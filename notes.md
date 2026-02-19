@@ -24,6 +24,35 @@ claude: "Vibey's bet is that the document is the right primitive — that coordi
 
 It should be trivial to make a document public in read-only mode. But any embeddings are live.
 
+Prompts:
+- Please - Debug flow 3 in test-server. Please don't restart the server, if you need to let me know. There are other agents working.
+- Fantastic! Look now at the dialogs. Why did the orchestrator spin five instead of just one agent for doing this? Look at the times to debug.
+- But why was another agent being spawned?
+- Maybe it's the instruction: ask the orchestrator to read the other dialogs to see what has been done already.
+- This is glorious. Now, can you implement tests for 4? If you need to change the server, lemme know first.
+- Fantastique! Did it all work on flow 4 or the server needs retouching?
+
+
+- Can you comment out flow 2 and onwards from test-client? Please don't modify any other files.
+- Brilliant, thanks. Can you find out why there are no seconds of duration showing in the dialogs? There's logic for it in the frontend, but it doesn't work. you can touch the client but nothing else for now. Example: 21:40:01 · 10.9kti + 4.5kto. What I want is, between the time and the kti/kto, have something like "2.5s"
+- Glory! Thanks for figuring it out!! Now, let's make tool calls far more beautiful in the client: 1) hide the ugly ids; parse the JSON in them if it's JSON and only show the first few lines of them (and if there are no newlines, autoinsert them every 90 chars or so).
+- We should also rename the vibey.md in test-server flow 1 to readme.md, when you're done
+- Beautiful! Can you now make the dialogs look more like the docs textareas, although they won't be editable? Also, if you have a JSON, could you remove the "stdout": ... and instead make it more like a bolded `stdout:` with the content next to it? Nobody will copy that JSON from there.
+- It looks GORGEOUS. Now, could you make user messages be slightly to the right and have perhaps 90% width? Same with the LLM messages, but left-aligned.
+
+- Can you add (commented out) a test for flow 3 in test-client? Take the approach from flow 3 in test-server. Don't change any other files than test-client please.
+- We're on a roll. Can you uncomment flow 2?
+- Can you implement flow 4 based on what's done on the server tests?
+- Great! In flow 1, can you rename vibey.md to readme.md?
+- Amazing progress. Now, when I run 1 and 2 in the browser, it all works, but I only see this alert at the end: ✅ All tests passed (Flow #1)! (10274ms). I would have expected that alert to fire at the end of flow 1, and then when I OK it, for flow 2 to start.
+- It worked! Can you uncomment flow 3?
+Uncaught ReferenceError: inc is not defined
+    at B.mrespond.match (client.js:192:7)
+- Please fix this and also add alerts at the end of flow 2 and 3 and 4, as well as any pauses.
+
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
+
 ### 2026-02-18
 
 Four ideas for vibey:

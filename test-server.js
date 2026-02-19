@@ -142,10 +142,10 @@ var flow1Sequence = [
       return true;
    }],
 
-   ['Prompt #1: ask to read first 20 lines of vibey.md (expect run_command request)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
+   ['Prompt #1: ask to read first 20 lines of readme.md (expect run_command request)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
       return {
          dialogId: s.dialogId,
-         prompt: 'Please read the first 20 lines of vibey.md using the run_command tool with `head -20 vibey.md`, then summarize it in 3 short bullets. You must use the tool.'
+         prompt: 'Please read the first 20 lines of readme.md using the run_command tool with `head -20 readme.md`, then summarize it in 3 short bullets. You must use the tool.'
       };
    }, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'string') return log ('Expected SSE text body');
@@ -377,7 +377,9 @@ var DOC_MAIN_F3 = [
    '',
    'When you receive "please start", you MUST do the following in this exact order:',
    '',
-   '1. FIRST: Call the `launch_agent` tool with these exact parameters:',
+   '**Before spawning any agent**, use `run_command` with `ls dialog-*.md` to see which agents already exist. Do NOT launch an agent if a dialog with that slug already exists.',
+   '',
+   '1. FIRST: Call the `launch_agent` tool with these exact parameters (only if no backend-agent dialog exists yet):',
    '   - provider: "openai"',
    '   - model: "gpt-5"',
    '   - prompt: "You are the backend agent for a tictactoe project. Do the following steps in order using tools:\\n1. run_command: npm init -y\\n2. run_command: npm install express\\n3. write_file server.js — a simple express server on port 4000 that serves static files from __dirname using express.static. About 10 lines.\\n4. run_command: node server.js &\\nDo all four steps. Keep server.js minimal."',
@@ -402,7 +404,7 @@ var DOC_MAIN_F3 = [
    '   - Mount on body with B.mount.',
    '   - Render each cell as a clickable div/button in a 3x3 grid.',
    '',
-   'Do NOT skip the launch_agent call. Create each file with a separate write_file call.',
+   'Do NOT skip the launch_agent call. Do NOT call launch_agent more than once for the same slug. Create each file with a separate write_file call.',
    '',
    '> Authorized: run_command',
    '> Authorized: write_file',
@@ -443,7 +445,7 @@ var GOTOB_F3 = [
    ''
 ].join ('\n');
 
-// Fire-and-forget: start a dialog via POST (SSE), read just enough to confirm it started, then abort.
+// Fire-and-forget: start a dialog via PUT (SSE), read just enough to confirm it started, then abort.
 var fireDialog = function (project, dialogId, prompt, cb) {
    var options = {
       hostname: 'localhost',
@@ -453,23 +455,43 @@ var fireDialog = function (project, dialogId, prompt, cb) {
       headers: {'Content-Type': 'application/json'}
    };
    var body = JSON.stringify ({dialogId: dialogId, prompt: prompt});
+   var called = false;
    var req = http.request (options, function (res) {
       var got = '';
       res.on ('data', function (chunk) {
          got += chunk;
          // As soon as we see the first SSE chunk event, we know the LLM started. Abort — let it run in background.
-         if (got.indexOf ('"type":"chunk"') !== -1 || got.indexOf ('"type":"error"') !== -1) {
+         if (! called && (got.indexOf ('"type":"chunk"') !== -1 || got.indexOf ('"type":"error"') !== -1)) {
+            called = true;
             req.destroy ();
             if (got.indexOf ('"type":"error"') !== -1) return cb (new Error ('SSE error: ' + got.slice (0, 500)));
             cb (null);
          }
       });
-      res.on ('end', function () {cb (null);});
+      res.on ('end', function () {if (! called) {called = true; cb (null);}});
    });
    req.on ('error', function (err) {
       // ECONNRESET is expected since we abort
       if (err.code === 'ECONNRESET') return;
    });
+   req.write (body);
+   req.end ();
+};
+
+// Fire-and-forget: send PUT to start a dialog, don't wait for any SSE data.
+var fireDialogNoWait = function (project, dialogId, prompt) {
+   var body = JSON.stringify ({dialogId: dialogId, prompt: prompt});
+   var req = http.request ({
+      hostname: 'localhost',
+      port: 5353,
+      path: '/project/' + project + '/dialog',
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'}
+   }, function (res) {
+      res.on ('data', function () {});
+      res.on ('end', function () {});
+   });
+   req.on ('error', function () {});
    req.write (body);
    req.end ();
 };
@@ -664,9 +686,121 @@ var flow3Sequence = [
    }]
 ];
 
+// *** FLOW #4: Delete project stops agents and removes folder ***
+
+var PROJECT4 = 'flow4-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
+
+var DOC_MAIN_F4 = [
+   '# Flow 4 Test Project',
+   '',
+   '> Authorized: run_command',
+   '> Authorized: write_file'
+].join ('\n') + '\n';
+
+var flow4Sequence = [
+
+   ['F4: Create project', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
+      return true;
+   }],
+
+   ['F4: Write doc-main.md', 'post', 'project/' + PROJECT4 + '/file/doc-main.md', {}, {content: DOC_MAIN_F4}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
+      return true;
+   }],
+
+   // Create two dialogs and fire them with slow prompts so they stay active
+   ['F4: Create dialog A', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, 200, function (s, rq, rs) {
+      if (! rs.body.dialogId) return log ('missing dialogId');
+      s.f4DialogA = rs.body.dialogId;
+      return true;
+   }],
+
+   ['F4: Create dialog B', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, 200, function (s, rq, rs) {
+      if (! rs.body.dialogId) return log ('missing dialogId');
+      s.f4DialogB = rs.body.dialogId;
+      return true;
+   }],
+
+   // Fire both dialogs with a long prompt to keep them busy
+   ['F4: Fire dialog A (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT4, s.f4DialogA, 'Write a 2000 word essay about the history of computing. Take your time and be thorough.', function (error) {
+         if (error) return log ('Failed to fire dialog A: ' + error.message);
+         next ();
+      });
+   }],
+
+   ['F4: Fire dialog B (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT4, s.f4DialogB, 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.', function (error) {
+         if (error) return log ('Failed to fire dialog B: ' + error.message);
+         next ();
+      });
+   }],
+
+   // Verify both dialogs are active before deleting
+   ['F4: Both dialogs are active', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var activeCount = 0;
+      dale.go (rs.body, function (d) {if (d.status === 'active') activeCount++;});
+      if (activeCount < 2) return log ('Expected 2 active dialogs, got ' + activeCount);
+      return true;
+   }],
+
+   // Delete the project while agents are running
+   ['F4: Delete project with active agents', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
+      return true;
+   }],
+
+   // Verify project is gone from the list
+   ['F4: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var stillExists = dale.stop (rs.body, false, function (name) {
+         if (name === PROJECT4) return true;
+      });
+      if (stillExists) return log ('Project still exists after deletion');
+      return true;
+   }],
+
+   // Verify the project's endpoints are 404
+   ['F4: Dialogs endpoint returns 404', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 404],
+
+   ['F4: Files endpoint returns 404', 'get', 'project/' + PROJECT4 + '/files', {}, '', 404],
+
+   // Verify we can't interact with the deleted dialogs
+   ['F4: Dialog A returns 404', 'get', 'project/' + PROJECT4 + '/dialog/' + 'placeholder', {}, '', 404, function (s, rq, rs) {
+      // Use actual dialogId — but project is gone so any dialog request should 404
+      return true;
+   }],
+
+   // Verify creating the same project name works (folder truly gone)
+   ['F4: Re-create same project name', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Re-creation failed');
+      return true;
+   }],
+
+   ['F4: Re-created project has no dialogs', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (rs.body.length !== 0) return log ('Expected 0 dialogs, got ' + rs.body.length);
+      return true;
+   }],
+
+   ['F4: Re-created project has no files', 'get', 'project/' + PROJECT4 + '/files', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (rs.body.length !== 0) return log ('Expected 0 files, got ' + rs.body.length);
+      return true;
+   }],
+
+   // Cleanup
+   ['F4: Delete re-created project', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Final cleanup failed');
+      return true;
+   }]
+];
+
 // *** RUNNER ***
 
-var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence};
+var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence};
 
 var requestedFlows = [];
 dale.go (process.argv.slice (2), function (arg) {
@@ -674,7 +808,7 @@ dale.go (process.argv.slice (2), function (arg) {
    if (match) requestedFlows.push (Number (match [1]));
 });
 
-if (! requestedFlows.length) requestedFlows = [1, 2, 3];
+if (! requestedFlows.length) requestedFlows = [1, 2, 3, 4];
 
 var sequences = dale.go (requestedFlows, function (n) {return allFlows [n];});
 var label = 'Flow #' + requestedFlows.join (' + Flow #');

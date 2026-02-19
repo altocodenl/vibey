@@ -6,6 +6,7 @@ B.prod = true;
 B.internal.timeout = 500;
 
 var type = teishi.type;
+var inc = teishi.inc;
 var style = lith.css.style;
 
 var parseDialogFilename = function (filename) {
@@ -1071,22 +1072,26 @@ views.css = [
       'border-radius': '8px 8px 0 0',
    }],
    ['.chat-message', {
-      'margin-bottom': '1rem',
+      'margin-bottom': '0.5rem',
       padding: '0.75rem 1rem',
-      'border-radius': '8px',
-      'max-width': '85%',
+      'border-radius': '6px',
+      'border-left': '3px solid transparent',
    }],
    ['.chat-user', {
-      'background-color': '#1f4d35',
+      'background-color': '#1a2a3e',
+      'border-left-color': '#2d6a4f',
+      'max-width': '90%',
       'margin-left': 'auto',
    }],
    ['.chat-assistant', {
-      'background-color': '#3d2b5a',
+      'background-color': '#1a1f35',
+      'border-left-color': '#4a69bd',
+      'max-width': '90%',
    }],
    ['.chat-role', {
       'font-size': '11px',
       'text-transform': 'uppercase',
-      color: '#888',
+      color: '#666',
       'margin-bottom': '0.25rem',
       display: 'flex',
       'justify-content': 'space-between',
@@ -1103,6 +1108,18 @@ views.css = [
    ['.chat-content', {
       'white-space': 'pre-wrap',
       'word-wrap': 'break-word',
+      'font-family': 'Monaco, Consolas, monospace',
+      'font-size': '13px',
+      'line-height': 1.6,
+   }],
+   ['.chat-label', {
+      color: '#94b8ff',
+      'font-weight': 'bold',
+   }],
+   ['.chat-separator', {
+      border: 'none',
+      'border-top': '1px solid #333',
+      margin: '0.5rem 0',
    }],
    ['.chat-input-area', {
       display: 'flex',
@@ -1319,6 +1336,17 @@ var compactLines = function (text, maxLines) {
    };
 };
 
+var wrapLongLines = function (text, maxCol) {
+   maxCol = maxCol || 90;
+   if (type (text) !== 'string') return text;
+   return dale.go (text.split ('\n'), function (line) {
+      if (line.length <= maxCol) return line;
+      var parts = [];
+      for (var i = 0; i < line.length; i += maxCol) parts.push (line.slice (i, i + maxCol));
+      return parts.join ('\n');
+   }).join ('\n');
+};
+
 var normalizeToolPreviewValue = function (value) {
    if (type (value) === 'string') {
       var escaped = value.replace (/\r/g, '').replace (/\n/g, '\\n');
@@ -1380,6 +1408,24 @@ var formatToolResultPreview = function (obj, maxStreamLines) {
    return lines.join ('\n\n');
 };
 
+var formatToolInputPreview = function (obj) {
+   if (type (obj) !== 'object' || ! obj) return null;
+   var keys = Object.keys (obj);
+   if (keys.length === 0) return null;
+
+   var lines = [];
+   dale.go (keys, function (key) {
+      var val = obj [key];
+      if (type (val) === 'string') {
+         if (val.length > 200) lines.push (key + ': [' + val.length + ' chars]');
+         else lines.push (key + ': ' + val);
+      }
+      else lines.push (key + ': ' + JSON.stringify (val));
+   });
+
+   return lines.join ('\n');
+};
+
 var formatIndentedToolPayload = function (payload, compact) {
    var deindented = payload.replace (/^    /gm, '').replace (/\s+$/, '');
    if (! deindented) return payload;
@@ -1387,11 +1433,12 @@ var formatIndentedToolPayload = function (payload, compact) {
    var preview = deindented;
    try {
       var parsed = JSON.parse (deindented);
-      preview = formatToolResultPreview (parsed, compact ? 8 : null) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
+      preview = formatToolResultPreview (parsed, compact ? 8 : null) || formatToolInputPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
    }
    catch (error) {}
 
-   var shown = compact ? compactLines (preview, 14).text : preview;
+   var shown = wrapLongLines (preview, 90);
+   shown = compact ? compactLines (shown, 14).text : shown;
    return '    ' + shown.split ('\n').join ('\n    ') + '\n';
 };
 
@@ -1399,6 +1446,8 @@ var formatToolBlocksForMessage = function (text, compact) {
    if (type (text) !== 'string' || text.indexOf ('Tool request:') === -1) return text;
 
    return text.replace (/---\nTool request:[\s\S]*?\n---/g, function (block) {
+      // Strip ugly IDs like [call_zBqRl2oG7ycoRzE4jLG244Of]
+      block = block.replace (/^(---\nTool request:\s+\S+)\s+\[[^\]]+\]/m, '$1');
       return block.replace (/\n\n((?: {4}.*(?:\n|$))+)/g, function (full, payload) {
          return '\n\n' + formatIndentedToolPayload (payload, compact !== false);
       });
@@ -1424,6 +1473,47 @@ var getMessageToolContentView = function (content, expanded) {
       text: expanded ? full : compact,
       compactable: compactable
    };
+};
+
+var renderChatContent = function (text) {
+   if (type (text) !== 'string' || ! text) return '';
+
+   var labelRe = /^(\s*)(Tool request:|Decision:|Result:|success:|error:|message:|stdout|stderr)(.*)/;
+   var result = [];
+   var buffer = '';
+
+   var flushBuffer = function () {
+      if (buffer) {
+         result.push (['span', buffer]);
+         buffer = '';
+      }
+   };
+
+   var lines = text.split ('\n');
+   dale.go (lines, function (line, i) {
+      var prefix = i > 0 ? '\n' : '';
+
+      if (line.trim () === '---') {
+         flushBuffer ();
+         result.push (['hr', {class: 'chat-separator'}]);
+         return;
+      }
+
+      var m = line.match (labelRe);
+      if (m) {
+         flushBuffer ();
+         if (prefix) result.push (['span', prefix]);
+         if (m [1]) result.push (['span', m [1]]);
+         result.push (['span', {class: 'chat-label'}, m [2]]);
+         if (m [3]) result.push (['span', m [3]]);
+         return;
+      }
+
+      buffer += prefix + line;
+   });
+
+   flushBuffer ();
+   return result;
 };
 
 var parseDialogContent = function (content) {
@@ -1576,7 +1666,7 @@ var parseTimeRange = function (time) {
 };
 
 var formatSecondsRounded = function (ms) {
-   if (type (ms) !== 'number' || ! isFinite (ms) || ms < 0) return null;
+   if (typeof ms !== 'number' || ! isFinite (ms) || ms < 0) return null;
    return (Math.round ((ms / 1000) * 10) / 10).toFixed (1) + 's';
 };
 
@@ -1881,7 +1971,7 @@ views.dialogs = function () {
 
                   return ['div', {class: 'chat-message chat-' + msg.role}, [
                      ['div', {class: 'chat-role'}, ['span', msg.role]],
-                     ['div', {class: 'chat-content'}, toolContentView.text],
+                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text)],
                      toolContentView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
                         ['button', {
                            class: 'btn-small',

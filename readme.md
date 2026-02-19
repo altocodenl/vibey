@@ -426,13 +426,12 @@ Flow #4:
 
 Goal: be able to build vibey with vibey itself.
 
+Prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
 
-- Debug flow 3 in test-server.
-- Implement flow 3 in test-client.
-- Flow 4 in test-client and test-server.
-- Show s taken properly in the UI.
-- A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it.
+- Make flows 3 & 4 work on the client.
+- A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
+- Test it all again dockerized.
 
 ### TODO vi mode
 
@@ -711,3 +710,7 @@ Hi! I'm building vibey. See please readme.md, then server.js and client.js, then
  7. Implement command mode (:w, :q, :wq)
  8. Add status bar
  9. Wire chat input (lighter variant)
+
+## TODO vibey online
+
+- Make a document public
