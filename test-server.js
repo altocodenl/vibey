@@ -358,7 +358,119 @@ var flow2Sequence = [
    }]
 ];
 
-// *** FLOW #3: Multi-agent tictactoe — agents write code, app runs on port 4000 ***
+// *** FLOW #3: Delete project stops agents and removes folder ***
+
+var PROJECT4 = 'flow4-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
+
+var DOC_MAIN_F4 = [
+   '# Flow 4 Test Project',
+   '',
+   '> Authorized: run_command',
+   '> Authorized: write_file'
+].join ('\n') + '\n';
+
+var flow4Sequence = [
+
+   ['F3: Create project', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
+      return true;
+   }],
+
+   ['F3: Write doc-main.md', 'post', 'project/' + PROJECT4 + '/file/doc-main.md', {}, {content: DOC_MAIN_F4}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
+      return true;
+   }],
+
+   // Create two dialogs and fire them with slow prompts so they stay active
+   ['F3: Create dialog A', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, 200, function (s, rq, rs) {
+      if (! rs.body.dialogId) return log ('missing dialogId');
+      s.f4DialogA = rs.body.dialogId;
+      return true;
+   }],
+
+   ['F3: Create dialog B', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, 200, function (s, rq, rs) {
+      if (! rs.body.dialogId) return log ('missing dialogId');
+      s.f4DialogB = rs.body.dialogId;
+      return true;
+   }],
+
+   // Fire both dialogs with a long prompt to keep them busy
+   ['F3: Fire dialog A (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT4, s.f4DialogA, 'Write a 2000 word essay about the history of computing. Take your time and be thorough.', function (error) {
+         if (error) return log ('Failed to fire dialog A: ' + error.message);
+         next ();
+      });
+   }],
+
+   ['F3: Fire dialog B (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT4, s.f4DialogB, 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.', function (error) {
+         if (error) return log ('Failed to fire dialog B: ' + error.message);
+         next ();
+      });
+   }],
+
+   // Verify both dialogs are active before deleting
+   ['F3: Both dialogs are active', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var activeCount = 0;
+      dale.go (rs.body, function (d) {if (d.status === 'active') activeCount++;});
+      if (activeCount < 2) return log ('Expected 2 active dialogs, got ' + activeCount);
+      return true;
+   }],
+
+   // Delete the project while agents are running
+   ['F3: Delete project with active agents', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
+      return true;
+   }],
+
+   // Verify project is gone from the list
+   ['F3: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var stillExists = dale.stop (rs.body, false, function (name) {
+         if (name === PROJECT4) return true;
+      });
+      if (stillExists) return log ('Project still exists after deletion');
+      return true;
+   }],
+
+   // Verify the project's endpoints are 404
+   ['F3: Dialogs endpoint returns 404', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 404],
+
+   ['F3: Files endpoint returns 404', 'get', 'project/' + PROJECT4 + '/files', {}, '', 404],
+
+   // Verify we can't interact with the deleted dialogs
+   ['F3: Dialog A returns 404', 'get', 'project/' + PROJECT4 + '/dialog/' + 'placeholder', {}, '', 404, function (s, rq, rs) {
+      // Use actual dialogId — but project is gone so any dialog request should 404
+      return true;
+   }],
+
+   // Verify creating the same project name works (folder truly gone)
+   ['F3: Re-create same project name', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Re-creation failed');
+      return true;
+   }],
+
+   ['F3: Re-created project has no dialogs', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (rs.body.length !== 0) return log ('Expected 0 dialogs, got ' + rs.body.length);
+      return true;
+   }],
+
+   ['F3: Re-created project has no files', 'get', 'project/' + PROJECT4 + '/files', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (rs.body.length !== 0) return log ('Expected 0 files, got ' + rs.body.length);
+      return true;
+   }],
+
+   // Cleanup
+   ['F3: Delete re-created project', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Final cleanup failed');
+      return true;
+   }]
+];
+
+// *** FLOW #4: Multi-agent tictactoe — agents write code, app runs on port 4000 ***
 
 var PROJECT3 = 'flow3-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
 
@@ -513,29 +625,29 @@ var pollUntil = function (checkFn, intervalMs, maxMs, cb) {
 
 var flow3Sequence = [
 
-   ['F3: Create project', 'post', 'projects', {}, {name: PROJECT3}, 200, function (s, rq, rs) {
+   ['F4: Create project', 'post', 'projects', {}, {name: PROJECT3}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
       return true;
    }],
 
-   ['F3: Write doc-main.md', 'post', 'project/' + PROJECT3 + '/file/doc-main.md', {}, {content: DOC_MAIN_F3}, 200, function (s, rq, rs) {
+   ['F4: Write doc-main.md', 'post', 'project/' + PROJECT3 + '/file/doc-main.md', {}, {content: DOC_MAIN_F3}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       return true;
    }],
 
-   ['F3: Write doc-gotob.md', 'post', 'project/' + PROJECT3 + '/file/doc-gotob.md', {}, {content: GOTOB_F3}, 200, function (s, rq, rs) {
+   ['F4: Write doc-gotob.md', 'post', 'project/' + PROJECT3 + '/file/doc-gotob.md', {}, {content: GOTOB_F3}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       return true;
    }],
 
-   ['F3: Create waiting dialog (orchestrator)', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['F4: Create waiting dialog (orchestrator)', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.f3DialogId = rs.body.dialogId;
       return true;
    }],
 
-   ['F3: Verify dialog inherited all 4 global authorizations', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Verify dialog inherited all 4 global authorizations', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       fetchDialogMarkdown (PROJECT3, s.f3DialogId, function (error, md) {
          if (error) return log ('Could not fetch dialog: ' + error.message);
          var tools = ['run_command', 'write_file', 'edit_file', 'launch_agent'];
@@ -547,7 +659,7 @@ var flow3Sequence = [
    }],
 
    // Fire the dialog and don't block — let agents work in background
-   ['F3: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       fireDialog (PROJECT3, s.f3DialogId, 'please start', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
@@ -555,7 +667,7 @@ var flow3Sequence = [
    }],
 
    // Poll until at least 2 dialogs exist (orchestrator spawned a backend agent)
-   ['F3: Poll until spawned agent appears', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Poll until spawned agent appears', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT3 + '/dialogs', function (error, status, body) {
             if (error || status !== 200) return done (false);
@@ -573,7 +685,7 @@ var flow3Sequence = [
    }],
 
    // Poll until the tictactoe app is reachable on port 4000 (inside container via tool/execute)
-   ['F3: Poll until app serves on port 4000', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Poll until app serves on port 4000', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          var reqBody = JSON.stringify ({toolName: 'run_command', toolInput: {command: 'curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/'}});
          var options = {
@@ -605,7 +717,7 @@ var flow3Sequence = [
    }],
 
    // Now verify the content of each file via tool/execute
-   ['F3: server.js has express content', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat server.js'}}, 200, function (s, rq, rs) {
+   ['F4: server.js has express content', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat server.js'}}, 200, function (s, rq, rs) {
       if (! rs.body || ! rs.body.success) return log ('cat server.js failed: ' + JSON.stringify (rs.body));
       var out = rs.body.stdout || '';
       if (out.indexOf ('express') === -1) return log ('server.js missing "express"');
@@ -614,7 +726,7 @@ var flow3Sequence = [
       return true;
    }],
 
-   ['F3: index.html has gotoB + app.js', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, 200, function (s, rq, rs) {
+   ['F4: index.html has gotoB + app.js', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, 200, function (s, rq, rs) {
       if (! rs.body || ! rs.body.success) return log ('cat index.html failed: ' + JSON.stringify (rs.body));
       var out = (rs.body.stdout || '').toLowerCase ();
       if (out.indexOf ('gotob') === -1) return log ('index.html missing gotoB reference');
@@ -622,7 +734,7 @@ var flow3Sequence = [
       return true;
    }],
 
-   ['F3: app.js has tictactoe gotoB code', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat app.js'}}, 200, function (s, rq, rs) {
+   ['F4: app.js has tictactoe gotoB code', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat app.js'}}, 200, function (s, rq, rs) {
       if (! rs.body || ! rs.body.success) return log ('cat app.js failed: ' + JSON.stringify (rs.body));
       var out = rs.body.stdout || '';
       if (out.indexOf ('B.') === -1) return log ('app.js missing gotoB usage (no B. references)');
@@ -632,7 +744,7 @@ var flow3Sequence = [
    }],
 
    // Verify dialogs: at least 2, parent has launch_agent evidence
-   ['F3: At least 2 dialogs with launch_agent evidence', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: At least 2 dialogs with launch_agent evidence', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (rs.body.length < 2) return log ('Expected at least 2 dialogs, got ' + rs.body.length);
 
@@ -648,13 +760,13 @@ var flow3Sequence = [
    }],
 
    // Expose port 4000 to host and verify from outside the container
-   ['F3: Expose port 4000 to host', 'post', 'project/' + PROJECT3 + '/ports', {}, {port: 4000}, 200, function (s, rq, rs) {
+   ['F4: Expose port 4000 to host', 'post', 'project/' + PROJECT3 + '/ports', {}, {port: 4000}, 200, function (s, rq, rs) {
       if (! rs.body) return log ('Empty response from ports endpoint');
       s.f3HostPort = rs.body.hostPort || rs.body.containerPort || 4000;
       return true;
    }],
 
-   ['F3: Tictactoe serves from host port', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Tictactoe serves from host port', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       var attempts = 0;
       var tryFetch = function () {
          httpGet (s.f3HostPort, '/', function (error, status, body) {
@@ -673,12 +785,12 @@ var flow3Sequence = [
       setTimeout (tryFetch, 2000);
    }],
 
-   ['F3: Delete project (cleanup)', 'delete', 'projects/' + PROJECT3, {}, '', 200, function (s, rq, rs) {
+   ['F4: Delete project (cleanup)', 'delete', 'projects/' + PROJECT3, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
 
-   ['F3: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['F4: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var stillExists = dale.stop (rs.body, false, function (name) {if (name === PROJECT3) return true;});
       if (stillExists) return log ('Project still exists after deletion');
@@ -686,121 +798,9 @@ var flow3Sequence = [
    }]
 ];
 
-// *** FLOW #4: Delete project stops agents and removes folder ***
-
-var PROJECT4 = 'flow4-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
-
-var DOC_MAIN_F4 = [
-   '# Flow 4 Test Project',
-   '',
-   '> Authorized: run_command',
-   '> Authorized: write_file'
-].join ('\n') + '\n';
-
-var flow4Sequence = [
-
-   ['F4: Create project', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
-      return true;
-   }],
-
-   ['F4: Write doc-main.md', 'post', 'project/' + PROJECT4 + '/file/doc-main.md', {}, {content: DOC_MAIN_F4}, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
-      return true;
-   }],
-
-   // Create two dialogs and fire them with slow prompts so they stay active
-   ['F4: Create dialog A', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, 200, function (s, rq, rs) {
-      if (! rs.body.dialogId) return log ('missing dialogId');
-      s.f4DialogA = rs.body.dialogId;
-      return true;
-   }],
-
-   ['F4: Create dialog B', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, 200, function (s, rq, rs) {
-      if (! rs.body.dialogId) return log ('missing dialogId');
-      s.f4DialogB = rs.body.dialogId;
-      return true;
-   }],
-
-   // Fire both dialogs with a long prompt to keep them busy
-   ['F4: Fire dialog A (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogA, 'Write a 2000 word essay about the history of computing. Take your time and be thorough.', function (error) {
-         if (error) return log ('Failed to fire dialog A: ' + error.message);
-         next ();
-      });
-   }],
-
-   ['F4: Fire dialog B (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogB, 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.', function (error) {
-         if (error) return log ('Failed to fire dialog B: ' + error.message);
-         next ();
-      });
-   }],
-
-   // Verify both dialogs are active before deleting
-   ['F4: Both dialogs are active', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      var activeCount = 0;
-      dale.go (rs.body, function (d) {if (d.status === 'active') activeCount++;});
-      if (activeCount < 2) return log ('Expected 2 active dialogs, got ' + activeCount);
-      return true;
-   }],
-
-   // Delete the project while agents are running
-   ['F4: Delete project with active agents', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
-      return true;
-   }],
-
-   // Verify project is gone from the list
-   ['F4: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      var stillExists = dale.stop (rs.body, false, function (name) {
-         if (name === PROJECT4) return true;
-      });
-      if (stillExists) return log ('Project still exists after deletion');
-      return true;
-   }],
-
-   // Verify the project's endpoints are 404
-   ['F4: Dialogs endpoint returns 404', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 404],
-
-   ['F4: Files endpoint returns 404', 'get', 'project/' + PROJECT4 + '/files', {}, '', 404],
-
-   // Verify we can't interact with the deleted dialogs
-   ['F4: Dialog A returns 404', 'get', 'project/' + PROJECT4 + '/dialog/' + 'placeholder', {}, '', 404, function (s, rq, rs) {
-      // Use actual dialogId — but project is gone so any dialog request should 404
-      return true;
-   }],
-
-   // Verify creating the same project name works (folder truly gone)
-   ['F4: Re-create same project name', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Re-creation failed');
-      return true;
-   }],
-
-   ['F4: Re-created project has no dialogs', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      if (rs.body.length !== 0) return log ('Expected 0 dialogs, got ' + rs.body.length);
-      return true;
-   }],
-
-   ['F4: Re-created project has no files', 'get', 'project/' + PROJECT4 + '/files', {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      if (rs.body.length !== 0) return log ('Expected 0 files, got ' + rs.body.length);
-      return true;
-   }],
-
-   // Cleanup
-   ['F4: Delete re-created project', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Final cleanup failed');
-      return true;
-   }]
-];
-
 // *** RUNNER ***
 
-var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence};
+var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow4Sequence, 4: flow3Sequence};
 
 var requestedFlows = [];
 dale.go (process.argv.slice (2), function (arg) {

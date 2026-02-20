@@ -591,13 +591,14 @@
          return true;
       }],
 
+      /*
       // =============================================
-      // *** FLOW #3: Multi-agent tictactoe ***
-      // (Based on flow3Sequence in test-server.js)
+      // *** FLOW #3: Delete project stops agents ***
+      // (Based on flow4Sequence/allFlows[3] in test-server.js)
       // =============================================
 
-      // --- F3 Step 1: Create a new project ---
-      ['F3-1: Create project for tictactoe', function (done) {
+      // --- F4 Step 1: Create project ---
+      ['F3-1: Create project', function (done) {
          window._f3Project = 'test-flow3-' + Date.now ();
          mockPrompt (window._f3Project);
          B.call ('create', 'project');
@@ -609,8 +610,206 @@
          return true;
       }],
 
+      // --- F4 Step 2: Write doc-main.md with tool auths ---
+      ['F3-2: Write doc-main.md', function (done) {
+         var content = [
+            '# Flow 4 Test Project',
+            '',
+            '> Authorized: run_command',
+            '> Authorized: write_file'
+         ].join ('\n') + '\n';
+         var project = window._f3Project;
+         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, {content: content}, function () {
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return true;
+      }],
+
+      // --- F4 Step 3: Create two dialogs (agent-a, agent-b) ---
+      ['F3-3: Create dialogs A and B', function (done) {
+         var project = window._f3Project;
+         var pending = 2;
+         var finish = function () {
+            pending--;
+            if (pending === 0) done (MEDIUM_WAIT, POLL);
+         };
+
+         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/dialog/new', {}, {
+            provider: 'openai',
+            model: 'gpt-5',
+            slug: 'agent-a'
+         }, function (error, rs) {
+            window._f3DialogA = rs && rs.body ? rs.body.dialogId : null;
+            finish ();
+         });
+
+         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/dialog/new', {}, {
+            provider: 'openai',
+            model: 'gpt-5',
+            slug: 'agent-b'
+         }, function (error, rs) {
+            window._f3DialogB = rs && rs.body ? rs.body.dialogId : null;
+            finish ();
+         });
+      }, function () {
+         if (! window._f3DialogA || ! window._f3DialogB) return 'Missing dialog ids for A/B';
+         return true;
+      }],
+
+      // --- F4 Step 4: Fire dialogs with long prompts (non-blocking) ---
+      ['F3-4: Fire dialog A + B', function (done) {
+         var project = window._f3Project;
+         var payloadA = {dialogId: window._f3DialogA, prompt: 'Write a file called story-a.txt with a 500 word story about a robot. Use write_file.'};
+         var payloadB = {dialogId: window._f3DialogB, prompt: 'Write a file called story-b.txt with a 500 word story about a dragon. Use write_file.'};
+
+         fetch ('project/' + encodeURIComponent (project) + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify (payloadA)
+         }).catch (function () {});
+
+         fetch ('project/' + encodeURIComponent (project) + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify (payloadB)
+         }).catch (function () {});
+
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         return true;
+      }],
+
+      // --- F4 Step 5: Wait until both dialogs are active ---
+      ['F3-5: Both dialogs become active', function (done) {
+         done (LONG_WAIT, POLL);
+      }, function () {
+         if (! window._f3DialogStatus && ! window._f3DialogCheckInFlight) {
+            window._f3DialogCheckInFlight = true;
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
+               window._f3DialogCheckInFlight = false;
+               if (error) return;
+               window._f3DialogStatus = rs.body || [];
+            });
+            return 'Waiting for dialog status...';
+         }
+
+         var dialogs = window._f3DialogStatus || [];
+         var activeCount = dialogs.filter (function (d) {return d.status === 'active';}).length;
+         if (activeCount >= 2) return true;
+
+         window._f3DialogStatus = null;
+         return 'Waiting for dialogs to become active...';
+      }],
+
+      // --- F4 Step 6: Delete project with active agents ---
+      ['F3-6: Delete project with active agents', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {
+            window.confirm = originalConfirm;
+            return true;
+         };
+         B.call ('delete', 'project', window._f3Project);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var project = B.get ('currentProject');
+         if (project) return 'Expected currentProject to be null after deletion';
+         var tab = B.get ('tab');
+         if (tab !== 'projects') return 'Expected to return to projects tab after deletion';
+         return true;
+      }],
+
+      // --- F4 Step 7: Dialogs endpoint returns 404 ---
+      ['F3-7: Dialogs endpoint returns 404', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
+            window._f3DialogsStatus = error ? error.status : (rs && rs.status);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3DialogsStatus !== 404) return 'Expected dialogs endpoint to return 404, got ' + window._f3DialogsStatus;
+         return true;
+      }],
+
+      // --- F4 Step 8: Files endpoint returns 404 ---
+      ['F3-8: Files endpoint returns 404', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/files', {}, '', function (error, rs) {
+            window._f3FilesStatus = error ? error.status : (rs && rs.status);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3FilesStatus !== 404) return 'Expected files endpoint to return 404, got ' + window._f3FilesStatus;
+         return true;
+      }],
+
+      // --- F4 Step 9: Re-create same project name ---
+      ['F3-9: Re-create same project name', function (done) {
+         c.ajax ('post', 'projects', {}, {name: window._f3Project}, function () {
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return true;
+      }],
+
+      // --- F4 Step 10: Re-created project has no dialogs/files ---
+      ['F3-10: Re-created project has no dialogs/files', function (done) {
+         var project = window._f3Project;
+         var pending = 2;
+         var finish = function () {
+            pending--;
+            if (pending === 0) done (SHORT_WAIT, POLL);
+         };
+
+         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/dialogs', {}, '', function (error, rs) {
+            window._f3DialogsAfter = error ? null : (rs.body || []);
+            finish ();
+         });
+
+         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/files', {}, '', function (error, rs) {
+            window._f3FilesAfter = error ? null : (rs.body || []);
+            finish ();
+         });
+      }, function () {
+         if (! window._f3DialogsAfter || window._f3DialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
+         if (! window._f3FilesAfter || window._f3FilesAfter.length !== 0) return 'Expected 0 files after re-create';
+         return true;
+      }],
+
+      // --- F4 Cleanup: Delete re-created project ---
+      ['F3-Cleanup: Delete re-created project', function (done) {
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._f3Project), {}, '', function () {
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return true;
+      }],
+
+      // --- Flow #3 complete alert ---
+      ['Flow #3 complete (acknowledge to continue)', function () {
+         alert ('✅ Flow #3 passed. Click OK to continue to Flow #4.');
+         return true;
+      }]
+      */
+
+      // =============================================
+      // *** FLOW #4: Multi-agent tictactoe ***
+      // (Based on flow3Sequence/allFlows[4] in test-server.js)
+      // =============================================
+
+      // --- F3 Step 1: Create a new project ---
+      ['F4-1: Create project for tictactoe', function (done) {
+         window._f4Project = 'test-flow4-' + Date.now ();
+         mockPrompt (window._f4Project);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var project = B.get ('currentProject');
+         if (project !== window._f4Project) return 'Expected project "' + window._f4Project + '", got "' + project + '"';
+         return true;
+      }],
+
       // --- F3 Step 2: Write doc-main.md + doc-gotob.md (instructions + gotoB reference) ---
-      ['F3-2: Write doc-main.md + doc-gotob.md', function (done) {
+      ['F4-2: Write doc-main.md + doc-gotob.md', function (done) {
          var docMain = [
             '# Tictactoe Project',
             '',
@@ -672,7 +871,7 @@
             ''
          ].join ('\n');
 
-         var project = window._f3Project;
+         var project = window._f4Project;
          var pending = 2;
          var finish = function () {
             pending--;
@@ -690,8 +889,8 @@
       }],
 
       // --- F3 Step 3: Create orchestrator dialog ---
-      ['F3-3: Create orchestrator dialog', function (done) {
-         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f3Project) + '/dialogs');
+      ['F4-3: Create orchestrator dialog', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f4Project) + '/dialogs');
          mockPrompt ('orchestrator');
          B.call ('create', 'dialog');
          done (MEDIUM_WAIT, POLL);
@@ -705,7 +904,7 @@
       }],
 
       // --- F3 Step 4: Verify global authorizations present in dialog markdown ---
-      ['F3-4: Dialog inherits global authorizations', function () {
+      ['F4-4: Dialog inherits global authorizations', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No dialog content loaded';
          var tools = ['run_command', 'write_file', 'edit_file', 'launch_agent'];
@@ -716,7 +915,7 @@
       }],
 
       // --- F3 Step 5: Fire "please start" and wait for a spawned agent to appear ---
-      ['F3-5: Fire "please start" and wait for second dialog', function (done) {
+      ['F4-5: Fire "please start" and wait for second dialog', function (done) {
          B.call ('set', 'chatInput', 'please start');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
@@ -728,8 +927,8 @@
       }],
 
       // --- F3 Step 6: Poll for app running on port 4000 (tool/execute curl) ---
-      ['F3-6: App responds on port 4000 (via tool/execute)', function (done) {
-         var project = window._f3Project;
+      ['F4-6: App responds on port 4000 (via tool/execute)', function (done) {
+         var project = window._f4Project;
          var attempt = function () {
             c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
                toolName: 'run_command',
@@ -745,8 +944,8 @@
       }],
 
       // --- F3 Step 7: Verify server.js, index.html, app.js content via tool/execute ---
-      ['F3-7: Verify generated files', function (done) {
-         var project = window._f3Project;
+      ['F4-7: Verify generated files', function (done) {
+         var project = window._f4Project;
          var remaining = 3;
          var fail = null;
          var finish = function () {
@@ -790,45 +989,45 @@
             finish ();
          });
 
-         window._f3FileCheckError = fail;
+         window._f4FileCheckError = fail;
       }, function () {
-         if (window._f3FileCheckError) return window._f3FileCheckError;
+         if (window._f4FileCheckError) return window._f4FileCheckError;
          return true;
       }],
 
       // --- F3 Step 8: Expose port 4000 and verify page from host ---
-      ['F3-8: Expose port 4000 and verify host response', function (done) {
-         var project = window._f3Project;
+      ['F4-8: Expose port 4000 and verify host response', function (done) {
+         var project = window._f4Project;
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/ports', {}, {port: 4000}, function (error, rs) {
             if (error || ! rs.body) {
-               window._f3HostPort = null;
+               window._f4HostPort = null;
                return done (SHORT_WAIT, POLL);
             }
-            window._f3HostPort = rs.body.hostPort || rs.body.containerPort || 4000;
+            window._f4HostPort = rs.body.hostPort || rs.body.containerPort || 4000;
             done (SHORT_WAIT, POLL);
          });
       }, function () {
-         if (! window._f3HostPort) return 'Failed to expose port 4000';
+         if (! window._f4HostPort) return 'Failed to expose port 4000';
          return true;
       }],
 
       // --- F3 Step 9: Fetch tictactoe from host port ---
-      ['F3-9: Tictactoe serves from host port', function (done) {
-         var port = window._f3HostPort;
+      ['F4-9: Tictactoe serves from host port', function (done) {
+         var port = window._f4HostPort;
          if (! port) return done (SHORT_WAIT, POLL);
          var req = new XMLHttpRequest ();
          req.open ('GET', 'http://localhost:' + port + '/', true);
          req.onload = function () {
-            window._f3HostPage = req.responseText || '';
+            window._f4HostPage = req.responseText || '';
             done (SHORT_WAIT, POLL);
          };
          req.onerror = function () {
-            window._f3HostPage = '';
+            window._f4HostPage = '';
             done (SHORT_WAIT, POLL);
          };
          req.send ();
       }, function () {
-         var body = (window._f3HostPage || '').toLowerCase ();
+         var body = (window._f4HostPage || '').toLowerCase ();
          if (! body) return 'No response from host port';
          if (body.indexOf ('gotob') === -1) return 'Host page missing gotoB';
          if (body.indexOf ('app.js') === -1) return 'Host page missing app.js';
@@ -836,208 +1035,10 @@
          return true;
       }],
 
-      // --- F3 Cleanup: Delete project ---
-      ['F3-Cleanup: Delete project', function (done) {
-         var project = window._f3Project;
+      // --- F4 Cleanup: Delete project ---
+      ['F4-Cleanup: Delete project', function (done) {
+         var project = window._f4Project;
          c.ajax ('delete', 'projects/' + encodeURIComponent (project), {}, '', function () {
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         return true;
-      }],
-
-      // --- Flow #3 complete alert ---
-      ['Flow #3 complete (acknowledge to continue)', function () {
-         alert ('✅ Flow #3 passed. Click OK to continue.');
-         return true;
-      }],
-
-      /*
-      // =============================================
-      // *** FLOW #4: Delete project stops agents ***
-      // (Based on flow4Sequence in test-server.js)
-      // =============================================
-
-      // --- F4 Step 1: Create project ---
-      ['F4-1: Create project', function (done) {
-         window._f4Project = 'test-flow4-' + Date.now ();
-         mockPrompt (window._f4Project);
-         B.call ('create', 'project');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         var project = B.get ('currentProject');
-         if (project !== window._f4Project) return 'Expected project "' + window._f4Project + '", got "' + project + '"';
-         return true;
-      }],
-
-      // --- F4 Step 2: Write doc-main.md with tool auths ---
-      ['F4-2: Write doc-main.md', function (done) {
-         var content = [
-            '# Flow 4 Test Project',
-            '',
-            '> Authorized: run_command',
-            '> Authorized: write_file'
-         ].join ('\n') + '\n';
-         var project = window._f4Project;
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, {content: content}, function () {
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         return true;
-      }],
-
-      // --- F4 Step 3: Create two dialogs (agent-a, agent-b) ---
-      ['F4-3: Create dialogs A and B', function (done) {
-         var project = window._f4Project;
-         var pending = 2;
-         var finish = function () {
-            pending--;
-            if (pending === 0) done (MEDIUM_WAIT, POLL);
-         };
-
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/dialog/new', {}, {
-            provider: 'openai',
-            model: 'gpt-5',
-            slug: 'agent-a'
-         }, function (error, rs) {
-            window._f4DialogA = rs && rs.body ? rs.body.dialogId : null;
-            finish ();
-         });
-
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/dialog/new', {}, {
-            provider: 'openai',
-            model: 'gpt-5',
-            slug: 'agent-b'
-         }, function (error, rs) {
-            window._f4DialogB = rs && rs.body ? rs.body.dialogId : null;
-            finish ();
-         });
-      }, function () {
-         if (! window._f4DialogA || ! window._f4DialogB) return 'Missing dialog ids for A/B';
-         return true;
-      }],
-
-      // --- F4 Step 4: Fire dialogs with long prompts (non-blocking) ---
-      ['F4-4: Fire dialog A + B', function (done) {
-         var project = window._f4Project;
-         var payloadA = {dialogId: window._f4DialogA, prompt: 'Write a file called story-a.txt with a 500 word story about a robot. Use write_file.'};
-         var payloadB = {dialogId: window._f4DialogB, prompt: 'Write a file called story-b.txt with a 500 word story about a dragon. Use write_file.'};
-
-         fetch ('project/' + encodeURIComponent (project) + '/dialog', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify (payloadA)
-         }).catch (function () {});
-
-         fetch ('project/' + encodeURIComponent (project) + '/dialog', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify (payloadB)
-         }).catch (function () {});
-
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         return true;
-      }],
-
-      // --- F4 Step 5: Wait until both dialogs are active ---
-      ['F4-5: Both dialogs become active', function (done) {
-         done (LONG_WAIT, POLL);
-      }, function () {
-         if (! window._f4DialogStatus && ! window._f4DialogCheckInFlight) {
-            window._f4DialogCheckInFlight = true;
-            c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/dialogs', {}, '', function (error, rs) {
-               window._f4DialogCheckInFlight = false;
-               if (error) return;
-               window._f4DialogStatus = rs.body || [];
-            });
-            return 'Waiting for dialog status...';
-         }
-
-         var dialogs = window._f4DialogStatus || [];
-         var activeCount = dialogs.filter (function (d) {return d.status === 'active';}).length;
-         if (activeCount >= 2) return true;
-
-         window._f4DialogStatus = null;
-         return 'Waiting for dialogs to become active...';
-      }],
-
-      // --- F4 Step 6: Delete project with active agents ---
-      ['F4-6: Delete project with active agents', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {
-            window.confirm = originalConfirm;
-            return true;
-         };
-         B.call ('delete', 'project', window._f4Project);
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var project = B.get ('currentProject');
-         if (project) return 'Expected currentProject to be null after deletion';
-         var tab = B.get ('tab');
-         if (tab !== 'projects') return 'Expected to return to projects tab after deletion';
-         return true;
-      }],
-
-      // --- F4 Step 7: Dialogs endpoint returns 404 ---
-      ['F4-7: Dialogs endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/dialogs', {}, '', function (error, rs) {
-            window._f4DialogsStatus = error ? error.status : (rs && rs.status);
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._f4DialogsStatus !== 404) return 'Expected dialogs endpoint to return 404, got ' + window._f4DialogsStatus;
-         return true;
-      }],
-
-      // --- F4 Step 8: Files endpoint returns 404 ---
-      ['F4-8: Files endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/files', {}, '', function (error, rs) {
-            window._f4FilesStatus = error ? error.status : (rs && rs.status);
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._f4FilesStatus !== 404) return 'Expected files endpoint to return 404, got ' + window._f4FilesStatus;
-         return true;
-      }],
-
-      // --- F4 Step 9: Re-create same project name ---
-      ['F4-9: Re-create same project name', function (done) {
-         c.ajax ('post', 'projects', {}, {name: window._f4Project}, function () {
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         return true;
-      }],
-
-      // --- F4 Step 10: Re-created project has no dialogs/files ---
-      ['F4-10: Re-created project has no dialogs/files', function (done) {
-         var project = window._f4Project;
-         var pending = 2;
-         var finish = function () {
-            pending--;
-            if (pending === 0) done (SHORT_WAIT, POLL);
-         };
-
-         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/dialogs', {}, '', function (error, rs) {
-            window._f4DialogsAfter = error ? null : (rs.body || []);
-            finish ();
-         });
-
-         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/files', {}, '', function (error, rs) {
-            window._f4FilesAfter = error ? null : (rs.body || []);
-            finish ();
-         });
-      }, function () {
-         if (! window._f4DialogsAfter || window._f4DialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
-         if (! window._f4FilesAfter || window._f4FilesAfter.length !== 0) return 'Expected 0 files after re-create';
-         return true;
-      }],
-
-      // --- F4 Cleanup: Delete re-created project ---
-      ['F4-Cleanup: Delete re-created project', function (done) {
-         c.ajax ('delete', 'projects/' + encodeURIComponent (window._f4Project), {}, '', function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {
@@ -1046,10 +1047,9 @@
 
       // --- Flow #4 complete alert ---
       ['Flow #4 complete (acknowledge to finish)', function () {
-         alert ('✅ Flow #4 passed. Click OK to finish.');
+         alert ('✅ Flow #4 passed. All tests done!');
          return true;
-      }]
-      */
+      }],
 
    ], function (error, time) {
       if (error) {
