@@ -785,17 +785,41 @@ var flow3Sequence = [
       setTimeout (tryFetch, 2000);
    }],
 
-   ['F4: Delete project (cleanup)', 'delete', 'projects/' + PROJECT3, {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
-      return true;
+   // Ask the AI to embed the game in doc-main.md
+   ['F4: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT3, s.f3DialogId, 'The tictactoe game is now running on port 4000. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc-main.md.', function (error) {
+         if (error) return log ('Failed to fire embed request: ' + error.message);
+         next ();
+      });
    }],
 
-   ['F4: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      var stillExists = dale.stop (rs.body, false, function (name) {if (name === PROJECT3) return true;});
-      if (stillExists) return log ('Project still exists after deletion');
+   // Poll until embed block appears in doc-main.md
+   ['F4: Poll until embed block appears in doc-main.md', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollUntil (function (done) {
+         httpGet (5353, '/project/' + PROJECT3 + '/file/doc-main.md', function (error, status, body) {
+            if (error || status !== 200) return done (false);
+            try {
+               var parsed = JSON.parse (body);
+               var content = parsed.content || '';
+               if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (true);
+            }
+            catch (e) {}
+            done (false);
+         });
+      }, 5000, 180000, function (error) {
+         if (error) return log ('Embed block never appeared in doc-main.md: ' + error.message);
+         next ();
+      });
+   }],
+
+   ['F4: Verify embed block in doc-main.md', 'get', 'project/' + PROJECT3 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
+      var content = rs.body.content || '';
+      if (content.indexOf ('əəəembed') === -1) return log ('doc-main.md missing əəəembed block');
+      if (content.indexOf ('port 4000') === -1) return log ('doc-main.md embed missing port 4000');
       return true;
    }]
+
+   // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
 ];
 
 // *** RUNNER ***

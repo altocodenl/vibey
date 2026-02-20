@@ -2530,6 +2530,94 @@ var routes = [
          reply (rs, 200, {docker: true, containerPort: rq.body.port, hostPort: hostPort});
       });
    }],
+
+   // *** EMBED PROXY ***
+
+   ['all', /^\/project\/([^/]+)\/proxy\/(\d+)(\/.*)?$/, function (rq, rs) {
+      var projectName = decodeURIComponent (rq.data.params [0]);
+      var port = Number (rq.data.params [1]);
+      var proxyPath = rq.data.params [2] || '/';
+
+      // cicek strips query strings from rq.url; reconstruct from rq.rawurl
+      if (rq.rawurl) {
+         var rawMatch = rq.rawurl.match (/\/proxy\/\d+(\/[^?]*)?(\?.*)?$/);
+         if (rawMatch) {
+            proxyPath = (rawMatch [1] || '/') + (rawMatch [2] || '');
+         }
+      }
+
+      // Validate port
+      if (port < 1 || port > 65535 || isNaN (port)) return reply (rs, 400, {error: 'Invalid port'});
+
+      // Validate project exists
+      try {
+         getExistingProjectDir (projectName);
+      }
+      catch (error) {
+         return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
+      }
+
+      // Build target URL
+      var targetHost = '127.0.0.1';
+
+      // In Docker mode, resolve container IP
+      if (DOCKER_MODE) {
+         var name = containerName (projectName);
+         try {
+            targetHost = execSync ("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' " + name, {encoding: 'utf8'}).trim ();
+            if (! targetHost) return reply (rs, 502, {error: 'Container has no IP address'});
+         }
+         catch (e) {
+            return reply (rs, 502, {error: 'Could not resolve container IP: ' + e.message});
+         }
+      }
+
+      // Build forwarded headers (strip hop-by-hop)
+      var HOP_BY_HOP = {host: 1, connection: 1, 'keep-alive': 1, 'proxy-authenticate': 1, 'proxy-authorization': 1, te: 1, trailer: 1, 'transfer-encoding': 1, upgrade: 1, 'content-length': 1};
+      var forwardHeaders = {};
+      dale.go (rq.headers, function (v, k) {
+         if (! HOP_BY_HOP [k]) forwardHeaders [k] = v;
+      });
+      forwardHeaders.host = targetHost + ':' + port;
+
+      // Recalculate content-length since cicek already consumed the body
+      if (rq.body && rq.method !== 'GET' && rq.method !== 'HEAD') {
+         var bodyBuf = type (rq.body) === 'string' ? rq.body : JSON.stringify (rq.body);
+         forwardHeaders ['content-length'] = Buffer.byteLength (bodyBuf);
+      }
+
+      var proxyReq = http.request ({
+         hostname: targetHost,
+         port: port,
+         path: proxyPath,
+         method: rq.method,
+         headers: forwardHeaders
+      }, function (proxyRes) {
+         // Copy response headers, add X-Frame-Options
+         var resHeaders = {};
+         dale.go (proxyRes.headers, function (v, k) {
+            if (! HOP_BY_HOP [k]) resHeaders [k] = v;
+         });
+         resHeaders ['x-frame-options'] = 'SAMEORIGIN';
+
+         rs.writeHead (proxyRes.statusCode, resHeaders);
+         proxyRes.pipe (rs);
+      });
+
+      proxyReq.on ('error', function (error) {
+         if (! rs.headersSent) reply (rs, 502, {error: 'Proxy error: ' + error.message});
+         else rs.end ();
+      });
+
+      // cicek already consumed the body into rq.body; write it through
+      if (rq.body && rq.method !== 'GET' && rq.method !== 'HEAD') {
+         var bodyStr = type (rq.body) === 'string' ? rq.body : JSON.stringify (rq.body);
+         proxyReq.end (bodyStr);
+      }
+      else {
+         proxyReq.end ();
+      }
+   }],
 ];
 
 // *** SERVER ***

@@ -56,6 +56,72 @@ var docDisplayName = function (name) {
    return name === 'doc-main.md' ? 'main.md' : name;
 };
 
+// *** EMBED HELPERS ***
+
+var parseEmbedBlock = function (body) {
+   var result = {port: null, path: '/', height: 400, title: 'App'};
+   var lines = (body || '').split ('\n');
+   dale.go (lines, function (line) {
+      line = line.trim ();
+      if (! line || line [0] === '#') return;
+      var idx = line.indexOf (' ');
+      if (idx === -1) return;
+      var key = line.slice (0, idx).toLowerCase ();
+      var val = line.slice (idx + 1).trim ();
+      if (key === 'port')   result.port = Number (val);
+      if (key === 'path')   result.path = val;
+      if (key === 'height') result.height = Number (val) || 400;
+      if (key === 'title')  result.title = val;
+   });
+   if (! result.port || result.port < 1 || result.port > 65535) return null;
+   return result;
+};
+
+var EMBED_RE = /əəəembed\n([\s\S]*?)əəə/g;
+
+var renderMarkdownWithEmbeds = function (markdown, project) {
+   if (type (markdown) !== 'string') return '';
+
+   // Extract embed blocks, replace with placeholders, render markdown, then reinsert iframes
+   var embeds = [];
+   var placeholder = function () {return '<!--VIBEY_EMBED_' + embeds.length + '-->';};
+
+   var withPlaceholders = markdown.replace (EMBED_RE, function (match, body) {
+      var parsed = parseEmbedBlock (body);
+      var idx = embeds.length;
+      embeds.push (parsed);
+      return '<!--VIBEY_EMBED_' + idx + '-->';
+   });
+
+   var html = '';
+   try {
+      html = marked.parse (withPlaceholders);
+   }
+   catch (e) {
+      html = lith.g (['pre', withPlaceholders]);
+   }
+
+   // Replace placeholders with lith-generated HTML
+   dale.go (embeds, function (embed, idx) {
+      var tag = '<!--VIBEY_EMBED_' + idx + '-->';
+      if (! embed) {
+         html = html.replace (tag, lith.g (['div', {class: 'embed-error'}, 'Invalid embed block (missing or invalid port)']));
+         return;
+      }
+      var src = '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embed.path;
+      html = html.replace (tag, lith.g (['div', {class: 'embed-container'}, [
+         ['div', {class: 'embed-header'}, [
+            ['span', {class: 'embed-title'}, embed.title],
+            ['span', {class: 'embed-port'}, ':' + embed.port + embed.path],
+            ['a', {class: 'embed-open', href: src, target: '_blank', title: 'Open in new tab'}, '↗']
+         ]],
+         ['iframe', {src: src, style: style ({width: '100%', height: embed.height + 'px'}), title: embed.title, sandbox: 'allow-scripts allow-forms allow-same-origin'}]
+      ]]));
+   });
+
+   return html;
+};
+
 var buildHash = function (project, tab, currentFile) {
    if (! project) return '#/projects';
    tab = tab === 'dialogs' ? 'dialogs' : 'docs';
@@ -124,6 +190,7 @@ B.mrespond ([
       B.call (x, 'set', 'chatModel', 'gpt-5');
       B.call (x, 'set', 'chatInput', '');
       B.call (x, 'set', 'chatAutoStick', true);
+      B.call (x, 'set', 'editorPreview', true);
       B.call (x, 'set', 'voiceActive', false);
       B.call (x, 'set', 'voiceSupported', !! (window.SpeechRecognition || window.webkitSpeechRecognition));
       B.call (x, 'load', 'projects');
@@ -511,6 +578,29 @@ B.mrespond ([
          ev.preventDefault ();
          B.call (x, 'save', 'file');
       }
+   }],
+
+   ['toggle', 'editorPreview', function (x) {
+      B.call (x, 'set', 'editorPreview', ! B.get ('editorPreview'));
+   }],
+
+   ['change', 'editorPreview', {match: B.changeResponder}, function (x) {
+      B.call (x, 'update', 'previewContent');
+   }],
+
+   ['change', ['currentFile', 'content'], {match: B.changeResponder}, function (x) {
+      if (B.get ('editorPreview')) B.call (x, 'update', 'previewContent');
+   }],
+
+   ['update', 'previewContent', function (x) {
+      setTimeout (function () {
+         var el = document.getElementById ('editor-preview-pane');
+         if (! el) return;
+         var file = B.get ('currentFile');
+         var project = B.get ('currentProject');
+         if (! file || ! project) {el.innerHTML = ''; return;}
+         el.innerHTML = renderMarkdownWithEmbeds (file.content, project);
+      }, 0);
    }],
 
    // *** DIALOGS ***
@@ -1387,14 +1477,136 @@ views.css = [
    ['.tool-result-error', {
       color: '#e74c3c',
    }],
+   // Embed
+   ['.embed-container', {
+      border: '1px solid #333',
+      'border-radius': '8px',
+      overflow: 'hidden',
+      'margin': '1rem 0',
+   }],
+   ['.embed-header', {
+      display: 'flex',
+      'align-items': 'center',
+      gap: '0.5rem',
+      padding: '0.4rem 0.75rem',
+      'background-color': '#0d0d1a',
+      'border-bottom': '1px solid #333',
+      'font-size': '12px',
+   }],
+   ['.embed-title', {
+      color: '#94b8ff',
+      'font-weight': 'bold',
+   }],
+   ['.embed-port', {
+      color: '#666',
+      'font-family': 'Monaco, Consolas, monospace',
+   }],
+   ['.embed-open', {
+      color: '#9aa4bf',
+      'text-decoration': 'none',
+      'margin-left': 'auto',
+      'font-size': '14px',
+   }],
+   ['.embed-open:hover', {
+      color: '#94b8ff',
+   }],
+   ['.embed-error', {
+      color: '#ff8b94',
+      'font-size': '13px',
+      padding: '0.75rem',
+      'background-color': '#2a1a1a',
+      'border-radius': '6px',
+      margin: '1rem 0',
+   }],
+   ['.embed-container iframe', {
+      border: 'none',
+      display: 'block',
+      'background-color': 'white',
+   }],
+   // Preview pane
+   ['.editor-preview', {
+      flex: 1,
+      padding: '1rem 1.5rem',
+      'background-color': '#16213e',
+      'border-radius': '8px',
+      'overflow-y': 'auto',
+      color: '#ddd',
+      'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      'font-size': '15px',
+      'line-height': 1.7,
+   }],
+   ['.editor-preview h1, .editor-preview h2, .editor-preview h3', {
+      color: '#94b8ff',
+      'margin-top': '1.5rem',
+      'margin-bottom': '0.5rem',
+   }],
+   ['.editor-preview h1', {'font-size': '1.6rem', 'border-bottom': '1px solid #333', 'padding-bottom': '0.3rem'}],
+   ['.editor-preview h2', {'font-size': '1.3rem'}],
+   ['.editor-preview h3', {'font-size': '1.1rem'}],
+   ['.editor-preview p', {'margin': '0.5rem 0'}],
+   ['.editor-preview code', {
+      'background-color': '#0d0d1a',
+      padding: '0.15rem 0.4rem',
+      'border-radius': '4px',
+      'font-family': 'Monaco, Consolas, monospace',
+      'font-size': '13px',
+   }],
+   ['.editor-preview pre', {
+      'background-color': '#0d0d1a',
+      padding: '0.75rem 1rem',
+      'border-radius': '6px',
+      'overflow-x': 'auto',
+   }],
+   ['.editor-preview pre code', {
+      padding: 0,
+      'background-color': 'transparent',
+   }],
+   ['.editor-preview a', {color: '#94b8ff'}],
+   ['.editor-preview blockquote', {
+      'border-left': '3px solid #4a69bd',
+      'padding-left': '1rem',
+      color: '#9aa4bf',
+      margin: '0.5rem 0',
+   }],
+   ['.editor-preview table', {
+      'border-collapse': 'collapse',
+      width: '100%',
+      margin: '0.75rem 0',
+   }],
+   ['.editor-preview th, .editor-preview td', {
+      border: '1px solid #333',
+      padding: '0.4rem 0.75rem',
+      'text-align': 'left',
+   }],
+   ['.editor-preview th', {
+      'background-color': '#0d0d1a',
+      color: '#94b8ff',
+   }],
+   ['.editor-preview ul, .editor-preview ol', {
+      'padding-left': '1.5rem',
+      margin: '0.5rem 0',
+   }],
+   ['.editor-preview li', {
+      margin: '0.25rem 0',
+   }],
+   ['.editor-preview img', {
+      'max-width': '100%',
+      'border-radius': '6px',
+   }],
+   ['.editor-preview hr', {
+      border: 'none',
+      'border-top': '1px solid #333',
+      margin: '1rem 0',
+   }],
 ];
 
 views.files = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile']], function (files, currentFile, loadingFile, savingFile) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject) {
       var docFiles = dale.fil (files || [], undefined, function (name) {
          if (! name.startsWith ('dialog-')) return name;
       });
       var isDirty = currentFile && currentFile.content !== currentFile.original;
+      var hasEmbeds = currentFile && type (currentFile.content) === 'string' && currentFile.content.indexOf ('əəəembed') !== -1;
 
       return ['div', {class: 'files-container'}, [
          // File list sidebar
@@ -1428,6 +1640,11 @@ views.files = function () {
                ]],
                ['div', {class: 'editor-actions'}, [
                   ['button', {
+                     class: 'btn-small' + (editorPreview ? ' primary' : ''),
+                     style: style ({'background-color': editorPreview ? '#4a69bd' : '#3a3a5f', color: editorPreview ? 'white' : '#c9d4ff'}),
+                     onclick: B.ev ('toggle', 'editorPreview')
+                  }, editorPreview ? 'Edit' : 'View'],
+                  ['button', {
                      class: 'primary btn-small',
                      onclick: B.ev ('save', 'file'),
                      disabled: savingFile || ! isDirty
@@ -1439,11 +1656,13 @@ views.files = function () {
                   }, 'Close']
                ]]
             ]],
-            ['textarea', {
-               class: 'editor-textarea',
-               oninput: B.ev ('set', ['currentFile', 'content']),
-               onkeydown: B.ev ('keydown', 'editor', {raw: 'event'})
-            }, currentFile.content]
+            editorPreview
+               ? ['div', {id: 'editor-preview-pane', class: 'editor-preview', opaque: true}]
+               : ['textarea', {
+                  class: 'editor-textarea',
+                  oninput: B.ev ('set', ['currentFile', 'content']),
+                  onkeydown: B.ev ('keydown', 'editor', {raw: 'event'})
+               }, currentFile.content]
          ] : ['div', {class: 'editor-empty'}, loadingFile ? 'Loading...' : 'Select a doc to edit']]
       ]];
    });
@@ -1599,7 +1818,7 @@ var getMessageToolContentView = function (content, expanded) {
    };
 };
 
-var renderChatContent = function (text) {
+var renderChatContent = function (text, project) {
    if (type (text) !== 'string' || ! text) return '';
 
    var labelRe = /^(\s*)(Tool request:|Decision:|Result:|success:|error:|message:|stdout|stderr)(.*)/;
@@ -1614,10 +1833,49 @@ var renderChatContent = function (text) {
    };
 
    var lines = text.split ('\n');
+   var inEmbed = false;
+   var embedBody = '';
+
    dale.go (lines, function (line, i) {
       var prefix = i > 0 ? '\n' : '';
+      var trimmed = line.trim ();
 
-      if (line.trim () === '---') {
+      // Detect embed block start
+      if (! inEmbed && trimmed === 'əəəembed') {
+         flushBuffer ();
+         inEmbed = true;
+         embedBody = '';
+         return;
+      }
+
+      // Detect embed block end
+      if (inEmbed && trimmed === 'əəə') {
+         inEmbed = false;
+         var embed = parseEmbedBlock (embedBody);
+         if (embed && project) {
+            var src = '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embed.path;
+            result.push (['div', {class: 'embed-container', opaque: true}, [
+               ['div', {class: 'embed-header'}, [
+                  ['span', {class: 'embed-title'}, embed.title],
+                  ['span', {class: 'embed-port'}, ':' + embed.port + embed.path],
+                  ['a', {class: 'embed-open', href: src, target: '_blank', title: 'Open in new tab'}, '↗']
+               ]],
+               ['iframe', {src: src, style: style ({width: '100%', height: embed.height + 'px', border: 'none', display: 'block', 'background-color': 'white'}), title: embed.title, sandbox: 'allow-scripts allow-forms allow-same-origin'}]
+            ]]);
+         }
+         else {
+            result.push (['div', {class: 'embed-error'}, 'Invalid embed block (missing or invalid port)']);
+         }
+         return;
+      }
+
+      // Accumulate embed body
+      if (inEmbed) {
+         embedBody += (embedBody ? '\n' : '') + line;
+         return;
+      }
+
+      if (trimmed === '---') {
          flushBuffer ();
          result.push (['hr', {class: 'chat-separator'}]);
          return;
@@ -2039,7 +2297,7 @@ views.toolRequests = function (pendingToolCalls, applyingToolDecisions) {
 };
 
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['pendingToolCalls'], ['optimisticUserMessage'], ['applyingToolDecisions'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, pendingToolCalls, optimisticUserMessage, applyingToolDecisions, toolMessageExpanded, voiceActive, voiceSupported) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['pendingToolCalls'], ['optimisticUserMessage'], ['applyingToolDecisions'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, pendingToolCalls, optimisticUserMessage, applyingToolDecisions, toolMessageExpanded, voiceActive, voiceSupported, currentProject) {
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (f.startsWith ('dialog-')) return f;
@@ -2095,7 +2353,7 @@ views.dialogs = function () {
 
                   return ['div', {class: 'chat-message chat-' + msg.role}, [
                      ['div', {class: 'chat-role'}, ['span', msg.role]],
-                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text)],
+                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject)],
                      toolContentView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
                         ['button', {
                            class: 'btn-small',

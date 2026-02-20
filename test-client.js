@@ -597,7 +597,7 @@
       // (Based on flow4Sequence/allFlows[3] in test-server.js)
       // =============================================
 
-      // --- F4 Step 1: Create project ---
+      // --- F3 Step 1: Create project ---
       ['F3-1: Create project', function (done) {
          window._f3Project = 'test-flow3-' + Date.now ();
          mockPrompt (window._f3Project);
@@ -610,7 +610,7 @@
          return true;
       }],
 
-      // --- F4 Step 2: Write doc-main.md with tool auths ---
+      // --- F3 Step 2: Write doc-main.md with tool auths ---
       ['F3-2: Write doc-main.md', function (done) {
          var content = [
             '# Flow 4 Test Project',
@@ -626,7 +626,7 @@
          return true;
       }],
 
-      // --- F4 Step 3: Create two dialogs (agent-a, agent-b) ---
+      // --- F3 Step 3: Create two dialogs (agent-a, agent-b) ---
       ['F3-3: Create dialogs A and B', function (done) {
          var project = window._f3Project;
          var pending = 2;
@@ -657,7 +657,7 @@
          return true;
       }],
 
-      // --- F4 Step 4: Fire dialogs with long prompts (non-blocking) ---
+      // --- F3 Step 4: Fire dialogs with long prompts (non-blocking) ---
       ['F3-4: Fire dialog A + B', function (done) {
          var project = window._f3Project;
          var payloadA = {dialogId: window._f3DialogA, prompt: 'Write a file called story-a.txt with a 500 word story about a robot. Use write_file.'};
@@ -680,7 +680,7 @@
          return true;
       }],
 
-      // --- F4 Step 5: Wait until both dialogs are active ---
+      // --- F3 Step 5: Wait until both dialogs are active ---
       ['F3-5: Both dialogs become active', function (done) {
          done (LONG_WAIT, POLL);
       }, function () {
@@ -702,7 +702,7 @@
          return 'Waiting for dialogs to become active...';
       }],
 
-      // --- F4 Step 6: Delete project with active agents ---
+      // --- F3 Step 6: Delete project with active agents ---
       ['F3-6: Delete project with active agents', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {
@@ -719,7 +719,7 @@
          return true;
       }],
 
-      // --- F4 Step 7: Dialogs endpoint returns 404 ---
+      // --- F3 Step 7: Dialogs endpoint returns 404 ---
       ['F3-7: Dialogs endpoint returns 404', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
             window._f3DialogsStatus = error ? error.status : (rs && rs.status);
@@ -730,7 +730,7 @@
          return true;
       }],
 
-      // --- F4 Step 8: Files endpoint returns 404 ---
+      // --- F3 Step 8: Files endpoint returns 404 ---
       ['F3-8: Files endpoint returns 404', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/files', {}, '', function (error, rs) {
             window._f3FilesStatus = error ? error.status : (rs && rs.status);
@@ -741,7 +741,7 @@
          return true;
       }],
 
-      // --- F4 Step 9: Re-create same project name ---
+      // --- F3 Step 9: Re-create same project name ---
       ['F3-9: Re-create same project name', function (done) {
          c.ajax ('post', 'projects', {}, {name: window._f3Project}, function () {
             done (SHORT_WAIT, POLL);
@@ -750,7 +750,7 @@
          return true;
       }],
 
-      // --- F4 Step 10: Re-created project has no dialogs/files ---
+      // --- F3 Step 10: Re-created project has no dialogs/files ---
       ['F3-10: Re-created project has no dialogs/files', function (done) {
          var project = window._f3Project;
          var pending = 2;
@@ -774,7 +774,7 @@
          return true;
       }],
 
-      // --- F4 Cleanup: Delete re-created project ---
+      // --- F3 Cleanup: Delete re-created project ---
       ['F3-Cleanup: Delete re-created project', function (done) {
          c.ajax ('delete', 'projects/' + encodeURIComponent (window._f3Project), {}, '', function () {
             done (SHORT_WAIT, POLL);
@@ -795,7 +795,7 @@
       // (Based on flow3Sequence/allFlows[4] in test-server.js)
       // =============================================
 
-      // --- F3 Step 1: Create a new project ---
+      // --- F4 Step 1: Create a new project ---
       ['F4-1: Create project for tictactoe', function (done) {
          window._f4Project = 'test-flow4-' + Date.now ();
          mockPrompt (window._f4Project);
@@ -808,7 +808,7 @@
          return true;
       }],
 
-      // --- F3 Step 2: Write doc-main.md + doc-gotob.md (instructions + gotoB reference) ---
+      // --- F4 Step 2: Write doc-main.md + doc-gotob.md (instructions + gotoB reference) ---
       ['F4-2: Write doc-main.md + doc-gotob.md', function (done) {
          var docMain = [
             '# Tictactoe Project',
@@ -888,7 +888,7 @@
          return true;
       }],
 
-      // --- F3 Step 3: Create orchestrator dialog ---
+      // --- F4 Step 3: Create orchestrator dialog ---
       ['F4-3: Create orchestrator dialog', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f4Project) + '/dialogs');
          mockPrompt ('orchestrator');
@@ -903,7 +903,7 @@
          return true;
       }],
 
-      // --- F3 Step 4: Verify global authorizations present in dialog markdown ---
+      // --- F4 Step 4: Verify global authorizations present in dialog markdown ---
       ['F4-4: Dialog inherits global authorizations', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No dialog content loaded';
@@ -914,7 +914,7 @@
          return true;
       }],
 
-      // --- F3 Step 5: Fire "please start" and wait for a spawned agent to appear ---
+      // --- F4 Step 5: Fire "please start" and wait for a spawned agent to appear ---
       ['F4-5: Fire "please start" and wait for second dialog', function (done) {
          B.call ('set', 'chatInput', 'please start');
          B.call ('send', 'message');
@@ -926,7 +926,7 @@
          return true;
       }],
 
-      // --- F3 Step 6: Poll for app running on port 4000 (tool/execute curl) ---
+      // --- F4 Step 6: Poll for app running on port 4000 (tool/execute curl) ---
       ['F4-6: App responds on port 4000 (via tool/execute)', function (done) {
          var project = window._f4Project;
          var attempt = function () {
@@ -943,7 +943,7 @@
          return true;
       }],
 
-      // --- F3 Step 7: Verify server.js, index.html, app.js content via tool/execute ---
+      // --- F4 Step 7: Verify server.js, index.html, app.js content via tool/execute ---
       ['F4-7: Verify generated files', function (done) {
          var project = window._f4Project;
          var remaining = 3;
@@ -995,7 +995,7 @@
          return true;
       }],
 
-      // --- F3 Step 8: Expose port 4000 and verify page from host ---
+      // --- F4 Step 8: Expose port 4000 and verify page from host ---
       ['F4-8: Expose port 4000 and verify host response', function (done) {
          var project = window._f4Project;
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/ports', {}, {port: 4000}, function (error, rs) {
@@ -1011,7 +1011,7 @@
          return true;
       }],
 
-      // --- F3 Step 9: Fetch tictactoe from host port ---
+      // --- F4 Step 9: Fetch tictactoe from host port ---
       ['F4-9: Tictactoe serves from host port', function (done) {
          var port = window._f4HostPort;
          if (! port) return done (SHORT_WAIT, POLL);
@@ -1035,19 +1035,53 @@
          return true;
       }],
 
-      // --- F4 Cleanup: Delete project ---
-      ['F4-Cleanup: Delete project', function (done) {
-         var project = window._f4Project;
-         c.ajax ('delete', 'projects/' + encodeURIComponent (project), {}, '', function () {
-            done (SHORT_WAIT, POLL);
+      // --- F4 Step 10: Ask the AI to embed the game in doc-main.md ---
+      ['F4-10: Ask AI to embed tictactoe in doc-main.md', function (done) {
+         // Reload the orchestrator dialog so we can send a follow-up message
+         var files = B.get ('files') || [];
+         var orchestratorFile = dale.stopNot (files, undefined, function (f) {
+            if (f.indexOf ('orchestrator') !== -1) return f;
          });
+         if (orchestratorFile) B.call ('load', 'file', orchestratorFile);
+         done (MEDIUM_WAIT, POLL);
       }, function () {
+         var file = B.get ('currentFile');
+         if (! file || file.name.indexOf ('orchestrator') === -1) return 'Orchestrator dialog not loaded';
          return true;
       }],
 
-      // --- Flow #4 complete alert ---
+      ['F4-11: Send embed request to AI and wait for completion', function (done) {
+         B.call ('set', 'chatInput', 'The tictactoe game is now running on port 4000. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc-main.md.');
+         B.call ('send', 'message');
+         done (LONG_WAIT, POLL);
+      }, function () {
+         var streaming = B.get ('streaming');
+         if (streaming) return 'Still streaming...';
+         var pending = B.get ('pendingToolCalls');
+         if (pending && pending.length > 0) {
+            B.call ('approve', 'allTools');
+            return 'Approving tool calls...';
+         }
+         return true;
+      }],
+
+      // --- F4 Step 12: Verify embed block is in doc-main.md ---
+      ['F4-12: Verify embed block in doc-main.md', function (done) {
+         var project = window._f4Project;
+         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, '', function (error, rs) {
+            window._f4EmbedContent = (rs && rs.body) ? rs.body.content : '';
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var content = window._f4EmbedContent || '';
+         if (content.indexOf ('əəəembed') === -1) return 'doc-main.md missing əəəembed block';
+         if (content.indexOf ('port 4000') === -1) return 'doc-main.md embed missing port 4000';
+         return true;
+      }],
+
+      // --- Flow #4 complete alert (project is NOT deleted) ---
       ['Flow #4 complete (acknowledge to finish)', function () {
-         alert ('✅ Flow #4 passed. All tests done!');
+         alert ('✅ Flow #4 passed. All tests done! Project "' + window._f4Project + '" kept with embed.');
          return true;
       }],
 
