@@ -5,7 +5,6 @@
 flexible and unreliable -> reliable while still flexible (software in the past; LLMs now)
 what's the vibe? what am I doing with vibey?
 
-
 Dialogs as documents that are append-only.
 
 Deeds as things that are not docs. perhaps these are blobs. some of them executable. But they're not all blobs, many are also text, though not a document.
@@ -16,10 +15,6 @@ Architecture: I can have a single vibey server dockerized per server. what shoul
 - Add audio. Be able to talk to an agent, and listen it back.
 
 Demos: make me something interactive to learn chess.
-
-
-
-
 
 Prompts:
 Main: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).

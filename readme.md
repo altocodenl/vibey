@@ -4,6 +4,8 @@ An agentic interface for those who love text.
 
 Use text to coordinate agents. From your browser. Surrounded by a container.
 
+I'm currently recording myself while building vibey. You can check out [the Youtube channel here](https://www.youtube.com/channel/UCEcfQSep8KzW7H2S0HBNj8g). The channel is from [cell](https://github.com/altocodenl/cell) but Vibey hijacked the channel starting on season 5.
+
 ## Vibey in a nutshell
 
 1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. Views of your app or images are embedded. A document as the gateway to everything.
