@@ -791,7 +791,7 @@
       */
 
       // =============================================
-      // *** FLOW #4: Multi-agent tictactoe ***
+      // *** FLOW #4: Static tictactoe (HTML + JS only) ***
       // (Based on flow3Sequence/allFlows[4] in test-server.js)
       // =============================================
 
@@ -817,31 +817,22 @@
             '',
             '## Architecture',
             '',
-            '- `server.js` — express server on port 4000, serves static files from `__dirname`.',
-            '- `index.html` — loads gotoB from CDN and `app.js`.',
+            '- `index.html` — static HTML shell that loads gotoB from CDN and `app.js`.',
             '- `app.js` — tictactoe game using gotoB (B.view, B.call, B.ev, B.store).',
+            '- No backend server. The game is served via the static proxy at `/project/<project>/static/`.',
             '',
             '## Agent Instructions',
             '',
             'When you receive "please start", you MUST do the following in this exact order:',
             '',
-            '**Before spawning any agent**, use `run_command` with `ls dialog-*.md` to see which agents already exist. Do NOT launch an agent if a dialog with that slug already exists.',
+            '1. Use write_file to create `index.html` with gotoB + app.js.',
+            '2. THEN: Use write_file to create `app.js` with a 3x3 tictactoe grid.',
             '',
-            '1. FIRST: Call the `launch_agent` tool with these exact parameters (only if no backend-agent dialog exists yet):',
-            '   - provider: "openai"',
-            '   - model: "gpt-5"',
-            '   - prompt: "You are the backend agent for a tictactoe project. Do the following steps in order using tools:\n1. run_command: npm init -y\n2. run_command: npm install express\n3. write_file server.js — a simple express server on port 4000 that serves static files from __dirname using express.static. About 10 lines.\n4. run_command: node server.js &\nDo all four steps. Keep server.js minimal."',
-            '   - slug: "backend-agent"',
-            '',
-            '2. THEN: Use write_file to create `index.html` with gotoB + app.js.',
-            '3. THEN: Use write_file to create `app.js` with a 3x3 tictactoe grid.',
-            '',
-            'Do NOT skip the launch_agent call. Do NOT call launch_agent more than once for the same slug. Create each file with a separate write_file call.',
+            'Do NOT create a backend server. Create each file with a separate write_file call.',
             '',
             '> Authorized: run_command',
             '> Authorized: write_file',
-            '> Authorized: edit_file',
-            '> Authorized: launch_agent'
+            '> Authorized: edit_file'
          ].join ('\n') + '\n';
 
          var docGotob = [
@@ -907,34 +898,38 @@
       ['F4-4: Dialog inherits global authorizations', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No dialog content loaded';
-         var tools = ['run_command', 'write_file', 'edit_file', 'launch_agent'];
+         var tools = ['run_command', 'write_file', 'edit_file'];
          for (var i = 0; i < tools.length; i++) {
             if (file.content.indexOf ('> Authorized: ' + tools [i]) === -1) return 'Missing authorization for ' + tools [i];
          }
          return true;
       }],
 
-      // --- F4 Step 5: Fire "please start" and wait for a spawned agent to appear ---
-      ['F4-5: Fire "please start" and wait for second dialog', function (done) {
+      // --- F4 Step 5: Fire "please start" ---
+      ['F4-5: Fire "please start"', function (done) {
          B.call ('set', 'chatInput', 'please start');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
-         var files = B.get ('files') || [];
-         var dialogFiles = files.filter (function (name) {return name.indexOf ('dialog-') === 0;});
-         if (dialogFiles.length < 2) return 'Waiting for spawned agent dialog...';
+         var streaming = B.get ('streaming');
+         if (streaming) return 'Still streaming...';
+         var pending = B.get ('pendingToolCalls');
+         if (pending && pending.length > 0) {
+            B.call ('approve', 'allTools');
+            return 'Approving tool calls...';
+         }
          return true;
       }],
 
-      // --- F4 Step 6: Poll for app running on port 4000 (tool/execute curl) ---
-      ['F4-6: App responds on port 4000 (via tool/execute)', function (done) {
+      // --- F4 Step 6: Poll for static app via static proxy ---
+      ['F4-6: Static app responds via static proxy', function (done) {
          var project = window._f4Project;
          var attempt = function () {
-            c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
-               toolName: 'run_command',
-               toolInput: {command: 'curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/'}
-            }, function (error, rs) {
-               if (! error && rs && rs.body && rs.body.success && (rs.body.stdout || '').indexOf ('200') !== -1) return done (SHORT_WAIT, POLL);
+            c.ajax ('get', 'project/' + encodeURIComponent (project) + '/static/', {}, '', function (error, rs) {
+               if (! error && rs && rs.status === 200) {
+                  var body = (rs.body || '').toLowerCase ();
+                  if (body.indexOf ('gotob') !== -1 && body.indexOf ('app.js') !== -1 && body.indexOf ('tictactoe') !== -1) return done (SHORT_WAIT, POLL);
+               }
                setTimeout (attempt, 5000);
             });
          };
@@ -943,27 +938,15 @@
          return true;
       }],
 
-      // --- F4 Step 7: Verify server.js, index.html, app.js content via tool/execute ---
+      // --- F4 Step 7: Verify index.html + app.js content via tool/execute ---
       ['F4-7: Verify generated files', function (done) {
          var project = window._f4Project;
-         var remaining = 3;
+         var remaining = 2;
          var fail = null;
          var finish = function () {
             remaining--;
             if (remaining === 0) done (SHORT_WAIT, POLL);
          };
-
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
-            toolName: 'run_command',
-            toolInput: {command: 'cat server.js'}
-         }, function (error, rs) {
-            if (error || ! rs.body || ! rs.body.success) fail = 'cat server.js failed';
-            else {
-               var out = rs.body.stdout || '';
-               if (out.indexOf ('express') === -1 || out.indexOf ('4000') === -1) fail = 'server.js missing express/port 4000';
-            }
-            finish ();
-         });
 
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
             toolName: 'run_command',
@@ -995,48 +978,8 @@
          return true;
       }],
 
-      // --- F4 Step 8: Expose port 4000 and verify page from host ---
-      ['F4-8: Expose port 4000 and verify host response', function (done) {
-         var project = window._f4Project;
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/ports', {}, {port: 4000}, function (error, rs) {
-            if (error || ! rs.body) {
-               window._f4HostPort = null;
-               return done (SHORT_WAIT, POLL);
-            }
-            window._f4HostPort = rs.body.hostPort || rs.body.containerPort || 4000;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (! window._f4HostPort) return 'Failed to expose port 4000';
-         return true;
-      }],
-
-      // --- F4 Step 9: Fetch tictactoe from host port ---
-      ['F4-9: Tictactoe serves from host port', function (done) {
-         var port = window._f4HostPort;
-         if (! port) return done (SHORT_WAIT, POLL);
-         var req = new XMLHttpRequest ();
-         req.open ('GET', 'http://localhost:' + port + '/', true);
-         req.onload = function () {
-            window._f4HostPage = req.responseText || '';
-            done (SHORT_WAIT, POLL);
-         };
-         req.onerror = function () {
-            window._f4HostPage = '';
-            done (SHORT_WAIT, POLL);
-         };
-         req.send ();
-      }, function () {
-         var body = (window._f4HostPage || '').toLowerCase ();
-         if (! body) return 'No response from host port';
-         if (body.indexOf ('gotob') === -1) return 'Host page missing gotoB';
-         if (body.indexOf ('app.js') === -1) return 'Host page missing app.js';
-         if (body.indexOf ('tictactoe') === -1) return 'Host page missing tictactoe title';
-         return true;
-      }],
-
-      // --- F4 Step 10: Ask the AI to embed the game in doc-main.md ---
-      ['F4-10: Ask AI to embed tictactoe in doc-main.md', function (done) {
+      // --- F4 Step 8: Ask the AI to embed the game in doc-main.md ---
+      ['F4-8: Ask AI to embed tictactoe in doc-main.md', function (done) {
          // Reload the orchestrator dialog so we can send a follow-up message
          var files = B.get ('files') || [];
          var orchestratorFile = dale.stopNot (files, undefined, function (f) {
@@ -1050,8 +993,8 @@
          return true;
       }],
 
-      ['F4-11: Send embed request to AI and wait for completion', function (done) {
-         B.call ('set', 'chatInput', 'The tictactoe game is now running on port 4000. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc-main.md.');
+      ['F4-9: Send embed request to AI and wait for completion', function (done) {
+         B.call ('set', 'chatInput', 'The tictactoe game is now available via the static proxy at /project/' + window._f4Project + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
@@ -1065,8 +1008,8 @@
          return true;
       }],
 
-      // --- F4 Step 12: Verify embed block is in doc-main.md ---
-      ['F4-12: Verify embed block in doc-main.md', function (done) {
+      // --- F4 Step 10: Verify embed block is in doc-main.md ---
+      ['F4-10: Verify embed block in doc-main.md', function (done) {
          var project = window._f4Project;
          c.ajax ('get', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, '', function (error, rs) {
             window._f4EmbedContent = (rs && rs.body) ? rs.body.content : '';
@@ -1075,7 +1018,7 @@
       }, function () {
          var content = window._f4EmbedContent || '';
          if (content.indexOf ('əəəembed') === -1) return 'doc-main.md missing əəəembed block';
-         if (content.indexOf ('port 4000') === -1) return 'doc-main.md embed missing port 4000';
+         if (content.indexOf ('port static') === -1) return 'doc-main.md embed missing port static';
          return true;
       }],
 

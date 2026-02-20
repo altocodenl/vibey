@@ -17,11 +17,22 @@ title My App
 height 500
 əəə
 
+Static-only projects (no backend) can use the static proxy:
+
+əəəembed
+port static
+path /
+title My Static App
+height 500
+əəə
+
 Fields:
-- port (required): the port the app listens on.
+- port (required): the port the app listens on, or `static` to serve files from the project folder.
 - path (default /): initial path to load.
 - height (default 400): iframe height in pixels.
 - title (default App): label shown above the embed.
 
-The vibey server proxies requests through /project/<project>/proxy/<port>/, so the app renders inside the doc. When you build an app that serves on a port, add an embed block to doc-main.md (or another relevant doc) so the user can see it directly.
+Use the schwa character `ə` (U+0259) for the delimiters (`əəə`), and avoid look‑alike Unicode characters.
+
+The vibey server proxies requests through /project/<project>/proxy/<port>/, so the app renders inside the doc. Static embeds use /project/<project>/static/<path>. When you build an app that serves on a port, add an embed block to doc-main.md (or another relevant doc) so the user can see it directly.
 ```

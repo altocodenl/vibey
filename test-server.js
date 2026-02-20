@@ -470,7 +470,7 @@ var flow4Sequence = [
    }]
 ];
 
-// *** FLOW #4: Multi-agent tictactoe — agents write code, app runs on port 4000 ***
+// *** FLOW #4: Static tictactoe — HTML + JS only (no backend) ***
 
 var PROJECT3 = 'flow3-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
 
@@ -481,23 +481,15 @@ var DOC_MAIN_F3 = [
    '',
    '## Architecture',
    '',
-   '- `server.js` — express server on port 4000, serves static files from `__dirname`.',
-   '- `index.html` — loads gotoB from CDN and `app.js`.',
+   '- `index.html` — static HTML shell that loads gotoB from CDN and `app.js`.',
    '- `app.js` — tictactoe game using gotoB (B.view, B.call, B.ev, B.store).',
+   '- No backend server. The game is served via the static proxy at `/project/<project>/static/`.',
    '',
    '## Agent Instructions',
    '',
    'When you receive "please start", you MUST do the following in this exact order:',
    '',
-   '**Before spawning any agent**, use `run_command` with `ls dialog-*.md` to see which agents already exist. Do NOT launch an agent if a dialog with that slug already exists.',
-   '',
-   '1. FIRST: Call the `launch_agent` tool with these exact parameters (only if no backend-agent dialog exists yet):',
-   '   - provider: "openai"',
-   '   - model: "gpt-5"',
-   '   - prompt: "You are the backend agent for a tictactoe project. Do the following steps in order using tools:\\n1. run_command: npm init -y\\n2. run_command: npm install express\\n3. write_file server.js — a simple express server on port 4000 that serves static files from __dirname using express.static. About 10 lines.\\n4. run_command: node server.js &\\nDo all four steps. Keep server.js minimal."',
-   '   - slug: "backend-agent"',
-   '',
-   '2. THEN: Use write_file to create `index.html`. It must:',
+   '1. Use write_file to create `index.html`. It must:',
    '   - Have a proper HTML5 doctype and charset.',
    '   - Load gotoB from: https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js',
    '   - Load dale from: https://cdn.jsdelivr.net/gh/nicedoc/dale@7f2ef0bcbeea7c2e10d7e0b7e6b12c18e5e89cfb/dale.min.js',
@@ -506,7 +498,7 @@ var DOC_MAIN_F3 = [
    '   - Load app.js via a script tag.',
    '   - Have a <title>Tictactoe</title>.',
    '',
-   '3. THEN: Use write_file to create `app.js`. It must:',
+   '2. THEN: Use write_file to create `app.js`. It must:',
    '   - Implement a 3x3 tictactoe grid using gotoB.',
    '   - Use `var dale = window.dale, teishi = window.teishi, lith = window.lith, c = window.c, B = window.B;` at the top.',
    '   - Store board state in B.store as an array of 9 cells (initially empty strings).',
@@ -516,12 +508,11 @@ var DOC_MAIN_F3 = [
    '   - Mount on body with B.mount.',
    '   - Render each cell as a clickable div/button in a 3x3 grid.',
    '',
-   'Do NOT skip the launch_agent call. Do NOT call launch_agent more than once for the same slug. Create each file with a separate write_file call.',
+   'Do NOT create a backend server. Create each file with a separate write_file call.',
    '',
    '> Authorized: run_command',
    '> Authorized: write_file',
-   '> Authorized: edit_file',
-   '> Authorized: launch_agent'
+   '> Authorized: edit_file'
 ].join ('\n') + '\n';
 
 var GOTOB_F3 = [
@@ -647,10 +638,10 @@ var flow3Sequence = [
       return true;
    }],
 
-   ['F4: Verify dialog inherited all 4 global authorizations', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Verify dialog inherited global authorizations', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       fetchDialogMarkdown (PROJECT3, s.f3DialogId, function (error, md) {
          if (error) return log ('Could not fetch dialog: ' + error.message);
-         var tools = ['run_command', 'write_file', 'edit_file', 'launch_agent'];
+         var tools = ['run_command', 'write_file', 'edit_file'];
          for (var i = 0; i < tools.length; i++) {
             if (md.indexOf ('> Authorized: ' + tools [i]) === -1) return log ('Dialog missing inherited ' + tools [i] + ' authorization');
          }
@@ -666,66 +657,22 @@ var flow3Sequence = [
       });
    }],
 
-   // Poll until at least 2 dialogs exist (orchestrator spawned a backend agent)
-   ['F4: Poll until spawned agent appears', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Poll until the static page is reachable via static proxy
+   ['F4: Poll until static page serves', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
-         httpGet (5353, '/project/' + PROJECT3 + '/dialogs', function (error, status, body) {
+         httpGet (5353, '/project/' + PROJECT3 + '/static/', function (error, status, body) {
             if (error || status !== 200) return done (false);
-            try {
-               var dialogs = JSON.parse (body);
-               if (dialogs.length >= 2) return done (true);
-            }
-            catch (e) {}
+            var lower = (body || '').toLowerCase ();
+            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (true);
             done (false);
          });
       }, 5000, 180000, function (error) {
-         if (error) return log ('Spawned agent never appeared: ' + error.message);
-         next ();
-      });
-   }],
-
-   // Poll until the tictactoe app is reachable on port 4000 (inside container via tool/execute)
-   ['F4: Poll until app serves on port 4000', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      pollUntil (function (done) {
-         var reqBody = JSON.stringify ({toolName: 'run_command', toolInput: {command: 'curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/'}});
-         var options = {
-            hostname: 'localhost',
-            port: 5353,
-            path: '/project/' + PROJECT3 + '/tool/execute',
-            method: 'POST',
-            headers: {'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength (reqBody)}
-         };
-         var req = http.request (options, function (res) {
-            var body = '';
-            res.on ('data', function (chunk) {body += chunk;});
-            res.on ('end', function () {
-               try {
-                  var parsed = JSON.parse (body);
-                  if (parsed.success && (parsed.stdout || '').indexOf ('200') !== -1) return done (true);
-               }
-               catch (e) {}
-               done (false);
-            });
-         });
-         req.on ('error', function () {done (false);});
-         req.write (reqBody);
-         req.end ();
-      }, 5000, 300000, function (error) {
-         if (error) return log ('App never started on port 4000: ' + error.message);
+         if (error) return log ('Static app never appeared: ' + error.message);
          next ();
       });
    }],
 
    // Now verify the content of each file via tool/execute
-   ['F4: server.js has express content', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat server.js'}}, 200, function (s, rq, rs) {
-      if (! rs.body || ! rs.body.success) return log ('cat server.js failed: ' + JSON.stringify (rs.body));
-      var out = rs.body.stdout || '';
-      if (out.indexOf ('express') === -1) return log ('server.js missing "express"');
-      if (out.indexOf ('4000') === -1) return log ('server.js missing port 4000');
-      if (out.indexOf ('listen') === -1 && out.indexOf ('createServer') === -1) return log ('server.js missing listen/createServer');
-      return true;
-   }],
-
    ['F4: index.html has gotoB + app.js', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, 200, function (s, rq, rs) {
       if (! rs.body || ! rs.body.success) return log ('cat index.html failed: ' + JSON.stringify (rs.body));
       var out = (rs.body.stdout || '').toLowerCase ();
@@ -743,51 +690,9 @@ var flow3Sequence = [
       return true;
    }],
 
-   // Verify dialogs: at least 2, parent has launch_agent evidence
-   ['F4: At least 2 dialogs with launch_agent evidence', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      if (rs.body.length < 2) return log ('Expected at least 2 dialogs, got ' + rs.body.length);
-
-      var parent = dale.stopNot (rs.body, undefined, function (d) {if (d.dialogId === s.f3DialogId) return d;});
-      if (! parent) return log ('Parent dialog not found');
-
-      fetchDialogMarkdown (PROJECT3, s.f3DialogId, function (error, md) {
-         if (error) return log ('Could not fetch parent dialog: ' + error.message);
-         if (! hasToolMention (md, 'launch_agent')) return log ('Parent missing launch_agent evidence');
-         if (! hasApprovedMarker (md)) return log ('Parent tools not approved');
-         next ();
-      });
-   }],
-
-   // Expose port 4000 to host and verify from outside the container
-   ['F4: Expose port 4000 to host', 'post', 'project/' + PROJECT3 + '/ports', {}, {port: 4000}, 200, function (s, rq, rs) {
-      if (! rs.body) return log ('Empty response from ports endpoint');
-      s.f3HostPort = rs.body.hostPort || rs.body.containerPort || 4000;
-      return true;
-   }],
-
-   ['F4: Tictactoe serves from host port', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      var attempts = 0;
-      var tryFetch = function () {
-         httpGet (s.f3HostPort, '/', function (error, status, body) {
-            if (error || status !== 200) {
-               attempts++;
-               if (attempts < 10) return setTimeout (tryFetch, 1000);
-               return log ('App not responding on host port ' + s.f3HostPort + ' after 10 attempts');
-            }
-            var lower = (body || '').toLowerCase ();
-            if (lower.indexOf ('gotob') === -1) return log ('Served page missing gotoB');
-            if (lower.indexOf ('app.js') === -1) return log ('Served page missing app.js');
-            if (lower.indexOf ('tictactoe') === -1) return log ('Served page missing tictactoe title');
-            next ();
-         });
-      };
-      setTimeout (tryFetch, 2000);
-   }],
-
    // Ask the AI to embed the game in doc-main.md
    ['F4: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT3, s.f3DialogId, 'The tictactoe game is now running on port 4000. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc-main.md.', function (error) {
+      fireDialog (PROJECT3, s.f3DialogId, 'The tictactoe game is now available via the static proxy at /project/' + PROJECT3 + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.', function (error) {
          if (error) return log ('Failed to fire embed request: ' + error.message);
          next ();
       });
@@ -801,7 +706,7 @@ var flow3Sequence = [
             try {
                var parsed = JSON.parse (body);
                var content = parsed.content || '';
-               if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (true);
+               if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port static') !== -1) return done (true);
             }
             catch (e) {}
             done (false);
@@ -815,7 +720,7 @@ var flow3Sequence = [
    ['F4: Verify embed block in doc-main.md', 'get', 'project/' + PROJECT3 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
       var content = rs.body.content || '';
       if (content.indexOf ('əəəembed') === -1) return log ('doc-main.md missing əəəembed block');
-      if (content.indexOf ('port 4000') === -1) return log ('doc-main.md embed missing port 4000');
+      if (content.indexOf ('port static') === -1) return log ('doc-main.md embed missing port static');
       return true;
    }]
 

@@ -61,6 +61,11 @@ var maskApiKey = function (key) {
    return key.slice (0, 7) + '••••••••' + key.slice (-4);
 };
 
+var getYoloSetting = function () {
+   var config = loadConfigJson ();
+   return !! (config.settings && config.settings.yolo);
+};
+
 // *** PKCE ***
 
 var base64urlEncode = function (buffer) {
@@ -1766,6 +1771,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          appendUsageToAssistantSection (dialog.filepath, result.usage);
          appendToolCallsToAssistantSection (dialog.filepath, result.toolCalls);
 
+         var yolo = getYoloSetting ();
          var authorizations = parseAuthorizations (fs.readFileSync (dialog.filepath, 'utf8'));
          var decisionsById = {};
          var autoExecuted = [];
@@ -1773,7 +1779,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          for (var i = 0; i < (result.toolCalls || []).length; i++) {
             var tc = result.toolCalls [i];
-            if (authorizations [tc.name]) {
+            if (yolo || authorizations [tc.name]) {
                var toolResult = await executeTool (tc.name, tc.input, projectName);
                decisionsById [tc.id] = {decision: 'approved', result: toolResult};
                autoExecuted.push ({id: tc.id, name: tc.name, result: toolResult});
@@ -1918,6 +1924,8 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, co
    var decisions = dale.go (decisionsMap, function (decision) {return decision;});
 
    var deniedAny = false;
+   var autoApproved = false;
+   var yolo = getYoloSetting ();
 
    if (decisions.length) {
       var pending = getPendingToolCalls (dialog.filepath);
@@ -1947,7 +1955,23 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, co
       if (Object.keys (decisionsById).length) writeToolDecisions (dialog.filepath, decisionsById);
    }
 
-   var shouldContinue = (type (prompt) === 'string' && prompt.trim ()) || decisions.length > 0;
+   if (yolo && decisions.length === 0) {
+      var pending = getPendingToolCalls (dialog.filepath);
+      if (pending.length) {
+         var decisionsById = {};
+         for (var i = 0; i < pending.length; i++) {
+            var tc = pending [i];
+            var toolResult = await executeTool (tc.name, tc.input, projectName);
+            decisionsById [tc.id] = {decision: 'approved', result: toolResult};
+         }
+         if (Object.keys (decisionsById).length) {
+            writeToolDecisions (dialog.filepath, decisionsById);
+            autoApproved = true;
+         }
+      }
+   }
+
+   var shouldContinue = (type (prompt) === 'string' && prompt.trim ()) || decisions.length > 0 || autoApproved;
 
    if (shouldContinue) {
       setDialogStatus (dialog, 'active');
@@ -2039,6 +2063,9 @@ var routes = [
          claudeOAuth: {
             loggedIn: !! (accounts.claudeOAuth && accounts.claudeOAuth.type === 'oauth'),
             expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
+         },
+         settings: {
+            yolo: !! (config.settings && config.settings.yolo)
          }
       });
    }],
@@ -2054,6 +2081,11 @@ var routes = [
       if (type (rq.body.claudeKey) === 'string') {
          if (! config.accounts.claude) config.accounts.claude = {};
          config.accounts.claude.apiKey = rq.body.claudeKey.trim ();
+      }
+
+      if (type (rq.body.yolo) === 'boolean') {
+         if (! config.settings) config.settings = {};
+         config.settings.yolo = rq.body.yolo === true;
       }
 
       saveConfigJson (config);
@@ -2529,6 +2561,41 @@ var routes = [
          if (error) return reply (rs, 500, {error: 'Failed to expose port: ' + error.message});
          reply (rs, 200, {docker: true, containerPort: rq.body.port, hostPort: hostPort});
       });
+   }],
+
+   // *** STATIC PROXY ***
+
+   ['get', /^\/project\/([^/]+)\/static(\/.*)?$/, function (rq, rs) {
+      var projectName = decodeURIComponent (rq.data.params [0]);
+      var rawPath = rq.data.params [1] || '/';
+
+      if (rq.rawurl) {
+         var rawMatch = rq.rawurl.match (/\/static(\/[^?]*)?(\?.*)?$/);
+         if (rawMatch) rawPath = rawMatch [1] || '/';
+      }
+
+      // Validate project exists
+      var projectDir;
+      try {
+         projectDir = getExistingProjectDir (projectName);
+      }
+      catch (error) {
+         return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
+      }
+
+      var filePath = rawPath || '/';
+      if (filePath [0] !== '/') filePath = '/' + filePath;
+      if (filePath === '/' || filePath [filePath.length - 1] === '/') filePath += 'index.html';
+      filePath = filePath.replace (/^\//, '');
+
+      try {
+         resolveProjectPath (projectDir, filePath);
+      }
+      catch (error) {
+         return reply (rs, 400, {error: error.message});
+      }
+
+      return cicek.file (rq, rs, filePath, [projectDir], {'x-frame-options': 'SAMEORIGIN'});
    }],
 
    // *** EMBED PROXY ***

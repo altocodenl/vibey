@@ -68,12 +68,16 @@ var parseEmbedBlock = function (body) {
       if (idx === -1) return;
       var key = line.slice (0, idx).toLowerCase ();
       var val = line.slice (idx + 1).trim ();
-      if (key === 'port')   result.port = Number (val);
+      if (key === 'port') {
+         if (val.toLowerCase () === 'static') result.port = 'static';
+         else result.port = Number (val);
+      }
       if (key === 'path')   result.path = val;
       if (key === 'height') result.height = Number (val) || 400;
       if (key === 'title')  result.title = val;
    });
-   if (! result.port || result.port < 1 || result.port > 65535) return null;
+   if (result.port === null) result.port = 'static';
+   if (result.port !== 'static' && (! result.port || result.port < 1 || result.port > 65535)) return null;
    return result;
 };
 
@@ -108,11 +112,16 @@ var renderMarkdownWithEmbeds = function (markdown, project) {
          html = html.replace (tag, lith.g (['div', {class: 'embed-error'}, 'Invalid embed block (missing or invalid port)']));
          return;
       }
-      var src = '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embed.path;
+      var embedPath = embed.path || '/';
+      if (embedPath [0] !== '/') embedPath = '/' + embedPath;
+      var src = embed.port === 'static'
+         ? '/project/' + encodeURIComponent (project) + '/static' + embedPath
+         : '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embedPath;
+      var portLabel = embed.port === 'static' ? ('static' + embedPath) : (':' + embed.port + embedPath);
       html = html.replace (tag, lith.g (['div', {class: 'embed-container'}, [
          ['div', {class: 'embed-header'}, [
             ['span', {class: 'embed-title'}, embed.title],
-            ['span', {class: 'embed-port'}, ':' + embed.port + embed.path],
+            ['span', {class: 'embed-port'}, portLabel],
             ['a', {class: 'embed-open', href: src, target: '_blank', title: 'Open in new tab'}, '↗']
          ]],
          ['iframe', {src: src, style: style ({width: '100%', height: embed.height + 'px'}), title: embed.title, sandbox: 'allow-scripts allow-forms allow-same-origin'}]
@@ -405,6 +414,7 @@ B.mrespond ([
       var body = {};
       if (edits.openaiKey !== undefined) body.openaiKey = edits.openaiKey;
       if (edits.claudeKey !== undefined) body.claudeKey = edits.claudeKey;
+      if (edits.yolo !== undefined) body.yolo = edits.yolo === true;
 
       B.call (x, 'set', 'savingAccounts', true);
       B.call (x, 'post', 'accounts', {}, body, function (x, error, rs) {
@@ -470,6 +480,28 @@ B.mrespond ([
          if (error) return B.call (x, 'report', 'error', 'Failed to load files');
          B.call (x, 'set', 'files', rs.body);
          B.call (x, 'apply', 'hashTarget');
+
+         setTimeout (function () {
+            if (B.get ('currentFile')) return;
+            var tab = B.get ('tab');
+            if (tab !== 'docs' && tab !== 'dialogs') return;
+            var hashTarget = B.get ('hashTarget');
+            if (hashTarget && hashTarget.target) return;
+
+            var files = rs.body || [];
+            var next = null;
+            if (tab === 'docs') {
+               next = dale.stopNot (files, undefined, function (name) {
+                  if (! name.startsWith ('dialog-')) return name;
+               });
+            }
+            else {
+               next = dale.stopNot (files, undefined, function (name) {
+                  if (name.startsWith ('dialog-')) return name;
+               });
+            }
+            if (next) B.call (x, 'load', 'file', next);
+         }, 0);
       });
    }],
 
@@ -1853,11 +1885,16 @@ var renderChatContent = function (text, project) {
          inEmbed = false;
          var embed = parseEmbedBlock (embedBody);
          if (embed && project) {
-            var src = '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embed.path;
+            var embedPath = embed.path || '/';
+            if (embedPath [0] !== '/') embedPath = '/' + embedPath;
+            var src = embed.port === 'static'
+               ? '/project/' + encodeURIComponent (project) + '/static' + embedPath
+               : '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embedPath;
+            var portLabel = embed.port === 'static' ? ('static' + embedPath) : (':' + embed.port + embedPath);
             result.push (['div', {class: 'embed-container', opaque: true}, [
                ['div', {class: 'embed-header'}, [
                   ['span', {class: 'embed-title'}, embed.title],
-                  ['span', {class: 'embed-port'}, ':' + embed.port + embed.path],
+                  ['span', {class: 'embed-port'}, portLabel],
                   ['a', {class: 'embed-open', href: src, target: '_blank', title: 'Open in new tab'}, '↗']
                ]],
                ['iframe', {src: src, style: style ({width: '100%', height: embed.height + 'px', border: 'none', display: 'block', 'background-color': 'white'}), title: embed.title, sandbox: 'allow-scripts allow-forms allow-same-origin'}]
@@ -2464,6 +2501,8 @@ views.accounts = function () {
       var claude = accounts.claude || {};
       var openaiOAuth = accounts.openaiOAuth || {};
       var claudeOAuth = accounts.claudeOAuth || {};
+      var settings = accounts.settings || {};
+      var yoloValue = edits.yolo !== undefined ? edits.yolo : !! settings.yolo;
 
       var sectionTitle = function (title) {
          return ['h3', {style: style ({color: '#94b8ff', 'font-size': '14px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '0.75rem', 'margin-top': '1.5rem', 'border-bottom': '1px solid #333', 'padding-bottom': '0.5rem'})}, title];
@@ -2579,7 +2618,7 @@ views.accounts = function () {
          ]];
       };
 
-      var hasEdits = edits.openaiKey !== undefined || edits.claudeKey !== undefined;
+      var hasEdits = edits.openaiKey !== undefined || edits.claudeKey !== undefined || edits.yolo !== undefined;
 
       return ['div', {class: 'editor-empty'}, [
          ['div', {style: style ({width: '100%', 'max-width': '640px', 'overflow-y': 'auto', 'max-height': 'calc(100vh - 120px)'})}, [
@@ -2604,6 +2643,25 @@ views.accounts = function () {
             ]],
             renderApiKeyProvider ('openai', 'OpenAI', openai, 'openaiKey'),
             renderApiKeyProvider ('claude', 'Anthropic (Claude)', claude, 'claudeKey'),
+
+            // *** SAFETY SECTION ***
+            sectionTitle ('Safety'),
+            ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
+               ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center'})}, [
+                  ['div', [
+                     ['div', {style: style ({'font-weight': 'bold', 'font-size': '15px', color: '#94b8ff'})}, 'YOLO mode'],
+                     ['div', {style: style ({color: '#9aa4bf', 'font-size': '12px', 'margin-top': '0.25rem'})}, 'When enabled, all tool calls are auto-approved (no authorization prompts).']
+                  ]],
+                  ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', 'font-size': '12px', color: '#aaa'})}, [
+                     ['input', {
+                        type: 'checkbox',
+                        checked: yoloValue === true,
+                        onchange: B.ev ('set', ['accountEdits', 'yolo'], {raw: 'this.checked'})
+                     }],
+                     yoloValue ? 'On' : 'Off'
+                  ]]
+               ]]
+            ]],
 
             // *** SUBSCRIPTIONS SECTION ***
             sectionTitle ('Subscriptions'),

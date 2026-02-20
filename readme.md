@@ -375,6 +375,135 @@ By default, only 3 context lines around each change are visible. A "Show full di
 
 There is no orchestration loop. To get the system going, the user starts a single dialog. That first agent reads `doc-main.md` and decides what to do - including spawning more agents via the `launch_agent` tool if needed. Each spawned agent is a flat, independent dialog that can itself spawn further agents.
 
+### Server: embed proxy
+
+Apps running inside a project (e.g. a tictactoe game on port 4000) can be embedded in any doc via a reverse proxy through the vibey server.
+
+#### Proxy route
+
+`ALL /project/:project/proxy/:port/*` — reverse-proxies to the target app.
+
+- **Non-docker**: proxies to `http://127.0.0.1:<port>/<path>`.
+- **Docker**: proxies into the project container at `<container-ip>:<port>/<path>`.
+
+The wildcard captures the full URL path and query string. Behavior:
+
+1. Validates `:port` is a number in 1–65535.
+2. Validates `:project` exists.
+3. Forwards method, headers, and body (stripping hop-by-hop headers like `host`, `connection`).
+4. Streams the response back (status, headers, body) — no buffering, so large files and SSE from the embedded app work.
+5. Sets `X-Frame-Options: SAMEORIGIN` so the iframe loads but external sites can't frame it.
+
+No URL rewriting is needed: the iframe's `src` is `/project/<project>/proxy/<port>/`, so relative URLs inside the app (like `app.js`) resolve naturally to `/project/<project>/proxy/<port>/app.js`.
+
+Embedded apps should use relative paths. Apps that use absolute paths (e.g. `/style.css`) would escape the proxy — this can be addressed later with a `<base>` tag injection if it becomes a pain point.
+
+### Server: static proxy
+
+Projects that are just static HTML/JS/CSS can be embedded without running a backend.
+
+#### Static route
+
+`GET /project/:project/static/*` — serves files from `vibey/<project>/`.
+
+Behavior:
+
+1. Validates `:project` exists.
+2. Resolves the requested path inside the project directory (no `..`).
+3. If the path is empty or ends in `/`, serves `index.html`.
+4. Uses `cicek.file` (ETag + gzip) for proper caching.
+5. Sets `X-Frame-Options: SAMEORIGIN`.
+
+#### Embed markdown syntax
+
+Embed blocks use schwa wrappers, consistent with the rest of the dialog/doc conventions. Use the schwa character `ə` (U+0259) — avoid look‑alikes like Arabic `ە` (U+06D5).
+
+```md
+əəəembed
+port 4000
+height 500
+title Tictactoe
+əəə
+```
+
+Static embed (no backend):
+
+```md
+əəəembed
+port static
+path /
+height 500
+title Static app
+əəə
+```
+
+Fields:
+
+| Field    | Default  | Meaning                                                              |
+|----------|----------|----------------------------------------------------------------------|
+| `port`   | `static` | Port number **or** the string `static` for the static proxy          |
+| `path`   | `/`      | Initial path to load (used for both proxy and static)                |
+| `height` | `400`    | Iframe height in px                                                  |
+| `title`  | `App`    | Shown in a small header bar above the embed                          |
+
+One embed = one port + path. Multiple embeds are multiple blocks.
+
+Parsing rules: same style as `control/v1` — ignore blank lines, ignore lines starting with `#`, each line is `key value`.
+
+Example inside a doc:
+
+```md
+# Tictactoe Project
+
+Here's the running game:
+
+əəəembed
+port 4000
+title Tictactoe
+height 500
+əəə
+
+Here's a static app:
+
+əəəembed
+port static
+path /
+title Static app
+height 500
+əəə
+
+## Architecture
+...
+```
+
+### Client: embed rendering
+
+When rendering markdown (doc preview or dialog view), the client detects `əəəembed ... əəə` blocks and replaces them with an iframe:
+
+```html
+<!-- port number -->
+<iframe src="/project/{project}/proxy/{port}/{path}"
+        style="width:100%; height:{height}px; border:1px solid #333; border-radius:8px;"
+        title="{title}"
+        sandbox="allow-scripts allow-forms allow-same-origin">
+</iframe>
+
+<!-- port static -->
+<iframe src="/project/{project}/static/{path}"
+        style="width:100%; height:{height}px; border:1px solid #333; border-radius:8px;"
+        title="{title}"
+        sandbox="allow-scripts allow-forms allow-same-origin">
+</iframe>
+```
+
+`sandbox` keeps the embedded app from navigating the top frame; `allow-same-origin` lets it talk to the proxy (same origin as vibey).
+
+#### Not in scope (yet)
+
+- **WebSocket proxying**: can add `Upgrade` handling later.
+- **Hot reload**: iframe is static; user refreshes or a reload button is added to the embed chrome.
+- **Absolute path rewriting**: deferred; agents can be told to use relative paths.
+
 ## Dockerization
 
 - For local vibey (all we have now), all dockers run on the host. Each with its own data volume.

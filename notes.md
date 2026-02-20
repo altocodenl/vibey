@@ -1,5 +1,77 @@
 ## Vibey development notes
 
+### 2026-02-20
+
+flexible and unreliable -> reliable while still flexible (software in the past; LLMs now)
+what's the vibe? what am I doing with vibey?
+
+
+Dialogs as documents that are append-only.
+
+Deeds as things that are not docs. perhaps these are blobs. some of them executable. But they're not all blobs, many are also text, though not a document.
+
+Architecture: I can have a single vibey server dockerized per server. what should I call it instead of server? Perhaps machine? Gear? Or engine? "Engine" sounds good. It brings the vibe of those who worked on cars before. It feels like "gear", while server is much drier and scarier. "Now that's a big engine".
+
+- Add embeddings. Embed a view of an app in a document.
+- Add audio. Be able to talk to an agent, and listen it back.
+
+Demos: make me something interactive to learn chess.
+
+
+
+
+
+Prompts:
+Main: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
+- Can you invert test flows 3 and 4? Both in the server test and the client test.
+---
+- Now I want to tackle a core feature: embeddings. I want to be able to embed a local app fro athat project into the doc of the project. This requires a proxy through the vibey server, plus showing things like an iframe. Let's please design the server part first, including how this would look in the markdown.
+- This is just gorgeous. Please add the docs about this to the relevant section of readme.md, probably above the TODO. Ignore vibey cloud for now, just focus on local. BTW, I think it's crazy reasonable to have one port & path per embed.
+- Brilliant. Please implement the server part.
+- You got it. Go for the client.
+- Rather than HTML strings, can you use lith?
+- Amazing. I think you need to wrap the iframe into an opaque pseudo-tag so that gotob doesn't use its elements to redraw things.
+- If I ask the agent to embed the game in main.md, will it know how to do that?
+- Brilliant. Add it to prompt.md.
+----
+- I'm working on embeddings. It all seems quite ready, except that I see in the client something like this:
+```
+əəəembed
+port 4000
+title Tic Tac Toe
+height 520
+əəə
+```
+  Do we have already code to actually show the embedding properly? Would this be outside of the textarea of the doc? How would this "split" the textarea in t he middle?
+- My bad. I don't want it on editing mode. I switched and it now looks like this:
+Do NOT skip the launch_agent call. Do NOT call launch_agent more than once for the same slug. Create each file with a separate write_file call.
+Authorized: run_command Authorized: write_file Authorized: edit_file Authorized: launch_agent
+- Holy Moly, it works! Can you fix the "Preview" button and logic so that when we are editing, the button says "View", and when you're in View mode, the button says "Edit"?
+- Can you kill what's on port 4000 now and take the latest tictactoe project completed and start that one?
+- No worries about that, just kill port 4000. Then make View mode the default, with Edit requiring a click. Thanks!
+- Amazing. Add me a yolo setting, turned off by default, that if turned on, no authorizations are required.
+- Amazing. Now, when going to a docs or dialogs tabs, can you autoselect the first one if there's nothing selected?
+- I am thinking we need vibey to be able to serve things from projects that just have static HTML with JS, I find myself adding these backends that just serve static files. Could we have some sort of static proxy? Let's design.
+- Brilliant idea. If no port is sent, then it's static. Or even better, we just say "port: static". For cache, can we leverage whatever is already provided by cicek? We have etags. No need for busting, it works out of the box. Please document first, then server, then client, let me know when to restart the server.
+- Please do. Also update the prompt.md to teach how to do static embeddings.
+
+
+- How could we change the interface so we can talk (instead of typing) on a dialog?
+- So, we do speech recognition in the browser? How's the quality? The language support?
+- Whisper is not under a normal openai sub, it's API driven, right?
+- Let's go with speech recognition on the browser. client.js is yours.
+- Amazing! Now, how can we make it voice directed so we can tell it when to stop recording and send? Maybe something like "send now"?
+- Great ideas. Let's do "say now" plus 1.5 second of silence. Anything said before that interval makes the "send now" be part of a normal stream.
+- It works! How can we make it so it keeps recording? Even better if we have a phrase to start recording, but am not at all sure if that's possible.
+- Good points. Let's do it like this: if you're in the dialogs tab, and you don't select the textarea, hitting spacebar starts recording. Only if you're not recording already.
+- This. Just. Works! Amazing. Please change "send now" to "send".
+- Alright! Can you change flow 4 of the client tests to NOT delete the project at the end? Also, please change it on both client and server tests to add an embedding to main.md once the tictactoe is done (read it up on vibey.md, this was just done by another client) so we can play the game from the document. Just touch the tests, not the client or server.
+- Changed my mind. Also remove the deletion at the end of flow 4. Also add a message at the end, when the AI is done, to embed the game in main.md. prompt.md has just been updated so the agent should know how to do this. Also, after swapping F3 and F4 a few labels were not updated, please take care of that.
+- Can you change flow 4 on both client & server tests to not use a backend, and just create a static HTML+JS game?
+- I forgot to say: there will be a static proxy, it's like what we have, except with "port: static". Another agent is implementing this now.
+
+
+
 ### 2026-02-19
 
 The feeling of computing is a way to express yourself. Sometimes, it can also be useful; tool building can also be expressive. Using JIRA is not conducent to being expressive.
