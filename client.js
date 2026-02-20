@@ -124,6 +124,8 @@ B.mrespond ([
       B.call (x, 'set', 'chatModel', 'gpt-5');
       B.call (x, 'set', 'chatInput', '');
       B.call (x, 'set', 'chatAutoStick', true);
+      B.call (x, 'set', 'voiceActive', false);
+      B.call (x, 'set', 'voiceSupported', !! (window.SpeechRecognition || window.webkitSpeechRecognition));
       B.call (x, 'load', 'projects');
       B.call (x, 'read', 'hash');
    }],
@@ -849,6 +851,128 @@ B.mrespond ([
          ev.preventDefault ();
          B.call (x, 'send', 'message');
       }
+   }],
+
+   ['toggle', 'voice', function (x) {
+      var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (! SpeechRecognition) return B.call (x, 'report', 'error', 'Speech recognition is not supported in this browser');
+
+      if (B.get ('voiceActive')) {
+         var rec = B.get ('voiceRecognition');
+         if (rec) {
+            rec.vibeyIntentionalStop = true;
+            rec.stop ();
+         }
+         B.call (x, 'set', 'voiceActive', false);
+         B.call (x, 'set', 'voiceRecognition', null);
+         return;
+      }
+
+      var recognition = new SpeechRecognition ();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      recognition.vibeyIntentionalStop = false;
+
+      var finalTranscript = '';
+      var baseInput = B.get ('chatInput') || '';
+      var commandTimer = null;
+      var pendingCommand = null; // 'send' or 'stop'
+
+      var VOICE_COMMANDS = [
+         {re: /\bsend$/i, action: 'send'},
+         {re: /\bstop recording$/i, action: 'stop'}
+      ];
+
+      var buildChatInput = function (final, interim) {
+         var text = final + interim;
+         var separator = baseInput && text ? ' ' : '';
+         return baseInput + separator + text;
+      };
+
+      var stripCommand = function (text, re) {
+         return text.replace (re, '').replace (/\s+$/, '');
+      };
+
+      var cancelCommand = function () {
+         if (commandTimer) clearTimeout (commandTimer);
+         commandTimer = null;
+         pendingCommand = null;
+      };
+
+      var executeCommand = function (action) {
+         cancelCommand ();
+         recognition.vibeyIntentionalStop = true;
+         // Strip the command phrase from final transcript
+         dale.go (VOICE_COMMANDS, function (cmd) {
+            if (cmd.action === action) finalTranscript = stripCommand (finalTranscript, cmd.re);
+         });
+         B.call ('set', 'chatInput', buildChatInput (finalTranscript, ''));
+         recognition.stop ();
+         if (action === 'send') {
+            setTimeout (function () {
+               B.call ('send', 'message');
+            }, 50);
+         }
+      };
+
+      recognition.onresult = function (event) {
+         var interim = '';
+         for (var i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results [i].isFinal) finalTranscript += event.results [i] [0].transcript;
+            else                           interim += event.results [i] [0].transcript;
+         }
+
+         // If we had a pending command but new speech arrived, cancel it — the phrase was part of normal speech
+         if (pendingCommand) {
+            cancelCommand ();
+            B.call ('set', 'chatInput', buildChatInput (finalTranscript, interim));
+            return;
+         }
+
+         // Check if final transcript ends with a voice command
+         var matched = dale.stopNot (VOICE_COMMANDS, undefined, function (cmd) {
+            if (cmd.re.test (finalTranscript)) return cmd.action;
+         });
+
+         if (matched) {
+            pendingCommand = matched;
+            commandTimer = setTimeout (function () {
+               executeCommand (matched);
+            }, 1500);
+         }
+
+         B.call ('set', 'chatInput', buildChatInput (finalTranscript, interim));
+      };
+
+      recognition.onend = function () {
+         // If a command was pending when recognition ended (e.g. silence triggered onend), execute it
+         if (pendingCommand) {
+            executeCommand (pendingCommand);
+            return;
+         }
+         // Auto-restart if not intentionally stopped (browser kills recognition on silence)
+         if (! recognition.vibeyIntentionalStop) {
+            try {
+               recognition.start ();
+               return;
+            }
+            catch (e) {}
+         }
+         B.call ('set', 'voiceActive', false);
+         B.call ('set', 'voiceRecognition', null);
+      };
+
+      recognition.onerror = function (event) {
+         cancelCommand ();
+         if (event.error !== 'aborted' && event.error !== 'no-speech') B.call ('report', 'error', 'Voice error: ' + event.error);
+         B.call ('set', 'voiceActive', false);
+         B.call ('set', 'voiceRecognition', null);
+      };
+
+      recognition.start ();
+      B.call (x, 'set', 'voiceRecognition', recognition);
+      B.call (x, 'set', 'voiceActive', true);
    }],
 
    ['run', 'tests', function (x) {
@@ -1915,7 +2039,7 @@ views.toolRequests = function (pendingToolCalls, applyingToolDecisions) {
 };
 
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['pendingToolCalls'], ['optimisticUserMessage'], ['applyingToolDecisions'], ['toolMessageExpanded']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, pendingToolCalls, optimisticUserMessage, applyingToolDecisions, toolMessageExpanded) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['pendingToolCalls'], ['optimisticUserMessage'], ['applyingToolDecisions'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, pendingToolCalls, optimisticUserMessage, applyingToolDecisions, toolMessageExpanded, voiceActive, voiceSupported) {
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (f.startsWith ('dialog-')) return f;
@@ -2019,6 +2143,19 @@ views.dialogs = function () {
                   onkeydown: B.ev ('keydown', 'chatInput', {raw: 'event'}),
                   disabled: streaming || hasPendingTools
                }],
+               voiceSupported ? ['button', {
+                  class: 'btn-small',
+                  style: style ({
+                     'background-color': voiceActive ? '#e74c3c' : '#3a3a5f',
+                     color: 'white',
+                     'font-size': '18px',
+                     padding: '0.5rem 0.65rem',
+                     'border-radius': '8px',
+                     transition: 'background-color 0.2s'
+                  }),
+                  onclick: B.ev ('toggle', 'voice'),
+                  disabled: streaming || hasPendingTools
+               }, voiceActive ? '⏹' : '🎤'] : '',
                ['button', {
                   class: 'primary',
                   onclick: B.ev ('send', 'message'),
@@ -2267,6 +2404,20 @@ views.main = function () {
 
 window.addEventListener ('hashchange', function () {
    B.call ('read', 'hash');
+});
+
+window.addEventListener ('keydown', function (ev) {
+   if (ev.key !== ' ') return;
+   if (B.get ('tab') !== 'dialogs') return;
+   if (B.get ('voiceActive')) return;
+   if (! B.get ('voiceSupported')) return;
+   if (B.get ('streaming')) return;
+
+   var tag = (document.activeElement || {}).tagName || '';
+   if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT') return;
+
+   ev.preventDefault ();
+   B.call ('toggle', 'voice');
 });
 
 B.call ('initialize', []);
