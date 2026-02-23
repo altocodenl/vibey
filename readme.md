@@ -512,9 +512,11 @@ Flow #4:
 Prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
 
+- Fix viewing of docs when you just land.
+- Fix tests so that they just reference ustack.md and embedded tictactoe runs.
 - Make flows 3 & 4 work on the client.
+- Add a flow 5 that requires a backend in another container.
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
-- Test it all again dockerized.
 
 ### TODO vi mode
 

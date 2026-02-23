@@ -304,6 +304,7 @@ B.mrespond ([
 
    ['change', 'currentFile', {match: B.changeResponder}, function (x) {
       B.call (x, 'maybe', 'autoscrollChat');
+      if (B.get ('editorPreview')) B.call (x, 'update', 'previewContent');
    }],
 
 

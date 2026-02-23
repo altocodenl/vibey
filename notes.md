@@ -20,6 +20,8 @@ Prompt:
 - This is great! Now, can you make the agents reference https://github.com/fpereiro/ustack/blob/master/llms.md in test flow 4 for server and client?
 - Is that a good link to retrieve? can you try to curl it yourself?
 
+- Could you fix something in the client? When I see a doc, in view mode, I see nothing. When I go to edit, I do see it, and when I go back to view, it works.
+
 
 ### 2026-02-20
 
