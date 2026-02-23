@@ -1,31 +1,32 @@
 # Vibey (codename)
 
-## Usage (Docker)
-
-1. Start Vibey:
-   ```bash
-   docker compose up --build
-   ```
-2. Open Vibey at:
-   - http://localhost:5353
-
-### Stop Vibey
-
-```bash
-docker compose down
-```
-
-### Reset all project data (optional)
-
-```bash
-docker compose down -v
-```
-
 An agentic interface for those who love text.
 
 Use text to coordinate agents. From your browser. Surrounded by a container.
 
 I'm currently recording myself while building vibey. You can check out [the Youtube channel here](https://www.youtube.com/channel/UCEcfQSep8KzW7H2S0HBNj8g). The channel is from [cell](https://github.com/altocodenl/cell) but Vibey hijacked the channel starting on season 5.
+
+## Usage
+
+1. To start Vibey:
+
+```bash
+docker compose up --build
+```
+
+You can now open Vibey at http://localhost:5353
+
+2. To stop vibey:
+
+```bash
+docker compose down
+```
+
+3. To reset all vibey data
+
+```bash
+docker compose down -v
+```
 
 ## Vibey in a nutshell
 

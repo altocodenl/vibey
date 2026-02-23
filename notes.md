@@ -16,7 +16,9 @@ Prompt:
 - To replace schwas, first add instead a SCHWA-SCHWA-SCHWA placeholder in your write function, then do a little grep to fix it as a second step.
 - You didn't get me at all. Wherever you want to add three schwas, just add a silly placeholder. Finishing editing the file, then grep with replacement to fix the placeholders.
 - Brilliant. There are still mentions of YOLO in server, client and tests. Except for the docs, there should be no mention of this. Can you clean it up please? I don't mean the oauth or api keys, just the authorization of tool uses.
-
+- Fantastic. Can you change the tests (server & client) to use the new docs at docs/ustack.md?
+- This is great! Now, can you make the agents reference https://github.com/fpereiro/ustack/blob/master/llms.md in test flow 4 for server and client?
+- Is that a good link to retrieve? can you try to curl it yourself?
 
 
 ### 2026-02-20
