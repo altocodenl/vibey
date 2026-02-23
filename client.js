@@ -306,9 +306,6 @@ B.mrespond ([
       B.call (x, 'maybe', 'autoscrollChat');
    }],
 
-   ['change', 'pendingToolCalls', {match: B.changeResponder}, function (x) {
-      B.call (x, 'maybe', 'autoscrollChat');
-   }],
 
    ['change', 'optimisticUserMessage', {match: B.changeResponder}, function (x) {
       B.call (x, 'maybe', 'autoscrollChat');
@@ -377,9 +374,7 @@ B.mrespond ([
             B.call (x, 'set', 'currentProject', null);
             B.call (x, 'set', 'files', []);
             B.call (x, 'set', 'currentFile', null);
-            B.call (x, 'set', 'pendingToolCalls', null);
             B.call (x, 'set', 'streaming', false);
-            B.call (x, 'set', 'applyingToolDecisions', false);
             B.call (x, 'set', 'streamingContent', '');
             B.call (x, 'set', 'optimisticUserMessage', null);
             B.call (x, 'reset', 'chatInput');
@@ -414,7 +409,6 @@ B.mrespond ([
       var body = {};
       if (edits.openaiKey !== undefined) body.openaiKey = edits.openaiKey;
       if (edits.claudeKey !== undefined) body.claudeKey = edits.claudeKey;
-      if (edits.yolo !== undefined) body.yolo = edits.yolo === true;
 
       B.call (x, 'set', 'savingAccounts', true);
       B.call (x, 'post', 'accounts', {}, body, function (x, error, rs) {
@@ -654,9 +648,7 @@ B.mrespond ([
       }, function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to create dialog');
 
-         B.call (x, 'set', 'pendingToolCalls', null);
          B.call (x, 'set', 'streaming', false);
-         B.call (x, 'set', 'applyingToolDecisions', false);
          B.call (x, 'set', 'streamingContent', '');
          B.call (x, 'set', 'optimisticUserMessage', null);
          B.call (x, 'set', 'chatInput', '');
@@ -687,9 +679,7 @@ B.mrespond ([
       var originalInput = input.trim ();
 
       B.call (x, 'set', 'streaming', true);
-      B.call (x, 'set', 'applyingToolDecisions', false);
       B.call (x, 'set', 'streamingContent', '');
-      B.call (x, 'set', 'pendingToolCalls', null);
       B.call (x, 'set', 'optimisticUserMessage', originalInput);
       B.call (x, 'set', 'chatInput', '');
       var inputNode = document.querySelector ('.chat-input');
@@ -719,7 +709,6 @@ B.mrespond ([
       }).catch (function (err) {
          B.call (x, 'report', 'error', 'Failed to send: ' + err.message);
          B.call (x, 'set', 'streaming', false);
-         B.call (x, 'set', 'applyingToolDecisions', false);
          B.call (x, 'set', 'optimisticUserMessage', null);
          B.call (x, 'set', 'chatInput', originalInput);
       });
@@ -731,20 +720,16 @@ B.mrespond ([
       var contentType = (response.headers && response.headers.get ('content-type')) || '';
 
       var finalize = function () {
-         var pendingCalls = B.get ('pendingToolCalls');
          B.call (x, 'set', 'streaming', false);
-         B.call (x, 'set', 'applyingToolDecisions', false);
          B.call (x, 'set', 'optimisticUserMessage', null);
          if (targetFilename) B.call (x, 'load', 'file', targetFilename);
          B.call (x, 'load', 'files');
-         if (! pendingCalls || pendingCalls.length === 0) B.call (x, 'set', 'pendingToolCalls', null);
       };
 
       if (! response.ok) {
          return response.text ().then (function (text) {
             B.call (x, 'report', 'error', 'Request failed: ' + response.status + ' ' + text);
             B.call (x, 'set', 'streaming', false);
-            B.call (x, 'set', 'applyingToolDecisions', false);
             B.call (x, 'set', 'optimisticUserMessage', null);
             if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
          });
@@ -780,31 +765,12 @@ B.mrespond ([
                      var current = B.get ('streamingContent') || '';
                      B.call (x, 'set', 'streamingContent', current + data.content);
                   }
-                  else if (data.type === 'tool_request') {
-                     if (data.filename) targetFilename = data.filename;
-                     var pendingTools = dale.go (data.toolCalls || [], function (tool) {
-                        return {
-                           id: tool.id,
-                           name: tool.name,
-                           input: tool.input,
-                           approved: null,
-                           alwaysAllow: false,
-                           expanded: false,
-                           diffExpanded: false
-                        };
-                     });
-                     B.call (x, 'set', 'pendingToolCalls', pendingTools);
-                     B.call (x, 'set', 'streaming', false);
-                     B.call (x, 'set', 'applyingToolDecisions', false);
-                     if (targetFilename) B.call (x, 'load', 'file', targetFilename);
-                  }
                   else if (data.type === 'done') {
                      if (data.result && data.result.filename) targetFilename = data.result.filename;
                   }
                   else if (data.type === 'error') {
                      B.call (x, 'report', 'error', data.error);
                      B.call (x, 'set', 'streaming', false);
-                     B.call (x, 'set', 'applyingToolDecisions', false);
                      B.call (x, 'set', 'optimisticUserMessage', null);
                      if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
                   }
@@ -816,7 +782,6 @@ B.mrespond ([
          }).catch (function (error) {
             B.call (x, 'report', 'error', 'Stream error: ' + error.message);
             B.call (x, 'set', 'streaming', false);
-            B.call (x, 'set', 'applyingToolDecisions', false);
             B.call (x, 'set', 'optimisticUserMessage', null);
             if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
          });
@@ -825,57 +790,6 @@ B.mrespond ([
       read ();
    }],
 
-   ['maybe', 'submitToolDecisions', function (x) {
-      if (B.get ('applyingToolDecisions')) return;
-      var pendingToolCalls = B.get ('pendingToolCalls');
-      if (! pendingToolCalls || ! pendingToolCalls.length) return;
-
-      var allChosen = dale.stop (pendingToolCalls, false, function (tool) {
-         return tool.approved === true || tool.approved === false;
-      });
-      if (allChosen !== false) B.call (x, 'submit', 'toolDecisions');
-   }],
-
-   // Approve a pending tool request
-   ['approve', 'tool', function (x, toolIndex) {
-      var pendingToolCalls = B.get ('pendingToolCalls');
-      if (! pendingToolCalls) return;
-      B.call (x, 'set', ['pendingToolCalls', toolIndex, 'approved'], true);
-      B.call (x, 'maybe', 'submitToolDecisions');
-   }],
-
-   // Deny a tool call
-   ['deny', 'tool', function (x, toolIndex) {
-      var pendingToolCalls = B.get ('pendingToolCalls');
-      if (! pendingToolCalls) return;
-      B.call (x, 'set', ['pendingToolCalls', toolIndex, 'approved'], false);
-      B.call (x, 'maybe', 'submitToolDecisions');
-   }],
-
-   // Approve all pending tools at once
-   ['approve', 'allTools', function (x) {
-      var pendingToolCalls = B.get ('pendingToolCalls');
-      if (! pendingToolCalls) return;
-      dale.go (pendingToolCalls, function (tool, index) {
-         B.call (x, 'set', ['pendingToolCalls', index, 'approved'], true);
-      });
-      B.call (x, 'maybe', 'submitToolDecisions');
-   }],
-
-   ['toggle', 'alwaysAllowTool', function (x, toolIndex) {
-      var current = B.get (['pendingToolCalls', toolIndex, 'alwaysAllow']);
-      B.call (x, 'set', ['pendingToolCalls', toolIndex, 'alwaysAllow'], ! current);
-   }],
-
-   ['toggle', 'toolInputExpanded', function (x, toolIndex) {
-      var current = B.get (['pendingToolCalls', toolIndex, 'expanded']);
-      B.call (x, 'set', ['pendingToolCalls', toolIndex, 'expanded'], ! current);
-   }],
-
-   ['toggle', 'toolDiffExpanded', function (x, toolIndex) {
-      var current = B.get (['pendingToolCalls', toolIndex, 'diffExpanded']);
-      B.call (x, 'set', ['pendingToolCalls', toolIndex, 'diffExpanded'], ! current);
-   }],
 
    ['toggle', 'messageToolContent', function (x, key) {
       var current = B.get (['toolMessageExpanded', key]);
@@ -883,53 +797,6 @@ B.mrespond ([
    }],
 
    // Submit tool decisions to PUT /dialog
-   ['submit', 'toolDecisions', function (x) {
-      var pendingToolCalls = B.get ('pendingToolCalls');
-      var file = B.get ('currentFile');
-      if (! pendingToolCalls || ! file) return;
-
-      var parsed = parseDialogFilename (file.name);
-      if (! parsed) return B.call (x, 'report', 'error', 'Current file is not a statused dialog');
-
-      var allChosen = dale.stop (pendingToolCalls, false, function (tool) {
-         return tool.approved === true || tool.approved === false;
-      });
-      if (allChosen === false) return B.call (x, 'report', 'error', 'Approve or deny each tool request first');
-
-      var decisionsLines = dale.go (pendingToolCalls, function (tool) {
-         return tool.id + ': ' + (tool.approved === true ? 'approve' : 'deny');
-      });
-      var decisions = 'əəə\n' + decisionsLines.join ('\n') + '\nəəə';
-
-      var authorizationsMap = {};
-      dale.go (pendingToolCalls, function (tool) {
-         if (tool.approved === true && tool.alwaysAllow) authorizationsMap [tool.name] = true;
-      });
-      var authLines = dale.go (Object.keys (authorizationsMap), function (name) {return 'allow ' + name;});
-      var authorizations = authLines.length ? ('əəə\n' + authLines.join ('\n') + '\nəəə') : undefined;
-
-      B.call (x, 'set', 'streaming', true);
-      B.call (x, 'set', 'applyingToolDecisions', true);
-      B.call (x, 'set', 'streamingContent', '');
-      B.call (x, 'set', 'pendingToolCalls', null);
-
-      fetch (projectPath (B.get ('currentProject'), 'dialog'), {
-         method: 'PUT',
-         headers: {'Content-Type': 'application/json'},
-         body: JSON.stringify ({
-            dialogId: parsed.dialogId,
-            decisions: decisions,
-            authorizations: authorizations
-         })
-      }).then (function (response) {
-         B.call (x, 'process', 'stream', response, file.name, null);
-      }).catch (function (err) {
-         B.call (x, 'report', 'error', 'Failed to submit tool results: ' + err.message);
-         B.call (x, 'set', 'streaming', false);
-         B.call (x, 'set', 'applyingToolDecisions', false);
-      });
-   }],
-
    ['stop', 'dialog', function (x) {
       var file = B.get ('currentFile');
       var parsed = file && parseDialogFilename (file.name);
@@ -946,7 +813,6 @@ B.mrespond ([
          if (! response.ok) return response.text ().then (function (text) {throw new Error (text || ('HTTP ' + response.status));});
          return response.json ().then (function () {
             B.call (x, 'set', 'streaming', false);
-            B.call (x, 'set', 'applyingToolDecisions', false);
             B.call (x, 'set', 'streamingContent', '');
             B.call (x, 'set', 'optimisticUserMessage', null);
 
@@ -1397,37 +1263,7 @@ views.css = [
       color: '#eee',
    }],
    // Tool calls
-   ['.tool-requests', {
-      'background-color': '#2a2a4e',
-      'border-radius': '8px',
-      padding: '1rem',
-      'margin-bottom': '0.5rem',
-      border: '2px solid #f0ad4e',
-   }],
-   ['.tool-requests-header', {
-      display: 'flex',
-      'justify-content': 'space-between',
-      'align-items': 'center',
-      'margin-bottom': '0.75rem',
-      'padding-bottom': '0.5rem',
-      'border-bottom': '1px solid #444',
-   }],
-   ['.tool-requests-title', {
-      'font-weight': 'bold',
-      color: '#f0ad4e',
-   }],
-   ['.tool-request', {
-      'background-color': '#1a1a2e',
-      'border-radius': '6px',
-      padding: '0.75rem',
-      'margin-bottom': '0.5rem',
-   }],
-   ['.tool-request-header', {
-      display: 'flex',
-      'justify-content': 'space-between',
-      'align-items': 'center',
-      'margin-bottom': '0.5rem',
-   }],
+
    ['.tool-name', {
       'font-weight': 'bold',
       color: '#94b8ff',
@@ -1475,20 +1311,7 @@ views.css = [
       display: 'flex',
       gap: '0.5rem',
    }],
-   ['.tool-btn-approve', {
-      'background-color': '#27ae60',
-      color: 'white',
-   }],
-   ['.tool-btn-approve:hover', {
-      'background-color': '#219a52',
-   }],
-   ['.tool-btn-deny', {
-      'background-color': '#e74c3c',
-      color: 'white',
-   }],
-   ['.tool-btn-deny:hover', {
-      'background-color': '#c0392b',
-   }],
+
    ['.tool-status', {
       'font-size': '12px',
       color: '#888',
@@ -2233,7 +2056,7 @@ var compactDiffLines = function (lines, full, contextLines) {
    return {lines: out, compacted: compacted};
 };
 
-var renderEditDiff = function (tool, index, applyingToolDecisions) {
+var renderEditDiff = function (tool, index) {
    var input = tool.input || {};
    var oldText = type (input.old_string) === 'string' ? input.old_string : '';
    var newText = type (input.new_string) === 'string' ? input.new_string : '';
@@ -2256,85 +2079,15 @@ var renderEditDiff = function (tool, index, applyingToolDecisions) {
             class: 'btn-small',
             style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
             onclick: B.ev ('toggle', 'toolDiffExpanded', index),
-            disabled: applyingToolDecisions
+            disabled: false
          }, tool.diffExpanded === true ? 'Show compact diff' : 'Show full diff']
       ]] : ''
    ]];
 };
 
-// Render tool request UI
-views.toolRequests = function (pendingToolCalls, applyingToolDecisions) {
-   if (! pendingToolCalls || pendingToolCalls.length === 0) return '';
-
-   var allChosen = dale.stop (pendingToolCalls, false, function (tool) {
-      return tool.approved === true || tool.approved === false;
-   }) !== false;
-
-   return ['div', {class: 'tool-requests'}, [
-      ['div', {class: 'tool-requests-header'}, [
-         ['span', {class: 'tool-requests-title'}, 'Tool Requests (' + pendingToolCalls.length + ')'],
-         ['div', {style: style ({display: 'flex', gap: '0.5rem'})}, [
-            ['button', {
-               class: 'btn-small tool-btn-approve',
-               onclick: B.ev ('approve', 'allTools'),
-               disabled: applyingToolDecisions
-            }, 'Approve All']
-         ]]
-      ]],
-      dale.go (pendingToolCalls, function (tool, index) {
-         var inputSummary = summarizeToolInput (tool, tool.expanded === true);
-         var inputUI = tool.name === 'edit_file'
-            ? renderEditDiff (tool, index, applyingToolDecisions)
-            : ['div', [
-               ['div', {class: 'tool-input' + (tool.expanded === true ? ' tool-input-expanded' : '')}, inputSummary.text],
-               inputSummary.isLong ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '0.4rem'})}, [
-                  ['button', {
-                     class: 'btn-small',
-                     style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
-                     onclick: B.ev ('toggle', 'toolInputExpanded', index),
-                     disabled: applyingToolDecisions
-                  }, tool.expanded === true ? 'Collapse' : 'Expand']
-               ]] : ''
-            ]];
-
-         return ['div', {class: 'tool-request'}, [
-            ['div', {class: 'tool-request-header'}, [
-               ['span', {class: 'tool-name'}, tool.name],
-               tool.approved === true ? ['span', {class: 'tool-status'}, 'Approved'] :
-               tool.approved === false ? ['span', {class: 'tool-status'}, 'Denied'] :
-               ['div', {class: 'tool-actions'}, [
-                  ['button', {
-                     class: 'btn-small tool-btn-approve',
-                     onclick: B.ev ('approve', 'tool', index),
-                     disabled: applyingToolDecisions
-                  }, 'Approve'],
-                  ['button', {
-                     class: 'btn-small tool-btn-deny',
-                     onclick: B.ev ('deny', 'tool', index),
-                     disabled: applyingToolDecisions
-                  }, 'Deny']
-               ]]
-            ]],
-            inputUI,
-            ['label', {style: style ({display: 'flex', gap: '0.4rem', 'align-items': 'center', 'font-size': '12px', color: '#aaa'})}, [
-               ['input', {
-                  type: 'checkbox',
-                  checked: tool.alwaysAllow === true,
-                  onchange: B.ev ('toggle', 'alwaysAllowTool', index),
-                  disabled: applyingToolDecisions
-               }],
-               'Always allow ' + tool.name + ' in this dialog'
-            ]]
-         ]];
-      }),
-      ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.75rem', color: '#9aa4bf', 'font-size': '12px'})},
-         applyingToolDecisions ? 'Applying decisions…' : (allChosen ? 'Decisions selected. Sending…' : 'Approve or deny each tool request')
-      ]
-   ]];
-};
-
+// Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['pendingToolCalls'], ['optimisticUserMessage'], ['applyingToolDecisions'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, pendingToolCalls, optimisticUserMessage, applyingToolDecisions, toolMessageExpanded, voiceActive, voiceSupported, currentProject) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject) {
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (f.startsWith ('dialog-')) return f;
@@ -2343,7 +2096,7 @@ views.dialogs = function () {
       var isDialog = currentFile && currentFile.name.startsWith ('dialog-');
       var messages = isDialog ? parseDialogContent (currentFile.content) : [];
 
-      var hasPendingTools = pendingToolCalls && pendingToolCalls.length > 0;
+
 
       return ['div', {class: 'files-container'}, [
          // Dialog list sidebar
@@ -2410,14 +2163,12 @@ views.dialogs = function () {
                   ['div', {class: 'chat-content'}, streamingContent + '▊']
                ]] : ''
             ]],
-            // Tool requests panel
-            views.toolRequests (pendingToolCalls, applyingToolDecisions),
             // Input area
             ['div', {class: 'chat-input-area'}, [
                ['select', {
                   class: 'provider-select',
                   onchange: B.ev ('change', 'chatProvider'),
-                  disabled: streaming || hasPendingTools
+                  disabled: streaming
                }, [
                   ['option', {value: 'openai', selected: (chatProvider || 'openai') === 'openai'}, 'OpenAI'],
                   ['option', {value: 'claude', selected: chatProvider === 'claude'}, 'Claude']
@@ -2425,7 +2176,7 @@ views.dialogs = function () {
                ['select', {
                   class: 'provider-select',
                   onchange: B.ev ('set', 'chatModel'),
-                  disabled: streaming || hasPendingTools
+                  disabled: streaming
                }, dale.go (MODEL_OPTIONS [chatProvider || 'openai'] || [], function (option) {
                   return ['option', {value: option.value, selected: (chatModel || defaultModelForProvider (chatProvider || 'openai')) === option.value}, option.label];
                })],
@@ -2436,7 +2187,7 @@ views.dialogs = function () {
                   placeholder: 'Type a message... (Cmd+Enter to send)',
                   oninput: B.ev ('set', 'chatInput'),
                   onkeydown: B.ev ('keydown', 'chatInput', {raw: 'event'}),
-                  disabled: streaming || hasPendingTools
+                  disabled: streaming
                }],
                voiceSupported ? ['button', {
                   class: 'btn-small',
@@ -2449,12 +2200,12 @@ views.dialogs = function () {
                      transition: 'background-color 0.2s'
                   }),
                   onclick: B.ev ('toggle', 'voice'),
-                  disabled: streaming || hasPendingTools
+                  disabled: streaming
                }, voiceActive ? '⏹' : '🎤'] : '',
                ['button', {
                   class: 'primary',
                   onclick: B.ev ('send', 'message'),
-                  disabled: streaming || hasPendingTools || ! (chatInput && chatInput.trim ())
+                  disabled: streaming || ! (chatInput && chatInput.trim ())
                }, streaming ? 'Sending...' : 'Send'],
                (streaming && isDialog) ? ['button', {
                   style: style ({'background-color': '#e67e22', color: 'white'}),
@@ -2502,7 +2253,6 @@ views.accounts = function () {
       var openaiOAuth = accounts.openaiOAuth || {};
       var claudeOAuth = accounts.claudeOAuth || {};
       var settings = accounts.settings || {};
-      var yoloValue = edits.yolo !== undefined ? edits.yolo : !! settings.yolo;
 
       var sectionTitle = function (title) {
          return ['h3', {style: style ({color: '#94b8ff', 'font-size': '14px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '0.75rem', 'margin-top': '1.5rem', 'border-bottom': '1px solid #333', 'padding-bottom': '0.5rem'})}, title];
@@ -2618,7 +2368,7 @@ views.accounts = function () {
          ]];
       };
 
-      var hasEdits = edits.openaiKey !== undefined || edits.claudeKey !== undefined || edits.yolo !== undefined;
+      var hasEdits = edits.openaiKey !== undefined || edits.claudeKey !== undefined;
 
       return ['div', {class: 'editor-empty'}, [
          ['div', {style: style ({width: '100%', 'max-width': '640px', 'overflow-y': 'auto', 'max-height': 'calc(100vh - 120px)'})}, [
@@ -2643,25 +2393,6 @@ views.accounts = function () {
             ]],
             renderApiKeyProvider ('openai', 'OpenAI', openai, 'openaiKey'),
             renderApiKeyProvider ('claude', 'Anthropic (Claude)', claude, 'claudeKey'),
-
-            // *** SAFETY SECTION ***
-            sectionTitle ('Safety'),
-            ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
-               ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center'})}, [
-                  ['div', [
-                     ['div', {style: style ({'font-weight': 'bold', 'font-size': '15px', color: '#94b8ff'})}, 'YOLO mode'],
-                     ['div', {style: style ({color: '#9aa4bf', 'font-size': '12px', 'margin-top': '0.25rem'})}, 'When enabled, all tool calls are auto-approved (no authorization prompts).']
-                  ]],
-                  ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', 'font-size': '12px', color: '#aaa'})}, [
-                     ['input', {
-                        type: 'checkbox',
-                        checked: yoloValue === true,
-                        onchange: B.ev ('set', ['accountEdits', 'yolo'], {raw: 'this.checked'})
-                     }],
-                     yoloValue ? 'On' : 'Off'
-                  ]]
-               ]]
-            ]],
 
             // *** SUBSCRIPTIONS SECTION ***
             sectionTitle ('Subscriptions'),

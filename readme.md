@@ -1,5 +1,26 @@
 # Vibey (codename)
 
+## Usage (Docker)
+
+1. Start Vibey:
+   ```bash
+   docker compose up --build
+   ```
+2. Open Vibey at:
+   - http://localhost:5353
+
+### Stop Vibey
+
+```bash
+docker compose down
+```
+
+### Reset all project data (optional)
+
+```bash
+docker compose down -v
+```
+
 An agentic interface for those who love text.
 
 Use text to coordinate agents. From your browser. Surrounded by a container.
@@ -39,7 +60,6 @@ The core of all this is one doc, `doc-main.md.` This file contains:
 - A description of the deed.
 - Links to other docs.
 - Instructions to agents that are picking up work. For example:
-   - What permissions to ask for a human and what not to ask for.
    - Whether to use Claude Code, Codex, or whatever it is to spin an agent.
    - How many agents to spin at one time.
    - Standards of work and workflows.
@@ -123,20 +143,19 @@ Left sidebar lists all files with + New and × delete. Right side is a textarea 
   - Creates a file named `dialog-<YYYYMMDD-HHmmss>-<slug>-<status>.md`.
   - Stable `dialogId` is `<YYYYMMDD-HHmmss>-<slug>` (status is not part of the id).
   - Appends a `## User` message with canonical payload format, opens `## Assistant`, streams `chunk` events.
-  - If unauthorized tool requests remain, emits `tool_request`, sets status to `waiting`, ends stream.
+  - Tool calls execute immediately (YOLO), results are appended to the dialog and streamed back.
 
 - `PUT /project/:project/dialog` — mutate or continue an existing dialog.
-  - Canonical body: `{dialogId, status?, prompt?, control?}`.
-  - Transitional compatibility: server may still accept `{decisions?, authorizations?}`; canonical input is `control`.
+  - Canonical body: `{dialogId, status?, prompt?}`.
   - `status` can be `waiting` or `done`.
-  - If `status` is set without `prompt` or `control`, it is a pure status change (interrupt/mark done).
+  - If `status` is set without `prompt`, it is a pure status change (interrupt/mark done).
   - If `prompt` is present, append as `## User` and continue generation.
   - Whenever generation is kicked off on an existing dialog, server first sets status to `active`.
   - Response is SSE when generation continues; otherwise JSON.
 - `GET /project/:project/dialogs` — list dialog files with `{dialogId, status, filename, mtime}`.
 - `GET /project/:project/dialog/:id` — load one dialog.
 
-SSE event types: `chunk`, `tool_request`, `done`, `error`.
+SSE event types: `chunk`, `done`, `error`.
 
 ### Dialog markdown: canonical convention
 
@@ -146,7 +165,7 @@ Dialogs are files named:
 
 Where `<status>` is one of: `active`, `waiting`, `done`.
 
-Canonical section shape (for `User`, `Assistant`, `Tool Request`, `Authorization`, `Tool Result`):
+Canonical section shape (for `User`, `Assistant`, `Tool Request`, `Tool Result`):
 
 ```md
 ## <Role>
@@ -227,11 +246,13 @@ The LLM always receives four tools:
 
 Tool definitions are written once and converted to both Claude and OpenAI formats.
 
-**No server-side state.** All tool-call state lives in dialog markdown. The server reconstructs pending requests, authorizations, and decisions by parsing markdown each request.
+**No server-side state.** All tool-call state lives in dialog markdown. The server reconstructs tool history by parsing markdown each request.
 
 #### Tool request/result canonical blocks
 
-Pending request:
+Tool calls execute immediately (YOLO). The server records both the request and the result in markdown.
+
+Tool request:
 
 ```md
 ## Tool Request
@@ -240,16 +261,14 @@ Pending request:
 > Time: 2026-02-16T20:11:02Z - 2026-02-16T20:11:02Z
 > Resources: in=0 out=0 total=0 tools=0 ms=0
 > Tool: run_command
-> Status: pending
+> Status: requested
 
 əəətool/input/json
 {"command":"ls"}
 əəə
 ```
 
-Status values: `pending | approved | denied | error`.
-
-Approved result:
+Tool result:
 
 ```md
 ## Tool Result
@@ -258,72 +277,21 @@ Approved result:
 > Time: 2026-02-16T20:11:03Z - 2026-02-16T20:11:04Z
 > Resources: in=0 out=0 total=0 tools=1 ms=812
 > Tool: run_command
-> Status: approved
+> Status: executed
 
 əəətool/result/json
 {"success":true,"stdout":"file1.txt"}
 əəə
 ```
 
-Denied result:
-
-```md
-## Tool Result
-> Id: toolu_abc123
-> Parent: msg_20260216_201101_a1
-> Time: 2026-02-16T20:11:03Z - 2026-02-16T20:11:03Z
-> Resources: in=0 out=0 total=0 tools=0 ms=0
-> Tool: run_command
-> Status: denied
-
-əəətool/result/json
-{"success":false,"error":"Denied by user"}
-əəə
-```
-
-#### Unified control text (schwa)
-
-Use one control grammar for per-call decisions and blanket authorizations.
-
-Canonical `PUT /project/:project/dialog` payload field: `control`.
-
-```txt
-əəəcontrol/v1
-toolu_abc123 approve
-toolu_def456 deny
-allow run_command
-deny write_file
-əəə
-```
-
-Parsing rules:
-- Ignore blank lines.
-- Ignore lines starting with `#`.
-- Unknown lines are ignored (non-fatal).
-
-Persist the control action in dialog markdown:
-
-```md
-## Authorization
-> Id: auth_20260216_201103_1
-> Time: 2026-02-16T20:11:03Z - 2026-02-16T20:11:03Z
-> Resources: in=0 out=0 total=0 tools=0 ms=0
-> Scope: dialog
-
-əəəcontrol/v1
-toolu_abc123 approve
-allow run_command
-əəə
-```
+Status values: `requested | executed | error`.
 
 #### Tool-call flow
 
 1. LLM emits tool calls. Server writes `Tool Request` sections.
-2. Server parses current authorizations from markdown.
-3. Authorized tools execute immediately.
-4. Results are written as `Tool Result` sections and fed back to the LLM.
-5. Unauthorized tools remain pending; dialog becomes `waiting`; stream emits `tool_request`.
-6. Human sends `control` text (`əəəcontrol/v1 ... əəə`); server writes authorization/decision effects and continues.
+2. Server executes each tool immediately.
+3. Results are written as `Tool Result` sections and fed back to the LLM.
+4. Stream continues; there are no tool approvals or waiting states for tool calls.
 
 No separate tool-execution endpoint is needed in normal flow.
 
@@ -340,7 +308,7 @@ Markdown is the source of truth. Restart-safe by design.
 
 Left sidebar lists dialog files (those starting with `dialog-`). Right side is a chat view: messages parsed from the file, rendered as bubbles.
 
-Input area: provider select (Claude/OpenAI), textarea (Cmd+Enter to send), Send button. During streaming, partial response shown with block cursor. Input is disabled while streaming or while dialog state is `waiting` with pending tool decisions.
+Input area: provider select (Claude/OpenAI), textarea (Cmd+Enter to send), Send button. During streaming, partial response shown with block cursor. Input is disabled while streaming.
 
 User messages are rendered optimistically (shown immediately when sent).
 
@@ -348,20 +316,7 @@ Message resources/tokens are shown from each section's `> Resources:` metadata l
 
 ### Client: tools for dialogs
 
-When `tool_request` arrives, a panel shows each unauthorized tool call (name + summarized input). Large file payloads are redacted in UI (markdown remains full-fidelity).
-
-User approves/denies by tool-call ID, optionally sets "Always allow" per tool type, then sends one `PUT /project/:project/dialog` with parseable `control` text wrapped in schwas.
-
-Canonical control payload:
-
-```txt
-əəəcontrol/v1
-toolu_abc123 approve
-allow edit_file
-əəə
-```
-
-Server writes authorization/decision outcomes in canonical markdown sections and continues.
+All tool calls execute immediately (YOLO) — there is no approval/denial UI. Tool requests and results are displayed inline in the chat view as they happen.
 
 #### Diff rendering for `edit_file`
 
@@ -450,7 +405,7 @@ Fields:
 
 One embed = one port + path. Multiple embeds are multiple blocks.
 
-Parsing rules: same style as `control/v1` — ignore blank lines, ignore lines starting with `#`, each line is `key value`.
+Parsing rules: ignore blank lines, ignore lines starting with `#`, each line is `key value`.
 
 Example inside a doc:
 
@@ -523,10 +478,8 @@ Flow #1:
 - I open a new dialog, entering its name
 - A file named dialog-<timestamp>-<name>-waiting.md is created, but I only see the name of the dialog. The status is shown as an appropriate icon. The entire name is seen, even if it makes the label larger.
 - The dropdown for gpt5.3 is selected. I enter some text on the box below on the right (not a prompt window) and I send it and off the dialog goes. The request is to read the first 20 lines of readme.md.
-- I get a request to read the file and I authorize it.
 - I get a LLM response. I can see tokens used, times of requests. The file sent is compacted, not shown fully. I can expand it (and re-contract it by clicking another button).
 - I ask a question to the LLM which requires tool use (say a diff): please create a little dummy.js file with a console.log on it.
-- The LLM asks for it and I need to authorize it. I authorize it once.
 - The diff is applied. I can see it with a green background.
 
 Flow #2:
@@ -554,8 +507,6 @@ Flow #4:
 
 
 ## TODO
-
-Goal: be able to build vibey with vibey itself.
 
 Prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).

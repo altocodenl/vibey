@@ -1,5 +1,24 @@
 ## Vibey development notes
 
+### 2026-02-23
+
+Idea for reading file tool: read multiple files at the same time, to avoid several round trips/messages.
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+
+Prompt:
+- How do I start vibey, dockerized? Please put it on an usage section at the top of readme.md.
+- Please remove ALL authorizations, including in the settings. We're going to be YOLO by default.
+- Sorry, I mean: remove all mentions or functionality concerning authorization from server.js. It won't even be an option.
+- Please remove ALL notion of authorizing an agent's command. It will be YOLO by design. Just do this on client.js, another agent is doing the rest.
+- Please remove ALL notion of authorizing an agent's command. It will be YOLO by design. Just do this on the tests.js, another agent is doing this on the server/client.
+- Please remove ALL notion of authorizing an agent's command. It will be YOLO by design. Just do this on readme.md.
+- To replace schwas, first add instead a SCHWA-SCHWA-SCHWA placeholder in your write function, then do a little grep to fix it as a second step.
+- You didn't get me at all. Wherever you want to add three schwas, just add a silly placeholder. Finishing editing the file, then grep with replacement to fix the placeholders.
+- Brilliant. There are still mentions of YOLO in server, client and tests. Except for the docs, there should be no mention of this. Can you clean it up please? I don't mean the oauth or api keys, just the authorization of tool uses.
+
+
+
 ### 2026-02-20
 
 flexible and unreliable -> reliable while still flexible (software in the past; LLMs now)

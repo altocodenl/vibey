@@ -61,10 +61,6 @@ var maskApiKey = function (key) {
    return key.slice (0, 7) + '••••••••' + key.slice (-4);
 };
 
-var getYoloSetting = function () {
-   var config = loadConfigJson ();
-   return !! (config.settings && config.settings.yolo);
-};
 
 // *** PKCE ***
 
@@ -948,21 +944,6 @@ var parseMetadata = function (markdown) {
    };
 };
 
-var parseAuthorizations = function (markdown) {
-   var authorized = {};
-   var lines = (markdown || '').split ('\n');
-   dale.go (lines, function (line) {
-      var allow = line.match (/^>\s*Authorized:\s*([a-zA-Z0-9_\-]+)/);
-      if (allow) {
-         authorized [allow [1]] = true;
-         return;
-      }
-      var revoke = line.match (/^>\s*Revoked:\s*([a-zA-Z0-9_\-]+)/);
-      if (revoke) delete authorized [revoke [1]];
-   });
-   return authorized;
-};
-
 var parseToolCalls = function (text, includePositions) {
    var toolCalls = [];
    var re = /---\nTool request:\s+([^\n\[]+?)(?:\s+\[([^\]]+)\])?\n\n([\s\S]*?)\n---/g;
@@ -972,23 +953,20 @@ var parseToolCalls = function (text, includePositions) {
       var name = match [1].trim ();
       var id = (match [2] || '').trim ();
       var body = match [3];
-      var decisionMatch = body.match (/\nDecision:\s*(approved|denied)\s*(?:\n|$)/);
-      var decision = decisionMatch ? decisionMatch [1] : null;
-      var decisionIndex = decisionMatch ? decisionMatch.index : -1;
-      var inputPart = decisionIndex >= 0 ? body.slice (0, decisionIndex) : body;
-      var inputText = inputPart.replace (/^\s+|\s+$/g, '').replace (/^    /gm, '');
+      var inputText = body;
       var result = null;
       var resultMatch = body.match (/\nResult:\n\n([\s\S]*)$/);
       if (resultMatch) {
+         inputText = body.slice (0, resultMatch.index);
          var resultText = resultMatch [1].replace (/^\s+|\s+$/g, '').replace (/^    /gm, '');
          result = safeJsonParse (resultText, resultText);
       }
+      inputText = inputText.replace (/^\s+|\s+$/g, '').replace (/^    /gm, '');
       var parsedInput = safeJsonParse (inputText || '{}', {});
       var parsed = {
          id: id || null,
          name: name,
          input: parsedInput,
-         decision: decision,
          result: result
       };
       if (includePositions) {
@@ -1001,17 +979,13 @@ var parseToolCalls = function (text, includePositions) {
    return toolCalls;
 };
 
-var buildToolBlock = function (toolCall, decision, result) {
+var buildToolBlock = function (toolCall, result) {
    var block = '---\n';
    block += 'Tool request: ' + toolCall.name + ' [' + toolCall.id + ']\n\n';
    block += '    ' + JSON.stringify (toolCall.input || {}, null, 2).split ('\n').join ('\n    ') + '\n\n';
-   if (decision) {
-      block += 'Decision: ' + decision + '\n';
-      if (decision === 'approved') {
-         block += 'Result:\n\n';
-         block += '    ' + JSON.stringify (result, null, 2).split ('\n').join ('\n    ') + '\n\n';
-      }
-      else block += '\n';
+   if (result) {
+      block += 'Result:\n\n';
+      block += '    ' + JSON.stringify (result, null, 2).split ('\n').join ('\n    ') + '\n\n';
    }
    block += '---';
    return block;
@@ -1130,15 +1104,15 @@ var parseDialogForProvider = function (markdown, provider) {
          });
          messages.push ({role: 'assistant', content: assistantContent});
 
-         var decided = dale.fil (toolCalls, undefined, function (tc) {
-            if (tc.decision) return tc;
+         var withResults = dale.fil (toolCalls, undefined, function (tc) {
+            if (tc.result) return tc;
          });
-         if (decided.length) {
-            messages.push ({role: 'user', content: dale.go (decided, function (tc) {
+         if (withResults.length) {
+            messages.push ({role: 'user', content: dale.go (withResults, function (tc) {
                return {
                   type: 'tool_result',
                   tool_use_id: tc.id,
-                  content: tc.decision === 'approved' ? JSON.stringify (tc.result) : 'Denied by user'
+                  content: JSON.stringify (tc.result)
                };
             })});
          }
@@ -1160,11 +1134,11 @@ var parseDialogForProvider = function (markdown, provider) {
          });
 
          dale.go (toolCalls, function (tc) {
-            if (! tc.decision) return;
+            if (! tc.result) return;
             messages.push ({
                role: 'tool',
                tool_call_id: tc.id,
-               content: tc.decision === 'approved' ? JSON.stringify (tc.result) : 'Denied by user'
+               content: JSON.stringify (tc.result)
             });
          });
       }
@@ -1260,14 +1234,6 @@ var setDialogStatus = function (dialog, status) {
    return dialog;
 };
 
-var getGlobalAuthorizations = function (projectDir) {
-   var docMain = Path.join (projectDir, 'doc-main.md');
-   if (! fs.existsSync (docMain)) return [];
-
-   var auth = parseAuthorizations (fs.readFileSync (docMain, 'utf8'));
-   return Object.keys (auth);
-};
-
 var ensureDialogFile = function (dialog, provider, model, projectDir) {
    if (dialog.exists) {
       if (dialog.metadata.provider && dialog.metadata.model) {
@@ -1290,11 +1256,6 @@ var ensureDialogFile = function (dialog, provider, model, projectDir) {
    var header = '# Dialog\n\n';
    header += '> Provider: ' + provider + ' | Model: ' + model + '\n';
    header += '> Started: ' + new Date ().toISOString () + '\n\n';
-   dale.go (getGlobalAuthorizations (projectDir), function (name) {
-      header += '> Authorized: ' + name + '\n';
-   });
-   if (header [header.length - 1] !== '\n') header += '\n';
-   header += '\n';
    fs.writeFileSync (dialog.filepath, header, 'utf8');
    upsertDocMainContextBlock (dialog.filepath, projectDir);
    dialog.exists = true;
@@ -1305,111 +1266,20 @@ var appendToDialog = function (filepath, text) {
    fs.appendFileSync (filepath, text, 'utf8');
 };
 
-var writeToolDecisions = function (filepath, decisionsById) {
+var writeToolResults = function (filepath, resultsById) {
    var markdown = fs.readFileSync (filepath, 'utf8');
    var toolCalls = parseToolCalls (markdown, true);
 
    for (var i = toolCalls.length - 1; i >= 0; i--) {
       var tc = toolCalls [i];
-      if (tc.decision) continue;
-      var decision = decisionsById [tc.id];
-      if (! decision) continue;
-      var replacement = buildToolBlock (tc, decision.decision, decision.result);
+      if (tc.result) continue;
+      var result = resultsById [tc.id];
+      if (! result) continue;
+      var replacement = buildToolBlock (tc, result);
       markdown = markdown.slice (0, tc.start) + replacement + markdown.slice (tc.end);
    }
 
    fs.writeFileSync (filepath, markdown, 'utf8');
-};
-
-var getPendingToolCalls = function (filepath) {
-   if (! fs.existsSync (filepath)) return [];
-   var markdown = fs.readFileSync (filepath, 'utf8');
-   return dale.fil (parseToolCalls (markdown, false), undefined, function (tc) {
-      if (! tc.decision) return tc;
-   });
-};
-
-var parseSentinelLines = function (text) {
-   if (type (text) !== 'string') return [];
-
-   var normalized = text.replace (/\r/g, '');
-   var lines = normalized.split ('\n');
-   var start = -1, end = -1;
-
-   dale.go (lines, function (line, index) {
-      var trimmed = line.trim ();
-      if (start === -1 && trimmed.indexOf ('əəə') === 0) {
-         start = Number (index);
-         return;
-      }
-      if (start !== -1 && end === -1 && trimmed === 'əəə') end = Number (index);
-   });
-
-   var bodyLines = lines;
-   if (start !== -1 && end > start) bodyLines = lines.slice (start + 1, end);
-
-   return dale.fil (bodyLines, undefined, function (line) {
-      line = line.trim ();
-      if (! line || line [0] === '#') return;
-      return line;
-   });
-};
-
-var parseDecisionsInput = function (decisions) {
-   if (! decisions) return [];
-   if (type (decisions) === 'array') return decisions;
-   var parsed = [];
-   dale.go (parseSentinelLines (decisions), function (line) {
-      var match = line.match (/^([^:\s]+)\s*:\s*(approve|deny)$/i);
-      if (! match) return;
-      parsed.push ({id: match [1], approved: match [2].toLowerCase () === 'approve'});
-   });
-   return parsed;
-};
-
-var parseAuthorizationsInput = function (authorizations) {
-   if (! authorizations) return {allow: [], deny: []};
-   if (type (authorizations) === 'array') return {allow: authorizations, deny: []};
-
-   var allow = {}, deny = {};
-   dale.go (parseSentinelLines (authorizations), function (line) {
-      var match = line.match (/^(allow|deny)\s+([a-zA-Z0-9_\-]+)$/i);
-      if (! match) return;
-      if (match [1].toLowerCase () === 'allow') allow [match [2]] = true;
-      else deny [match [2]] = true;
-   });
-   return {allow: Object.keys (allow), deny: Object.keys (deny)};
-};
-
-var parseControlInput = function (control) {
-   if (! control) return {decisions: [], authorizations: {allow: [], deny: []}};
-
-   var decisions = [];
-   var allow = {}, deny = {};
-
-   dale.go (parseSentinelLines (control), function (line) {
-      var toolDecision = line.match (/^([^:\s]+)\s+(approve|deny)$/i);
-      if (toolDecision) {
-         decisions.push ({id: toolDecision [1], approved: toolDecision [2].toLowerCase () === 'approve'});
-         return;
-      }
-
-      var legacyDecision = line.match (/^([^:\s]+)\s*:\s*(approve|deny)$/i);
-      if (legacyDecision) {
-         decisions.push ({id: legacyDecision [1], approved: legacyDecision [2].toLowerCase () === 'approve'});
-         return;
-      }
-
-      var authMatch = line.match (/^(allow|deny)\s+([a-zA-Z0-9_\-]+)$/i);
-      if (! authMatch) return;
-      if (authMatch [1].toLowerCase () === 'allow') allow [authMatch [2]] = true;
-      else deny [authMatch [2]] = true;
-   });
-
-   return {
-      decisions: decisions,
-      authorizations: {allow: Object.keys (allow), deny: Object.keys (deny)}
-   };
 };
 
 // Implementation function for Claude (streaming with tool support)
@@ -1771,38 +1641,21 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          appendUsageToAssistantSection (dialog.filepath, result.usage);
          appendToolCallsToAssistantSection (dialog.filepath, result.toolCalls);
 
-         var yolo = getYoloSetting ();
-         var authorizations = parseAuthorizations (fs.readFileSync (dialog.filepath, 'utf8'));
-         var decisionsById = {};
-         var autoExecuted = [];
-         var pending = [];
+         var resultsById = {};
+         var executed = [];
+         var toolCalls = result.toolCalls || [];
 
-         for (var i = 0; i < (result.toolCalls || []).length; i++) {
-            var tc = result.toolCalls [i];
-            if (yolo || authorizations [tc.name]) {
-               var toolResult = await executeTool (tc.name, tc.input, projectName);
-               decisionsById [tc.id] = {decision: 'approved', result: toolResult};
-               autoExecuted.push ({id: tc.id, name: tc.name, result: toolResult});
-            }
-            else pending.push (tc);
+         for (var i = 0; i < toolCalls.length; i++) {
+            var tc = toolCalls [i];
+            var toolResult = await executeTool (tc.name, tc.input, projectName);
+            resultsById [tc.id] = toolResult;
+            executed.push ({id: tc.id, name: tc.name, result: toolResult});
          }
 
-         if (Object.keys (decisionsById).length) writeToolDecisions (dialog.filepath, decisionsById);
-         if (autoExecuted.length) autoExecutedAll = autoExecutedAll.concat (autoExecuted);
+         if (Object.keys (resultsById).length) writeToolResults (dialog.filepath, resultsById);
+         if (executed.length) autoExecutedAll = autoExecutedAll.concat (executed);
 
-         if (pending.length) {
-            return {
-               dialogId: dialog.dialogId,
-               filename: dialog.filename,
-               provider: provider,
-               model: model,
-               content: lastContent,
-               toolCalls: pending,
-               autoExecuted: autoExecutedAll
-            };
-         }
-
-         if (! autoExecuted.length) {
+         if (! toolCalls.length) {
             return {
                dialogId: dialog.dialogId,
                filename: dialog.filename,
@@ -1877,101 +1730,16 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    appendToDialog (dialog.filepath, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
 
    var result = await runCompletion (projectName, dialog, provider, defaultModel, onChunk, abortSignal);
-   if (result.toolCalls && result.toolCalls.length) setDialogStatus (dialog, 'waiting');
    result.filename = dialog.filename;
    result.status = dialog.status;
    return result;
 };
 
-var updateDialogTurn = async function (projectName, dialogId, status, prompt, controlInput, decisionsInput, authorizationsInput, provider, model, onChunk, abortSignal) {
+var updateDialogTurn = async function (projectName, dialogId, status, prompt, provider, model, onChunk, abortSignal) {
    var dialog = loadDialog (getExistingProjectDir (projectName), dialogId);
    if (! dialog.exists) throw new Error ('Dialog not found: ' + dialogId);
 
-   var control = parseControlInput (controlInput || '');
-
-   var legacyAuthorizations = parseAuthorizationsInput (authorizationsInput || '');
-   var authMap = {};
-   dale.go (legacyAuthorizations.allow, function (name) {authMap [name] = 'allow';});
-   dale.go (legacyAuthorizations.deny, function (name) {authMap [name] = 'deny';});
-   dale.go (control.authorizations.allow, function (name) {authMap [name] = 'allow';});
-   dale.go (control.authorizations.deny, function (name) {authMap [name] = 'deny';});
-
-   var authorizations = {allow: [], deny: []};
-   dale.go (authMap, function (action, name) {
-      if (action === 'allow') authorizations.allow.push (name);
-      if (action === 'deny') authorizations.deny.push (name);
-   });
-
-   if (authorizations.allow.length || authorizations.deny.length) {
-      dale.go (authorizations.allow, function (name) {
-         appendToDialog (dialog.filepath, '> Authorized: ' + name + '\n');
-      });
-      dale.go (authorizations.deny, function (name) {
-         appendToDialog (dialog.filepath, '> Revoked: ' + name + '\n');
-      });
-      appendToDialog (dialog.filepath, '\n');
-   }
-
-   var decisionsMap = {};
-   dale.go (parseDecisionsInput (decisionsInput || []), function (decision) {
-      if (! decision || ! decision.id) return;
-      decisionsMap [decision.id] = {id: decision.id, approved: decision.approved === true};
-   });
-   dale.go (control.decisions, function (decision) {
-      if (! decision || ! decision.id) return;
-      decisionsMap [decision.id] = {id: decision.id, approved: decision.approved === true};
-   });
-   var decisions = dale.go (decisionsMap, function (decision) {return decision;});
-
-   var deniedAny = false;
-   var autoApproved = false;
-   var yolo = getYoloSetting ();
-
-   if (decisions.length) {
-      var pending = getPendingToolCalls (dialog.filepath);
-      var pendingById = {};
-      dale.go (pending, function (tc) {
-         pendingById [tc.id] = tc;
-      });
-
-      var decisionsById = {};
-      dale.go (decisions, function (decision) {
-         var tc = pendingById [decision.id];
-         if (! tc) return;
-         if (decision.approved) decisionsById [tc.id] = {decision: 'approved', result: null};
-         else {
-            deniedAny = true;
-            decisionsById [tc.id] = {decision: 'denied', result: {success: false, error: 'User denied this tool call'}};
-         }
-      });
-
-      for (var i = 0; i < pending.length; i++) {
-         var tc = pending [i];
-         if (! decisionsById [tc.id]) continue;
-         if (decisionsById [tc.id].decision !== 'approved') continue;
-         decisionsById [tc.id].result = await executeTool (tc.name, tc.input, projectName);
-      }
-
-      if (Object.keys (decisionsById).length) writeToolDecisions (dialog.filepath, decisionsById);
-   }
-
-   if (yolo && decisions.length === 0) {
-      var pending = getPendingToolCalls (dialog.filepath);
-      if (pending.length) {
-         var decisionsById = {};
-         for (var i = 0; i < pending.length; i++) {
-            var tc = pending [i];
-            var toolResult = await executeTool (tc.name, tc.input, projectName);
-            decisionsById [tc.id] = {decision: 'approved', result: toolResult};
-         }
-         if (Object.keys (decisionsById).length) {
-            writeToolDecisions (dialog.filepath, decisionsById);
-            autoApproved = true;
-         }
-      }
-   }
-
-   var shouldContinue = (type (prompt) === 'string' && prompt.trim ()) || decisions.length > 0 || autoApproved;
+   var shouldContinue = (type (prompt) === 'string' && prompt.trim ());
 
    if (shouldContinue) {
       setDialogStatus (dialog, 'active');
@@ -1987,17 +1755,14 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, co
       var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5');
       var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal);
 
-      if (result.toolCalls && result.toolCalls.length) setDialogStatus (dialog, 'waiting');
-      else if (deniedAny) setDialogStatus (dialog, 'waiting');
-      else if (status && inc (['waiting', 'done'], status)) setDialogStatus (dialog, status);
+      if (status && inc (['waiting', 'done'], status)) setDialogStatus (dialog, status);
 
       result.filename = dialog.filename;
       result.status = dialog.status;
       return result;
    }
 
-   if (deniedAny) setDialogStatus (dialog, 'waiting');
-   else if (status && inc (['waiting', 'done'], status)) setDialogStatus (dialog, status);
+   if (status && inc (['waiting', 'done'], status)) setDialogStatus (dialog, status);
 
    return {
       dialogId: dialog.dialogId,
@@ -2063,9 +1828,6 @@ var routes = [
          claudeOAuth: {
             loggedIn: !! (accounts.claudeOAuth && accounts.claudeOAuth.type === 'oauth'),
             expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
-         },
-         settings: {
-            yolo: !! (config.settings && config.settings.yolo)
          }
       });
    }],
@@ -2081,11 +1843,6 @@ var routes = [
       if (type (rq.body.claudeKey) === 'string') {
          if (! config.accounts.claude) config.accounts.claude = {};
          config.accounts.claude.apiKey = rq.body.claudeKey.trim ();
-      }
-
-      if (type (rq.body.yolo) === 'boolean') {
-         if (! config.settings) config.settings = {};
-         config.settings.yolo = rq.body.yolo === true;
       }
 
       saveConfigJson (config);
@@ -2370,10 +2127,6 @@ var routes = [
             }
          );
 
-         if (result.toolCalls) {
-            rs.write ('data: ' + JSON.stringify ({type: 'tool_request', toolCalls: result.toolCalls, dialogId: result.dialogId, filename: result.filename}) + '\n\n');
-         }
-
          rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
          rs.end ();
       }
@@ -2392,15 +2145,10 @@ var routes = [
 
       if (rq.body.status !== undefined && ! inc (['waiting', 'done'], rq.body.status)) return reply (rs, 400, {error: 'status must be waiting or done'});
       if (rq.body.prompt !== undefined && type (rq.body.prompt) !== 'string') return reply (rs, 400, {error: 'prompt must be a string'});
-      if (rq.body.control !== undefined && type (rq.body.control) !== 'string') return reply (rs, 400, {error: 'control must be a string'});
-      if (rq.body.decisions !== undefined && type (rq.body.decisions) !== 'string' && type (rq.body.decisions) !== 'array') return reply (rs, 400, {error: 'decisions must be string or array'});
-      if (rq.body.authorizations !== undefined && type (rq.body.authorizations) !== 'string' && type (rq.body.authorizations) !== 'array') return reply (rs, 400, {error: 'authorizations must be string or array'});
       if (rq.body.provider !== undefined && (type (rq.body.provider) !== 'string' || ! inc (['claude', 'openai'], rq.body.provider))) return reply (rs, 400, {error: 'provider must be claude or openai'});
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
 
-      var controlParsed = parseControlInput (rq.body.control || '');
-      var hasControlDecisions = controlParsed.decisions.length > 0;
-      var continues = (type (rq.body.prompt) === 'string' && rq.body.prompt.trim ()) || rq.body.decisions !== undefined || hasControlDecisions;
+      var continues = type (rq.body.prompt) === 'string' && rq.body.prompt.trim () ? true : false;
 
       if (! continues) {
          var active = getActiveStream (rq.body.dialogId);
@@ -2411,7 +2159,7 @@ var routes = [
          }
 
          try {
-            var result = await updateDialogTurn (rq.data.params.project, rq.body.dialogId, rq.body.status, null, rq.body.control, rq.body.decisions, rq.body.authorizations, rq.body.provider, rq.body.model, null);
+            var result = await updateDialogTurn (rq.data.params.project, rq.body.dialogId, rq.body.status, null, rq.body.provider, rq.body.model, null);
             return reply (rs, 200, result);
          }
          catch (error) {
@@ -2433,9 +2181,6 @@ var routes = [
             rq.body.dialogId,
             rq.body.status,
             rq.body.prompt,
-            rq.body.control,
-            rq.body.decisions,
-            rq.body.authorizations,
             rq.body.provider,
             rq.body.model,
             function (chunk) {
@@ -2443,10 +2188,6 @@ var routes = [
             },
             controller.signal
          );
-
-         if (result.toolCalls) {
-            rs.write ('data: ' + JSON.stringify ({type: 'tool_request', toolCalls: result.toolCalls, dialogId: result.dialogId, filename: result.filename}) + '\n\n');
-         }
 
          rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
          rs.end ();
@@ -2477,7 +2218,7 @@ var routes = [
       }
    }],
 
-   // Execute a tool (called after user approves)
+   // Execute a tool directly
    ['post', 'project/:project/tool/execute', async function (rq, rs) {
       if (stop (rs, [
          ['toolName', rq.body.toolName, 'string'],

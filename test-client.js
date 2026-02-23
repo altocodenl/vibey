@@ -206,45 +206,15 @@
          done (LONG_WAIT, POLL);
       }, function () {
          var streaming = B.get ('streaming');
-         var pending = B.get ('pendingToolCalls');
-         // Keep waiting while streaming
-         if (streaming) return 'Still streaming, waiting for tool request...';
-         // If we have pending tool calls, step 7 is done
-         if (pending && pending.length > 0) return true;
-         // If no pending and not streaming, check if the full round-trip already completed
-         // (tools may have been auto-approved)
-         var file = B.get ('currentFile');
-         if (file && file.content && file.content.indexOf ('Tool request:') !== -1 && file.content.indexOf ('Decision: approved') !== -1) return true;
-         return 'Waiting for tool request or completed tool round-trip...';
-      }],
-
-      // --- Step 8: Authorize tool requests and wait for full round-trip ---
-      ['Step 8: Authorize tool requests and wait for complete response', function (done) {
-         var pending = B.get ('pendingToolCalls');
-         if (pending && pending.length > 0) {
-            B.call ('approve', 'allTools');
-         }
-         done (LONG_WAIT, POLL);
-      }, function () {
-         var streaming = B.get ('streaming');
          if (streaming) return 'Still streaming...';
 
-         var pending = B.get ('pendingToolCalls');
-         if (pending && pending.length > 0) {
-            // More tool calls arrived — keep approving
-            B.call ('approve', 'allTools');
-            return 'Approving additional tool calls, waiting...';
-         }
-
-         // Wait until the file has been reloaded with tool blocks and a final response
+         // Tools auto-execute. Wait for the file to have tool results.
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'Waiting for file to reload...';
 
          var content = file.content;
-         // Must have at least one completed tool block
-         if (content.indexOf ('Tool request:') === -1) return 'Waiting for tool blocks in dialog...';
-         if (content.indexOf ('Decision: approved') === -1) return 'Waiting for tool decisions in dialog...';
-         if (content.indexOf ('Result:') === -1) return 'Waiting for tool results in dialog...';
+         if (content.indexOf ('Tool request:') === -1 && content.indexOf ('## Tool Request') === -1) return 'Waiting for tool blocks in dialog...';
+         if (content.indexOf ('Result:') === -1 && content.indexOf ('## Tool Result') === -1) return 'Waiting for tool results in dialog...';
 
          return true;
       }],
@@ -285,8 +255,9 @@
          if (! file) return 'No current file';
 
          // Verify tool blocks exist in markdown
-         if (file.content.indexOf ('Tool request:') === -1) return 'No tool request blocks found in dialog';
-         if (file.content.indexOf ('Result:') === -1) return 'No tool results found in dialog';
+         var content = file.content;
+         if (content.indexOf ('Tool request:') === -1 && content.indexOf ('## Tool Request') === -1) return 'No tool request blocks found in dialog';
+         if (content.indexOf ('Result:') === -1 && content.indexOf ('## Tool Result') === -1) return 'No tool results found in dialog';
 
          // The tool result should contain file content from vibey.md
          var chatArea = document.querySelector ('.chat-messages');
@@ -295,47 +266,18 @@
          return true;
       }],
 
-      // --- Step 11: Ask to create dummy.js (write_file) ---
+      // --- Step 11: Ask to create dummy.js (write_file auto-executes) ---
       ['Step 11: Ask LLM to create dummy.js with console.log', function (done) {
          B.call ('set', 'chatInput', 'Please create a file called dummy.js with the content: console.log("hello from dummy"); Use the write_file tool for this.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
          var streaming = B.get ('streaming');
-         if (streaming) return 'Still streaming, waiting for write_file tool request...';
-         var pending = B.get ('pendingToolCalls');
-         if (pending && pending.length > 0) return true;
-         // It may have already been auto-approved if authorization was given
-         var file = B.get ('currentFile');
-         if (file && file.content && file.content.indexOf ('write_file') !== -1) return true;
-         return 'No write_file tool request found yet';
-      }],
+         if (streaming) return 'Still streaming...';
 
-      // --- Step 12: Authorize the write_file tool once ---
-      ['Step 12: Authorize write_file tool request', function (done) {
-         var pending = B.get ('pendingToolCalls');
-         if (! pending || pending.length === 0) {
-            // May have been auto-approved
-            done (SHORT_WAIT, POLL);
-            return;
-         }
-         // Approve all pending
-         B.call ('approve', 'allTools');
-         done (LONG_WAIT, POLL);
-      }, function () {
-         var streaming = B.get ('streaming');
-         if (streaming) return 'Still streaming after tool approval...';
-         var pending = B.get ('pendingToolCalls');
-         if (pending && pending.length > 0) {
-            // More tool calls — approve them
-            B.call ('approve', 'allTools');
-            return 'Approving additional tool calls...';
-         }
          var file = B.get ('currentFile');
-         if (! file || ! file.content) return 'No file content';
-         // Check that write_file was used and approved
-         if (file.content.indexOf ('write_file') === -1) return 'write_file tool not found in dialog';
-         if (file.content.indexOf ('Decision: approved') === -1) return 'No approved tool decision found';
+         if (! file || ! file.content) return 'Waiting for file content...';
+         if (file.content.indexOf ('write_file') === -1) return 'write_file tool not found in dialog yet';
          return true;
       }],
 
@@ -344,9 +286,8 @@
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No current file';
 
-         // Check the dialog markdown has write_file approved
+         // Check the dialog markdown has write_file
          if (file.content.indexOf ('write_file') === -1) return 'write_file not found in dialog';
-         if (file.content.indexOf ('Decision: approved') === -1) return 'write_file not approved';
 
          // Check the DOM for the chat messages area
          var chatArea = document.querySelector ('.chat-messages');
@@ -610,13 +551,11 @@
          return true;
       }],
 
-      // --- F3 Step 2: Write doc-main.md with tool auths ---
+      // --- F3 Step 2: Write doc-main.md ---
       ['F3-2: Write doc-main.md', function (done) {
          var content = [
             '# Flow 4 Test Project',
-            '',
-            '> Authorized: run_command',
-            '> Authorized: write_file'
+            ''
          ].join ('\n') + '\n';
          var project = window._f3Project;
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, {content: content}, function () {
@@ -828,11 +767,7 @@
             '1. Use write_file to create `index.html` with gotoB + app.js.',
             '2. THEN: Use write_file to create `app.js` with a 3x3 tictactoe grid.',
             '',
-            'Do NOT create a backend server. Create each file with a separate write_file call.',
-            '',
-            '> Authorized: run_command',
-            '> Authorized: write_file',
-            '> Authorized: edit_file'
+            'Do NOT create a backend server. Create each file with a separate write_file call.'
          ].join ('\n') + '\n';
 
          var docGotob = [
@@ -894,30 +829,14 @@
          return true;
       }],
 
-      // --- F4 Step 4: Verify global authorizations present in dialog markdown ---
-      ['F4-4: Dialog inherits global authorizations', function () {
-         var file = B.get ('currentFile');
-         if (! file || ! file.content) return 'No dialog content loaded';
-         var tools = ['run_command', 'write_file', 'edit_file'];
-         for (var i = 0; i < tools.length; i++) {
-            if (file.content.indexOf ('> Authorized: ' + tools [i]) === -1) return 'Missing authorization for ' + tools [i];
-         }
-         return true;
-      }],
-
       // --- F4 Step 5: Fire "please start" ---
-      ['F4-5: Fire "please start"', function (done) {
+      ['F4-5: Fire "please start" (tools auto-execute)', function (done) {
          B.call ('set', 'chatInput', 'please start');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
          var streaming = B.get ('streaming');
          if (streaming) return 'Still streaming...';
-         var pending = B.get ('pendingToolCalls');
-         if (pending && pending.length > 0) {
-            B.call ('approve', 'allTools');
-            return 'Approving tool calls...';
-         }
          return true;
       }],
 
@@ -993,18 +912,13 @@
          return true;
       }],
 
-      ['F4-9: Send embed request to AI and wait for completion', function (done) {
+      ['F4-9: Send embed request to AI and wait for completion (tools auto-execute)', function (done) {
          B.call ('set', 'chatInput', 'The tictactoe game is now available via the static proxy at /project/' + window._f4Project + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
          var streaming = B.get ('streaming');
          if (streaming) return 'Still streaming...';
-         var pending = B.get ('pendingToolCalls');
-         if (pending && pending.length > 0) {
-            B.call ('approve', 'allTools');
-            return 'Approving tool calls...';
-         }
          return true;
       }],
 

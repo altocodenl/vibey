@@ -43,23 +43,8 @@ var getEventsByType = function (events, eventType) {
    });
 };
 
-var sentinelDecisions = function (toolCalls) {
-   var lines = dale.fil (toolCalls || [], undefined, function (tc) {
-      if (tc && tc.id) return tc.id + ': approve';
-   });
-   return 'əəə\n' + lines.join ('\n') + '\nəəə';
-};
-
-var sentinelAllow = function (toolName) {
-   return 'əəə\nallow ' + toolName + '\nəəə';
-};
-
 var hasToolMention = function (md, toolName) {
    return md.indexOf ('Tool request: ' + toolName) !== -1 || md.indexOf ('> Tool: ' + toolName) !== -1 || md.indexOf ('"name":"' + toolName + '"') !== -1;
-};
-
-var hasApprovedMarker = function (md) {
-   return md.indexOf ('Decision: approved') !== -1 || md.indexOf ('> Status: approved') !== -1;
 };
 
 var hasResultMarker = function (md) {
@@ -142,7 +127,7 @@ var flow1Sequence = [
       return true;
    }],
 
-   ['Prompt #1: ask to read first 20 lines of readme.md (expect run_command request)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
+   ['Prompt #1: ask to read first 20 lines of readme.md (tools auto-execute)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
       return {
          dialogId: s.dialogId,
          prompt: 'Please read the first 20 lines of readme.md using the run_command tool with `head -20 readme.md`, then summarize it in 3 short bullets. You must use the tool.'
@@ -151,31 +136,9 @@ var flow1Sequence = [
       if (type (rs.body) !== 'string') return log ('Expected SSE text body');
 
       var events = parseSSE (rs.body);
-      var toolRequests = getEventsByType (events, 'tool_request');
-      if (! toolRequests.length) return log ('Expected tool_request event for first prompt');
-
-      var pending = toolRequests [0].toolCalls || [];
-      var runCommands = dale.fil (pending, undefined, function (tc) {
-         if (tc.name === 'run_command') return tc;
-      });
-      if (! runCommands.length) return log ('Expected run_command in first tool request');
-
-      s.pendingReadToolCalls = pending;
-      return true;
-   }],
-
-   ['Approve first tool request + allow run_command', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
-      return {
-         dialogId: s.dialogId,
-         decisions: sentinelDecisions (s.pendingReadToolCalls),
-         authorizations: sentinelAllow ('run_command')
-      };
-   }, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'string') return log ('Expected SSE text response after approvals');
-      var events = parseSSE (rs.body);
       if (! getEventsByType (events, 'done').length) {
          var eventTypes = dale.go (events, function (event) {return event && event.type ? event.type : 'unknown'}).join (', ');
-         return log ('Missing done event after approving read tool request. Events: ' + eventTypes);
+         return log ('Expected done event (tools auto-execute). Events: ' + eventTypes);
       }
       return true;
    }],
@@ -186,13 +149,12 @@ var flow1Sequence = [
          if (error) return log ('Could not fetch dialog: ' + error.message);
          if (md.indexOf ('> Time:') === -1) return log ('Dialog markdown missing > Time metadata');
          if (! hasToolMention (md, 'run_command')) return log ('Missing run_command evidence in dialog markdown');
-         if (! hasApprovedMarker (md)) return log ('run_command block is not approved in markdown');
          if (! hasResultMarker (md)) return log ('run_command block missing Result section');
          next ();
       });
    }],
 
-   ['Prompt #2: ask to create dummy.js (expect write_file request)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
+   ['Prompt #2: ask to create dummy.js (tools auto-execute)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
       return {
          dialogId: s.dialogId,
          prompt: 'Please create a file called dummy.js with the content: console.log("hello from dummy"); Use the write_file tool for this.'
@@ -201,29 +163,10 @@ var flow1Sequence = [
       if (type (rs.body) !== 'string') return log ('Expected SSE text body for second prompt');
 
       var events = parseSSE (rs.body);
-      var toolRequests = getEventsByType (events, 'tool_request');
-      if (! toolRequests.length) return log ('Expected tool_request event for second prompt');
-
-      var pending = toolRequests [0].toolCalls || [];
-      var writeCalls = dale.fil (pending, undefined, function (tc) {
-         if (tc.name === 'write_file') return tc;
-      });
-      if (! writeCalls.length) return log ('Expected write_file in second tool request');
-
-      s.pendingWriteToolCalls = writeCalls;
-      return true;
-   }],
-
-   ['Approve write_file request + allow write_file', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
-      return {
-         dialogId: s.dialogId,
-         decisions: sentinelDecisions (s.pendingWriteToolCalls),
-         authorizations: sentinelAllow ('write_file')
-      };
-   }, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'string') return log ('Expected SSE text response after write approval');
-      var events = parseSSE (rs.body);
-      if (! getEventsByType (events, 'done').length) return log ('Missing done event after approving write_file request');
+      if (! getEventsByType (events, 'done').length) {
+         var eventTypes = dale.go (events, function (event) {return event && event.type ? event.type : 'unknown'}).join (', ');
+         return log ('Expected done event (tools auto-execute). Events: ' + eventTypes);
+      }
       return true;
    }],
 
@@ -231,7 +174,7 @@ var flow1Sequence = [
       fetchDialogMarkdown (PROJECT, s.dialogId, function (error, md) {
          if (error) return log ('Could not fetch dialog: ' + error.message);
          if (! hasToolMention (md, 'write_file')) return log ('Missing write_file block in dialog markdown');
-         if (! hasApprovedMarker (md)) return log ('write_file block is not approved in markdown');
+         if (! hasResultMarker (md)) return log ('write_file block missing Result section');
          next ();
       });
    }],
@@ -364,9 +307,7 @@ var PROJECT4 = 'flow4-' + Date.now () + '-' + Math.floor (Math.random () * 10000
 
 var DOC_MAIN_F4 = [
    '# Flow 4 Test Project',
-   '',
-   '> Authorized: run_command',
-   '> Authorized: write_file'
+   ''
 ].join ('\n') + '\n';
 
 var flow4Sequence = [
@@ -510,9 +451,6 @@ var DOC_MAIN_F3 = [
    '',
    'Do NOT create a backend server. Create each file with a separate write_file call.',
    '',
-   '> Authorized: run_command',
-   '> Authorized: write_file',
-   '> Authorized: edit_file'
 ].join ('\n') + '\n';
 
 var GOTOB_F3 = [
@@ -636,17 +574,6 @@ var flow3Sequence = [
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.f3DialogId = rs.body.dialogId;
       return true;
-   }],
-
-   ['F4: Verify dialog inherited global authorizations', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fetchDialogMarkdown (PROJECT3, s.f3DialogId, function (error, md) {
-         if (error) return log ('Could not fetch dialog: ' + error.message);
-         var tools = ['run_command', 'write_file', 'edit_file'];
-         for (var i = 0; i < tools.length; i++) {
-            if (md.indexOf ('> Authorized: ' + tools [i]) === -1) return log ('Dialog missing inherited ' + tools [i] + ' authorization');
-         }
-         next ();
-      });
    }],
 
    // Fire the dialog and don't block — let agents work in background
