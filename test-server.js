@@ -5,6 +5,7 @@ var teishi = require ('teishi');
 
 var log  = teishi.l || function () {console.log.apply (console, arguments)};
 var type = teishi.type || teishi.t;
+var inc  = teishi.inc;
 
 // Backend integration tests for server.
 // Run:   node test-server.js              (all flows)
@@ -193,10 +194,7 @@ var flow1Sequence = [
 
    ['Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('projects endpoint should return array');
-      var stillExists = dale.stop (rs.body, false, function (name) {
-         if (name === PROJECT) return true;
-      });
-      if (stillExists) return log ('Project still exists after deletion');
+      if (inc (rs.body, PROJECT)) return log ('Project still exists after deletion');
       return true;
    }]
 ];
@@ -232,7 +230,7 @@ var flow2Sequence = [
 
    ['F2: List files includes doc-main.md', 'get', 'project/' + PROJECT2 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (rs.body.indexOf ('doc-main.md') === -1) return log ('doc-main.md not in file list');
+      if (! inc (rs.body, 'doc-main.md')) return log ('doc-main.md not in file list');
       return true;
    }],
 
@@ -253,8 +251,8 @@ var flow2Sequence = [
 
    ['F2: List files includes both docs', 'get', 'project/' + PROJECT2 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (rs.body.indexOf ('doc-main.md') === -1) return log ('doc-main.md missing from list');
-      if (rs.body.indexOf (SECOND_DOC) === -1) return log (SECOND_DOC + ' missing from list');
+      if (! inc (rs.body, 'doc-main.md')) return log ('doc-main.md missing from list');
+      if (! inc (rs.body, SECOND_DOC)) return log (SECOND_DOC + ' missing from list');
       return true;
    }],
 
@@ -270,8 +268,8 @@ var flow2Sequence = [
 
    ['F2: List files no longer has second doc', 'get', 'project/' + PROJECT2 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (rs.body.indexOf (SECOND_DOC) !== -1) return log (SECOND_DOC + ' still in list after deletion');
-      if (rs.body.indexOf ('doc-main.md') === -1) return log ('doc-main.md disappeared');
+      if (inc (rs.body, SECOND_DOC)) return log (SECOND_DOC + ' still in list after deletion');
+      if (! inc (rs.body, 'doc-main.md')) return log ('doc-main.md disappeared');
       return true;
    }],
 
@@ -293,10 +291,7 @@ var flow2Sequence = [
 
    ['F2: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      var stillExists = dale.stop (rs.body, false, function (name) {
-         if (name === PROJECT2) return true;
-      });
-      if (stillExists) return log ('Project still exists after deletion');
+      if (inc (rs.body, PROJECT2)) return log ('Project still exists after deletion');
       return true;
    }]
 ];
@@ -353,8 +348,9 @@ var flow4Sequence = [
    // Verify both dialogs are active before deleting
    ['F3: Both dialogs are active', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      var activeCount = 0;
-      dale.go (rs.body, function (d) {if (d.status === 'active') activeCount++;});
+      var activeCount = dale.fil (rs.body, undefined, function (d) {
+         if (d.status === 'active') return d;
+      }).length;
       if (activeCount < 2) return log ('Expected 2 active dialogs, got ' + activeCount);
       return true;
    }],
@@ -368,10 +364,7 @@ var flow4Sequence = [
    // Verify project is gone from the list
    ['F3: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      var stillExists = dale.stop (rs.body, false, function (name) {
-         if (name === PROJECT4) return true;
-      });
-      if (stillExists) return log ('Project still exists after deletion');
+      if (inc (rs.body, PROJECT4)) return log ('Project still exists after deletion');
       return true;
    }],
 

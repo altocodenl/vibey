@@ -1005,14 +1005,11 @@ var parseSections = function (markdown) {
 };
 
 var stripSectionMetadata = function (text) {
-   var lines = (text || '').split ('\n');
-   var kept = [];
-   dale.go (lines, function (line) {
+   return dale.fil ((text || '').split ('\n'), undefined, function (line) {
       if (/^>\s*Time:/.test (line)) return;
       if (/^>\s*Usage(?: cumulative)?:/.test (line)) return;
-      kept.push (line);
-   });
-   return kept.join ('\n').trim ();
+      return line;
+   }).join ('\n').trim ();
 };
 
 var parseUsageNumbers = function (usage) {
@@ -1270,14 +1267,18 @@ var writeToolResults = function (filepath, resultsById) {
    var markdown = fs.readFileSync (filepath, 'utf8');
    var toolCalls = parseToolCalls (markdown, true);
 
-   for (var i = toolCalls.length - 1; i >= 0; i--) {
-      var tc = toolCalls [i];
-      if (tc.result) continue;
+   // Collect replacements, then apply in reverse order to preserve positions
+   var replacements = dale.fil (toolCalls, undefined, function (tc) {
+      if (tc.result) return;
       var result = resultsById [tc.id];
-      if (! result) continue;
-      var replacement = buildToolBlock (tc, result);
-      markdown = markdown.slice (0, tc.start) + replacement + markdown.slice (tc.end);
-   }
+      if (! result) return;
+      return {start: tc.start, end: tc.end, text: buildToolBlock (tc, result)};
+   });
+
+   replacements.reverse ();
+   dale.go (replacements, function (r) {
+      markdown = markdown.slice (0, r.start) + r.text + markdown.slice (r.end);
+   });
 
    fs.writeFileSync (filepath, markdown, 'utf8');
 };
@@ -1652,7 +1653,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
             executed.push ({id: tc.id, name: tc.name, result: toolResult});
          }
 
-         if (Object.keys (resultsById).length) writeToolResults (dialog.filepath, resultsById);
+         if (dale.keys (resultsById).length) writeToolResults (dialog.filepath, resultsById);
          if (executed.length) autoExecutedAll = autoExecutedAll.concat (executed);
 
          if (! toolCalls.length) {
@@ -1774,12 +1775,23 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
 
 // Validate filename: only alphanumeric, dash, underscore, dot; must end in .md
 var validFilename = function (name) {
-   if (! name || typeof name !== 'string') return false;
+   if (type (name) !== 'string') return false;
    if (! name.endsWith ('.md')) return false;
    if (name.includes ('..')) return false;
    if (name.includes ('/') || name.includes ('\\')) return false;
    return true;
 }
+
+// Resolve project dir for route handlers; replies with error and returns null on failure
+var resolveProject = function (rs, projectName) {
+   try {
+      return getExistingProjectDir (projectName);
+   }
+   catch (error) {
+      reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
+      return null;
+   }
+};
 
 // *** ROUTES ***
 
@@ -2004,8 +2016,8 @@ var routes = [
    // *** FILES ***
 
    ['get', 'project/:project/files', function (rq, rs) {
-      var projectDir;
-      try {projectDir = getExistingProjectDir (rq.data.params.project);} catch (error) {return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});}
+      var projectDir = resolveProject (rs, rq.data.params.project);
+      if (! projectDir) return;
 
       fs.readdir (projectDir, function (error, files) {
          if (error) return reply (rs, 500, {error: 'Failed to read directory'});
@@ -2031,8 +2043,8 @@ var routes = [
       var name = rq.data.params.name;
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectDir;
-      try {projectDir = getExistingProjectDir (rq.data.params.project);} catch (error) {return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});}
+      var projectDir = resolveProject (rs, rq.data.params.project);
+      if (! projectDir) return;
 
       var filepath = Path.join (projectDir, name);
       fs.readFile (filepath, 'utf8', function (error, content) {
@@ -2052,8 +2064,8 @@ var routes = [
          ['content', rq.body.content, 'string'],
       ])) return;
 
-      var projectDir;
-      try {projectDir = getExistingProjectDir (rq.data.params.project);} catch (error) {return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});}
+      var projectDir = resolveProject (rs, rq.data.params.project);
+      if (! projectDir) return;
 
       var filepath = Path.join (projectDir, name);
       fs.writeFile (filepath, rq.body.content, 'utf8', function (error) {
@@ -2066,8 +2078,8 @@ var routes = [
       var name = rq.data.params.name;
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectDir;
-      try {projectDir = getExistingProjectDir (rq.data.params.project);} catch (error) {return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});}
+      var projectDir = resolveProject (rs, rq.data.params.project);
+      if (! projectDir) return;
 
       var filepath = Path.join (projectDir, name);
       fs.unlink (filepath, function (error) {
@@ -2148,7 +2160,7 @@ var routes = [
       if (rq.body.provider !== undefined && (type (rq.body.provider) !== 'string' || ! inc (['claude', 'openai'], rq.body.provider))) return reply (rs, 400, {error: 'provider must be claude or openai'});
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
 
-      var continues = type (rq.body.prompt) === 'string' && rq.body.prompt.trim () ? true : false;
+      var continues = type (rq.body.prompt) === 'string' && !! rq.body.prompt.trim ();
 
       if (! continues) {
          var active = getActiveStream (rq.body.dialogId);
@@ -2238,8 +2250,8 @@ var routes = [
    // Get dialog by ID
    ['get', 'project/:project/dialog/:id', function (rq, rs) {
       var dialogId = rq.data.params.id;
-      var projectDir;
-      try {projectDir = getExistingProjectDir (rq.data.params.project);} catch (error) {return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});}
+      var projectDir = resolveProject (rs, rq.data.params.project);
+      if (! projectDir) return;
       var dialog = loadDialog (projectDir, dialogId);
 
       if (! dialog.exists) {
@@ -2259,8 +2271,8 @@ var routes = [
 
    // List all dialogs
    ['get', 'project/:project/dialogs', function (rq, rs) {
-      var projectDir;
-      try {projectDir = getExistingProjectDir (rq.data.params.project);} catch (error) {return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});}
+      var projectDir = resolveProject (rs, rq.data.params.project);
+      if (! projectDir) return;
 
       fs.readdir (projectDir, function (error, files) {
          if (error) return reply (rs, 500, {error: 'Failed to read directory'});
@@ -2268,18 +2280,15 @@ var routes = [
             if (file.startsWith ('dialog-') && file.endsWith ('.md')) return file;
          });
          // Sort by modification time, most recent first
-         var withStats = dale.go (dialogFiles, function (file) {
+         var withStats = dale.fil (dialogFiles, undefined, function (file) {
             try {
-               var stat = fs.statSync (Path.join (projectDir, file));
                var parsed = parseDialogFilename (file);
-               if (! parsed) return null;
+               if (! parsed) return;
+               var stat = fs.statSync (Path.join (projectDir, file));
                return {dialogId: parsed.dialogId, status: parsed.status, filename: file, mtime: stat.mtime.getTime ()};
             }
-            catch (e) {
-               return null;
-            }
+            catch (e) {}
          });
-         withStats = dale.fil (withStats, undefined, function (f) { return f; });
          withStats.sort (function (a, b) { return b.mtime - a.mtime; });
          reply (rs, 200, withStats);
       });

@@ -72,6 +72,7 @@
 
    var B = window.B;
    var type = teishi.type;
+   var inc  = teishi.inc;
 
    // *** HELPERS ***
 
@@ -93,11 +94,9 @@
    };
 
    var findByText = function (selector, text) {
-      var elements = document.querySelectorAll (selector);
-      for (var i = 0; i < elements.length; i++) {
-         if (elements [i].textContent.indexOf (text) !== -1) return elements [i];
-      }
-      return null;
+      return dale.stopNot (Array.prototype.slice.call (document.querySelectorAll (selector)), undefined, function (el) {
+         if (el.textContent.indexOf (text) !== -1) return el;
+      }) || null;
    };
 
    var click = function (el) {
@@ -231,16 +230,19 @@
          var metaElements = document.querySelectorAll ('.chat-meta');
          if (metaElements.length === 0) return 'No .chat-meta elements found in chat view';
 
-         var hasTime = false;
-         var hasDuration = false;
-         var hasCompactTokens = false;
+         var texts = dale.go (Array.prototype.slice.call (metaElements), function (el) {
+            return el.textContent || '';
+         });
 
-         for (var i = 0; i < metaElements.length; i++) {
-            var text = metaElements [i].textContent || '';
-            if (/\b\d{2}:\d{2}:\d{2}\b/.test (text) || /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\b/.test (text)) hasTime = true;
-            if (/\b\d+\.\ds\b/.test (text)) hasDuration = true;
-            if (/\b\d+\.\dkti\s+\+\s+\d+\.\dkto\b/.test (text)) hasCompactTokens = true;
-         }
+         var hasTime = dale.stopNot (texts, undefined, function (text) {
+            if (/\b\d{2}:\d{2}:\d{2}\b/.test (text) || /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\b/.test (text)) return true;
+         });
+         var hasDuration = dale.stopNot (texts, undefined, function (text) {
+            if (/\b\d+\.\ds\b/.test (text)) return true;
+         });
+         var hasCompactTokens = dale.stopNot (texts, undefined, function (text) {
+            if (/\b\d+\.\dkti\s+\+\s+\d+\.\dkto\b/.test (text)) return true;
+         });
 
          if (! hasTime) return 'No local time shown in gauges';
          if (! hasDuration) return 'No rounded seconds duration shown in gauges';

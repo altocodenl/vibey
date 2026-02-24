@@ -276,7 +276,7 @@ B.mrespond ([
 
 
    ['report', 'error', function (x, error) {
-      alert (typeof error === 'string' ? error : JSON.stringify (error));
+      alert (type (error) === 'string' ? error : JSON.stringify (error));
    }],
 
    ['reset', 'chatInput', function (x) {
@@ -1540,9 +1540,9 @@ var wrapLongLines = function (text, maxCol) {
    if (type (text) !== 'string') return text;
    return dale.go (text.split ('\n'), function (line) {
       if (line.length <= maxCol) return line;
-      var parts = [];
-      for (var i = 0; i < line.length; i += maxCol) parts.push (line.slice (i, i + maxCol));
-      return parts.join ('\n');
+      return dale.go (dale.times (Math.ceil (line.length / maxCol), 0), function (k) {
+         return line.slice (k * maxCol, (k + 1) * maxCol);
+      }).join ('\n');
    }).join ('\n');
 };
 
@@ -1561,7 +1561,7 @@ var normalizeToolPreviewValue = function (value) {
 
    if (type (value) === 'object') {
       var out = {};
-      dale.go (Object.keys (value), function (key) {
+      dale.go (dale.keys (value), function (key) {
          out [key] = normalizeToolPreviewValue (value [key]);
       });
       return out;
@@ -1578,51 +1578,36 @@ var previewValueText = function (value) {
 
 var compactStdStream = function (label, text, maxLines) {
    text = type (text) === 'string' ? text.replace (/\r/g, '') : '';
-   var out = [];
-   out.push (label + ' (' + text.length + ' chars)');
-   if (! text) {
-      out.push ('  (empty)');
-      return out.join ('\n');
-   }
+   var header = label + ' (' + text.length + ' chars)';
+   if (! text) return header + '\n  (empty)';
 
-   var shown = text;
-   if (maxLines !== null && maxLines !== undefined) shown = compactLines (text, maxLines).text;
-
-   out.push ('  ' + shown.split ('\n').join ('\n  '));
-   return out.join ('\n');
+   var shown = (maxLines !== null && maxLines !== undefined) ? compactLines (text, maxLines).text : text;
+   return header + '\n  ' + shown.split ('\n').join ('\n  ');
 };
 
 var formatToolResultPreview = function (obj, maxStreamLines) {
    if (type (obj) !== 'object' || ! obj) return null;
    if (obj.stdout === undefined && obj.stderr === undefined) return null;
 
-   var lines = [];
-   if (obj.success !== undefined) lines.push ('success: ' + (obj.success ? 'true' : 'false'));
-   if (obj.error !== undefined) lines.push ('error: ' + previewValueText (obj.error));
-   if (obj.message !== undefined) lines.push ('message: ' + previewValueText (obj.message));
-
-   lines.push (compactStdStream ('stdout', type (obj.stdout) === 'string' ? obj.stdout : '', maxStreamLines));
-   lines.push (compactStdStream ('stderr', type (obj.stderr) === 'string' ? obj.stderr : '', maxStreamLines));
-
-   return lines.join ('\n\n');
+   return dale.fil ([
+      obj.success !== undefined ? 'success: ' + (obj.success ? 'true' : 'false') : undefined,
+      obj.error   !== undefined ? 'error: '   + previewValueText (obj.error)      : undefined,
+      obj.message !== undefined ? 'message: ' + previewValueText (obj.message)    : undefined,
+      compactStdStream ('stdout', type (obj.stdout) === 'string' ? obj.stdout : '', maxStreamLines),
+      compactStdStream ('stderr', type (obj.stderr) === 'string' ? obj.stderr : '', maxStreamLines)
+   ], undefined, function (v) { return v; }).join ('\n\n');
 };
 
 var formatToolInputPreview = function (obj) {
    if (type (obj) !== 'object' || ! obj) return null;
-   var keys = Object.keys (obj);
+   var keys = dale.keys (obj);
    if (keys.length === 0) return null;
 
-   var lines = [];
-   dale.go (keys, function (key) {
+   return dale.go (keys, function (key) {
       var val = obj [key];
-      if (type (val) === 'string') {
-         if (val.length > 200) lines.push (key + ': [' + val.length + ' chars]');
-         else lines.push (key + ': ' + val);
-      }
-      else lines.push (key + ': ' + JSON.stringify (val));
-   });
-
-   return lines.join ('\n');
+      if (type (val) === 'string') return key + ': ' + (val.length > 200 ? '[' + val.length + ' chars]' : val);
+      return key + ': ' + JSON.stringify (val);
+   }).join ('\n');
 };
 
 var formatIndentedToolPayload = function (payload, compact) {
@@ -1658,9 +1643,10 @@ var compactToolBlocksForMessage = function (text) {
 };
 
 var messageToolExpansionKey = function (dialogId, index, content) {
-   var hash = 0;
    content = type (content) === 'string' ? content : '';
-   for (var i = 0; i < content.length; i++) hash = ((hash * 31) + content.charCodeAt (i)) >>> 0;
+   var hash = dale.acc (content.split (''), 0, function (h, ch) {
+      return ((h * 31) + ch.charCodeAt (0)) >>> 0;
+   });
    return 'vibey_toolmsg_v1_' + (dialogId || 'new') + '_' + index + '_' + hash;
 };
 
@@ -1764,9 +1750,8 @@ var parseDialogContent = function (content) {
 
    var parseSection = function (role, lines) {
       var time = null, usage = null, usageCumulative = null, resourcesMs = null;
-      var body = [];
 
-      dale.go (lines, function (line) {
+      var body = dale.fil (lines, undefined, function (line) {
          var mTime = line.match (/^>\s*Time:\s*(.+)$/);
          if (mTime) {
             time = mTime [1].trim ();
@@ -1791,7 +1776,7 @@ var parseDialogContent = function (content) {
             return;
          }
 
-         body.push (line);
+         return line;
       });
 
       var cleaned = body.join ('\n').replace (/^\n+/, '').replace (/\s+$/, '');
@@ -1909,7 +1894,7 @@ var parseTimeRange = function (time) {
 };
 
 var formatSecondsRounded = function (ms) {
-   if (typeof ms !== 'number' || ! isFinite (ms) || ms < 0) return null;
+   if (! inc (['integer', 'float'], type (ms)) || ! isFinite (ms) || ms < 0) return null;
    return (Math.round ((ms / 1000) * 10) / 10).toFixed (1) + 's';
 };
 
@@ -1919,35 +1904,28 @@ var formatKTokens = function (tokens) {
 };
 
 var formatMessageGauges = function (msg) {
-   var meta = [];
-
    var timeRange = parseTimeRange (msg.time);
-   if (timeRange && timeRange.end && timeRange.end !== '...') {
-      meta.push (formatLocalDateTimeNoMs (timeRange.end));
+   var hasEnd = timeRange && timeRange.end && timeRange.end !== '...';
+   var elapsedMs = null;
 
-      var elapsedMs = null;
+   if (hasEnd) {
       if (timeRange.startMs !== null && timeRange.endMs !== null) elapsedMs = timeRange.endMs - timeRange.startMs;
       else if (timeRange.startTodMs !== null && timeRange.endTodMs !== null) {
          elapsedMs = timeRange.endTodMs - timeRange.startTodMs;
          if (elapsedMs < 0) elapsedMs += 24 * 60 * 60 * 1000;
       }
-      if ((elapsedMs === null || elapsedMs < 0) && type (msg.resourcesMs) === 'number' && isFinite (msg.resourcesMs)) elapsedMs = msg.resourcesMs;
-
-      if (elapsedMs !== null) {
-         var duration = formatSecondsRounded (elapsedMs);
-         if (duration) meta.push (duration);
-      }
+      if ((elapsedMs === null || elapsedMs < 0) && inc (['integer', 'float'], type (msg.resourcesMs)) && isFinite (msg.resourcesMs)) elapsedMs = msg.resourcesMs;
    }
 
-   if (msg.usageCumulative) {
-      meta.push (formatKTokens (msg.usageCumulative.input) + 'ti + ' + formatKTokens (msg.usageCumulative.output) + 'to');
-   }
-
-   return meta.join (' · ');
+   return dale.fil ([
+      hasEnd ? formatLocalDateTimeNoMs (timeRange.end) : undefined,
+      elapsedMs !== null ? formatSecondsRounded (elapsedMs) : undefined,
+      msg.usageCumulative ? formatKTokens (msg.usageCumulative.input) + 'ti + ' + formatKTokens (msg.usageCumulative.output) + 'to' : undefined
+   ], undefined, function (v) { return v; }).join (' · ');
 };
 
 var summarizeToolInput = function (tool, expanded) {
-   var input = JSON.parse (JSON.stringify (tool.input || {}));
+   var input = teishi.copy (tool.input || {});
 
    if (tool.name === 'write_file' && type (input.content) === 'string') {
       input.content = '[hidden file content: ' + input.content.length + ' chars]';
