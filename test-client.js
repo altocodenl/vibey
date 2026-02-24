@@ -26,7 +26,7 @@
          });
 
          try {
-            await page.goto ('http://localhost:3001', {waitUntil: 'networkidle2', timeout: 30000});
+            await page.goto ('http://localhost:5353', {waitUntil: 'networkidle2', timeout: 30000});
 
             // Click the top-right "🧪 Test" button.
             var clicked = await page.evaluate (function () {
@@ -204,8 +204,8 @@
          return true;
       }],
 
-      // --- Step 6b: Write a test file into the project for the agent to read ---
-      ['Step 6b: Write test-sample.txt for agent to read', function (done) {
+      // --- Step 7: Write a test file into the project for the agent to read ---
+      ['Step 7: Write test-sample.txt for agent to read', function (done) {
          var project = TEST_PROJECT;
          var content = '# Sample File\n\nThis is a test file for vibey.\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n';
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
@@ -218,8 +218,8 @@
          return true;
       }],
 
-      // --- Step 7: Send message to read test-sample.txt ---
-      ['Step 7: Send "Please read test-sample.txt" message', function (done) {
+      // --- Step 8: Send message to read test-sample.txt ---
+      ['Step 8: Send "Please read test-sample.txt" message', function (done) {
          B.call ('set', 'chatInput', 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, and summarize what it is about.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
@@ -303,8 +303,8 @@
          return true;
       }],
 
-      // --- Step 13: Verify write_file result shown with success ---
-      ['Step 13: Write result shown with success in chat view', function () {
+      // --- Step 12: Verify write_file result shown with success ---
+      ['Step 12: Write result shown with success in chat view', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No current file';
 
@@ -322,8 +322,8 @@
          return true;
       }],
 
-      // --- Step 14: Verify dummy.js was actually created ---
-      ['Step 14: Verify dummy.js exists with console.log', function (done) {
+      // --- Step 13: Verify dummy.js was actually created ---
+      ['Step 13: Verify dummy.js exists with console.log', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (TEST_PROJECT) + '/file/dummy.js', {}, '', function (error, rs) {
             if (error) {
                window._testDummyContent = null;
@@ -346,12 +346,6 @@
       // --- Cleanup Flow #1 ---
       ['Cleanup: restore prompt', function () {
          restorePrompt ();
-         return true;
-      }],
-
-      // --- Flow #1 complete alert ---
-      ['Flow #1 complete (acknowledge to continue)', function () {
-         alert ('✅ Flow #1 passed. Click OK to continue to Flow #2.');
          return true;
       }],
 
@@ -400,9 +394,9 @@
       ['F2-4: Click main.md, editor shows content', function () {
          var file = B.get ('currentFile');
          if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
-         var textarea = document.querySelector ('.editor-textarea');
-         if (! textarea) return 'Editor textarea not found';
-         if (textarea.value.indexOf ('main') === -1) return 'Editor does not contain initial content';
+         var preview = document.querySelector ('.editor-preview');
+         if (! preview) return 'Editor preview not found';
+         if (preview.innerHTML.indexOf ('main') === -1) return 'Editor does not contain initial content';
          return true;
       }],
 
@@ -415,7 +409,6 @@
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile';
          if (file.content === file.original) return 'Content should differ from original (dirty state)';
-         // Check dirty indicator in DOM
          var dirty = document.querySelector ('.editor-dirty');
          if (! dirty) return 'Dirty indicator "(unsaved)" not found in DOM';
          if (dirty.textContent.indexOf ('unsaved') === -1) return 'Dirty indicator text missing "unsaved"';
@@ -430,7 +423,6 @@
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile after save';
          if (file.content !== file.original) return 'After save, content and original should match';
-         // Dirty indicator should be gone
          var dirty = document.querySelector ('.editor-dirty');
          if (dirty) return 'Dirty indicator still present after save';
          return true;
@@ -460,48 +452,43 @@
          return true;
       }],
 
-      // --- F2 Step 9: Go back to main.md, edit, then try to switch away ---
-      // We mock confirm to test the dirty-leave warning
-      ['F2-9: Edit main.md and attempt to leave (warned, stay and save)', function (done) {
-         // First load main.md
+      // --- F2 Step 9: Go back to main.md and make it dirty ---
+      ['F2-9: Edit main.md and mark it dirty', function (done) {
          B.call ('load', 'file', 'doc-main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
          if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
-         // Make it dirty
          B.call ('set', ['currentFile', 'content'], file.original + '\nExtra unsaved line.\n');
-         var fileDirty = B.get ('currentFile');
-         if (fileDirty.content === fileDirty.original) return 'File should be dirty';
+         var dirtyFile = B.get ('currentFile');
+         if (dirtyFile.content === dirtyFile.original) return 'File should be dirty';
          return true;
       }],
 
-      // --- F2 Step 10: Try to load another file while dirty — mock confirm to save ---
+      // --- F2 Step 10: Try to leave dirty doc and choose save ---
       ['F2-10: Navigate away from dirty doc triggers save via confirm', function (done) {
-         // Mock confirm: first confirm (save?) -> true, triggering save
          var originalConfirm = window.confirm;
          window.confirm = function () {
             window.confirm = originalConfirm;
-            return true; // "Yes, save before leaving"
+            return true;
          };
          B.call ('load', 'file', 'doc-notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile';
-         // We should now be on doc-notes.md (the save succeeded and we navigated)
          if (file.name !== 'doc-notes.md') return 'Expected to land on doc-notes.md, got ' + file.name;
          return true;
       }],
 
-      // --- F2 Step 11: Verify the save from step 10 persisted ---
+      // --- F2 Step 11: Verify save persisted ---
       ['F2-11: Verify main.md has the extra line saved', function (done) {
          B.call ('load', 'file', 'doc-main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
          if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
-         if (file.content.indexOf ('Extra unsaved line') === -1) return 'Extra line was not saved. Content: ' + file.content.slice (0, 200);
+         if (file.content.indexOf ('Extra unsaved line') === -1) return 'Extra line was not saved';
          return true;
       }],
 
@@ -509,13 +496,12 @@
       ['F2-12: Edit main.md, then discard changes', function (done) {
          var file = B.get ('currentFile');
          B.call ('set', ['currentFile', 'content'], file.original + '\nThis will be discarded.\n');
-         // Mock confirm: first confirm (save?) -> false (don't save), second confirm (discard?) -> true
          var callCount = 0;
          var originalConfirm = window.confirm;
          window.confirm = function () {
             callCount++;
-            if (callCount === 1) return false;  // "No, don't save"
-            if (callCount === 2) {               // "Yes, discard"
+            if (callCount === 1) return false;
+            if (callCount === 2) {
                window.confirm = originalConfirm;
                return true;
             }
@@ -531,36 +517,26 @@
          return true;
       }],
 
-      // --- F2 Step 13: Verify main.md does NOT have the discarded text ---
+      // --- F2 Step 13: Verify discarded changes were not persisted ---
       ['F2-13: Verify discarded changes not persisted', function (done) {
          B.call ('load', 'file', 'doc-main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
          if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
-         if (file.content.indexOf ('This will be discarded') !== -1) return 'Discarded text was persisted — should not be there';
+         if (file.content.indexOf ('This will be discarded') !== -1) return 'Discarded text was persisted';
          return true;
       }],
 
-      // --- F2 Cleanup ---
       ['F2-Cleanup: restore prompt', function () {
          restorePrompt ();
          return true;
       }],
 
-      // --- Flow #2 complete alert ---
-      ['Flow #2 complete (acknowledge to continue)', function () {
-         alert ('✅ Flow #2 passed. Click OK to continue to Flow #3.');
-         return true;
-      }],
-
-      /*
       // =============================================
-      // *** FLOW #3: Delete project stops agents ***
-      // (Based on flow4Sequence/allFlows[3] in test-server.js)
+      // *** FLOW #3: Delete project stops agents and removes folder ***
       // =============================================
 
-      // --- F3 Step 1: Create project ---
       ['F3-1: Create project', function (done) {
          window._f3Project = 'test-flow3-' + testTimestamp ();
          mockPrompt (window._f3Project);
@@ -568,49 +544,24 @@
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
-         var project = B.get ('currentProject');
-         if (project !== window._f3Project) return 'Expected project "' + window._f3Project + '", got "' + project + '"';
-         return true;
+         return B.get ('currentProject') === window._f3Project || 'Failed to create flow #3 project';
       }],
 
-      // --- F3 Step 2: Write doc-main.md ---
       ['F3-2: Write doc-main.md', function (done) {
-         var content = [
-            '# Flow 4 Test Project',
-            ''
-         ].join ('\n') + '\n';
-         var project = window._f3Project;
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, {content: content}, function () {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/file/doc-main.md', {}, {content: '# Flow 3 Test Project\n\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
-      }, function () {
-         return true;
-      }],
+      }, function () {return true;}],
 
-      // --- F3 Step 3: Create two dialogs (agent-a, agent-b) ---
       ['F3-3: Create dialogs A and B', function (done) {
-         var project = window._f3Project;
          var pending = 2;
-         var finish = function () {
-            pending--;
-            if (pending === 0) done (MEDIUM_WAIT, POLL);
-         };
-
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/dialog/new', {}, {
-            provider: 'openai',
-            model: 'gpt-5',
-            slug: 'agent-a'
-         }, function (error, rs) {
-            window._f3DialogA = rs && rs.body ? rs.body.dialogId : null;
+         var finish = function () {if (--pending === 0) done (MEDIUM_WAIT, POLL);};
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, function (error, rs) {
+            window._f3DialogA = rs && rs.body && rs.body.dialogId;
             finish ();
          });
-
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/dialog/new', {}, {
-            provider: 'openai',
-            model: 'gpt-5',
-            slug: 'agent-b'
-         }, function (error, rs) {
-            window._f3DialogB = rs && rs.body ? rs.body.dialogId : null;
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, function (error, rs) {
+            window._f3DialogB = rs && rs.body && rs.body.dialogId;
             finish ();
          });
       }, function () {
@@ -618,231 +569,133 @@
          return true;
       }],
 
-      // --- F3 Step 4: Fire dialogs with long prompts (non-blocking) ---
-      ['F3-4: Fire dialog A + B', function (done) {
-         var project = window._f3Project;
-         var payloadA = {dialogId: window._f3DialogA, prompt: 'Write a file called story-a.txt with a 500 word story about a robot. Use write_file.'};
-         var payloadB = {dialogId: window._f3DialogB, prompt: 'Write a file called story-b.txt with a 500 word story about a dragon. Use write_file.'};
-
-         fetch ('project/' + encodeURIComponent (project) + '/dialog', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify (payloadA)
-         }).catch (function () {});
-
-         fetch ('project/' + encodeURIComponent (project) + '/dialog', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify (payloadB)
-         }).catch (function () {});
-
+      ['F3-4: Fire both dialogs (non-blocking)', function (done) {
+         var project = encodeURIComponent (window._f3Project);
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f3DialogA, prompt: 'Write a 2000 word essay about the history of computing. Take your time and be thorough.'})}).catch (function () {});
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f3DialogB, prompt: 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.'})}).catch (function () {});
          done (SHORT_WAIT, POLL);
-      }, function () {
-         return true;
-      }],
+      }, function () {return true;}],
 
-      // --- F3 Step 5: Wait until both dialogs are active ---
-      ['F3-5: Both dialogs become active', function (done) {
+      ['F3-5: Both dialogs are active', function (done) {
          done (LONG_WAIT, POLL);
       }, function () {
-         if (! window._f3DialogStatus && ! window._f3DialogCheckInFlight) {
-            window._f3DialogCheckInFlight = true;
+         if (! window._f3StatusRequested) {
+            window._f3StatusRequested = true;
             c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
-               window._f3DialogCheckInFlight = false;
+               window._f3StatusRequested = false;
                if (error) return;
-               window._f3DialogStatus = rs.body || [];
+               window._f3Dialogs = rs.body || [];
             });
-            return 'Waiting for dialog status...';
+            return 'Polling dialog statuses...';
          }
-
-         var dialogs = window._f3DialogStatus || [];
-         var activeCount = dialogs.filter (function (d) {return d.status === 'active';}).length;
+         var activeCount = dale.fil (window._f3Dialogs || [], undefined, function (d) {
+            if (d.status === 'active') return d;
+         }).length;
          if (activeCount >= 2) return true;
-
-         window._f3DialogStatus = null;
-         return 'Waiting for dialogs to become active...';
+         window._f3Dialogs = null;
+         return 'Waiting for both dialogs to become active...';
       }],
 
-      // --- F3 Step 6: Delete project with active agents ---
       ['F3-6: Delete project with active agents', function (done) {
          var originalConfirm = window.confirm;
-         window.confirm = function () {
-            window.confirm = originalConfirm;
-            return true;
-         };
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f3Project);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var project = B.get ('currentProject');
-         if (project) return 'Expected currentProject to be null after deletion';
-         var tab = B.get ('tab');
-         if (tab !== 'projects') return 'Expected to return to projects tab after deletion';
+         if (B.get ('currentProject')) return 'Expected currentProject to be null after deletion';
+         if (B.get ('tab') !== 'projects') return 'Expected to return to projects tab after deletion';
          return true;
       }],
 
-      // --- F3 Step 7: Dialogs endpoint returns 404 ---
       ['F3-7: Dialogs endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
-            window._f3DialogsStatus = error ? error.status : (rs && rs.status);
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error) {
+            window._f3Dialogs404 = error && error.status;
             done (SHORT_WAIT, POLL);
          });
       }, function () {
-         if (window._f3DialogsStatus !== 404) return 'Expected dialogs endpoint to return 404, got ' + window._f3DialogsStatus;
-         return true;
+         return window._f3Dialogs404 === 404 || 'Expected dialogs endpoint 404';
       }],
 
-      // --- F3 Step 8: Files endpoint returns 404 ---
       ['F3-8: Files endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/files', {}, '', function (error, rs) {
-            window._f3FilesStatus = error ? error.status : (rs && rs.status);
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/files', {}, '', function (error) {
+            window._f3Files404 = error && error.status;
             done (SHORT_WAIT, POLL);
          });
       }, function () {
-         if (window._f3FilesStatus !== 404) return 'Expected files endpoint to return 404, got ' + window._f3FilesStatus;
-         return true;
+         return window._f3Files404 === 404 || 'Expected files endpoint 404';
       }],
 
-      // --- F3 Step 9: Re-create same project name ---
       ['F3-9: Re-create same project name', function (done) {
-         c.ajax ('post', 'projects', {}, {name: window._f3Project}, function () {
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         return true;
-      }],
+         c.ajax ('post', 'projects', {}, {name: window._f3Project}, function () {done (SHORT_WAIT, POLL);});
+      }, function () {return true;}],
 
-      // --- F3 Step 10: Re-created project has no dialogs/files ---
-      ['F3-10: Re-created project has no dialogs/files', function (done) {
-         var project = window._f3Project;
+      ['F3-10: Re-created project has no dialogs and only default doc-main.md', function (done) {
          var pending = 2;
-         var finish = function () {
-            pending--;
-            if (pending === 0) done (SHORT_WAIT, POLL);
-         };
-
-         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/dialogs', {}, '', function (error, rs) {
+         var finish = function () {if (--pending === 0) done (SHORT_WAIT, POLL);};
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
             window._f3DialogsAfter = error ? null : (rs.body || []);
             finish ();
          });
-
-         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/files', {}, '', function (error, rs) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/files', {}, '', function (error, rs) {
             window._f3FilesAfter = error ? null : (rs.body || []);
             finish ();
          });
       }, function () {
-         if (! window._f3DialogsAfter || window._f3DialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
-         if (! window._f3FilesAfter || window._f3FilesAfter.length !== 0) return 'Expected 0 files after re-create';
-         return true;
-      }],
-
-      // --- F3 Cleanup: Delete re-created project ---
-      ['F3-Cleanup: Delete re-created project', function (done) {
-         c.ajax ('delete', 'projects/' + encodeURIComponent (window._f3Project), {}, '', function () {
-            done (SHORT_WAIT, POLL);
+         if (type (window._f3DialogsAfter) !== 'array' || window._f3DialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
+         if (type (window._f3FilesAfter) !== 'array') return 'Expected files array after re-create';
+         var unexpected = dale.fil (window._f3FilesAfter, undefined, function (name) {
+            if (name !== 'doc-main.md') return name;
          });
-      }, function () {
+         if (unexpected.length) return 'Unexpected files after re-create: ' + unexpected.join (', ');
          return true;
       }],
 
-      // --- Flow #3 complete alert ---
-      ['Flow #3 complete (acknowledge to continue)', function () {
-         alert ('✅ Flow #3 passed. Click OK to continue to Flow #4.');
-         return true;
-      }]
-      */
+      ['F3-11: Delete re-created project', function (done) {
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._f3Project), {}, '', function () {done (SHORT_WAIT, POLL);});
+      }, function () {return true;}],
 
       // =============================================
-      // *** FLOW #4: Static tictactoe (HTML + JS only) ***
-      // (Based on flow3Sequence/allFlows[4] in test-server.js)
+      // *** FLOW #4: Static tictactoe — HTML + JS only (no backend) ***
       // =============================================
 
-      // --- F4 Step 1: Create a new project ---
-      ['F4-1: Create project for tictactoe', function (done) {
+      ['F4-1: Create project', function (done) {
          window._f4Project = 'test-flow4-' + testTimestamp ();
          mockPrompt (window._f4Project);
          B.call ('create', 'project');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
-         var project = B.get ('currentProject');
-         if (project !== window._f4Project) return 'Expected project "' + window._f4Project + '", got "' + project + '"';
-         return true;
+         return B.get ('currentProject') === window._f4Project || 'Failed to create flow #4 project';
       }],
 
-      // --- F4 Step 2: Write doc-main.md + doc-gotob.md (instructions + gotoB reference) ---
-      ['F4-2: Write doc-main.md + doc-gotob.md', function (done) {
+      ['F4-2: Write doc-main.md', function (done) {
          var docMain = [
             '# Tictactoe Project',
             '',
-            'Build a simple tictactoe game for the browser using gotoB.',
-            '',
-            '## Architecture',
-            '',
-            '- `index.html` — static HTML shell that loads gotoB from CDN and `app.js`.',
-            '- `app.js` — tictactoe game using gotoB (B.view, B.call, B.ev, B.store).',
-            '- No backend server. The game is served via the static proxy at `/project/<project>/static/`.',
+            'Build a simple tictactoe game for the browser using gotoB. No backend server.',
+            'Served via the static proxy at `/project/<project>/static/`.',
             '',
             '## References',
             '',
-            '- gotoB docs for LLMs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
-            '- See also doc-gotob.md in this project for a quick reference.',
+            '- gotoB docs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
             '',
-            '## Agent Instructions',
+            '## Critical rules',
             '',
-            'When you receive "please start", you MUST do the following in this exact order:',
-            '',
-            '1. Use write_file to create `index.html` with gotoB + app.js.',
-            '2. THEN: Use write_file to create `app.js` with a 3x3 tictactoe grid.',
-            '',
-            'Do NOT create a backend server. Create each file with a separate write_file call.'
-         ].join ('\n') + '\n';
-
-         var docGotob = [
-            '# gotoB quick reference',
-            '',
-            'gotoB is a client-side reactive UI framework. Load it from CDN.',
-            '',
-            '## Core API',
-            '- `B.store` — single global state object.',
-            '- `B.call(x, verb, path, value)` — trigger an event.',
-            '- `B.view(path, fn)` — reactive view.',
-            '- `B.ev(verb, path, value)` — returns an event handler string for DOM.',
-            '- `B.mount(selector, viewFunction)` — mount a view into the DOM.',
-            '',
-            '## Minimal example',
-            '```js',
-            'var dale = window.dale, B = window.B;',
-            'B.mount ("body", function () {',
-            '   return B.view ("board", function (board) {',
-            '      board = board || [];',
-            '      return ["div", dale.go (board, function (cell, i) {',
-            '         return ["button", {onclick: B.ev ("set", ["board", i], "X")}, cell || ""];',
-            '      })];',
-            '   });',
-            '});',
-            '```',
+            '- `index.html`: load gotoB.min.js in `<body>` (not `<head>` — document.body must exist when gotoB initializes):',
+            '  `<script src="https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js"></script>`',
+            '  This single file bundles dale, teishi, lith, recalc, cocholate. Do NOT load them separately.',
+            '- `app.js`: set `B.prod = true` before any B.call.',
+            '- Use `lith.css.style({...})` for inline styles, not raw JS objects.',
+            '- `B.ev` always requires a path: `B.ev(\'reset\', [])`, not `B.ev(\'reset\')`.',
+            '- Pass event context in responders: `function (x, ...) { B.call(x, \'set\', ...); }`.',
             ''
-         ].join ('\n');
-
-         var project = window._f4Project;
-         var pending = 2;
-         var finish = function () {
-            pending--;
-            if (pending === 0) done (MEDIUM_WAIT, POLL);
-         };
-
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, {content: docMain}, function () {
-            finish ();
+         ].join ('\n') + '\n';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc-main.md', {}, {content: docMain}, function () {
+            done (MEDIUM_WAIT, POLL);
          });
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/doc-gotob.md', {}, {content: docGotob}, function () {
-            finish ();
-         });
-      }, function () {
-         return true;
-      }],
+      }, function () {return true;}],
 
-      // --- F4 Step 3: Create orchestrator dialog ---
-      ['F4-3: Create orchestrator dialog', function (done) {
+      ['F4-3: Create waiting dialog (orchestrator)', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f4Project) + '/dialogs');
          mockPrompt ('orchestrator');
          B.call ('create', 'dialog');
@@ -856,116 +709,91 @@
          return true;
       }],
 
-      // --- F4 Step 5: Fire "please start" ---
-      ['F4-5: Fire "please start" (tools auto-execute)', function (done) {
+      ['F4-4: Fire "please start" (non-blocking)', function (done) {
          B.call ('set', 'chatInput', 'please start');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
-         var streaming = B.get ('streaming');
-         if (streaming) return 'Still streaming...';
+         if (B.get ('streaming')) return 'Still streaming...';
          return true;
       }],
 
-      // --- F4 Step 6: Poll for static app via static proxy ---
-      ['F4-6: Static app responds via static proxy', function (done) {
-         var project = window._f4Project;
+      ['F4-5: Poll until static page serves', function (done) {
          var attempt = function () {
-            c.ajax ('get', 'project/' + encodeURIComponent (project) + '/static/', {}, '', function (error, rs) {
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/static/', {}, '', function (error, rs) {
                if (! error && rs && rs.status === 200) {
-                  var body = (rs.body || '').toLowerCase ();
-                  if (body.indexOf ('gotob') !== -1 && body.indexOf ('app.js') !== -1 && body.indexOf ('tictactoe') !== -1) return done (SHORT_WAIT, POLL);
+                  var lower = (rs.body || '').toLowerCase ();
+                  if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (SHORT_WAIT, POLL);
                }
                setTimeout (attempt, 5000);
             });
          };
          attempt ();
-      }, function () {
-         return true;
-      }],
+      }, function () {return true;}],
 
-      // --- F4 Step 7: Verify index.html + app.js content via tool/execute ---
-      ['F4-7: Verify generated files', function (done) {
-         var project = window._f4Project;
-         var remaining = 2;
-         var fail = null;
-         var finish = function () {
-            remaining--;
-            if (remaining === 0) done (SHORT_WAIT, POLL);
-         };
-
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
-            toolName: 'run_command',
-            toolInput: {command: 'cat index.html'}
-         }, function (error, rs) {
-            if (error || ! rs.body || ! rs.body.success) fail = fail || 'cat index.html failed';
+      ['F4-6: index.html has gotoB + app.js', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, function (error, rs) {
+            if (error || ! rs.body || ! rs.body.success) window._f4IndexError = 'cat index.html failed';
             else {
                var out = (rs.body.stdout || '').toLowerCase ();
-               if (out.indexOf ('gotob') === -1 || out.indexOf ('app.js') === -1) fail = fail || 'index.html missing gotoB/app.js';
+               if (out.indexOf ('gotob') === -1) window._f4IndexError = 'index.html missing gotoB reference';
+               else if (out.indexOf ('app.js') === -1) window._f4IndexError = 'index.html missing app.js reference';
+               else window._f4IndexError = null;
             }
-            finish ();
+            done (SHORT_WAIT, POLL);
          });
+      }, function () {
+         return window._f4IndexError ? window._f4IndexError : true;
+      }],
 
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
-            toolName: 'run_command',
-            toolInput: {command: 'cat app.js'}
-         }, function (error, rs) {
-            if (error || ! rs.body || ! rs.body.success) fail = fail || 'cat app.js failed';
+      ['F4-7: app.js has tictactoe gotoB code', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat app.js'}}, function (error, rs) {
+            if (error || ! rs.body || ! rs.body.success) window._f4AppError = 'cat app.js failed';
             else {
                var out = rs.body.stdout || '';
-               if (out.indexOf ('B.') === -1) fail = fail || 'app.js missing gotoB usage';
+               if (out.indexOf ('B.') === -1) window._f4AppError = 'app.js missing gotoB usage';
+               else {
+                  var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('grid') !== -1;
+                  window._f4AppError = hasBoardLogic ? null : 'app.js missing board/cell/grid logic';
+               }
             }
-            finish ();
+            done (SHORT_WAIT, POLL);
          });
-
-         window._f4FileCheckError = fail;
       }, function () {
-         if (window._f4FileCheckError) return window._f4FileCheckError;
-         return true;
+         return window._f4AppError ? window._f4AppError : true;
       }],
 
-      // --- F4 Step 8: Ask the AI to embed the game in doc-main.md ---
-      ['F4-8: Ask AI to embed tictactoe in doc-main.md', function (done) {
-         // Reload the orchestrator dialog so we can send a follow-up message
-         var files = B.get ('files') || [];
-         var orchestratorFile = dale.stopNot (files, undefined, function (f) {
-            if (f.indexOf ('orchestrator') !== -1) return f;
-         });
-         if (orchestratorFile) B.call ('load', 'file', orchestratorFile);
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file || file.name.indexOf ('orchestrator') === -1) return 'Orchestrator dialog not loaded';
-         return true;
-      }],
-
-      ['F4-9: Send embed request to AI and wait for completion (tools auto-execute)', function (done) {
+      ['F4-8: Send embed request to orchestrator dialog', function (done) {
          B.call ('set', 'chatInput', 'The tictactoe game is now available via the static proxy at /project/' + window._f4Project + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
-         var streaming = B.get ('streaming');
-         if (streaming) return 'Still streaming...';
+         if (B.get ('streaming')) return 'Still streaming...';
          return true;
       }],
 
-      // --- F4 Step 10: Verify embed block is in doc-main.md ---
+      ['F4-9: Poll until embed block appears in doc-main.md', function (done) {
+         var attempt = function () {
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc-main.md', {}, '', function (error, rs) {
+               if (! error && rs && rs.body && type (rs.body.content) === 'string') {
+                  var content = rs.body.content;
+                  if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port static') !== -1) return done (SHORT_WAIT, POLL);
+               }
+               setTimeout (attempt, 5000);
+            });
+         };
+         attempt ();
+      }, function () {return true;}],
+
       ['F4-10: Verify embed block in doc-main.md', function (done) {
-         var project = window._f4Project;
-         c.ajax ('get', 'project/' + encodeURIComponent (project) + '/file/doc-main.md', {}, '', function (error, rs) {
-            window._f4EmbedContent = (rs && rs.body) ? rs.body.content : '';
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc-main.md', {}, '', function (error, rs) {
+            window._f4EmbedContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
          });
       }, function () {
          var content = window._f4EmbedContent || '';
          if (content.indexOf ('əəəembed') === -1) return 'doc-main.md missing əəəembed block';
          if (content.indexOf ('port static') === -1) return 'doc-main.md embed missing port static';
-         return true;
-      }],
-
-      // --- Flow #4 complete alert (project is NOT deleted) ---
-      ['Flow #4 complete (acknowledge to finish)', function () {
-         alert ('✅ Flow #4 passed. All tests done! Project "' + window._f4Project + '" kept with embed.');
          return true;
       }],
 

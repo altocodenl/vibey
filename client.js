@@ -304,8 +304,9 @@ B.mrespond ([
 
    ['change', 'currentFile', {match: B.changeResponder}, function (x) {
       B.call (x, 'maybe', 'autoscrollChat');
-      if (B.get ('editorPreview')) B.call (x, 'update', 'previewContent');
    }],
+
+
 
 
    ['change', 'optimisticUserMessage', {match: B.changeResponder}, function (x) {
@@ -353,8 +354,9 @@ B.mrespond ([
       if (! name || ! name.trim ()) return;
       B.call (x, 'post', 'projects', {}, {name: name.trim ()}, function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to create project');
+         var slug = rs.body && rs.body.slug ? rs.body.slug : name.trim ();
          B.call (x, 'load', 'projects');
-         B.call (x, 'navigate', 'hash', '#/project/' + encodeURIComponent (name.trim ()) + '/docs');
+         B.call (x, 'navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs');
       });
    }],
 
@@ -513,12 +515,13 @@ B.mrespond ([
                return B.call (x, 'write', 'hash');
             }
             var isDialogFile = rs.body.name.startsWith ('dialog-');
+            var nextTab = isDialogFile ? 'dialogs' : 'docs';
+            if (B.get ('tab') !== nextTab) B.call (x, 'set', 'tab', nextTab);
             B.call (x, 'set', 'currentFile', {
                name: rs.body.name,
                content: rs.body.content,
                original: rs.body.content
             });
-            B.call (x, 'set', 'tab', isDialogFile ? 'dialogs' : 'docs');
             if (isDialogFile) B.call (x, 'reset', 'chatInput');
             B.call (x, 'write', 'hash');
          });
@@ -611,24 +614,7 @@ B.mrespond ([
       B.call (x, 'set', 'editorPreview', ! B.get ('editorPreview'));
    }],
 
-   ['change', 'editorPreview', {match: B.changeResponder}, function (x) {
-      B.call (x, 'update', 'previewContent');
-   }],
 
-   ['change', ['currentFile', 'content'], {match: B.changeResponder}, function (x) {
-      if (B.get ('editorPreview')) B.call (x, 'update', 'previewContent');
-   }],
-
-   ['update', 'previewContent', function (x) {
-      setTimeout (function () {
-         var el = document.getElementById ('editor-preview-pane');
-         if (! el) return;
-         var file = B.get ('currentFile');
-         var project = B.get ('currentProject');
-         if (! file || ! project) {el.innerHTML = ''; return;}
-         el.innerHTML = renderMarkdownWithEmbeds (file.content, project);
-      }, 0);
-   }],
 
    // *** DIALOGS ***
 
@@ -1513,7 +1499,7 @@ views.files = function () {
                ]]
             ]],
             editorPreview
-               ? ['div', {id: 'editor-preview-pane', class: 'editor-preview', opaque: true}]
+               ? ['div', {class: 'editor-preview', opaque: true}, ['LITERAL', renderMarkdownWithEmbeds (currentFile.content, currentProject)]]
                : ['textarea', {
                   class: 'editor-textarea',
                   oninput: B.ev ('set', ['currentFile', 'content']),
@@ -2205,15 +2191,17 @@ views.projects = function () {
                ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'project')}, '+ New project']
             ]],
             (projects && projects.length)
-               ? ['div', {class: 'file-list', style: style ({width: '100%'})}, dale.go (projects, function (name) {
+               ? ['div', {class: 'file-list', style: style ({width: '100%'})}, dale.go (projects, function (project) {
+                  var slug = type (project) === 'object' ? project.slug : project;
+                  var displayName = type (project) === 'object' ? project.name : project;
                   return ['div', {
                      class: 'file-item',
-                     onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (name) + '/docs')
+                     onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
                   }, [
-                     ['span', {class: 'file-name'}, name],
+                     ['span', {class: 'file-name'}, displayName],
                      ['span', {
                         class: 'file-delete',
-                        onclick: B.ev ('delete', 'project', name, {raw: 'event'})
+                        onclick: B.ev ('delete', 'project', slug, {raw: 'event'})
                      }, '×']
                   ]];
                })]

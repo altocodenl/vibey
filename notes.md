@@ -4,6 +4,8 @@
 
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
 
+### Prompts
+
 - New architecture:
    - Vibey runs on its own docker
    - Each project, even ones with static files, have their own docker, with a port assigned to them by vibey. Also their own data volume.
@@ -17,11 +19,31 @@ Hi! I'm building vibey. See please readme.md, then server.js and client.js, then
 - Excellent! Do the tests or the client need changes?
 - Can you debug the server tests? vibey is running.
 - Please take all timestamps used in the snapshots and tests and make them into YYYYMMDD-ddmmss
+- In the tests of flow 4, there are still references to flow 3 in the variable names. Can you fix that?
+---
+- I have a failure in the client tests at step f2-4: click main.md: textarea not found
+- We're getting to the point. I want to see the file when I land, not edit it. It's just not showing anything. But if I refresh, it does show.
+- Why do we have a timeout?
+- We need the opaque. That should remain. If you need to render stuff there, you can do it with a responder that has priority of 1 and above. Sorry, -1000 and below.
+- <div id="editor-preview-pane" class="editor-preview" opaque="true"></div>
+  Still empty
+- Still didn't work. Can you fire up client.js and click on that green button using pupeteer?
+- If you figure out a more elegant approach, go for it. You're looking at the events, which gives you the key.
+- Well done! Can you debug this now? Open it in pupeteer too: http://localhost:5353/project/flow3-20260224-203513-86607/static/
+- You fixed it! Can you adjust the instructions on flow 4 of the server test? Make it minimal, just the errors.
+- Can you take all the server tests and make sure that the same instructions and approach is used on the client tests? Also, the variable numbers on each flow should match the step (3 and 4 are sometimes crossed over). Just change the client tests please.
 
-- Snapshots
-   - Snapshots are stored inside the vibey container, in its data volume.
-   - Restoring a snapshot creates a new project with those files.
-   - We have a snapshots view.
+
+- Well done! Can you explain how the static proxying works now that everything's containerized?
+- On creating a project, can you 1) allow arbitrary names with uppercase and symbols, or are we restricted by docker container names? 2) can you autocreate a minimal main.md that says "# <project name>"
+- Can you base64 encode any non-alphanumeric characters and use a delimiter of sorts, so that the names are still readable?
+- No trimming. Any string should generate a valid slug.
+- Great! But don't we need to un-slugify when we're reading the projects?
+
+====
+
+https://antirez.com/news/158
+"It is simply impossible not to see the reality of what is happening. Writing code is no longer needed for the most part. It is now a lot more interesting to understand what to do, and how to do it (and, about this second part, LLMs are great partners, too). It does not matter if AI companies will not be able to get their money back and the stock market will crash. All that is irrelevant, in the long run. It does not matter if this or the other CEO of some unicorn is telling you something that is off putting, or absurd. Programming changed forever, anyway."
 
 ### 2026-02-23
 

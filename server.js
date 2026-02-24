@@ -695,11 +695,38 @@ var pfs = {
 
 // *** PROJECT HELPERS ***
 
+var slugifyProjectName = function (name) {
+   if (type (name) !== 'string' || ! name.trim ()) throw new Error ('Invalid project name');
+   name = name.trim ();
+   // Split into runs of pass-through chars [a-zA-Z0-9_-] and runs of everything else
+   var parts = name.match (/[a-zA-Z0-9_\-]+|[^a-zA-Z0-9_\-]+/g) || [];
+   var slug = dale.go (parts, function (part) {
+      if (/^[a-zA-Z0-9_\-]+$/.test (part)) return part;
+      return '.' + Buffer.from (part, 'utf8').toString ('base64url') + '.';
+   }).join ('');
+   if (! slug) throw new Error ('Invalid project name');
+   return slug;
+};
+
+var unslugifyProjectName = function (slug) {
+   // Split on dots: pass-through segments alternate with base64url-encoded segments
+   // Encoded segments are wrapped in dots: .XXXX.
+   // We find all .XXXX. blocks and decode them; everything else passes through
+   return slug.replace (/\.([A-Za-z0-9_\-]+)\./g, function (match, encoded) {
+      try {
+         return Buffer.from (encoded, 'base64url').toString ('utf8');
+      }
+      catch (e) {
+         return match;
+      }
+   });
+};
+
 var validateProjectName = function (projectName) {
    if (type (projectName) !== 'string' || ! projectName.trim ()) throw new Error ('Invalid project name');
    projectName = projectName.trim ();
    if (projectName.includes ('..') || projectName.includes ('/') || projectName.includes ('\\')) throw new Error ('Invalid project name');
-   if (! /^[a-zA-Z0-9_\-]+$/.test (projectName)) throw new Error ('Invalid project name');
+   if (! /^[a-zA-Z0-9_.\-]+$/.test (projectName)) throw new Error ('Invalid project name');
    return projectName;
 };
 
@@ -708,9 +735,9 @@ var projectExists = function (projectName) {
 };
 
 var ensureProject = function (projectName) {
-   projectName = validateProjectName (projectName);
-   ensureProjectContainer (projectName);
-   return projectName;
+   var slug = slugifyProjectName (projectName);
+   ensureProjectContainer (slug);
+   return slug;
 };
 
 var getExistingProject = function (projectName) {
@@ -728,9 +755,12 @@ var listProjects = function () {
       if (! output) return [];
       var names = output.split ('\n');
       var projects = dale.fil (names, undefined, function (name) {
-         if (name.indexOf ('vibey-proj-') === 0) return name.slice ('vibey-proj-'.length);
+         if (name.indexOf ('vibey-proj-') === 0) {
+            var slug = name.slice ('vibey-proj-'.length);
+            return {slug: slug, name: unslugifyProjectName (slug)};
+         }
       });
-      projects.sort ();
+      projects.sort (function (a, b) {return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);});
       return projects;
    }
    catch (e) {
@@ -2020,8 +2050,12 @@ var routes = [
    ['post', 'projects', function (rq, rs) {
       if (stop (rs, [['name', rq.body.name, 'string']])) return;
       try {
-         ensureProject (rq.body.name);
-         reply (rs, 200, {ok: true, name: rq.body.name.trim ()});
+         var displayName = rq.body.name.trim ();
+         var slug = ensureProject (displayName);
+         if (! pfs.exists (slug, 'doc-main.md')) {
+            pfs.writeFile (slug, 'doc-main.md', '# ' + displayName + '\n');
+         }
+         reply (rs, 200, {ok: true, slug: slug, name: displayName});
       }
       catch (error) {
          reply (rs, 400, {error: error.message});

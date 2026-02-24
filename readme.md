@@ -565,17 +565,17 @@ Flow #2:
 
 Flow #3:
 
-- I write in main.md that I want to create a little game on my browser. A tictactoe, for example. And that two agents should work on it. The game should be simple client side gotoB, provide docs/gotoB.md. Also use a simple express on port 4000 to serve the static file.
-- I go to the dialogs tab.
-- I start a new dialog to say "please start".
-- The agent starts working, spawning another agent.
-
-Flow #4:
-
 - I open vibey, already with a project.
 - I can delete the project.
 - Any agents running in that project are stopped.
 - The folder is deleted.
+
+Flow #4:
+
+- I write in main.md that I want to create a little game on my browser. A tictactoe, for example. And that two agents should work on it. The game should be simple client side gotoB, provide docs/gotoB.md. Also use a simple express on port 4000 to serve the static file.
+- I go to the dialogs tab.
+- I start a new dialog to say "please start".
+- The agent starts working, spawning another agent.
 
 
 ## TODO
@@ -583,8 +583,13 @@ Flow #4:
 Prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
 
-- Fix viewing of docs when you just land.
-- Fix tests so that they just reference ustack.md and embedded tictactoe runs.
+
+
+- Snapshots
+   - Snapshots are stored inside the vibey container, in its data volume.
+   - Restoring a snapshot creates a new project with those files.
+   - We have a snapshots view.
+
 - Make flows 3 & 4 work on the client.
 - Add a flow 5 that requires a backend in another container.
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?

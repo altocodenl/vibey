@@ -23,6 +23,13 @@ var testTimestamp = function () {
 
 // *** HELPERS ***
 
+var projectListHasSlug = function (list, slug) {
+   return dale.stopNot (list, undefined, function (item) {
+      if (type (item) === 'object' && item.slug === slug) return true;
+      if (item === slug) return true;
+   }) === true;
+};
+
 var parseSSE = function (body) {
    if (type (body) !== 'string') body = '' + body;
    var events = [];
@@ -111,7 +118,7 @@ var flow1Sequence = [
 
    ['Create project', 'post', 'projects', {}, {name: PROJECT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
-      if (rs.body.name !== PROJECT) return log ('Unexpected project name returned');
+      if (rs.body.slug !== PROJECT) return log ('Unexpected project slug returned');
       return true;
    }],
 
@@ -208,7 +215,7 @@ var flow1Sequence = [
 
    ['Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('projects endpoint should return array');
-      if (inc (rs.body, PROJECT)) return log ('Project still exists after deletion');
+      if (projectListHasSlug (rs.body, PROJECT)) return log ('Project still exists after deletion');
       return true;
    }]
 ];
@@ -225,7 +232,7 @@ var flow2Sequence = [
 
    ['F2: Create project', 'post', 'projects', {}, {name: PROJECT2}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
-      if (rs.body.name !== PROJECT2) return log ('Unexpected project name');
+      if (rs.body.slug !== PROJECT2) return log ('Unexpected project slug');
       return true;
    }],
 
@@ -305,57 +312,57 @@ var flow2Sequence = [
 
    ['F2: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (inc (rs.body, PROJECT2)) return log ('Project still exists after deletion');
+      if (projectListHasSlug (rs.body, PROJECT2)) return log ('Project still exists after deletion');
       return true;
    }]
 ];
 
 // *** FLOW #3: Delete project stops agents and removes folder ***
 
-var PROJECT4 = 'flow4-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
+var PROJECT3 = 'flow3-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 
-var DOC_MAIN_F4 = [
-   '# Flow 4 Test Project',
+var DOC_MAIN_F3 = [
+   '# Flow 3 Test Project',
    ''
 ].join ('\n') + '\n';
 
-var flow4Sequence = [
+var flow3Sequence = [
 
-   ['F3: Create project', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
+   ['F3: Create project', 'post', 'projects', {}, {name: PROJECT3}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
       return true;
    }],
 
-   ['F3: Write doc-main.md', 'post', 'project/' + PROJECT4 + '/file/doc-main.md', {}, {content: DOC_MAIN_F4}, 200, function (s, rq, rs) {
+   ['F3: Write doc-main.md', 'post', 'project/' + PROJECT3 + '/file/doc-main.md', {}, {content: DOC_MAIN_F3}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       return true;
    }],
 
    // Create two dialogs and fire them with slow prompts so they stay active
-   ['F3: Create dialog A', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, 200, function (s, rq, rs) {
+   ['F3: Create dialog A', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
-      s.f4DialogA = rs.body.dialogId;
+      s.f3DialogA = rs.body.dialogId;
       return true;
    }],
 
-   ['F3: Create dialog B', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, 200, function (s, rq, rs) {
+   ['F3: Create dialog B', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
-      s.f4DialogB = rs.body.dialogId;
+      s.f3DialogB = rs.body.dialogId;
       return true;
    }],
 
    // Fire both dialogs with a long prompt to keep them busy
-   ['F3: Fire both dialogs (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialogNoWait (PROJECT4, s.f4DialogA, 'Write a 2000 word essay about the history of computing. Take your time and be thorough.');
-      fireDialogNoWait (PROJECT4, s.f4DialogB, 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.');
+   ['F3: Fire both dialogs (non-blocking)', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialogNoWait (PROJECT3, s.f3DialogA, 'Write a 2000 word essay about the history of computing. Take your time and be thorough.');
+      fireDialogNoWait (PROJECT3, s.f3DialogB, 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.');
       // Give the server a moment to start processing both PUT requests
       setTimeout (next, 2000);
    }],
 
    // Poll until both dialogs are active before deleting
-   ['F3: Both dialogs are active', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F3: Both dialogs are active', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
-         httpGet (5353, '/project/' + PROJECT4 + '/dialogs', function (error, status, body) {
+         httpGet (5353, '/project/' + PROJECT3 + '/dialogs', function (error, status, body) {
             if (error || status !== 200) return done (false);
             try {
                var dialogs = JSON.parse (body);
@@ -373,7 +380,7 @@ var flow4Sequence = [
    }],
 
    // Delete the project while agents are running
-   ['F3: Delete project with active agents', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
+   ['F3: Delete project with active agents', 'delete', 'projects/' + PROJECT3, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
@@ -381,41 +388,44 @@ var flow4Sequence = [
    // Verify project is gone from the list
    ['F3: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (inc (rs.body, PROJECT4)) return log ('Project still exists after deletion');
+      if (projectListHasSlug (rs.body, PROJECT3)) return log ('Project still exists after deletion');
       return true;
    }],
 
    // Verify the project's endpoints are 404
-   ['F3: Dialogs endpoint returns 404', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 404],
+   ['F3: Dialogs endpoint returns 404', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 404],
 
-   ['F3: Files endpoint returns 404', 'get', 'project/' + PROJECT4 + '/files', {}, '', 404],
+   ['F3: Files endpoint returns 404', 'get', 'project/' + PROJECT3 + '/files', {}, '', 404],
 
    // Verify we can't interact with the deleted dialogs
-   ['F3: Dialog A returns 404', 'get', 'project/' + PROJECT4 + '/dialog/' + 'placeholder', {}, '', 404, function (s, rq, rs) {
+   ['F3: Dialog A returns 404', 'get', 'project/' + PROJECT3 + '/dialog/' + 'placeholder', {}, '', 404, function (s, rq, rs) {
       // Use actual dialogId — but project is gone so any dialog request should 404
       return true;
    }],
 
    // Verify creating the same project name works (folder truly gone)
-   ['F3: Re-create same project name', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
+   ['F3: Re-create same project name', 'post', 'projects', {}, {name: PROJECT3}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Re-creation failed');
       return true;
    }],
 
-   ['F3: Re-created project has no dialogs', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
+   ['F3: Re-created project has no dialogs', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (rs.body.length !== 0) return log ('Expected 0 dialogs, got ' + rs.body.length);
       return true;
    }],
 
-   ['F3: Re-created project has no files', 'get', 'project/' + PROJECT4 + '/files', {}, '', 200, function (s, rq, rs) {
+   ['F3: Re-created project has only default doc-main.md', 'get', 'project/' + PROJECT3 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (rs.body.length !== 0) return log ('Expected 0 files, got ' + rs.body.length);
+      var unexpected = dale.fil (rs.body, undefined, function (name) {
+         if (name !== 'doc-main.md') return name;
+      });
+      if (unexpected.length) return log ('Unexpected files after re-create: ' + unexpected.join (', '));
       return true;
    }],
 
    // Cleanup
-   ['F3: Delete re-created project', 'delete', 'projects/' + PROJECT4, {}, '', 200, function (s, rq, rs) {
+   ['F3: Delete re-created project', 'delete', 'projects/' + PROJECT3, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Final cleanup failed');
       return true;
    }]
@@ -423,83 +433,29 @@ var flow4Sequence = [
 
 // *** FLOW #4: Static tictactoe — HTML + JS only (no backend) ***
 
-var PROJECT3 = 'flow3-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
+var PROJECT4 = 'flow4-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 
-var DOC_MAIN_F3 = [
+var DOC_MAIN_F4 = [
    '# Tictactoe Project',
    '',
-   'Build a simple tictactoe game for the browser using gotoB.',
-   '',
-   '## Architecture',
-   '',
-   '- `index.html` — static HTML shell that loads gotoB from CDN and `app.js`.',
-   '- `app.js` — tictactoe game using gotoB (B.view, B.call, B.ev, B.store).',
-   '- No backend server. The game is served via the static proxy at `/project/<project>/static/`.',
+   'Build a simple tictactoe game for the browser using gotoB. No backend server.',
+   'Served via the static proxy at `/project/<project>/static/`.',
    '',
    '## References',
    '',
-   '- gotoB docs for LLMs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
-   '- See also doc-gotob.md in this project for a quick reference.',
+   '- gotoB docs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
    '',
-   '## Agent Instructions',
+   '## Critical rules',
    '',
-   'When you receive "please start", you MUST do the following in this exact order:',
-   '',
-   '1. Use write_file to create `index.html`. It must:',
-   '   - Have a proper HTML5 doctype and charset.',
-   '   - Load gotoB from: https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js',
-   '   - Load dale from: https://cdn.jsdelivr.net/gh/nicedoc/dale@7f2ef0bcbeea7c2e10d7e0b7e6b12c18e5e89cfb/dale.min.js',
-   '   - Load teishi from: https://cdn.jsdelivr.net/gh/fpereiro/teishi@dbfdd7131a44e29e39d68e5a4b6fb42bb6e2ee0f/teishi.min.js',
-   '   - Load lith from: https://cdn.jsdelivr.net/gh/fpereiro/lith@4de7b40cae0b32dfea7f5ab891bb8d99e0abb47b/lith.min.js',
-   '   - Load app.js via a script tag.',
-   '   - Have a <title>Tictactoe</title>.',
-   '',
-   '2. THEN: Use write_file to create `app.js`. It must:',
-   '   - Implement a 3x3 tictactoe grid using gotoB.',
-   '   - Use `var dale = window.dale, teishi = window.teishi, lith = window.lith, c = window.c, B = window.B;` at the top.',
-   '   - Store board state in B.store as an array of 9 cells (initially empty strings).',
-   '   - Store current turn in B.store (X goes first).',
-   '   - Alternate X and O turns on cell click.',
-   '   - Detect a winner or draw and display the result.',
-   '   - Mount on body with B.mount.',
-   '   - Render each cell as a clickable div/button in a 3x3 grid.',
-   '',
-   'Do NOT create a backend server. Create each file with a separate write_file call.',
+   '- `index.html`: load gotoB.min.js in `<body>` (not `<head>` — document.body must exist when gotoB initializes):',
+   '  `<script src="https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js"></script>`',
+   '  This single file bundles dale, teishi, lith, recalc, cocholate. Do NOT load them separately.',
+   '- `app.js`: set `B.prod = true` before any B.call.',
+   '- Use `lith.css.style({...})` for inline styles, not raw JS objects.',
+   '- `B.ev` always requires a path: `B.ev(\'reset\', [])`, not `B.ev(\'reset\')`.',
+   '- Pass event context in responders: `function (x, ...) { B.call(x, \'set\', ...); }`.',
    '',
 ].join ('\n') + '\n';
-
-var GOTOB_F3 = [
-   '# gotoB quick reference',
-   '',
-   'gotoB is a client-side reactive UI framework. Load it from CDN.',
-   '',
-   '## Core API',
-   '- `B.store` — single global state object.',
-   '- `B.call(x, verb, path, value)` — trigger an event. Built-in: `set`, `add`, `rem`.',
-   '- `B.view(path, fn)` — reactive view. `fn` receives value at `path`, returns lith markup.',
-   '- `B.ev(verb, path, value)` — returns an event handler string for use in onclick/oninput.',
-   '- `B.mount(selector, viewFunction)` — mount a view into the DOM.',
-   '- `B.respond(verb, path, fn)` — register a responder for events.',
-   '- `B.mrespond([...])` — register multiple responders at once.',
-   '',
-   '## Lith markup',
-   'Views return arrays: `[tag, attrs?, children?]`.',
-   'Example: `["div", {class: "board"}, [["span", "X"]]]`',
-   '',
-   '## Minimal example',
-   '```js',
-   'var dale = window.dale, B = window.B;',
-   'B.mount ("body", function () {',
-   '   return B.view ("board", function (board) {',
-   '      board = board || [];',
-   '      return ["div", dale.go (board, function (cell, i) {',
-   '         return ["button", {onclick: B.ev ("set", ["board", i], "X")}, cell || ""];',
-   '      })];',
-   '   });',
-   '});',
-   '```',
-   ''
-].join ('\n');
 
 // Fire-and-forget: start a dialog via PUT (SSE), read just enough to confirm it started, then abort.
 var fireDialog = function (project, dialogId, prompt, cb) {
@@ -567,42 +523,37 @@ var pollUntil = function (checkFn, intervalMs, maxMs, cb) {
    tick ();
 };
 
-var flow3Sequence = [
+var flow4Sequence = [
 
-   ['F4: Create project', 'post', 'projects', {}, {name: PROJECT3}, 200, function (s, rq, rs) {
+   ['F4: Create project', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
       return true;
    }],
 
-   ['F4: Write doc-main.md', 'post', 'project/' + PROJECT3 + '/file/doc-main.md', {}, {content: DOC_MAIN_F3}, 200, function (s, rq, rs) {
+   ['F4: Write doc-main.md', 'post', 'project/' + PROJECT4 + '/file/doc-main.md', {}, {content: DOC_MAIN_F4}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       return true;
    }],
 
-   ['F4: Write doc-gotob.md', 'post', 'project/' + PROJECT3 + '/file/doc-gotob.md', {}, {content: GOTOB_F3}, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
-      return true;
-   }],
-
-   ['F4: Create waiting dialog (orchestrator)', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['F4: Create waiting dialog (orchestrator)', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
-      s.f3DialogId = rs.body.dialogId;
+      s.f4DialogId = rs.body.dialogId;
       return true;
    }],
 
    // Fire the dialog and don't block — let agents work in background
-   ['F4: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT3, s.f3DialogId, 'please start', function (error) {
+   ['F4: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT4, s.f4DialogId, 'please start', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
       });
    }],
 
    // Poll until the static page is reachable via static proxy
-   ['F4: Poll until static page serves', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Poll until static page serves', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
-         httpGet (5353, '/project/' + PROJECT3 + '/static/', function (error, status, body) {
+         httpGet (5353, '/project/' + PROJECT4 + '/static/', function (error, status, body) {
             if (error || status !== 200) return done (false);
             var lower = (body || '').toLowerCase ();
             if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (true);
@@ -615,7 +566,7 @@ var flow3Sequence = [
    }],
 
    // Now verify the content of each file via tool/execute
-   ['F4: index.html has gotoB + app.js', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, 200, function (s, rq, rs) {
+   ['F4: index.html has gotoB + app.js', 'post', 'project/' + PROJECT4 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, 200, function (s, rq, rs) {
       if (! rs.body || ! rs.body.success) return log ('cat index.html failed: ' + JSON.stringify (rs.body));
       var out = (rs.body.stdout || '').toLowerCase ();
       if (out.indexOf ('gotob') === -1) return log ('index.html missing gotoB reference');
@@ -623,7 +574,7 @@ var flow3Sequence = [
       return true;
    }],
 
-   ['F4: app.js has tictactoe gotoB code', 'post', 'project/' + PROJECT3 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat app.js'}}, 200, function (s, rq, rs) {
+   ['F4: app.js has tictactoe gotoB code', 'post', 'project/' + PROJECT4 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat app.js'}}, 200, function (s, rq, rs) {
       if (! rs.body || ! rs.body.success) return log ('cat app.js failed: ' + JSON.stringify (rs.body));
       var out = rs.body.stdout || '';
       if (out.indexOf ('B.') === -1) return log ('app.js missing gotoB usage (no B. references)');
@@ -633,17 +584,17 @@ var flow3Sequence = [
    }],
 
    // Ask the AI to embed the game in doc-main.md
-   ['F4: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT3, s.f3DialogId, 'The tictactoe game is now available via the static proxy at /project/' + PROJECT3 + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.', function (error) {
+   ['F4: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT4, s.f4DialogId, 'The tictactoe game is now available via the static proxy at /project/' + PROJECT4 + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.', function (error) {
          if (error) return log ('Failed to fire embed request: ' + error.message);
          next ();
       });
    }],
 
    // Poll until embed block appears in doc-main.md
-   ['F4: Poll until embed block appears in doc-main.md', 'get', 'project/' + PROJECT3 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: Poll until embed block appears in doc-main.md', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
-         httpGet (5353, '/project/' + PROJECT3 + '/file/doc-main.md', function (error, status, body) {
+         httpGet (5353, '/project/' + PROJECT4 + '/file/doc-main.md', function (error, status, body) {
             if (error || status !== 200) return done (false);
             try {
                var parsed = JSON.parse (body);
@@ -659,7 +610,7 @@ var flow3Sequence = [
       });
    }],
 
-   ['F4: Verify embed block in doc-main.md', 'get', 'project/' + PROJECT3 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
+   ['F4: Verify embed block in doc-main.md', 'get', 'project/' + PROJECT4 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
       var content = rs.body.content || '';
       if (content.indexOf ('əəəembed') === -1) return log ('doc-main.md missing əəəembed block');
       if (content.indexOf ('port static') === -1) return log ('doc-main.md embed missing port static');
@@ -671,7 +622,7 @@ var flow3Sequence = [
 
 // *** RUNNER ***
 
-var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow4Sequence, 4: flow3Sequence};
+var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence};
 
 var requestedFlows = [];
 dale.go (process.argv.slice (2), function (arg) {
