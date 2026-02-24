@@ -32,7 +32,7 @@ docker compose down -v
 
 1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. Views of your app or images are embedded. A document as the gateway to everything.
 2. **In your browser**: allows to see not just text, but images, audio, and embed little apps in your documents.
-3. **Containerized**: so that the blast radius is reduced, with your local machine and also between apps.
+3. **Containerized**: each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or the host.
 
 All you need is an AI provider and to install vibey locally.
 
@@ -87,7 +87,7 @@ Browsers are wonderfully plastic and powerful interfaces. At this stage, the ser
 
 ## Surrounded by a container?
 
-Yes, so agents don't mess up your local environment too much.
+Yes. Each project runs in its own Docker container with its own volume. No shared mounts. If an agent goes rogue, the blast radius is limited to that one project — it cannot touch other projects, vibey itself, or the host.
 
 ## How does it look?
 
@@ -109,12 +109,13 @@ Note that the deed is missing; if it's code, go use your IDE, or just open your 
 
 ### Server: projects
 
-Projects are directories under `vibey/`.
+Each project is a container (`vibey-proj-<name>`) with its own named volume (`vibey-vol-<name>`).
 
 - `GET /projects` - list project names.
-- `POST /projects` - create project. Body: `{name}`.
-- `DELETE /projects/:name` - delete a project directory recursively.
+- `POST /projects` - create project. Body: `{name}`. Creates the project container and volume.
+- `DELETE /projects/:name` - delete a project.
   - If any dialog streams are active for dialogs in that project, they are aborted before deletion.
+  - Removes the container (`docker rm -f`) and volume (`docker volume rm`).
 
 ### Client: projects
 
@@ -126,7 +127,7 @@ Projects tab lists all projects with + New and × delete.
 
 ### Server: files
 
-All files live inside a project directory `vibey/<project>/`. Filenames must match `[a-zA-Z0-9_\-\.]+`, end in `.md`, no `..`.
+All files live inside `/workspace/` in the project container. All file I/O goes through the `projectFS` abstraction. Filenames must match `[a-zA-Z0-9_\-\.]+`, end in `.md`, no `..`.
 
 - `GET /project/:project/files` - list all `.md` files, sorted by mtime descending.
 - `GET /project/:project/file/:name` - read file. Returns `{name, content}`.
@@ -341,8 +342,7 @@ Apps running inside a project (e.g. a tictactoe game on port 4000) can be embedd
 
 `ALL /project/:project/proxy/:port/*` — reverse-proxies to the target app.
 
-- **Non-docker**: proxies to `http://127.0.0.1:<port>/<path>`.
-- **Docker**: proxies into the project container at `<container-ip>:<port>/<path>`.
+- Resolves the project container's IP on `vibey-net` and proxies to `http://<container-ip>:<port>/<path>`. No host port exposure needed.
 
 The wildcard captures the full URL path and query string. Behavior:
 
@@ -362,14 +362,14 @@ Projects that are just static HTML/JS/CSS can be embedded without running a back
 
 #### Static route
 
-`GET /project/:project/static/*` — serves files from `vibey/<project>/`.
+`GET /project/:project/static/*` — serves files from the project.
 
 Behavior:
 
 1. Validates `:project` exists.
-2. Resolves the requested path inside the project directory (no `..`).
+2. Resolves the requested path (no `..`).
 3. If the path is empty or ends in `/`, serves `index.html`.
-4. Uses `cicek.file` (ETag + gzip) for proper caching.
+4. Reads the file from the project container via `projectFS` and serves it.
 5. Sets `X-Frame-Options: SAMEORIGIN`.
 
 #### Embed markdown syntax
@@ -462,10 +462,81 @@ When rendering markdown (doc preview or dialog view), the client detects `əəə
 - **Hot reload**: iframe is static; user refreshes or a reload button is added to the embed chrome.
 - **Absolute path rewriting**: deferred; agents can be told to use relative paths.
 
-## Dockerization
+## Dockerization [TO IMPLEMENT]
 
-- For local vibey (all we have now), all dockers run on the host. Each with its own data volume.
-- For hosted vibey, since it's Ubuntu, we'll do docker inside docker.
+### Architecture: full container isolation
+
+Every project runs in its own Docker container with its own named volume. Vibey itself runs in a separate container. There are **no shared volume mounts** between vibey and project containers. If an agent goes rogue in a project, the blast radius is completely limited to that project — it cannot read, write, or delete files in other projects or in vibey itself.
+
+```
+┌──────────────────────────────────────────┐
+│  vibey container (port 5353 on host)     │
+│  - serves UI + API                       │
+│  - projectFS: reads/writes via docker    │
+│  - reverse-proxies to container IPs      │
+│  - manages container lifecycle           │
+│  - NO volume mounts to project data      │
+└────────┬─────────────────────────────────┘
+         │ docker network (vibey-net)
+    ┌────┴────┐    ┌────┴────┐
+    │ proj-A  │    │ proj-B  │
+    │ vol-A   │    │ vol-B   │
+    │ /workspace   │ /workspace
+    └─────────┘    └─────────┘
+```
+
+### Container details
+
+- **Vibey container**: runs the vibey server. Has access to the Docker socket to manage project containers. Published port: 5353 (host).
+- **Project containers**: one per project. Named `vibey-proj-<name>`. Main process is `/bin/sh` — a living shell session that keeps the container alive and can parent long-running processes (e.g., `node server.js &` started by an agent). No published ports — only reachable by vibey via the `vibey-net` Docker network.
+- **Project volumes**: one named volume per project (`vibey-vol-<name>`), mounted at `/workspace` inside the project container. This is the project's entire world. All agent work (code, data, servers) lives here.
+- **Sandbox image**: `vibey-sandbox:latest` — a base image with common tools (node, npm, git, curl, etc.) that all project containers use.
+
+### projectFS: file operations across the container boundary
+
+Since there are no shared volume mounts, vibey cannot use `fs.readFileSync` / `fs.writeFileSync` on project files. All file operations go through Docker:
+
+| Operation | Implementation |
+|---|---|
+| List files | `docker exec proj-A ls /workspace` |
+| Read file | `docker exec proj-A cat /workspace/file.md` or `docker cp proj-A:/workspace/file.md -` |
+| Write file | Pipe content via `docker exec -i proj-A sh -c 'cat > /workspace/file.md'` |
+| Rename file | `docker exec proj-A mv /workspace/old.md /workspace/new.md` |
+| Delete file | `docker exec proj-A rm /workspace/file.md` |
+| Check exists | `docker exec proj-A test -f /workspace/file.md` |
+
+These are wrapped in a `projectFS` abstraction in server.js.
+
+Latency per `docker exec` call is ~20-50ms. For human-speed UI operations (loading a doc, saving a file) this is fine. For tight loops (e.g., reconstructing dialog history before an LLM call), batch reads into a single `docker exec` (e.g., `cat /workspace/dialog-*.md`).
+
+### Container lifecycle
+
+| Event | Action |
+|---|---|
+| Project created | Spin up container with fresh named volume, main process `/bin/sh` |
+| First dialog turn / tool execution | Container already running (created at project creation) |
+| Project deleted | Abort active dialog streams → `docker rm -f vibey-proj-<name>` → `docker volume rm vibey-vol-<name>` |
+| Vibey shutdown | Stop all project containers (`docker stop` with label `vibey=project`) |
+| Vibey startup | Clean up orphaned project containers from previous runs; restart containers for existing projects on demand |
+
+### Embed proxy (updated for isolation)
+
+The proxy route `ALL /project/:project/proxy/:port/*` resolves the project container's IP on `vibey-net` and proxies to `http://<container-ip>:<port>/<path>`. No host port exposure needed for project containers.
+
+The static route `GET /project/:project/static/*` reads the file from the project container via `docker cp` or `docker exec cat` and serves it to the browser.
+
+Agent prompt says: *"Your working directory is /workspace. If you run a server, listen on port 4000. Embeds use `port 4000`."* The agent never knows or cares about host ports or container IPs.
+
+### Tool execution (updated for isolation)
+
+- `run_command`: already runs via `docker exec` in the project container. No change needed.
+- `write_file`: goes through `projectFS.writeFile` (pipes content into the container).
+- `edit_file`: `projectFS.readFile` → find/replace in vibey's memory → `projectFS.writeFile`.
+- `launch_agent`: spawns a new dialog in the same project container (same container, new dialog file).
+
+### Hosted vibey (future)
+
+For hosted vibey on Ubuntu, Docker-in-Docker or sibling containers via the Docker socket. Same architecture — each project is a container with a volume, vibey proxies to container IPs. The transition from local to hosted is: add DNS, TLS, and session cookies. The container topology stays the same.
 
 ## Test flows
 
