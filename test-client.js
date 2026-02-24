@@ -198,9 +198,23 @@
          return true;
       }],
 
-      // --- Step 7: Send message to read first 20 lines of readme.md ---
-      ['Step 7: Send "Please read the first 20 lines of readme.md" message', function (done) {
-         B.call ('set', 'chatInput', 'Please read the first 20 lines of readme.md, which is two directories up from your working directory, using the run_command tool with `head -20 ../../readme.md`, and summarize what it is about.');
+      // --- Step 6b: Write a test file into the project for the agent to read ---
+      ['Step 6b: Write test-sample.txt for agent to read', function (done) {
+         var project = TEST_PROJECT;
+         var content = '# Sample File\n\nThis is a test file for vibey.\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n';
+         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
+            toolName: 'write_file',
+            toolInput: {path: 'test-sample.txt', content: content}
+         }, function (error, rs) {
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return true;
+      }],
+
+      // --- Step 7: Send message to read test-sample.txt ---
+      ['Step 7: Send "Please read test-sample.txt" message', function (done) {
+         B.call ('set', 'chatInput', 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, and summarize what it is about.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {

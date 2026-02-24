@@ -1,5 +1,28 @@
 ## Vibey development notes
 
+### 2026-02-24
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+
+- New architecture:
+   - Vibey runs on its own docker
+   - Each project, even ones with static files, have their own docker, with a port assigned to them by vibey. Also their own data volume.
+   - Vibey reads files on the dockers of the projects to create the list of docs & dialogs
+   - The beginning prompt to each agent includes the port number of the outside, to use in embeddings.
+- Please review this idea and comment.
+- I disagree. I want that if an agent goes rogue in a project, the blast radius is completely limited to that project.
+- Please make the changes to the readme.md first to document this architecture, and mark it as [TO IMPLEMENT]
+- Please remove in the readme any mention of docker mode. It's always going to be dockerized.
+- Please now implement the changes on the server.
+- Excellent! Do the tests or the client need changes?
+- Can you debug the server tests? vibey is running.
+- Please take all timestamps used in the snapshots and tests and make them into YYYYMMDD-ddmmss
+
+- Snapshots
+   - Snapshots are stored inside the vibey container, in its data volume.
+   - Restoring a snapshot creates a new project with those files.
+   - We have a snapshots view.
+
 ### 2026-02-23
 
 Idea for reading file tool: read multiple files at the same time, to avoid several round trips/messages.

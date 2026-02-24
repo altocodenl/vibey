@@ -128,10 +128,16 @@ var flow1Sequence = [
       return true;
    }],
 
-   ['Prompt #1: ask to read first 20 lines of readme.md (tools auto-execute)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
+   // Write a test file inside the project so the agent can read it
+   ['Write test-sample.txt for agent to read', 'post', 'project/' + PROJECT + '/tool/execute', {}, {toolName: 'write_file', toolInput: {path: 'test-sample.txt', content: '# Sample File\n\nThis is a test file for vibey.\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n'}}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || ! rs.body.success) return log ('Failed to write test-sample.txt: ' + JSON.stringify (rs.body));
+      return true;
+   }],
+
+   ['Prompt #1: ask to read test-sample.txt (tools auto-execute)', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
       return {
          dialogId: s.dialogId,
-         prompt: 'Please read the first 20 lines of readme.md using the run_command tool with `head -20 readme.md`, then summarize it in 3 short bullets. You must use the tool.'
+         prompt: 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, then summarize it in 3 short bullets. You must use the tool.'
       };
    }, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'string') return log ('Expected SSE text body');
@@ -331,28 +337,31 @@ var flow4Sequence = [
    }],
 
    // Fire both dialogs with a long prompt to keep them busy
-   ['F3: Fire dialog A (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogA, 'Write a 2000 word essay about the history of computing. Take your time and be thorough.', function (error) {
-         if (error) return log ('Failed to fire dialog A: ' + error.message);
-         next ();
-      });
+   ['F3: Fire both dialogs (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialogNoWait (PROJECT4, s.f4DialogA, 'Write a 2000 word essay about the history of computing. Take your time and be thorough.');
+      fireDialogNoWait (PROJECT4, s.f4DialogB, 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.');
+      // Give the server a moment to start processing both PUT requests
+      setTimeout (next, 2000);
    }],
 
-   ['F3: Fire dialog B (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogB, 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.', function (error) {
-         if (error) return log ('Failed to fire dialog B: ' + error.message);
+   // Poll until both dialogs are active before deleting
+   ['F3: Both dialogs are active', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollUntil (function (done) {
+         httpGet (5353, '/project/' + PROJECT4 + '/dialogs', function (error, status, body) {
+            if (error || status !== 200) return done (false);
+            try {
+               var dialogs = JSON.parse (body);
+               var activeCount = dale.fil (dialogs, undefined, function (d) {
+                  if (d.status === 'active') return d;
+               }).length;
+               done (activeCount >= 2);
+            }
+            catch (e) {done (false);}
+         });
+      }, 2000, 60000, function (error) {
+         if (error) return log ('Dialogs never became active: ' + error.message);
          next ();
       });
-   }],
-
-   // Verify both dialogs are active before deleting
-   ['F3: Both dialogs are active', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      var activeCount = dale.fil (rs.body, undefined, function (d) {
-         if (d.status === 'active') return d;
-      }).length;
-      if (activeCount < 2) return log ('Expected 2 active dialogs, got ' + activeCount);
-      return true;
    }],
 
    // Delete the project while agents are running
