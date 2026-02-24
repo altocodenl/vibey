@@ -13,6 +13,14 @@ var inc  = teishi.inc;
 //        node test-server.js --flow=3     (just flow 3)
 // Assumes server is already running on localhost:5353
 
+// *** TIMESTAMP ***
+
+var pad2 = function (n) {return n < 10 ? '0' + n : '' + n;};
+var testTimestamp = function () {
+   var d = new Date ();
+   return d.getUTCFullYear () + '' + pad2 (d.getUTCMonth () + 1) + pad2 (d.getUTCDate ()) + '-' + pad2 (d.getUTCHours ()) + pad2 (d.getUTCMinutes ()) + pad2 (d.getUTCSeconds ());
+};
+
 // *** HELPERS ***
 
 var parseSSE = function (body) {
@@ -90,7 +98,7 @@ var httpGet = function (port, path, cb) {
 
 // *** FLOW #1: Dialog with tool calls (read + write) ***
 
-var PROJECT = 'flow1-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
+var PROJECT = 'flow1-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 var DIALOG_SLUG = 'flow1-read-vibey';
 
 var flow1Sequence = [
@@ -207,7 +215,7 @@ var flow1Sequence = [
 
 // *** FLOW #2: Docs editing ***
 
-var PROJECT2 = 'flow2-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
+var PROJECT2 = 'flow2-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 var INITIAL_CONTENT = '# Main\n\nThis is the initial content of the project.\n';
 var UPDATED_CONTENT = '# Main\n\nThis is the updated content of the project.\n\n## New section\n\nWith more detail.\n';
 var SECOND_DOC = 'doc-notes.md';
@@ -304,7 +312,7 @@ var flow2Sequence = [
 
 // *** FLOW #3: Delete project stops agents and removes folder ***
 
-var PROJECT4 = 'flow4-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
+var PROJECT4 = 'flow4-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 
 var DOC_MAIN_F4 = [
    '# Flow 4 Test Project',
@@ -415,7 +423,7 @@ var flow4Sequence = [
 
 // *** FLOW #4: Static tictactoe — HTML + JS only (no backend) ***
 
-var PROJECT3 = 'flow3-' + Date.now () + '-' + Math.floor (Math.random () * 100000);
+var PROJECT3 = 'flow3-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 
 var DOC_MAIN_F3 = [
    '# Tictactoe Project',

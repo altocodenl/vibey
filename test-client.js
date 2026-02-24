@@ -105,12 +105,18 @@
       return true;
    };
 
+   var pad2 = function (n) {return n < 10 ? '0' + n : '' + n;};
+   var testTimestamp = function () {
+      var d = new Date ();
+      return d.getUTCFullYear () + '' + pad2 (d.getUTCMonth () + 1) + pad2 (d.getUTCDate ()) + '-' + pad2 (d.getUTCHours ()) + pad2 (d.getUTCMinutes ()) + pad2 (d.getUTCSeconds ());
+   };
+
    var LONG_WAIT   = 120000; // 2 min for LLM responses
    var MEDIUM_WAIT = 15000;
    var SHORT_WAIT  = 3000;
    var POLL        = 200;
 
-   var TEST_PROJECT = 'test-flow1-' + Date.now ();
+   var TEST_PROJECT = 'test-flow1-' + testTimestamp ();
    var TEST_DIALOG  = 'read-vibey';
 
    // *** TESTS ***
@@ -355,7 +361,7 @@
 
       // --- F2 Step 1: Create a new project for Flow #2 ---
       ['F2-1: Create project for docs editing', function (done) {
-         window._f2Project = 'test-flow2-' + Date.now ();
+         window._f2Project = 'test-flow2-' + testTimestamp ();
          mockPrompt (window._f2Project);
          B.call ('create', 'project');
          done (MEDIUM_WAIT, POLL);
@@ -556,7 +562,7 @@
 
       // --- F3 Step 1: Create project ---
       ['F3-1: Create project', function (done) {
-         window._f3Project = 'test-flow3-' + Date.now ();
+         window._f3Project = 'test-flow3-' + testTimestamp ();
          mockPrompt (window._f3Project);
          B.call ('create', 'project');
          done (MEDIUM_WAIT, POLL);
@@ -752,7 +758,7 @@
 
       // --- F4 Step 1: Create a new project ---
       ['F4-1: Create project for tictactoe', function (done) {
-         window._f4Project = 'test-flow4-' + Date.now ();
+         window._f4Project = 'test-flow4-' + testTimestamp ();
          mockPrompt (window._f4Project);
          B.call ('create', 'project');
          done (MEDIUM_WAIT, POLL);
