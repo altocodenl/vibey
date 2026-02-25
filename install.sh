@@ -12,6 +12,8 @@ docker-entrypoint.sh
 package.json
 server.js
 client.js
+test-client.js
+test-server.js
 client-css.js
 prompt.md
 "
