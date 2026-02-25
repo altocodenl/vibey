@@ -10,13 +10,7 @@ services:
       - vibey=master
     environment:
       - VIBEY_DOCKER=1
-    networks:
-      - vibey-net
+    network_mode: bridge
 
 volumes:
   vibey-data:
-
-networks:
-  vibey-net:
-    external: true
-    name: vibey-net

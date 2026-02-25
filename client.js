@@ -356,7 +356,12 @@ viController.operator = function (key, textarea, info, register) {
    if (key === 'o' || key === 'O') {
       if (key === 'o') {
          result.value = text.slice (0, afterLine) + '\n' + text.slice (afterLine);
-         result.cursor = viClamp (afterLine + 1, 0, result.value.length);
+         // On non-last lines afterLine already points past the \n, so the
+         // new empty line starts at afterLine in the new text.  On the last
+         // line there is no trailing \n so afterLine === lineEnd and the new
+         // empty line starts one position later.
+         var oTarget = (line < lines.length - 1) ? afterLine : afterLine + 1;
+         result.cursor = viClamp (oTarget, 0, result.value.length);
          return result;
       }
       result.value = text.slice (0, lineStart) + '\n' + text.slice (lineStart);
@@ -1072,6 +1077,14 @@ B.mrespond ([
       B.call (x, 'set', 'viMode', next);
       B.call (x, 'set', ['settings', 'editor', 'viMode'], next);
       B.call (x, 'set', ['viState', 'mode'], next ? 'normal' : 'insert');
+      // Initialize the cursor overlay after the DOM redraws
+      if (next) setTimeout (function () {
+         var textarea = document.querySelector ('.editor-textarea');
+         if (textarea) {
+            textarea.focus ();
+            updateViCursorState (x, textarea);
+         }
+      }, 50);
       B.call (x, 'post', 'settings', {}, {editor: {viMode: next}}, function (x, error, rs) {
          if (error) {
             B.call (x, 'set', 'viMode', previous);
@@ -1199,6 +1212,14 @@ B.mrespond ([
             B.call (x, 'set', 'viCursor', {line: 1, col: 1});
             if (dialogFile) B.call (x, 'reset', 'chatInput');
             B.call (x, 'write', 'hash');
+            // Initialize vi cursor overlay after DOM redraws with the new file
+            if (B.get ('viMode') && ! dialogFile) setTimeout (function () {
+               var textarea = document.querySelector ('.editor-textarea');
+               if (textarea) {
+                  textarea.focus ();
+                  updateViCursorState (x, textarea);
+               }
+            }, 50);
          });
       };
 
@@ -1314,11 +1335,30 @@ B.mrespond ([
          else B.call (x, 'set', ['currentFile', 'content'], result.value);
       }
 
-      if (result.cursor !== undefined) {
-         updateViCursorState (x, textarea);
-      }
-      if (result.mode) {
-         updateViCursorState (x, textarea);
+      // After store changes, gotoB re-renders the textarea which can
+      // reset selectionStart/selectionEnd.  Capture the desired cursor
+      // position and restore it after the DOM settles.
+      var desiredCursor = textarea.selectionStart;
+      if (result.cursor !== undefined) desiredCursor = result.cursor;
+
+      // Always update the cursor overlay after any vi key press.
+      // Motions (h/j/k/l/w/b etc.) move the textarea cursor directly
+      // via viController.moveCursor but don't set result.cursor,
+      // so we must unconditionally sync the overlay position.
+      updateViCursorState (x, textarea);
+
+      // Restore cursor position after gotoB's synchronous re-render
+      // may have reset it (e.g. entering insert mode via o/O/i).
+      if (result.value !== undefined || result.mode) {
+         setTimeout (function () {
+            var sel = isChat ? '.chat-input' : '.editor-textarea';
+            var ta = document.querySelector (sel);
+            if (ta) {
+               viController.moveCursor (ta, desiredCursor);
+               ta.focus ();
+               updateViCursorState (x, ta);
+            }
+         }, 0);
       }
 
       if (result.save) B.call (x, 'save', 'file');

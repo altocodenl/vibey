@@ -11,7 +11,7 @@ COPY package.json ./
 RUN npm install --production
 
 # Copy application files
-COPY server.js client.js client-css.js test-client.js test-server.js prompt.md ./
+COPY server.js client.js client-css.js test-client.js test-server.js prompt.md Dockerfile.sandbox ./
 
 # Bake secret.json into image as seed if present (API keys etc.)
 RUN mkdir -p /app/seed /app/data/snapshots && echo '{}' > /app/seed/secret.json
@@ -20,7 +20,5 @@ COPY secret.json* /app/seed/
 # Entrypoint seeds config into volume on first run, then starts node
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
-
-EXPOSE 3001
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -46,11 +46,14 @@ New prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). When you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry.
 
 - The vi cursor is not visible, can you fix that?
+- The vi cursor is still not visible, can you fix that?
+- It now works, this is cool! The jumping to edit with i and o is a bit flaky, sometimes you land on the wrong line. Can you debug with the client, making more thorough tests and then running just that flow with pupeteer?
 ---
 - upload files into uploads/ show them at the bottom of the docs on the sidebar always visible (if you have any), if you click on it if it's media you show it, otherwise you just show some metadata as text; add docs, endpoints, client support and a test flow.
 Brilliant! Can you add the tests please?
 - I don't see a button for adding an upload, where is this?
 - Great! Can you add support for spaces in files? Whatever we upload, it should be possible. Also enable multiselect to upload several files.
+- My bad, the UX is bad. We need to create the image for sandbox on install so creating the project is instant.
 ---
 Can you add the tests for flow 8 in test-server? Unless they're already there.
 ---

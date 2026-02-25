@@ -8,7 +8,20 @@ I'm currently recording myself while building vibey. You can check out [the Yout
 
 ## Installation
 
-TODO
+Only requirement: Docker installed and running.
+
+From any directory where you want a `vibey/` folder created, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/altocodenl/vibey/main/install.sh | sh
+```
+
+Then:
+
+```bash
+cd vibey
+docker compose up --build
+```
 
 ## Usage
 
@@ -720,8 +733,8 @@ Flow #8 — Uploads (create/list/preview)
 
 ## TODO
 
-Intro prompt:
-Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). When you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry.
+Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+Workflow: when you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry. When you update agents-now.md, only update your entry! Always read before you write.
 
 
 - Website, add link to github

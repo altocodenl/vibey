@@ -1271,6 +1271,77 @@ var flow8Sequence = [
       req.end ();
    }],
 
+   // *** Upload with spaces in filename ***
+
+   ['F8: Upload file with spaces in name', 'post', 'project/' + PROJECT8 + '/upload', {}, {name: 'my screenshot 2026.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('Expected object body');
+      if (rs.body.name !== 'my screenshot 2026.png') return log ('Upload name mismatch: ' + rs.body.name);
+      if (rs.body.contentType !== 'image/png') return log ('Upload contentType mismatch: ' + rs.body.contentType);
+      if (type (rs.body.size) !== 'integer' || rs.body.size < 1) return log ('Upload size should be positive, got: ' + rs.body.size);
+      if (type (rs.body.url) !== 'string' || rs.body.url.indexOf ('upload') === -1) return log ('Upload url missing or malformed');
+      return true;
+   }],
+
+   ['F8: List uploads includes spaced filename', 'get', 'project/' + PROJECT8 + '/uploads', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var found = dale.stopNot (rs.body, undefined, function (entry) {
+         if (entry.name === 'my screenshot 2026.png') return entry;
+      });
+      if (! found) return log ('Spaced filename not found in uploads list');
+      return true;
+   }],
+
+   // Fetch file with spaces — must percent-encode the name in the URL
+   ['F8: Fetch file with spaces in name', 'get', 'project/' + PROJECT8 + '/uploads', {}, '', 200, function (s, rq, rs, next) {
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/project/' + PROJECT8 + '/upload/' + encodeURIComponent ('my screenshot 2026.png'),
+         method: 'GET'
+      }, function (res) {
+         if (res.statusCode !== 200) return log ('Expected 200 for spaced filename, got ' + res.statusCode);
+         var ct = res.headers ['content-type'] || '';
+         if (ct.indexOf ('image/png') === -1) return log ('Expected Content-Type image/png for spaced file, got: ' + ct);
+         res.on ('data', function () {});
+         res.on ('end', function () {next ();});
+      });
+      req.on ('error', function (err) {log ('Request error: ' + err.message);});
+      req.end ();
+   }],
+
+   // *** Upload with dots and dashes (edge-case valid names) ***
+
+   ['F8: Upload file with dots and dashes', 'post', 'project/' + PROJECT8 + '/upload', {}, {name: 'my-file.v2.backup.txt', content: TEXT_CONTENT_BASE64, contentType: 'text/plain'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('Expected object body');
+      if (rs.body.name !== 'my-file.v2.backup.txt') return log ('Upload name mismatch: ' + rs.body.name);
+      return true;
+   }],
+
+   // *** Upload with path traversal should fail ***
+
+   ['F8: Upload with .. in name returns 400', 'post', 'project/' + PROJECT8 + '/upload', {}, {name: '../etc/passwd', content: TEXT_CONTENT_BASE64}, 400],
+
+   // *** Upload with backslash should fail ***
+
+   ['F8: Upload with backslash returns 400', 'post', 'project/' + PROJECT8 + '/upload', {}, {name: 'sub\\file.txt', content: TEXT_CONTENT_BASE64}, 400],
+
+   // *** Upload with leading slash should fail ***
+
+   ['F8: Upload with leading slash returns 400', 'post', 'project/' + PROJECT8 + '/upload', {}, {name: '/absolute.txt', content: TEXT_CONTENT_BASE64}, 400],
+
+   // *** List should now have 4 valid uploads ***
+
+   ['F8: List uploads has all valid entries', 'get', 'project/' + PROJECT8 + '/uploads', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var names = dale.go (rs.body, function (entry) {return entry.name;});
+      if (! inc (names, 'test-image.png')) return log ('test-image.png missing');
+      if (! inc (names, 'notes.txt')) return log ('notes.txt missing');
+      if (! inc (names, 'my screenshot 2026.png')) return log ('spaced filename missing');
+      if (! inc (names, 'my-file.v2.backup.txt')) return log ('dotted filename missing');
+      if (rs.body.length !== 4) return log ('Expected exactly 4 uploads, got ' + rs.body.length);
+      return true;
+   }],
+
    // *** Fetch nonexistent upload returns 404 ***
 
    ['F8: Fetch nonexistent upload returns 404', 'get', 'project/' + PROJECT8 + '/upload/nonexistent.png', {}, '', 404],

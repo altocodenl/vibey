@@ -256,11 +256,6 @@ window.vibeyCSS = [
       'pointer-events': 'none',
       'background-color': 'rgba(238, 238, 238, 0.7)',
       'z-index': 10,
-      'animation': 'vi-blink 1s step-end infinite',
-   }],
-   ['@keyframes vi-blink', {
-      '0%, 100%': 'opacity: 1',
-      '50%': 'opacity: 0',
    }],
    // Vi textarea wrapper for positioning the cursor overlay
    ['.vi-textarea-wrap', {

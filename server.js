@@ -456,7 +456,6 @@ var exec = require ('child_process').exec;
 var execSync = require ('child_process').execSync;
 
 var SANDBOX_IMAGE = 'vibey-sandbox:latest';
-var DOCKER_NETWORK = 'vibey-net';
 
 var containerName = function (projectName) {
    return 'vibey-proj-' + projectName;
@@ -464,16 +463,6 @@ var containerName = function (projectName) {
 
 var volumeName = function (projectName) {
    return 'vibey-vol-' + projectName;
-};
-
-var ensureNetwork = function () {
-   try {
-      execSync ('docker network inspect ' + DOCKER_NETWORK + ' >/dev/null 2>&1', {encoding: 'utf8'});
-   }
-   catch (e) {
-      execSync ('docker network create ' + DOCKER_NETWORK, {encoding: 'utf8'});
-      clog ('Created Docker network: ' + DOCKER_NETWORK);
-   }
 };
 
 var cleanupProjectContainers = function () {
@@ -533,13 +522,12 @@ var ensureProjectContainer = function (projectName) {
       execSync ('docker volume create --label vibey=project --label vibey-project=' + projectName + ' ' + vol, {encoding: 'utf8'});
    }
 
-   // Create new container with its own volume on the vibey network
+   // Create new container with its own volume
    execSync (
       'docker run -d' +
       ' --name ' + name +
       ' --label vibey=project' +
       ' --label vibey-project=' + projectName +
-      ' --network ' + DOCKER_NETWORK +
       ' -v ' + vol + ':/workspace' +
       ' -w /workspace' +
       ' ' + SANDBOX_IMAGE,
@@ -2964,7 +2952,7 @@ var routes = [
          return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
       }
 
-      // Resolve container IP on vibey-net
+      // Resolve container IP
       var targetHost;
       try {
          targetHost = getContainerIP (projectName);
@@ -3028,9 +3016,8 @@ process.on ('uncaughtException', function (error, origin) {
    process.exit (1);
 });
 
-// Docker housekeeping: ensure network exists, cleanup orphaned containers on startup
-clog ('Ensuring Docker network and cleaning up orphaned project containers...');
-ensureNetwork ();
+// Docker housekeeping: cleanup orphaned containers on startup
+clog ('Cleaning up orphaned project containers...');
 cleanupProjectContainers ();
 
 // Docker housekeeping: kill project containers on shutdown
