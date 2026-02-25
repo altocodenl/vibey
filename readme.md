@@ -56,7 +56,7 @@ Think of a text-based agentic system as three things:
 
 The first two are stocks: things that accumulate with time. The last one is a flow: changes to the deed and the docs.
 
-The core of all this is one doc, `doc-main.md.` This file contains:
+The core of all this is one doc, `doc/main.md.` This file contains:
 
 - A description of the deed.
 - Links to other docs.
@@ -95,9 +95,9 @@ Yes. Each project runs in its own Docker container with its own volume. No share
    - Docs: lush markdown editing
    - Dialogs: lush visual of each dialog, with the possibility to interrupt it and converse with it.
 
-Docs and dialogs are just markdown files in `vibey/`:
-   - doc-<name>.md
-   - dialog-<YYYYMMDD-HHMMSS (utc)>-<slug>-<status>.md
+Docs and dialogs are markdown files under dedicated folders in each project:
+   - `doc/<name>`
+   - `dialog/<YYYYMMDD-HHMMSS (utc)>-<slug>-<status>.md`
 
 Note that the deed is missing; if it's code, go use your IDE, or just open your browser and use it, if it's running.
 
@@ -155,12 +155,14 @@ Snapshots view lists all snapshots with restore, download, and delete actions. C
 
 ### Server: files
 
-All files live inside `/workspace/` in the project container. All file I/O goes through the `projectFS` abstraction. Filenames must match `[a-zA-Z0-9_\-\.]+`, end in `.md`, no `..`.
+All files live inside `/workspace/` in the project container. All file I/O goes through the `projectFS` abstraction. Managed files are under `doc/` and `dialog/`; no `..`.
 
-- `GET /project/:project/files` - list all `.md` files, sorted by mtime descending.
+- `GET /project/:project/files` - list all managed files (`doc/*`, `dialog/*`), sorted by mtime descending.
 - `GET /project/:project/file/:name` - read file. Returns `{name, content}`.
 - `POST /project/:project/file/:name` - write file. Body: `{content}`.
 - `DELETE /project/:project/file/:name` - delete file.
+
+`name` may include subpaths (for example `doc/main.md` or `dialog/<id>-<status>.md`).
 
 ### Client: files
 
@@ -170,7 +172,7 @@ Left sidebar lists all files with + New and × delete. Right side is a textarea 
 
 - `POST /project/:project/dialog/new` — create a waiting dialog draft. Body: `{provider, model?, slug?}`.
 - `POST /project/:project/dialog` — create a new dialog and run first turn. Body: `{provider, model?, prompt, slug?}`. Response: SSE.
-  - Creates a file named `dialog-<YYYYMMDD-HHmmss>-<slug>-<status>.md`.
+  - Creates a file named `dialog/<YYYYMMDD-HHmmss>-<slug>-<status>.md`.
   - Stable `dialogId` is `<YYYYMMDD-HHmmss>-<slug>` (status is not part of the id).
   - Appends a `## User` message with canonical payload format, opens `## Assistant`, streams `chunk` events.
   - Tool calls execute immediately (YOLO), results are appended to the dialog and streamed back.
@@ -182,7 +184,7 @@ Left sidebar lists all files with + New and × delete. Right side is a textarea 
   - If `prompt` is present, append as `## User` and continue generation.
   - Whenever generation is kicked off on an existing dialog, server first sets status to `active`.
   - Response is SSE when generation continues; otherwise JSON.
-- `GET /project/:project/dialogs` — list dialog files with `{dialogId, status, filename, mtime}`.
+- `GET /project/:project/dialogs` — list dialog files with `{dialogId, status, filename, mtime}` (filenames live under `dialog/`).
 - `GET /project/:project/dialog/:id` — load one dialog.
 
 SSE event types: `chunk`, `done`, `error`.
@@ -191,7 +193,7 @@ SSE event types: `chunk`, `done`, `error`.
 
 Dialogs are files named:
 
-`dialog-<YYYYMMDD-HHmmss>-<slug>-<status>.md`
+`dialog/<YYYYMMDD-HHmmss>-<slug>-<status>.md`
 
 Where `<status>` is one of: `active`, `waiting`, `done`.
 
@@ -336,7 +338,7 @@ Markdown is the source of truth. Restart-safe by design.
 
 ### Client: dialogs
 
-Left sidebar lists dialog files (those starting with `dialog-`). Right side is a chat view: messages parsed from the file, rendered as bubbles.
+Left sidebar lists dialog files (those under `dialog/`). Right side is a chat view: messages parsed from the file, rendered as bubbles.
 
 Input area: provider select (Claude/OpenAI), textarea (Cmd+Enter to send), Send button. During streaming, partial response shown with block cursor. Input is disabled while streaming.
 
@@ -360,7 +362,7 @@ By default, only 3 context lines around each change are visible. A "Show full di
 
 #### Bootstrapping
 
-There is no orchestration loop. To get the system going, the user starts a single dialog. That first agent reads `doc-main.md` and decides what to do - including spawning more agents via the `launch_agent` tool if needed. Each spawned agent is a flat, independent dialog that can itself spawn further agents.
+There is no orchestration loop. To get the system going, the user starts a single dialog. That first agent reads `doc/main.md` and decides what to do - including spawning more agents via the `launch_agent` tool if needed. Each spawned agent is a flat, independent dialog that can itself spawn further agents.
 
 ### Server: embed proxy
 
@@ -535,7 +537,7 @@ Since there are no shared volume mounts, vibey cannot use `fs.readFileSync` / `f
 
 These are wrapped in a `projectFS` abstraction in server.js.
 
-Latency per `docker exec` call is ~20-50ms. For human-speed UI operations (loading a doc, saving a file) this is fine. For tight loops (e.g., reconstructing dialog history before an LLM call), batch reads into a single `docker exec` (e.g., `cat /workspace/dialog-*.md`).
+Latency per `docker exec` call is ~20-50ms. For human-speed UI operations (loading a doc, saving a file) this is fine. For tight loops (e.g., reconstructing dialog history before an LLM call), batch reads into a single `docker exec` (e.g., `cat /workspace/dialog/*.md`).
 
 ### Container lifecycle
 
@@ -592,7 +594,7 @@ Flow #1:
 - I appear on the Docs tab
 - I go to the dialogs tab
 - I open a new dialog, entering its name
-- A file named dialog-<timestamp>-<name>-waiting.md is created, but I only see the name of the dialog. The status is shown as an appropriate icon. The entire name is seen, even if it makes the label larger.
+- A file named dialog/<timestamp>-<name>-waiting.md is created, but I only see the name of the dialog. The status is shown as an appropriate icon. The entire name is seen, even if it makes the label larger.
 - The dropdown for gpt5.3 is selected. I enter some text on the box below on the right (not a prompt window) and I send it and off the dialog goes. The request is to read the first 20 lines of readme.md.
 - I get a LLM response. I can see tokens used, times of requests. The file sent is compacted, not shown fully. I can expand it (and re-contract it by clicking another button).
 - I ask a question to the LLM which requires tool use (say a diff): please create a little dummy.js file with a console.log on it.
@@ -601,7 +603,7 @@ Flow #1:
 Flow #2:
 
 - I appear on the Docs tab
-- I click on main.md (which is, under the hood, doc-main.md).
+- I click on main.md (which is, under the hood, doc/main.md).
 - I can have a good editing experience of the file.
 - I can save my changes.
 - If I leave before saving my changes, I'm warned and can stay and then save.
@@ -626,14 +628,11 @@ Flow #4:
 Prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
 
-- Move the CSS to a different file: client-css.js; keep the litc format.
-- Remove the dialog- and doc- convention and instead use dedicated folders for that on each project (dialog/, doc/). Also remove the "must end with .md" from the client. Please autocreate these folders on project creation, and modify prompt.md to let the agents know about these folders, which they can read if they need to.
-
 Tests:
    - Make flows 3 & 4 work on the client.
-   - Add a flow 5 that requires a backend in another container.
+   - Add a flow 5 that requires a backend in another container. A tictactoe like that of flow 4 that is served through a port, also embedded.
    - Flow 6 for testing vi.
-   - Flow 7 for snapshot mode.
+   - Flow 7 for testing snapshot mode.
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
 
 ## TODO vibey cloud

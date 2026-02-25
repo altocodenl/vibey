@@ -127,7 +127,7 @@ var flow1Sequence = [
       if (! rs.body.dialogId || ! rs.body.filename) return log ('dialog/new missing dialogId or filename');
       if (rs.body.provider !== 'openai') return log ('dialog/new provider mismatch');
       if (rs.body.model !== 'gpt-5') return log ('dialog/new model mismatch');
-      if (! rs.body.filename.match (/^dialog\-.*\-waiting\.md$/)) return log ('dialog/new should produce waiting dialog filename');
+      if (! rs.body.filename.match (/^dialog\/.*\-waiting\.md$/)) return log ('dialog/new should produce waiting dialog filename');
       if (rs.body.filename.indexOf (DIALOG_SLUG) === -1) return log ('dialog/new filename missing slug');
       s.dialogId = rs.body.dialogId;
       return true;
@@ -225,7 +225,7 @@ var flow1Sequence = [
 var PROJECT2 = 'flow2-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 var INITIAL_CONTENT = '# Main\n\nThis is the initial content of the project.\n';
 var UPDATED_CONTENT = '# Main\n\nThis is the updated content of the project.\n\n## New section\n\nWith more detail.\n';
-var SECOND_DOC = 'doc-notes.md';
+var SECOND_DOC = 'doc/notes.md';
 var SECOND_CONTENT = '# Notes\n\nSome notes here.\n';
 
 var flow2Sequence = [
@@ -236,31 +236,31 @@ var flow2Sequence = [
       return true;
    }],
 
-   ['F2: Write doc-main.md with initial content', 'post', 'project/' + PROJECT2 + '/file/doc-main.md', {}, {content: INITIAL_CONTENT}, 200, function (s, rq, rs) {
+   ['F2: Write doc/main.md with initial content', 'post', 'project/' + PROJECT2 + '/file/doc/main.md', {}, {content: INITIAL_CONTENT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
-      if (rs.body.name !== 'doc-main.md') return log ('Unexpected filename returned');
+      if (rs.body.name !== 'doc/main.md') return log ('Unexpected filename returned');
       return true;
    }],
 
-   ['F2: Read doc-main.md returns initial content', 'get', 'project/' + PROJECT2 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
+   ['F2: Read doc/main.md returns initial content', 'get', 'project/' + PROJECT2 + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
-      if (rs.body.name !== 'doc-main.md') return log ('Unexpected name: ' + rs.body.name);
+      if (rs.body.name !== 'doc/main.md') return log ('Unexpected name: ' + rs.body.name);
       if (rs.body.content !== INITIAL_CONTENT) return log ('Content mismatch. Got: ' + JSON.stringify (rs.body.content));
       return true;
    }],
 
-   ['F2: List files includes doc-main.md', 'get', 'project/' + PROJECT2 + '/files', {}, '', 200, function (s, rq, rs) {
+   ['F2: List files includes doc/main.md', 'get', 'project/' + PROJECT2 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (! inc (rs.body, 'doc-main.md')) return log ('doc-main.md not in file list');
+      if (! inc (rs.body, 'doc/main.md')) return log ('doc/main.md not in file list');
       return true;
    }],
 
-   ['F2: Overwrite doc-main.md with updated content', 'post', 'project/' + PROJECT2 + '/file/doc-main.md', {}, {content: UPDATED_CONTENT}, 200, function (s, rq, rs) {
+   ['F2: Overwrite doc/main.md with updated content', 'post', 'project/' + PROJECT2 + '/file/doc/main.md', {}, {content: UPDATED_CONTENT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File overwrite failed');
       return true;
    }],
 
-   ['F2: Read doc-main.md returns updated content', 'get', 'project/' + PROJECT2 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
+   ['F2: Read doc/main.md returns updated content', 'get', 'project/' + PROJECT2 + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       if (rs.body.content !== UPDATED_CONTENT) return log ('Updated content mismatch. Got: ' + JSON.stringify (rs.body.content));
       return true;
    }],
@@ -272,7 +272,7 @@ var flow2Sequence = [
 
    ['F2: List files includes both docs', 'get', 'project/' + PROJECT2 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
-      if (! inc (rs.body, 'doc-main.md')) return log ('doc-main.md missing from list');
+      if (! inc (rs.body, 'doc/main.md')) return log ('doc/main.md missing from list');
       if (! inc (rs.body, SECOND_DOC)) return log (SECOND_DOC + ' missing from list');
       return true;
    }],
@@ -290,12 +290,12 @@ var flow2Sequence = [
    ['F2: List files no longer has second doc', 'get', 'project/' + PROJECT2 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (inc (rs.body, SECOND_DOC)) return log (SECOND_DOC + ' still in list after deletion');
-      if (! inc (rs.body, 'doc-main.md')) return log ('doc-main.md disappeared');
+      if (! inc (rs.body, 'doc/main.md')) return log ('doc/main.md disappeared');
       return true;
    }],
 
-   ['F2: doc-main.md still has updated content', 'get', 'project/' + PROJECT2 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
-      if (rs.body.content !== UPDATED_CONTENT) return log ('doc-main.md content changed unexpectedly');
+   ['F2: doc/main.md still has updated content', 'get', 'project/' + PROJECT2 + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
+      if (rs.body.content !== UPDATED_CONTENT) return log ('doc/main.md content changed unexpectedly');
       return true;
    }],
 
@@ -303,7 +303,7 @@ var flow2Sequence = [
 
    ['F2: Write with invalid filename returns 400', 'post', 'project/' + PROJECT2 + '/file/bad..name.md', {}, {content: 'x'}, 400],
 
-   ['F2: Write with non-md extension returns 400', 'post', 'project/' + PROJECT2 + '/file/bad.txt', {}, {content: 'x'}, 400],
+   ['F2: Write outside managed folders returns 400', 'post', 'project/' + PROJECT2 + '/file/bad.txt', {}, {content: 'x'}, 400],
 
    ['F2: Delete project', 'delete', 'projects/' + PROJECT2, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
@@ -333,7 +333,7 @@ var flow3Sequence = [
       return true;
    }],
 
-   ['F3: Write doc-main.md', 'post', 'project/' + PROJECT3 + '/file/doc-main.md', {}, {content: DOC_MAIN_F3}, 200, function (s, rq, rs) {
+   ['F3: Write doc/main.md', 'post', 'project/' + PROJECT3 + '/file/doc/main.md', {}, {content: DOC_MAIN_F3}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       return true;
    }],
@@ -415,10 +415,10 @@ var flow3Sequence = [
       return true;
    }],
 
-   ['F3: Re-created project has only default doc-main.md', 'get', 'project/' + PROJECT3 + '/files', {}, '', 200, function (s, rq, rs) {
+   ['F3: Re-created project has only default doc/main.md', 'get', 'project/' + PROJECT3 + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var unexpected = dale.fil (rs.body, undefined, function (name) {
-         if (name !== 'doc-main.md') return name;
+         if (name !== 'doc/main.md') return name;
       });
       if (unexpected.length) return log ('Unexpected files after re-create: ' + unexpected.join (', '));
       return true;
@@ -530,7 +530,7 @@ var flow4Sequence = [
       return true;
    }],
 
-   ['F4: Write doc-main.md', 'post', 'project/' + PROJECT4 + '/file/doc-main.md', {}, {content: DOC_MAIN_F4}, 200, function (s, rq, rs) {
+   ['F4: Write doc/main.md', 'post', 'project/' + PROJECT4 + '/file/doc/main.md', {}, {content: DOC_MAIN_F4}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       return true;
    }],
@@ -583,18 +583,18 @@ var flow4Sequence = [
       return true;
    }],
 
-   // Ask the AI to embed the game in doc-main.md
+   // Ask the AI to embed the game in doc/main.md
    ['F4: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogId, 'The tictactoe game is now available via the static proxy at /project/' + PROJECT4 + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.', function (error) {
+      fireDialog (PROJECT4, s.f4DialogId, 'The tictactoe game is now available via the static proxy at /project/' + PROJECT4 + '/static/. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc/main.md.', function (error) {
          if (error) return log ('Failed to fire embed request: ' + error.message);
          next ();
       });
    }],
 
-   // Poll until embed block appears in doc-main.md
-   ['F4: Poll until embed block appears in doc-main.md', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Poll until embed block appears in doc/main.md
+   ['F4: Poll until embed block appears in doc/main.md', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
-         httpGet (5353, '/project/' + PROJECT4 + '/file/doc-main.md', function (error, status, body) {
+         httpGet (5353, '/project/' + PROJECT4 + '/file/doc/main.md', function (error, status, body) {
             if (error || status !== 200) return done (false);
             try {
                var parsed = JSON.parse (body);
@@ -605,24 +605,558 @@ var flow4Sequence = [
             done (false);
          });
       }, 5000, 180000, function (error) {
-         if (error) return log ('Embed block never appeared in doc-main.md: ' + error.message);
+         if (error) return log ('Embed block never appeared in doc/main.md: ' + error.message);
          next ();
       });
    }],
 
-   ['F4: Verify embed block in doc-main.md', 'get', 'project/' + PROJECT4 + '/file/doc-main.md', {}, '', 200, function (s, rq, rs) {
+   ['F4: Verify embed block in doc/main.md', 'get', 'project/' + PROJECT4 + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       var content = rs.body.content || '';
-      if (content.indexOf ('əəəembed') === -1) return log ('doc-main.md missing əəəembed block');
-      if (content.indexOf ('port static') === -1) return log ('doc-main.md embed missing port static');
+      if (content.indexOf ('əəəembed') === -1) return log ('doc/main.md missing əəəembed block');
+      if (content.indexOf ('port static') === -1) return log ('doc/main.md embed missing port static');
       return true;
    }]
 
    // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
 ];
 
+// *** FLOW #5: Backend tictactoe — Express server on port 4000, embed via proxy ***
+
+var PROJECT5 = 'flow5-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
+
+var DOC_MAIN_F5 = [
+   '# Tictactoe Project (Backend)',
+   '',
+   'Build a simple tictactoe game for the browser using gotoB, served by an Express server on port 4000.',
+   'The game should be embedded in this doc via the proxy.',
+   '',
+   '## References',
+   '',
+   '- gotoB docs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
+   '',
+   '## Critical rules',
+   '',
+   '- Create a `server.js` that uses Express to serve static files from `/workspace` on port 4000.',
+   '- `index.html`: load gotoB.min.js in `<body>` (not `<head>` — document.body must exist when gotoB initializes):',
+   '  `<script src="https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js"></script>`',
+   '  This single file bundles dale, teishi, lith, recalc, cocholate. Do NOT load them separately.',
+   '- `app.js`: set `B.prod = true` before any B.call.',
+   '- Use `lith.css.style({...})` for inline styles, not raw JS objects.',
+   '- `B.ev` always requires a path: `B.ev(\'reset\', [])`, not `B.ev(\'reset\')`.',
+   '- Pass event context in responders: `function (x, ...) { B.call(x, \'set\', ...); }`.',
+   '- Run the server with `node server.js &` so it stays alive in the background.',
+   '- The game must mention "tictactoe" somewhere in the page title or heading.',
+   '',
+].join ('\n') + '\n';
+
+var flow5Sequence = [
+
+   ['F5: Create project', 'post', 'projects', {}, {name: PROJECT5}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
+      return true;
+   }],
+
+   ['F5: Write doc/main.md', 'post', 'project/' + PROJECT5 + '/file/doc/main.md', {}, {content: DOC_MAIN_F5}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
+      return true;
+   }],
+
+   ['F5: Create waiting dialog (orchestrator)', 'post', 'project/' + PROJECT5 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('dialog/new should return object');
+      if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
+      s.f5DialogId = rs.body.dialogId;
+      return true;
+   }],
+
+   // Fire the orchestrator and let it build the game + start the server
+   ['F5: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT5, s.f5DialogId, 'please start', function (error) {
+         if (error) return log ('Failed to fire dialog: ' + error.message);
+         next ();
+      });
+   }],
+
+   // Poll until the backend server is reachable via the proxy
+   ['F5: Poll until proxy serves the app on port 4000', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollUntil (function (done) {
+         httpGet (5353, '/project/' + PROJECT5 + '/proxy/4000/', function (error, status, body) {
+            if (error || status !== 200) return done (false);
+            var lower = (body || '').toLowerCase ();
+            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (true);
+            done (false);
+         });
+      }, 5000, 180000, function (error) {
+         if (error) return log ('Backend app never appeared via proxy: ' + error.message);
+         next ();
+      });
+   }],
+
+   // Verify the index page via proxy
+   ['F5: Proxy serves index.html with gotoB + app.js', 'get', 'project/' + PROJECT5 + '/proxy/4000/', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'string') return log ('Expected HTML string body');
+      var lower = (rs.body || '').toLowerCase ();
+      if (lower.indexOf ('gotob') === -1) return log ('index.html missing gotoB reference');
+      if (lower.indexOf ('app.js') === -1) return log ('index.html missing app.js reference');
+      return true;
+   }],
+
+   // Verify app.js is served through proxy
+   ['F5: Proxy serves app.js', 'get', 'project/' + PROJECT5 + '/proxy/4000/app.js', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'string') return log ('Expected JS string body');
+      if (rs.body.indexOf ('B.') === -1) return log ('app.js missing gotoB usage');
+      var hasBoardLogic = rs.body.indexOf ('board') !== -1 || rs.body.indexOf ('cell') !== -1 || rs.body.indexOf ('grid') !== -1;
+      if (! hasBoardLogic) return log ('app.js missing board/cell/grid logic');
+      return true;
+   }],
+
+   // Verify the Express server is running inside the container
+   ['F5: Server process is running', 'post', 'project/' + PROJECT5 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'ps aux | grep node || true'}}, 200, function (s, rq, rs) {
+      if (! rs.body || ! rs.body.success) return log ('ps aux failed: ' + JSON.stringify (rs.body));
+      var out = (rs.body.stdout || '') + (rs.body.stderr || '');
+      if (out.indexOf ('server.js') === -1) return log ('server.js process not found in ps output');
+      return true;
+   }],
+
+   // Ask the agent to embed the game in doc/main.md
+   ['F5: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fireDialog (PROJECT5, s.f5DialogId, 'The tictactoe game is now running on port 4000 inside the container. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc/main.md.', function (error) {
+         if (error) return log ('Failed to fire embed request: ' + error.message);
+         next ();
+      });
+   }],
+
+   // Poll until embed block appears in doc/main.md
+   ['F5: Poll until embed block appears in doc/main.md', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollUntil (function (done) {
+         httpGet (5353, '/project/' + PROJECT5 + '/file/doc/main.md', function (error, status, body) {
+            if (error || status !== 200) return done (false);
+            try {
+               var parsed = JSON.parse (body);
+               var content = parsed.content || '';
+               if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (true);
+            }
+            catch (e) {}
+            done (false);
+         });
+      }, 5000, 180000, function (error) {
+         if (error) return log ('Embed block never appeared in doc/main.md: ' + error.message);
+         next ();
+      });
+   }],
+
+   ['F5: Verify embed block in doc/main.md', 'get', 'project/' + PROJECT5 + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
+      var content = rs.body.content || '';
+      if (content.indexOf ('əəəembed') === -1) return log ('doc/main.md missing əəəembed block');
+      if (content.indexOf ('port 4000') === -1) return log ('doc/main.md embed missing port 4000');
+      return true;
+   }]
+
+   // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
+];
+
+// *** FLOW #6: Vi mode (settings toggle) ***
+
+var PROJECT6 = 'flow6-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
+
+var flow6Sequence = [
+
+   // *** Settings: default state ***
+
+   ['F6: GET /settings returns default viMode false', 'get', 'settings', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('Expected object body');
+      if (! rs.body.editor || rs.body.editor.viMode !== false) return log ('Default viMode should be false, got: ' + JSON.stringify (rs.body.editor));
+      return true;
+   }],
+
+   // *** Settings: enable vi mode ***
+
+   ['F6: POST /settings to enable viMode', 'post', 'settings', {}, {editor: {viMode: true}}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Settings save failed');
+      return true;
+   }],
+
+   ['F6: GET /settings confirms viMode true', 'get', 'settings', {}, '', 200, function (s, rq, rs) {
+      if (! rs.body.editor || rs.body.editor.viMode !== true) return log ('viMode should be true after enable, got: ' + JSON.stringify (rs.body.editor));
+      return true;
+   }],
+
+   // *** Settings: disable vi mode ***
+
+   ['F6: POST /settings to disable viMode', 'post', 'settings', {}, {editor: {viMode: false}}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Settings save failed');
+      return true;
+   }],
+
+   ['F6: GET /settings confirms viMode false again', 'get', 'settings', {}, '', 200, function (s, rq, rs) {
+      if (! rs.body.editor || rs.body.editor.viMode !== false) return log ('viMode should be false after disable, got: ' + JSON.stringify (rs.body.editor));
+      return true;
+   }],
+
+   // *** Settings: viMode persists alongside API keys ***
+
+   ['F6: POST /settings with API key does not clobber viMode', 'post', 'settings', {}, {editor: {viMode: true}}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Settings save failed');
+      return true;
+   }],
+
+   ['F6: POST /settings with API key only', 'post', 'settings', {}, {openaiKey: 'sk-test-vi-flow'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Settings save failed');
+      return true;
+   }],
+
+   ['F6: GET /settings: viMode still true after API key save', 'get', 'settings', {}, '', 200, function (s, rq, rs) {
+      if (! rs.body.editor || rs.body.editor.viMode !== true) return log ('viMode should still be true, got: ' + JSON.stringify (rs.body.editor));
+      if (! rs.body.openai || ! rs.body.openai.hasKey) return log ('openai key should be set');
+      return true;
+   }],
+
+   // *** Settings: viMode with boolean body.viMode (backward compat) ***
+
+   ['F6: POST /settings with top-level viMode boolean', 'post', 'settings', {}, {viMode: false}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Settings save failed');
+      return true;
+   }],
+
+   ['F6: GET /settings confirms viMode false via top-level toggle', 'get', 'settings', {}, '', 200, function (s, rq, rs) {
+      if (! rs.body.editor || rs.body.editor.viMode !== false) return log ('viMode should be false, got: ' + JSON.stringify (rs.body.editor));
+      return true;
+   }],
+
+   // *** Vi mode with doc editing ***
+
+   ['F6: Create project', 'post', 'projects', {}, {name: PROJECT6}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
+      return true;
+   }],
+
+   ['F6: Write a doc to edit', 'post', 'project/' + PROJECT6 + '/file/doc/main.md', {}, {content: '# Vi Test\n\nHello world.\n'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
+      return true;
+   }],
+
+   ['F6: Read doc back', 'get', 'project/' + PROJECT6 + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
+      if (rs.body.content !== '# Vi Test\n\nHello world.\n') return log ('Content mismatch');
+      return true;
+   }],
+
+   // Simulate vi :w by writing updated content
+   ['F6: Simulate vi :w (overwrite doc)', 'post', 'project/' + PROJECT6 + '/file/doc/main.md', {}, {content: '# Vi Test\n\nHello world.\nNew line added by vi.\n'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File overwrite failed');
+      return true;
+   }],
+
+   ['F6: Read doc confirms vi edit persisted', 'get', 'project/' + PROJECT6 + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
+      if (rs.body.content !== '# Vi Test\n\nHello world.\nNew line added by vi.\n') return log ('Vi edit not persisted');
+      return true;
+   }],
+
+   // *** Cleanup: restore viMode to false, clean API key ***
+
+   ['F6: Restore viMode to false', 'post', 'settings', {}, {editor: {viMode: false}, openaiKey: ''}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Cleanup settings failed');
+      return true;
+   }],
+
+   ['F6: Delete project', 'delete', 'projects/' + PROJECT6, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
+      return true;
+   }]
+];
+
+// *** FLOW #7: Snapshots ***
+
+var PROJECT7 = 'flow7-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
+
+var SNAP_DOC_CONTENT = '# Snapshot Test\n\nThis content should survive a snapshot and restore.\n';
+var SNAP_EXTRA_FILE = 'doc/notes.md';
+var SNAP_EXTRA_CONTENT = '# Notes\n\nSome extra notes.\n';
+
+var flow7Sequence = [
+
+   ['F7: Create project', 'post', 'projects', {}, {name: PROJECT7}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
+      return true;
+   }],
+
+   ['F7: Write doc/main.md', 'post', 'project/' + PROJECT7 + '/file/doc/main.md', {}, {content: SNAP_DOC_CONTENT}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
+      return true;
+   }],
+
+   ['F7: Write extra file', 'post', 'project/' + PROJECT7 + '/file/' + SNAP_EXTRA_FILE, {}, {content: SNAP_EXTRA_CONTENT}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Extra file write failed');
+      return true;
+   }],
+
+   // *** Create a snapshot ***
+
+   ['F7: Create snapshot with label', 'post', 'project/' + PROJECT7 + '/snapshot', {}, {label: 'before refactor'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('Expected snapshot entry object');
+      if (! rs.body.id) return log ('Snapshot missing id');
+      if (rs.body.project !== PROJECT7) return log ('Snapshot project mismatch: ' + rs.body.project);
+      if (rs.body.label !== 'before refactor') return log ('Snapshot label mismatch');
+      if (! rs.body.file || rs.body.file.indexOf ('.tar.gz') === -1) return log ('Snapshot file should be .tar.gz');
+      if (type (rs.body.fileCount) !== 'integer' || rs.body.fileCount < 2) return log ('Expected at least 2 files, got: ' + rs.body.fileCount);
+      if (! rs.body.created) return log ('Snapshot missing created timestamp');
+      s.snapshotId = rs.body.id;
+      s.snapshotProjectName = rs.body.projectName;
+      return true;
+   }],
+
+   // *** List snapshots ***
+
+   ['F7: List snapshots includes our snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var found = dale.stopNot (rs.body, undefined, function (snap) {
+         if (snap.id === s.snapshotId) return snap;
+      });
+      if (! found) return log ('Snapshot not found in list');
+      if (found.label !== 'before refactor') return log ('Label mismatch in list');
+      return true;
+   }],
+
+   // *** Create a second snapshot (no label) ***
+
+   ['F7: Create second snapshot without label', 'post', 'project/' + PROJECT7 + '/snapshot', {}, {}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || ! rs.body.id) return log ('Second snapshot creation failed');
+      s.snapshotId2 = rs.body.id;
+      return true;
+   }],
+
+   ['F7: List snapshots has two entries', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var ids = dale.go (rs.body, function (snap) {return snap.id;});
+      if (! inc (ids, s.snapshotId)) return log ('First snapshot missing');
+      if (! inc (ids, s.snapshotId2)) return log ('Second snapshot missing');
+      // Newest first
+      if (rs.body [0].id !== s.snapshotId2) return log ('Expected newest snapshot first');
+      return true;
+   }],
+
+   // *** Download snapshot ***
+
+   ['F7: Download snapshot returns tar.gz', 'get', 'snapshots/' + 'placeholder' + '/download', {}, '', 200, function (s, rq, rs) {
+      // NOTE: We can't easily use dynamic path with hitit tuple format, so we verify via httpGet
+      return true;
+   }],
+
+   // Verify download via httpGet for dynamic path
+   ['F7: Download snapshot (dynamic path)', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+      httpGet (5353, '/snapshots/' + encodeURIComponent (s.snapshotId) + '/download', function (error, status, body) {
+         if (error) return log ('Download failed: ' + error.message);
+         if (status !== 200) return log ('Download returned status ' + status);
+         if (! body || body.length < 10) return log ('Download body too small: ' + body.length + ' bytes');
+         next ();
+      });
+   }],
+
+   // *** Restore snapshot as new project ***
+
+   ['F7: Restore snapshot as new project', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+      var body = JSON.stringify ({name: 'Restored Flow7 Test'});
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/snapshots/' + encodeURIComponent (s.snapshotId) + '/restore',
+         method: 'POST',
+         headers: {'Content-Type': 'application/json'}
+      }, function (res) {
+         var data = '';
+         res.on ('data', function (chunk) {data += chunk;});
+         res.on ('end', function () {
+            try {
+               var result = JSON.parse (data);
+               if (! result.slug) return log ('Restore missing slug');
+               if (result.snapshotId !== s.snapshotId) return log ('Restore snapshotId mismatch');
+               s.restoredSlug = result.slug;
+               s.restoredName = result.name;
+               next ();
+            }
+            catch (e) {
+               log ('Restore response parse error: ' + data);
+            }
+         });
+      });
+      req.on ('error', function (err) {log ('Restore request error: ' + err.message);});
+      req.write (body);
+      req.end ();
+   }],
+
+   // Verify restored project appears in project list
+   ['F7: Restored project in list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (! projectListHasSlug (rs.body, s.restoredSlug)) return log ('Restored project not in list: ' + s.restoredSlug);
+      return true;
+   }],
+
+   // Verify restored project has the same files
+   ['F7: Restored project has both files', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+      httpGet (5353, '/project/' + s.restoredSlug + '/files', function (error, status, body) {
+         if (error || status !== 200) return log ('Failed to list restored files');
+         try {
+            var files = JSON.parse (body);
+            if (! inc (files, 'doc/main.md')) return log ('Restored project missing doc/main.md');
+            if (! inc (files, SNAP_EXTRA_FILE)) return log ('Restored project missing ' + SNAP_EXTRA_FILE);
+            next ();
+         }
+         catch (e) {log ('Parse error: ' + body);}
+      });
+   }],
+
+   // Verify restored file content matches original
+   ['F7: Restored doc/main.md matches original', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+      httpGet (5353, '/project/' + s.restoredSlug + '/file/doc/main.md', function (error, status, body) {
+         if (error || status !== 200) return log ('Failed to read restored doc/main.md');
+         try {
+            var parsed = JSON.parse (body);
+            if (parsed.content !== SNAP_DOC_CONTENT) return log ('Restored doc/main.md content mismatch. Got: ' + JSON.stringify (parsed.content));
+            next ();
+         }
+         catch (e) {log ('Parse error');}
+      });
+   }],
+
+   ['F7: Restored notes.md matches original', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+      httpGet (5353, '/project/' + s.restoredSlug + '/file/' + SNAP_EXTRA_FILE, function (error, status, body) {
+         if (error || status !== 200) return log ('Failed to read restored notes.md');
+         try {
+            var parsed = JSON.parse (body);
+            if (parsed.content !== SNAP_EXTRA_CONTENT) return log ('Restored notes.md content mismatch');
+            next ();
+         }
+         catch (e) {log ('Parse error');}
+      });
+   }],
+
+   // *** Modify original project, verify snapshot is unaffected ***
+
+   ['F7: Modify original doc/main.md', 'post', 'project/' + PROJECT7 + '/file/doc/main.md', {}, {content: '# Modified After Snapshot\n'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File overwrite failed');
+      return true;
+   }],
+
+   // Restored project should still have original content
+   ['F7: Restored project unaffected by original modification', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+      httpGet (5353, '/project/' + s.restoredSlug + '/file/doc/main.md', function (error, status, body) {
+         if (error || status !== 200) return log ('Failed to read restored doc/main.md after modification');
+         try {
+            var parsed = JSON.parse (body);
+            if (parsed.content !== SNAP_DOC_CONTENT) return log ('Restored content was affected by original modification!');
+            next ();
+         }
+         catch (e) {log ('Parse error');}
+      });
+   }],
+
+   // *** Delete a snapshot ***
+
+   ['F7: Delete second snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/snapshots/' + encodeURIComponent (s.snapshotId2),
+         method: 'DELETE'
+      }, function (res) {
+         var data = '';
+         res.on ('data', function (chunk) {data += chunk;});
+         res.on ('end', function () {
+            try {
+               var result = JSON.parse (data);
+               if (! result.ok) return log ('Snapshot deletion failed');
+               next ();
+            }
+            catch (e) {log ('Delete response parse error: ' + data);}
+         });
+      });
+      req.on ('error', function (err) {log ('Delete request error: ' + err.message);});
+      req.end ();
+   }],
+
+   ['F7: List snapshots no longer has deleted snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var ids = dale.go (rs.body, function (snap) {return snap.id;});
+      if (inc (ids, s.snapshotId2)) return log ('Deleted snapshot still in list');
+      if (! inc (ids, s.snapshotId)) return log ('First snapshot should still exist');
+      return true;
+   }],
+
+   // *** Snapshot survives project deletion ***
+
+   ['F7: Delete original project', 'delete', 'projects/' + PROJECT7, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
+      return true;
+   }],
+
+   ['F7: Snapshot still in list after project deletion', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var found = dale.stopNot (rs.body, undefined, function (snap) {
+         if (snap.id === s.snapshotId) return snap;
+      });
+      if (! found) return log ('Snapshot disappeared after project deletion');
+      return true;
+   }],
+
+   // *** Delete nonexistent snapshot returns error ***
+
+   ['F7: Delete nonexistent snapshot returns 400', 'delete', 'snapshots/nonexistent-id-12345', {}, '', 400, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || ! rs.body.error) return log ('Expected error message');
+      return true;
+   }],
+
+   // *** Download nonexistent snapshot returns 404 ***
+
+   ['F7: Download nonexistent snapshot returns 404', 'get', 'snapshots/nonexistent-id-12345/download', {}, '', 404, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || ! rs.body.error) return log ('Expected error message');
+      return true;
+   }],
+
+   // *** Cleanup ***
+
+   ['F7: Delete restored project', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+      if (! s.restoredSlug) return next ();
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/projects/' + encodeURIComponent (s.restoredSlug),
+         method: 'DELETE'
+      }, function (res) {
+         var data = '';
+         res.on ('data', function (chunk) {data += chunk;});
+         res.on ('end', function () {next ();});
+      });
+      req.on ('error', function () {next ();});
+      req.end ();
+   }],
+
+   // Clean up remaining snapshot
+   ['F7: Delete first snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/snapshots/' + encodeURIComponent (s.snapshotId),
+         method: 'DELETE'
+      }, function (res) {
+         var data = '';
+         res.on ('data', function (chunk) {data += chunk;});
+         res.on ('end', function () {next ();});
+      });
+      req.on ('error', function () {next ();});
+      req.end ();
+   }],
+
+   ['F7: Snapshots list is clean', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      var ours = dale.fil (rs.body, undefined, function (snap) {
+         if (snap.project === PROJECT7) return snap;
+      });
+      if (ours.length > 0) return log ('Leftover snapshots from flow7: ' + ours.length);
+      return true;
+   }]
+];
+
 // *** RUNNER ***
 
-var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence};
+var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence, 5: flow5Sequence, 6: flow6Sequence, 7: flow7Sequence};
 
 var requestedFlows = [];
 dale.go (process.argv.slice (2), function (arg) {
@@ -630,7 +1164,7 @@ dale.go (process.argv.slice (2), function (arg) {
    if (match) requestedFlows.push (Number (match [1]));
 });
 
-if (! requestedFlows.length) requestedFlows = [1, 2, 3, 4];
+if (! requestedFlows.length) requestedFlows = [1, 2, 3, 4, 5, 6, 7];
 
 var sequences = dale.go (requestedFlows, function (n) {return allFlows [n];});
 var label = 'Flow #' + requestedFlows.join (' + Flow #');

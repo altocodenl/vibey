@@ -586,9 +586,12 @@ var pfs = {
    readdir: function (projectName) {
       var name = containerName (projectName);
       try {
-         var output = execSync ('docker exec ' + name + ' ls /workspace', {encoding: 'utf8'}).trim ();
+         var output = execSync ('docker exec ' + name + " sh -c 'find /workspace -type f'", {encoding: 'utf8'}).trim ();
          if (! output) return [];
-         return output.split ('\n');
+         return dale.fil (output.split ('\n'), undefined, function (line) {
+            if (! line) return;
+            return line.replace (/^\/workspace\//, '');
+         });
       }
       catch (e) {
          return [];
@@ -851,6 +854,7 @@ var projectExists = function (projectName) {
 var ensureProject = function (projectName) {
    var slug = slugifyProjectName (projectName);
    ensureProjectContainer (slug);
+   ensureProjectLayout (slug);
    return slug;
 };
 
@@ -860,6 +864,7 @@ var getExistingProject = function (projectName) {
    if (! containerRunning (projectName)) {
       execSync ('docker start ' + containerName (projectName), {encoding: 'utf8'});
    }
+   ensureProjectLayout (projectName);
    return projectName;
 };
 
@@ -898,6 +903,23 @@ var endActiveStream = function (dialogId) {
    delete ACTIVE_STREAMS [dialogId];
 };
 
+var DOC_DIR = 'doc';
+var DIALOG_DIR = 'dialog';
+var DOC_MAIN_FILE = DOC_DIR + '/main.md';
+
+var managedFilePath = function (name) {
+   if (type (name) !== 'string') return false;
+   return name.indexOf (DOC_DIR + '/') === 0 || name.indexOf (DIALOG_DIR + '/') === 0;
+};
+
+var ensureProjectLayout = function (projectName) {
+   try {
+      pfs.mkdirp (projectName, DOC_DIR);
+      pfs.mkdirp (projectName, DIALOG_DIR);
+   }
+   catch (e) {}
+};
+
 // *** DOC-MAIN HELPERS ***
 
 var compactText = function (text, maxLines, maxChars) {
@@ -914,12 +936,12 @@ var compactText = function (text, maxLines, maxChars) {
 };
 
 var getDocMainContent = function (projectName) {
-   if (! pfs.exists (projectName, 'doc-main.md')) return null;
+   if (! pfs.exists (projectName, DOC_MAIN_FILE)) return null;
 
    try {
-      var content = pfs.readFile (projectName, 'doc-main.md');
+      var content = pfs.readFile (projectName, DOC_MAIN_FILE);
       if (! content || ! content.trim ()) return null;
-      return {name: 'doc-main.md', content: content.trim ()};
+      return {name: DOC_MAIN_FILE, content: content.trim ()};
    }
    catch (error) {
       return null;
@@ -1389,13 +1411,24 @@ var slugify = function (text) {
 };
 
 var buildDialogFilename = function (dialogId, status) {
-   return 'dialog-' + dialogId + '-' + status + '.md';
+   return DIALOG_DIR + '/' + dialogId + '-' + status + '.md';
 };
 
 var parseDialogFilename = function (filename) {
-   var match = (filename || '').match (/^dialog\-(.+)\-(active|waiting|done)\.md$/);
-   if (! match) return null;
-   return {dialogId: match [1], status: match [2]};
+   if (type (filename) !== 'string') return null;
+
+   // New format: dialog/<dialogId>-<status>.md
+   if (filename.indexOf (DIALOG_DIR + '/') === 0) {
+      filename = filename.slice ((DIALOG_DIR + '/').length);
+      var match = filename.match (/^(.+)\-(active|waiting|done)\.md$/);
+      if (! match) return null;
+      return {dialogId: match [1], status: match [2]};
+   }
+
+   // Legacy format (backward compatibility): dialog-<dialogId>-<status>.md
+   var legacy = filename.match (/^dialog\-(.+)\-(active|waiting|done)\.md$/);
+   if (! legacy) return null;
+   return {dialogId: legacy [1], status: legacy [2]};
 };
 
 var findDialogFilename = function (projectName, dialogId) {
@@ -1991,12 +2024,14 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
    };
 };
 
-// Validate filename: only alphanumeric, dash, underscore, dot; must end in .md
+// Validate file path: managed folders only (doc/ or dialog/), no traversal
 var validFilename = function (name) {
    if (type (name) !== 'string') return false;
-   if (! name.endsWith ('.md')) return false;
+   if (! name.trim ()) return false;
    if (name.includes ('..')) return false;
-   if (name.includes ('/') || name.includes ('\\')) return false;
+   if (name [0] === '/' || name.includes ('\\')) return false;
+   if (! /^[a-zA-Z0-9_\-\.\/]+$/.test (name)) return false;
+   if (! managedFilePath (name)) return false;
    return true;
 }
 
@@ -2083,10 +2118,12 @@ var routes = [
          ['body', [
             ['script', {src: 'https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js'}],
             ['script', {src: 'https://cdn.jsdelivr.net/npm/marked/marked.min.js'}],
+            ['script', {src: 'client-css.js'}],
             ['script', {src: 'client.js'}],
          ]]
       ]]
    ])],
+   ['get', 'client-css.js', cicek.file],
    ['get', 'client.js', cicek.file],
    ['get', 'test-client.js', cicek.file],
 
@@ -2168,6 +2205,75 @@ var routes = [
       reply (rs, 200, {ok: true});
    }],
 
+   // Backward-compatible accounts routes
+   ['get', 'accounts', function (rq, rs) {
+      var config = loadConfigJson ();
+      reply (rs, 200, buildSettingsResponse (config));
+   }],
+   ['post', 'accounts', function (rq, rs) {
+      var config = loadConfigJson ();
+      config = applySettingsUpdate (config, rq.body);
+      saveConfigJson (config);
+      reply (rs, 200, {ok: true});
+   }],
+   ['post', 'accounts/login/:provider', async function (rq, rs) {
+      var provider = rq.data.params.provider;
+      try {
+         if (provider === 'claude') {
+            var url = await startAnthropicLogin ();
+            reply (rs, 200, {url: url, flow: 'paste_code'});
+         }
+         else if (provider === 'openai') {
+            var url = await startOpenAILogin ();
+            reply (rs, 200, {url: url, flow: 'callback'});
+         }
+         else {
+            reply (rs, 400, {error: 'Unknown provider: ' + provider});
+         }
+      }
+      catch (error) {
+         reply (rs, 500, {error: error.message});
+      }
+   }],
+   ['post', 'accounts/login/:provider/callback', async function (rq, rs) {
+      var provider = rq.data.params.provider;
+      try {
+         if (provider === 'claude') {
+            if (type (rq.body.code) !== 'string' || ! rq.body.code.trim ()) return reply (rs, 400, {error: 'code is required'});
+            var result = await completeAnthropicLogin (rq.body.code.trim ());
+            reply (rs, 200, result);
+         }
+         else if (provider === 'openai') {
+            var result = await completeOpenAILogin (rq.body.code || null);
+            reply (rs, 200, result);
+         }
+         else {
+            reply (rs, 400, {error: 'Unknown provider: ' + provider});
+         }
+      }
+      catch (error) {
+         reply (rs, 500, {error: error.message});
+      }
+   }],
+   ['post', 'accounts/logout/:provider', function (rq, rs) {
+      var provider = rq.data.params.provider;
+      var config = loadConfigJson ();
+      if (! config.accounts) config.accounts = {};
+
+      if (provider === 'claude') {
+         delete config.accounts.claudeOAuth;
+      }
+      else if (provider === 'openai') {
+         delete config.accounts.openaiOAuth;
+      }
+      else {
+         return reply (rs, 400, {error: 'Unknown provider: ' + provider});
+      }
+
+      saveConfigJson (config);
+      reply (rs, 200, {ok: true});
+   }],
+
    // *** PROJECTS ***
 
    ['get', 'projects', function (rq, rs) {
@@ -2184,8 +2290,10 @@ var routes = [
       try {
          var displayName = rq.body.name.trim ();
          var slug = ensureProject (displayName);
-         if (! pfs.exists (slug, 'doc-main.md')) {
-            pfs.writeFile (slug, 'doc-main.md', '# ' + displayName + '\n');
+         pfs.mkdirp (slug, DOC_DIR);
+         pfs.mkdirp (slug, DIALOG_DIR);
+         if (! pfs.exists (slug, DOC_MAIN_FILE)) {
+            pfs.writeFile (slug, DOC_MAIN_FILE, '# ' + displayName + '\n');
          }
          reply (rs, 200, {ok: true, slug: slug, name: displayName});
       }
@@ -2306,11 +2414,11 @@ var routes = [
 
       try {
          var files = pfs.readdir (projectName);
-         var mdFiles = dale.fil (files, undefined, function (file) {
-            if (file.endsWith ('.md')) return file;
+         var managedFiles = dale.fil (files, undefined, function (file) {
+            if (managedFilePath (file)) return file;
          });
          // Sort by modification time, most recent first
-         var withStats = dale.go (mdFiles, function (file) {
+         var withStats = dale.go (managedFiles, function (file) {
             var stat = pfs.stat (projectName, file);
             return {name: file, mtime: stat.mtime.getTime ()};
          });
@@ -2322,11 +2430,12 @@ var routes = [
       }
    }],
 
-   ['get', 'project/:project/file/:name', function (rq, rs) {
-      var name = rq.data.params.name;
+   ['get', /^\/project\/([^/]+)\/file\/(.+)$/, function (rq, rs) {
+      var projectSlug = decodeURIComponent (rq.data.params [0]);
+      var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectName = resolveProject (rs, rq.data.params.project);
+      var projectName = resolveProject (rs, projectSlug);
       if (! projectName) return;
 
       try {
@@ -2339,15 +2448,16 @@ var routes = [
       }
    }],
 
-   ['post', 'project/:project/file/:name', function (rq, rs) {
-      var name = rq.data.params.name;
+   ['post', /^\/project\/([^/]+)\/file\/(.+)$/, function (rq, rs) {
+      var projectSlug = decodeURIComponent (rq.data.params [0]);
+      var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
       if (stop (rs, [
          ['content', rq.body.content, 'string'],
       ])) return;
 
-      var projectName = resolveProject (rs, rq.data.params.project);
+      var projectName = resolveProject (rs, projectSlug);
       if (! projectName) return;
 
       try {
@@ -2359,11 +2469,12 @@ var routes = [
       }
    }],
 
-   ['delete', 'project/:project/file/:name', function (rq, rs) {
-      var name = rq.data.params.name;
+   ['delete', /^\/project\/([^/]+)\/file\/(.+)$/, function (rq, rs) {
+      var projectSlug = decodeURIComponent (rq.data.params [0]);
+      var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectName = resolveProject (rs, rq.data.params.project);
+      var projectName = resolveProject (rs, projectSlug);
       if (! projectName) return;
 
       try {
@@ -2563,7 +2674,8 @@ var routes = [
       try {
          var files = pfs.readdir (projectName);
          var dialogFiles = dale.fil (files, undefined, function (file) {
-            if (file.startsWith ('dialog-') && file.endsWith ('.md')) return file;
+            var parsed = parseDialogFilename (file);
+            if (parsed) return file;
          });
          // Sort by modification time, most recent first
          var withStats = dale.fil (dialogFiles, undefined, function (file) {

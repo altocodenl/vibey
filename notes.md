@@ -1,5 +1,31 @@
 ## Vibey development notes
 
+### 2026-02-25
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+
+- Can you implement vi mode in client? No other agent will touch it. The details are in the corresponding TODO in readme.md.
+- Amazing. Can you make the change on the server for /settings too? And document the vi mode in readme.md and remove (or repurpose) the vi TODO section?
+---
+- Can you implement snapshots? Don't touch client.js yet, just the server.
+   - Snapshots are stored inside the vibey container, in its data volume.
+   - Restoring a snapshot creates a new project with those files.
+   - We have a snapshots view.
+- Great! Can you modify readme.md accordingly? Especially with endpoint info.
+- Perfct. Now you can modify the client to include snapshot support.
+---
+- Can you review the latest changes that are not committed? Don't modify any files. Just review the changes and see if they look good to you or not.
+---
+- Move the CSS to a different file: client-css.js; keep the litc format.
+- Remove the dialog- and doc- convention and instead use dedicated folders for that on each project (dialog/, doc/). Also remove the "must end with .md" from the client. Please autocreate these folders on project creation, and modify prompt.md to let the agents know about these folders, which they can read if they need to. Do it everywhere including tests except for client.js.
+- Please implement but do not run these server tests, using the existing style and conventions:
+   - Add a flow 5 that requires a backend in another container. A tictactoe like that of flow 4 that is served through a port, also embedded.
+   - Flow 6 for testing vi.
+   - Flow 7 for testing snapshot mode.
+---
+- Fantastic! Now extrapolate the tests to the client tests, with the same approach. Uncomment any commented tests on the client tests. Don't run anything yet.
+
+
 ### 2026-02-24
 
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).

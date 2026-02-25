@@ -168,7 +168,7 @@
          restorePrompt ();
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile set after dialog creation';
-         if (file.name.indexOf ('dialog-') !== 0) return 'Filename does not start with "dialog-": ' + file.name;
+         if (file.name.indexOf ('dialog/') !== 0) return 'Filename does not start with "dialog/": ' + file.name;
          if (file.name.indexOf (TEST_DIALOG) === -1) return 'Filename does not contain slug "' + TEST_DIALOG + '": ' + file.name;
          if (file.name.indexOf ('-waiting.md') === -1) return 'Dialog should be in waiting status: ' + file.name;
          return true;
@@ -368,7 +368,7 @@
          return true;
       }],
 
-      // --- F2 Step 2: Create doc-main.md (shown as main.md) ---
+      // --- F2 Step 2: Create doc/main.md (shown as main.md) ---
       ['F2-2: Create main.md', function (done) {
          mockPrompt ('main.md');
          B.call ('create', 'file');
@@ -377,7 +377,7 @@
          restorePrompt ();
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile after creating main.md';
-         if (file.name !== 'doc-main.md') return 'Expected name "doc-main.md", got "' + file.name + '"';
+         if (file.name !== 'doc/main.md') return 'Expected name "doc/main.md", got "' + file.name + '"';
          return true;
       }],
 
@@ -393,7 +393,7 @@
       // --- F2 Step 4: Click main.md, editor opens with content ---
       ['F2-4: Click main.md, editor shows content', function () {
          var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
+         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
          var preview = document.querySelector ('.editor-preview');
          if (! preview) return 'Editor preview not found';
          if (preview.innerHTML.indexOf ('main') === -1) return 'Editor does not contain initial content';
@@ -430,7 +430,7 @@
 
       // --- F2 Step 7: Verify saved content persisted on server ---
       ['F2-7: Reload file and verify persisted content', function (done) {
-         B.call ('load', 'file', 'doc-main.md');
+         B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
@@ -442,23 +442,23 @@
 
       // --- F2 Step 8: Create a second doc so we can test navigating away ---
       ['F2-8: Create second doc', function (done) {
-         mockPrompt ('doc-notes.md');
+         mockPrompt ('doc/notes.md');
          B.call ('create', 'file');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc-notes.md') return 'Expected doc-notes.md as current file';
+         if (! file || file.name !== 'doc/notes.md') return 'Expected doc/notes.md as current file';
          return true;
       }],
 
       // --- F2 Step 9: Go back to main.md and make it dirty ---
       ['F2-9: Edit main.md and mark it dirty', function (done) {
-         B.call ('load', 'file', 'doc-main.md');
+         B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
+         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
          B.call ('set', ['currentFile', 'content'], file.original + '\nExtra unsaved line.\n');
          var dirtyFile = B.get ('currentFile');
          if (dirtyFile.content === dirtyFile.original) return 'File should be dirty';
@@ -472,22 +472,22 @@
             window.confirm = originalConfirm;
             return true;
          };
-         B.call ('load', 'file', 'doc-notes.md');
+         B.call ('load', 'file', 'doc/notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile';
-         if (file.name !== 'doc-notes.md') return 'Expected to land on doc-notes.md, got ' + file.name;
+         if (file.name !== 'doc/notes.md') return 'Expected to land on doc/notes.md, got ' + file.name;
          return true;
       }],
 
       // --- F2 Step 11: Verify save persisted ---
       ['F2-11: Verify main.md has the extra line saved', function (done) {
-         B.call ('load', 'file', 'doc-main.md');
+         B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
+         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
          if (file.content.indexOf ('Extra unsaved line') === -1) return 'Extra line was not saved';
          return true;
       }],
@@ -508,22 +508,22 @@
             window.confirm = originalConfirm;
             return true;
          };
-         B.call ('load', 'file', 'doc-notes.md');
+         B.call ('load', 'file', 'doc/notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile';
-         if (file.name !== 'doc-notes.md') return 'Expected doc-notes.md after discard, got ' + file.name;
+         if (file.name !== 'doc/notes.md') return 'Expected doc/notes.md after discard, got ' + file.name;
          return true;
       }],
 
       // --- F2 Step 13: Verify discarded changes were not persisted ---
       ['F2-13: Verify discarded changes not persisted', function (done) {
-         B.call ('load', 'file', 'doc-main.md');
+         B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc-main.md') return 'doc-main.md not loaded';
+         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
          if (file.content.indexOf ('This will be discarded') !== -1) return 'Discarded text was persisted';
          return true;
       }],
@@ -547,8 +547,8 @@
          return B.get ('currentProject') === window._f3Project || 'Failed to create flow #3 project';
       }],
 
-      ['F3-2: Write doc-main.md', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/file/doc-main.md', {}, {content: '# Flow 3 Test Project\n\n'}, function () {
+      ['F3-2: Write doc/main.md', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/file/doc/main.md', {}, {content: '# Flow 3 Test Project\n\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
@@ -629,7 +629,7 @@
          c.ajax ('post', 'projects', {}, {name: window._f3Project}, function () {done (SHORT_WAIT, POLL);});
       }, function () {return true;}],
 
-      ['F3-10: Re-created project has no dialogs and only default doc-main.md', function (done) {
+      ['F3-10: Re-created project has no dialogs and only default doc/main.md', function (done) {
          var pending = 2;
          var finish = function () {if (--pending === 0) done (SHORT_WAIT, POLL);};
          c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
@@ -644,7 +644,7 @@
          if (type (window._f3DialogsAfter) !== 'array' || window._f3DialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
          if (type (window._f3FilesAfter) !== 'array') return 'Expected files array after re-create';
          var unexpected = dale.fil (window._f3FilesAfter, undefined, function (name) {
-            if (name !== 'doc-main.md') return name;
+            if (name !== 'doc/main.md') return name;
          });
          if (unexpected.length) return 'Unexpected files after re-create: ' + unexpected.join (', ');
          return true;
@@ -668,7 +668,7 @@
          return B.get ('currentProject') === window._f4Project || 'Failed to create flow #4 project';
       }],
 
-      ['F4-2: Write doc-main.md', function (done) {
+      ['F4-2: Write doc/main.md', function (done) {
          var docMain = [
             '# Tictactoe Project',
             '',
@@ -690,7 +690,7 @@
             '- Pass event context in responders: `function (x, ...) { B.call(x, \'set\', ...); }`.',
             ''
          ].join ('\n') + '\n';
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc-main.md', {}, {content: docMain}, function () {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, {content: docMain}, function () {
             done (MEDIUM_WAIT, POLL);
          });
       }, function () {return true;}],
@@ -703,7 +703,7 @@
       }, function () {
          restorePrompt ();
          var file = B.get ('currentFile');
-         if (! file || file.name.indexOf ('dialog-') !== 0) return 'No dialog file created';
+         if (! file || file.name.indexOf ('dialog/') !== 0) return 'No dialog file created';
          if (file.name.indexOf ('orchestrator') === -1) return 'Dialog filename missing orchestrator slug';
          if (file.name.indexOf ('-waiting.md') === -1) return 'Dialog should start in waiting status';
          return true;
@@ -764,7 +764,7 @@
       }],
 
       ['F4-8: Send embed request to orchestrator dialog', function (done) {
-         B.call ('set', 'chatInput', 'The tictactoe game is now available via the static proxy at /project/' + window._f4Project + '/static/. Please add an embed block to doc-main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc-main.md.');
+         B.call ('set', 'chatInput', 'The tictactoe game is now available via the static proxy at /project/' + window._f4Project + '/static/. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc/main.md.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
@@ -772,9 +772,9 @@
          return true;
       }],
 
-      ['F4-9: Poll until embed block appears in doc-main.md', function (done) {
+      ['F4-9: Poll until embed block appears in doc/main.md', function (done) {
          var attempt = function () {
-            c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc-main.md', {}, '', function (error, rs) {
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, '', function (error, rs) {
                if (! error && rs && rs.body && type (rs.body.content) === 'string') {
                   var content = rs.body.content;
                   if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port static') !== -1) return done (SHORT_WAIT, POLL);
@@ -785,15 +785,15 @@
          attempt ();
       }, function () {return true;}],
 
-      ['F4-10: Verify embed block in doc-main.md', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc-main.md', {}, '', function (error, rs) {
+      ['F4-10: Verify embed block in doc/main.md', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._f4EmbedContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
          });
       }, function () {
          var content = window._f4EmbedContent || '';
-         if (content.indexOf ('əəəembed') === -1) return 'doc-main.md missing əəəembed block';
-         if (content.indexOf ('port static') === -1) return 'doc-main.md embed missing port static';
+         if (content.indexOf ('əəəembed') === -1) return 'doc/main.md missing əəəembed block';
+         if (content.indexOf ('port static') === -1) return 'doc/main.md embed missing port static';
          return true;
       }],
 
