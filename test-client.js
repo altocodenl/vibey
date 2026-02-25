@@ -797,6 +797,718 @@
          return true;
       }],
 
+      // =============================================
+      // *** FLOW #5: Backend tictactoe — Express on port 4000, proxy embed ***
+      // =============================================
+
+      ['F5-1: Create project', function (done) {
+         window._f5Project = 'test-flow5-' + testTimestamp ();
+         mockPrompt (window._f5Project);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         return B.get ('currentProject') === window._f5Project || 'Failed to create flow #5 project';
+      }],
+
+      ['F5-2: Write doc/main.md', function (done) {
+         var docMain = [
+            '# Tictactoe Project (Backend)',
+            '',
+            'Build a simple tictactoe game for the browser using gotoB, served by an Express server on port 4000.',
+            'The game should be embedded in this doc via the proxy.',
+            '',
+            '## References',
+            '',
+            '- gotoB docs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
+            '',
+            '## Critical rules',
+            '',
+            '- Create a `server.js` that uses Express to serve static files from `/workspace` on port 4000.',
+            '- `index.html`: load gotoB.min.js in `<body>` (not `<head>` — document.body must exist when gotoB initializes):',
+            '  `<script src="https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js"></script>`',
+            '  This single file bundles dale, teishi, lith, recalc, cocholate. Do NOT load them separately.',
+            '- `app.js`: set `B.prod = true` before any B.call.',
+            '- Use `lith.css.style({...})` for inline styles, not raw JS objects.',
+            '- `B.ev` always requires a path: `B.ev(\'reset\', [])`, not `B.ev(\'reset\')`.',
+            '- Pass event context in responders: `function (x, ...) { B.call(x, \'set\', ...); }`.',
+            '- Run the server with `node server.js &` so it stays alive in the background.',
+            '- The game must mention "tictactoe" somewhere in the page title or heading.',
+            ''
+         ].join ('\n') + '\n';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f5Project) + '/file/doc/main.md', {}, {content: docMain}, function () {
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {return true;}],
+
+      ['F5-3: Create waiting dialog (orchestrator)', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f5Project) + '/dialogs');
+         mockPrompt ('orchestrator');
+         B.call ('create', 'dialog');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var file = B.get ('currentFile');
+         if (! file || file.name.indexOf ('dialog/') !== 0) return 'No dialog file created';
+         if (file.name.indexOf ('orchestrator') === -1) return 'Dialog filename missing orchestrator slug';
+         if (file.name.indexOf ('-waiting.md') === -1) return 'Dialog should start in waiting status';
+         return true;
+      }],
+
+      ['F5-4: Fire "please start" (non-blocking)', function (done) {
+         B.call ('set', 'chatInput', 'please start');
+         B.call ('send', 'message');
+         done (LONG_WAIT, POLL);
+      }, function () {
+         if (B.get ('streaming')) return 'Still streaming...';
+         return true;
+      }],
+
+      ['F5-5: Poll until proxy serves the app on port 4000', function (done) {
+         var attempt = function () {
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/', {}, '', function (error, rs) {
+               if (! error && rs && rs.status === 200) {
+                  var lower = (rs.body || '').toLowerCase ();
+                  if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (SHORT_WAIT, POLL);
+               }
+               setTimeout (attempt, 5000);
+            });
+         };
+         attempt ();
+      }, function () {return true;}],
+
+      ['F5-6: Proxy serves index.html with gotoB + app.js', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/', {}, '', function (error, rs) {
+            if (error || ! rs || ! rs.body) window._f5IndexError = 'Failed to fetch index via proxy';
+            else {
+               var lower = (rs.body || '').toLowerCase ();
+               if (lower.indexOf ('gotob') === -1) window._f5IndexError = 'index.html missing gotoB reference';
+               else if (lower.indexOf ('app.js') === -1) window._f5IndexError = 'index.html missing app.js reference';
+               else window._f5IndexError = null;
+            }
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return window._f5IndexError ? window._f5IndexError : true;
+      }],
+
+      ['F5-7: Proxy serves app.js with gotoB code', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/app.js', {}, '', function (error, rs) {
+            if (error || ! rs || ! rs.body) window._f5AppError = 'Failed to fetch app.js via proxy';
+            else {
+               var out = rs.body || '';
+               if (out.indexOf ('B.') === -1) window._f5AppError = 'app.js missing gotoB usage';
+               else {
+                  var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('grid') !== -1;
+                  window._f5AppError = hasBoardLogic ? null : 'app.js missing board/cell/grid logic';
+               }
+            }
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return window._f5AppError ? window._f5AppError : true;
+      }],
+
+      ['F5-8: Server process is running', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f5Project) + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'ps aux | grep node || true'}}, function (error, rs) {
+            if (error || ! rs.body || ! rs.body.success) window._f5PsError = 'ps aux failed';
+            else {
+               var out = (rs.body.stdout || '') + (rs.body.stderr || '');
+               window._f5PsError = out.indexOf ('server.js') !== -1 ? null : 'server.js process not found in ps output';
+            }
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return window._f5PsError ? window._f5PsError : true;
+      }],
+
+      ['F5-9: Send embed request to orchestrator dialog', function (done) {
+         B.call ('set', 'chatInput', 'The tictactoe game is now running on port 4000 inside the container. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc/main.md.');
+         B.call ('send', 'message');
+         done (LONG_WAIT, POLL);
+      }, function () {
+         if (B.get ('streaming')) return 'Still streaming...';
+         return true;
+      }],
+
+      ['F5-10: Poll until embed block appears in doc/main.md', function (done) {
+         var attempt = function () {
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/file/doc/main.md', {}, '', function (error, rs) {
+               if (! error && rs && rs.body && type (rs.body.content) === 'string') {
+                  var content = rs.body.content;
+                  if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (SHORT_WAIT, POLL);
+               }
+               setTimeout (attempt, 5000);
+            });
+         };
+         attempt ();
+      }, function () {return true;}],
+
+      ['F5-11: Verify embed block in doc/main.md', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/file/doc/main.md', {}, '', function (error, rs) {
+            window._f5EmbedContent = (rs && rs.body && rs.body.content) || '';
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var content = window._f5EmbedContent || '';
+         if (content.indexOf ('əəəembed') === -1) return 'doc/main.md missing əəəembed block';
+         if (content.indexOf ('port 4000') === -1) return 'doc/main.md embed missing port 4000';
+         return true;
+      }],
+
+      // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
+
+      // =============================================
+      // *** FLOW #6: Vi mode ***
+      // =============================================
+
+      // --- F6: Settings default state ---
+
+      ['F6-1: Navigate to settings', function (done) {
+         B.call ('navigate', 'hash', '#/settings');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'settings') return 'Expected tab to be "settings" but got "' + tab + '"';
+         return true;
+      }],
+
+      ['F6-2: Default viMode is false', function () {
+         var viMode = B.get ('viMode');
+         if (viMode !== false) return 'Expected default viMode to be false, got: ' + viMode;
+         var settings = B.get ('settings') || {};
+         var editor = settings.editor || {};
+         if (editor.viMode !== false) return 'Expected settings.editor.viMode to be false, got: ' + editor.viMode;
+         return true;
+      }],
+
+      ['F6-3: Vi mode checkbox is unchecked', function () {
+         var checkbox = document.querySelector ('input[type="checkbox"]');
+         if (! checkbox) return 'Vi mode checkbox not found';
+         if (checkbox.checked) return 'Checkbox should be unchecked by default';
+         return true;
+      }],
+
+      // --- F6: Enable vi mode ---
+
+      ['F6-4: Toggle vi mode on', function (done) {
+         B.call ('toggle', 'viMode');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var viMode = B.get ('viMode');
+         if (viMode !== true) return 'Expected viMode true after toggle, got: ' + viMode;
+         return true;
+      }],
+
+      ['F6-5: Server persisted viMode true', function (done) {
+         c.ajax ('get', 'settings', {}, '', function (error, rs) {
+            window._f6Settings = rs && rs.body;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var settings = window._f6Settings;
+         if (! settings || ! settings.editor || settings.editor.viMode !== true) return 'Server settings do not reflect viMode true';
+         return true;
+      }],
+
+      ['F6-6: Vi mode checkbox is checked', function () {
+         var checkbox = document.querySelector ('input[type="checkbox"]');
+         if (! checkbox) return 'Vi mode checkbox not found';
+         if (! checkbox.checked) return 'Checkbox should be checked after toggle';
+         return true;
+      }],
+
+      // --- F6: Vi mode in docs editor ---
+
+      ['F6-7: Create project for vi editing', function (done) {
+         window._f6Project = 'test-flow6-' + testTimestamp ();
+         mockPrompt (window._f6Project);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         return B.get ('currentProject') === window._f6Project || 'Failed to create flow #6 project';
+      }],
+
+      ['F6-8: Create and open doc/main.md', function (done) {
+         mockPrompt ('main.md');
+         B.call ('create', 'file');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/main.md') return 'Expected doc/main.md, got: ' + (file ? file.name : 'null');
+         return true;
+      }],
+
+      ['F6-9: Switch to edit mode (not preview)', function (done) {
+         if (B.get ('editorPreview')) B.call ('toggle', 'editorPreview');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         if (B.get ('editorPreview')) return 'Still in preview mode';
+         return true;
+      }],
+
+      ['F6-10: Vi starts in normal mode, textarea is readonly', function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'normal') return 'Expected vi mode to be normal, got: ' + viState.mode;
+         var textarea = document.querySelector ('.editor-textarea');
+         if (! textarea) return 'Editor textarea not found';
+         if (! textarea.readOnly) return 'Textarea should be readonly in normal mode';
+         return true;
+      }],
+
+      ['F6-11: Vi status bar shows cursor position', function () {
+         var statusBar = document.querySelector ('.vi-status');
+         if (! statusBar) return 'Vi status bar not found';
+         var text = statusBar.textContent || '';
+         if (text.indexOf ('Ln') === -1 || text.indexOf ('Col') === -1) return 'Status bar missing Ln/Col: ' + text;
+         return true;
+      }],
+
+      ['F6-12: Press i to enter insert mode', function (done) {
+         var textarea = document.querySelector ('.editor-textarea');
+         if (! textarea) return 'Textarea not found';
+         textarea.focus ();
+         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'i', bubbles: true}));
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'insert') return 'Expected insert mode after pressing i, got: ' + viState.mode;
+         var textarea = document.querySelector ('.editor-textarea');
+         if (textarea && textarea.readOnly) return 'Textarea should not be readonly in insert mode';
+         var statusBar = document.querySelector ('.vi-status');
+         if (! statusBar) return 'Vi status bar not found';
+         if (statusBar.textContent.indexOf ('INSERT') === -1) return 'Status bar should show INSERT';
+         return true;
+      }],
+
+      ['F6-13: Type content in insert mode', function (done) {
+         var file = B.get ('currentFile');
+         var newContent = (file ? file.content : '') + 'Hello from vi insert mode.\n';
+         B.call ('set', ['currentFile', 'content'], newContent);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file || file.content.indexOf ('Hello from vi insert mode') === -1) return 'Content not updated';
+         return true;
+      }],
+
+      ['F6-14: Press Escape to return to normal mode', function (done) {
+         var textarea = document.querySelector ('.editor-textarea');
+         if (! textarea) return 'Textarea not found';
+         textarea.focus ();
+         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'normal') return 'Expected normal mode after Escape, got: ' + viState.mode;
+         var textarea = document.querySelector ('.editor-textarea');
+         if (textarea && ! textarea.readOnly) return 'Textarea should be readonly in normal mode';
+         return true;
+      }],
+
+      ['F6-15: Save with :w command', function (done) {
+         var textarea = document.querySelector ('.editor-textarea');
+         if (! textarea) return 'Textarea not found';
+         textarea.focus ();
+         // Enter command mode
+         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: ':', bubbles: true}));
+         // Type 'w'
+         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'w', bubbles: true}));
+         // Press Enter
+         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Enter', bubbles: true}));
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file) return 'No current file';
+         if (file.content !== file.original) return 'File should not be dirty after :w save';
+         return true;
+      }],
+
+      ['F6-16: Verify :w saved to server', function (done) {
+         B.call ('load', 'file', 'doc/main.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file) return 'No current file after reload';
+         if (file.content.indexOf ('Hello from vi insert mode') === -1) return 'Vi content not persisted to server';
+         return true;
+      }],
+
+      // --- F6: Vi mode in chat input (light mode) ---
+
+      ['F6-17: Navigate to dialogs tab', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f6Project) + '/dialogs');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'dialogs') return 'Expected dialogs tab, got: ' + tab;
+         return true;
+      }],
+
+      ['F6-18: Create a dialog for vi chat test', function (done) {
+         mockPrompt ('vi-chat-test');
+         B.call ('create', 'dialog');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var file = B.get ('currentFile');
+         if (! file || file.name.indexOf ('vi-chat-test') === -1) return 'Dialog not created';
+         return true;
+      }],
+
+      ['F6-19: Chat input has vi-active class', function () {
+         var chatInput = document.querySelector ('.chat-input');
+         if (! chatInput) return 'Chat input not found';
+         if (! chatInput.classList.contains ('vi-active')) return 'Chat input missing vi-active class';
+         return true;
+      }],
+
+      ['F6-20: Chat input: press i then type, press Escape', function (done) {
+         var chatInput = document.querySelector ('.chat-input');
+         if (! chatInput) return 'Chat input not found';
+         chatInput.focus ();
+         // Press i to enter insert
+         chatInput.dispatchEvent (new KeyboardEvent ('keydown', {key: 'i', bubbles: true}));
+         // Set text directly (simulating typing)
+         B.call ('set', 'chatInput', 'hello from vi chat');
+         // Press Escape to return to normal
+         chatInput.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'normal') return 'Expected normal mode after Escape in chat';
+         var chatInput = B.get ('chatInput');
+         if (chatInput !== 'hello from vi chat') return 'Chat input content mismatch: ' + chatInput;
+         return true;
+      }],
+
+      // --- F6: Disable vi mode ---
+
+      ['F6-21: Toggle vi mode off', function (done) {
+         B.call ('toggle', 'viMode');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var viMode = B.get ('viMode');
+         if (viMode !== false) return 'Expected viMode false after toggle off, got: ' + viMode;
+         return true;
+      }],
+
+      ['F6-22: Server persisted viMode false', function (done) {
+         c.ajax ('get', 'settings', {}, '', function (error, rs) {
+            window._f6SettingsAfter = rs && rs.body;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var settings = window._f6SettingsAfter;
+         if (! settings || ! settings.editor || settings.editor.viMode !== false) return 'Server settings do not reflect viMode false';
+         return true;
+      }],
+
+      ['F6-23: Editor textarea is no longer readonly', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f6Project) + '/docs');
+         B.call ('load', 'file', 'doc/main.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         if (B.get ('editorPreview')) {
+            B.call ('toggle', 'editorPreview');
+            return 'Toggling preview off...';
+         }
+         var textarea = document.querySelector ('.editor-textarea');
+         if (! textarea) return 'Textarea not found';
+         if (textarea.readOnly) return 'Textarea should not be readonly with vi mode off';
+         var statusBar = document.querySelector ('.vi-status');
+         if (statusBar) return 'Vi status bar should not be visible with vi mode off';
+         return true;
+      }],
+
+      // --- F6: Cleanup ---
+
+      ['F6-24: Delete project', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f6Project);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         if (B.get ('currentProject') === window._f6Project) return 'Project should be deleted';
+         return true;
+      }],
+
+      ['F6-Cleanup: restore prompt', function () {
+         restorePrompt ();
+         return true;
+      }],
+
+      // =============================================
+      // *** FLOW #7: Snapshots ***
+      // =============================================
+
+      ['F7-1: Create project for snapshots', function (done) {
+         window._f7Project = 'test-flow7-' + testTimestamp ();
+         mockPrompt (window._f7Project);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         return B.get ('currentProject') === window._f7Project || 'Failed to create flow #7 project';
+      }],
+
+      ['F7-2: Write doc/main.md', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f7Project) + '/file/doc/main.md', {}, {content: '# Snapshot Test\n\nThis content should survive a snapshot and restore.\n'}, function () {
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {return true;}],
+
+      ['F7-3: Write extra file doc/notes.md', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f7Project) + '/file/doc/notes.md', {}, {content: '# Notes\n\nSome extra notes.\n'}, function () {
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {return true;}],
+
+      // --- F7: Create a snapshot ---
+
+      ['F7-4: Create snapshot via header button', function (done) {
+         // Mock prompt for label
+         mockPrompt ('before refactor');
+         B.call ('create', 'snapshot');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         // Accept the alert from the snapshot creation
+         return true;
+      }],
+
+      ['F7-5: Snapshot appears in snapshots list', function (done) {
+         // Dismiss any pending alert
+         B.call ('load', 'snapshots');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var snapshots = B.get ('snapshots') || [];
+         var found = dale.stopNot (snapshots, undefined, function (snap) {
+            if (snap.project === window._f7Project) return snap;
+         });
+         if (! found) return 'Snapshot for project not found in list';
+         if (found.label !== 'before refactor') return 'Snapshot label mismatch: ' + found.label;
+         if (! found.id) return 'Snapshot missing id';
+         if (type (found.fileCount) !== 'integer' || found.fileCount < 2) return 'Expected at least 2 files, got: ' + found.fileCount;
+         window._f7SnapshotId = found.id;
+         window._f7SnapshotProjectName = found.projectName;
+         return true;
+      }],
+
+      // --- F7: Navigate to snapshots view ---
+
+      ['F7-6: Navigate to snapshots view', function (done) {
+         B.call ('navigate', 'hash', '#/snapshots');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'snapshots') return 'Expected snapshots tab, got: ' + tab;
+         return true;
+      }],
+
+      ['F7-7: Snapshot visible in snapshots view', function () {
+         var heading = findByText ('.editor-filename', 'Snapshots');
+         if (! heading) return 'Snapshots heading not found';
+         var item = findByText ('.file-item', 'before refactor');
+         if (! item) return 'Snapshot "before refactor" not found in view';
+         return true;
+      }],
+
+      ['F7-8: Snapshot entry shows restore, download, delete buttons', function () {
+         var item = findByText ('.file-item', 'before refactor');
+         if (! item) return 'Snapshot item not found';
+         var buttons = item.querySelectorAll ('button');
+         if (buttons.length < 3) return 'Expected at least 3 buttons (restore, download, delete), found: ' + buttons.length;
+         var texts = dale.go (Array.prototype.slice.call (buttons), function (b) {return b.textContent;}).join (' | ');
+         if (texts.indexOf ('Restore') === -1) return 'Missing Restore button. Buttons: ' + texts;
+         if (texts.indexOf ('Download') === -1) return 'Missing Download button. Buttons: ' + texts;
+         return true;
+      }],
+
+      // --- F7: Create second snapshot (no label) ---
+
+      ['F7-9: Create second snapshot without label', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f7Project) + '/docs');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         return B.get ('currentProject') === window._f7Project || 'Not on project';
+      }],
+
+      ['F7-10: Create second snapshot', function (done) {
+         mockPrompt ('');
+         B.call ('create', 'snapshot');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         return true;
+      }],
+
+      ['F7-11: Two snapshots in list', function (done) {
+         B.call ('load', 'snapshots');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var snapshots = B.get ('snapshots') || [];
+         var ours = dale.fil (snapshots, undefined, function (snap) {
+            if (snap.project === window._f7Project) return snap;
+         });
+         if (ours.length < 2) return 'Expected at least 2 snapshots, got: ' + ours.length;
+         window._f7SnapshotId2 = ours [0].id !== window._f7SnapshotId ? ours [0].id : ours [1].id;
+         return true;
+      }],
+
+      // --- F7: Restore snapshot as new project ---
+
+      ['F7-12: Restore snapshot as new project', function (done) {
+         mockPrompt ('Restored Flow7 Test');
+         B.call ('restore', 'snapshot', window._f7SnapshotId, window._f7SnapshotProjectName);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var project = B.get ('currentProject');
+         if (! project) return 'No current project after restore';
+         window._f7RestoredProject = project;
+         return true;
+      }],
+
+      ['F7-13: Restored project has both files', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/files', {}, '', function (error, rs) {
+            window._f7RestoredFiles = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var files = window._f7RestoredFiles;
+         if (type (files) !== 'array') return 'Expected files array';
+         if (! inc (files, 'doc/main.md')) return 'Restored project missing doc/main.md';
+         if (! inc (files, 'doc/notes.md')) return 'Restored project missing doc/notes.md';
+         return true;
+      }],
+
+      ['F7-14: Restored doc/main.md matches original', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
+            window._f7RestoredContent = (rs && rs.body && rs.body.content) || '';
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f7RestoredContent !== '# Snapshot Test\n\nThis content should survive a snapshot and restore.\n') return 'Restored doc/main.md content mismatch';
+         return true;
+      }],
+
+      ['F7-15: Restored doc/notes.md matches original', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/notes.md', {}, '', function (error, rs) {
+            window._f7RestoredNotes = (rs && rs.body && rs.body.content) || '';
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f7RestoredNotes !== '# Notes\n\nSome extra notes.\n') return 'Restored notes.md content mismatch';
+         return true;
+      }],
+
+      // --- F7: Modify original, verify restored unaffected ---
+
+      ['F7-16: Modify original project doc/main.md', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f7Project) + '/file/doc/main.md', {}, {content: '# Modified After Snapshot\n'}, function () {
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {return true;}],
+
+      ['F7-17: Restored project unaffected by original modification', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
+            window._f7CheckContent = (rs && rs.body && rs.body.content) || '';
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f7CheckContent !== '# Snapshot Test\n\nThis content should survive a snapshot and restore.\n') return 'Restored content was affected by original modification!';
+         return true;
+      }],
+
+      // --- F7: Delete a snapshot ---
+
+      ['F7-18: Delete second snapshot', function (done) {
+         B.call ('delete', 'snapshot', window._f7SnapshotId2);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         // confirm dialog is auto-accepted since we mocked it... but delete uses confirm.
+         // Let's just check the list
+         return true;
+      }],
+
+      ['F7-19: Deleted snapshot gone from list', function (done) {
+         // Override confirm for delete call
+         B.call ('load', 'snapshots');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var snapshots = B.get ('snapshots') || [];
+         var ids = dale.go (snapshots, function (snap) {return snap.id;});
+         if (inc (ids, window._f7SnapshotId2)) return 'Deleted snapshot still in list';
+         if (! inc (ids, window._f7SnapshotId)) return 'First snapshot should still exist';
+         return true;
+      }],
+
+      // --- F7: Snapshot survives project deletion ---
+
+      ['F7-20: Delete original project', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f7Project);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         return true;
+      }],
+
+      ['F7-21: Snapshot still in list after project deletion', function (done) {
+         B.call ('load', 'snapshots');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var snapshots = B.get ('snapshots') || [];
+         var found = dale.stopNot (snapshots, undefined, function (snap) {
+            if (snap.id === window._f7SnapshotId) return snap;
+         });
+         if (! found) return 'Snapshot disappeared after project deletion';
+         return true;
+      }],
+
+      // --- F7: Snapshots view shows empty state ---
+
+      ['F7-22: Delete remaining snapshot', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'snapshot', window._f7SnapshotId);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         return true;
+      }],
+
+      ['F7-23: No snapshots left for this project', function (done) {
+         B.call ('load', 'snapshots');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var snapshots = B.get ('snapshots') || [];
+         var ours = dale.fil (snapshots, undefined, function (snap) {
+            if (snap.project === window._f7Project) return snap;
+         });
+         if (ours.length > 0) return 'Leftover snapshots from flow7: ' + ours.length;
+         return true;
+      }],
+
+      // --- F7: Cleanup ---
+
+      ['F7-24: Delete restored project', function (done) {
+         if (! window._f7RestoredProject) return done ();
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f7RestoredProject);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         return true;
+      }],
+
+      ['F7-Cleanup: restore prompt', function () {
+         restorePrompt ();
+         return true;
+      }],
+
    ], function (error, time) {
       if (error) {
          console.error ('❌ Test FAILED:', error.test, '— Result:', error.result);
