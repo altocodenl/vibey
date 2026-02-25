@@ -1603,6 +1603,9 @@ B.mrespond ([
    }],
 
    ['run', 'tests', function (x) {
+      var choice = prompt ('Which flow to run?\n1 = Dialog + tools\n2 = Docs CRUD\n3 = Delete project aborts agents\n4 = Static tictactoe\n5 = Backend tictactoe\n6 = Vi mode\n7 = Snapshots\nALL = run everything', 'ALL');
+      if (choice === null) return;
+      window._vibeyTestFlow = (choice || 'ALL').trim ().toUpperCase ();
       c.loadScript ('test-client.js', function (error) {
          if (error) return B.call (x, 'report', 'error', 'Failed to load test-client.js');
       });
