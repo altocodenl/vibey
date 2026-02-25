@@ -6,11 +6,17 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - vibey-data:/app/data
-
     labels:
       - vibey=master
     environment:
       - VIBEY_DOCKER=1
+    networks:
+      - vibey-net
 
 volumes:
   vibey-data:
+
+networks:
+  vibey-net:
+    external: true
+    name: vibey-net

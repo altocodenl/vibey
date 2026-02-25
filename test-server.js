@@ -935,8 +935,8 @@ var flow7Sequence = [
 
    // *** Download snapshot ***
 
-   ['F7: Download snapshot returns tar.gz', 'get', 'snapshots/' + 'placeholder' + '/download', {}, '', 200, function (s, rq, rs) {
-      // NOTE: We can't easily use dynamic path with hitit tuple format, so we verify via httpGet
+   ['F7: Download placeholder snapshot returns 404', 'get', 'snapshots/' + 'placeholder' + '/download', {}, '', 404, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || ! rs.body.error) return log ('Expected error message');
       return true;
    }],
 

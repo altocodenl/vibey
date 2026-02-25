@@ -1,4 +1,4 @@
-views.css = [
+window.vibeyCSS = [
    ['body', {
       'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       margin: 0,

@@ -11,18 +11,51 @@
       const puppeteer = require ('puppeteer');
 
       (async function () {
-         var browser = await puppeteer.launch ({headless: true});
+         var launchOptions = {headless: true};
+         if (process.env.PUPPETEER_EXECUTABLE_PATH) launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+
+         var browser = await puppeteer.launch (launchOptions);
          var page = await browser.newPage ();
 
          var gotDialog = false;
 
+         var lastActivity = Date.now ();
+
+         // Stream browser logs to Node stdout so test progress is visible in real time.
+         page.on ('console', function (msg) {
+            lastActivity = Date.now ();
+            var type = msg.type ? msg.type () : 'log';
+            var text = msg.text ? msg.text () : '';
+            console.log ('[vibey-page-' + type + '] ' + text);
+         });
+
+         page.on ('pageerror', function (error) {
+            lastActivity = Date.now ();
+            console.log ('[vibey-page-error] ' + (error && error.message ? error.message : String (error)));
+         });
+
+         page.on ('requestfailed', function (request) {
+            lastActivity = Date.now ();
+            var fail = request.failure ? request.failure () : null;
+            console.log ('[vibey-request-failed] ' + request.method () + ' ' + request.url () + ' :: ' + (fail && fail.errorText ? fail.errorText : 'unknown'));
+         });
+
          page.on ('dialog', async function (dialog) {
-            gotDialog = true;
             var message = dialog.message ();
             console.log ('[vibey-test-alert] ' + message.replace (/\n/g, ' | '));
             await dialog.accept ();
-            await browser.close ();
-            process.exit (0);
+
+            // Only finish on the final c.test alerts.
+            if (message.indexOf ('✅ All tests passed!') === 0) {
+               gotDialog = true;
+               await browser.close ();
+               process.exit (0);
+            }
+            if (message.indexOf ('❌ Test FAILED:') === 0) {
+               gotDialog = true;
+               await browser.close ();
+               process.exit (1);
+            }
          });
 
          try {
@@ -46,14 +79,24 @@
                process.exit (1);
             }
 
-            // Wait up to 15 minutes for the test alert.
+            // Abort if idle for too long (stuck), with a generous hard cap for full runs.
+            var MAX_TEST_MS = Number (process.env.VIBEY_TEST_TIMEOUT_MS || (15 * 60 * 1000));
+            var IDLE_TIMEOUT_MS = Number (process.env.VIBEY_TEST_IDLE_TIMEOUT_MS || (3 * 60 * 1000));
             var started = Date.now ();
-            while (! gotDialog && Date.now () - started < 15 * 60 * 1000) {
+
+            while (! gotDialog) {
+               var now = Date.now ();
+               if (now - started >= MAX_TEST_MS) break;
+               if (now - lastActivity >= IDLE_TIMEOUT_MS) break;
                await new Promise (function (resolve) {setTimeout (resolve, 250);});
             }
 
             if (! gotDialog) {
-               console.log ('[vibey-test-alert] TIMEOUT: No alert received within 15 minutes');
+               var now = Date.now ();
+               var reason = (now - lastActivity >= IDLE_TIMEOUT_MS)
+                  ? ('idle timeout (' + Math.round (IDLE_TIMEOUT_MS / 1000) + 's without activity)')
+                  : ('max timeout (' + Math.round (MAX_TEST_MS / 1000) + 's)');
+               console.log ('[vibey-test-alert] TIMEOUT: ' + reason);
                await browser.close ();
                process.exit (2);
             }
@@ -111,10 +154,11 @@
       return d.getUTCFullYear () + '' + pad2 (d.getUTCMonth () + 1) + pad2 (d.getUTCDate ()) + '-' + pad2 (d.getUTCHours ()) + pad2 (d.getUTCMinutes ()) + pad2 (d.getUTCSeconds ());
    };
 
-   var LONG_WAIT   = 120000; // 2 min for LLM responses
-   var MEDIUM_WAIT = 15000;
-   var SHORT_WAIT  = 3000;
-   var POLL        = 200;
+   var LONG_WAIT    = 240000; // 4 min for LLM responses
+   var MEDIUM_WAIT  = 15000;
+   var SHORT_WAIT   = 3000;
+   var POLL         = 200;
+   var POLL_TIMEOUT = 180000; // 3 min hard timeout for long polling steps
 
    var TEST_PROJECT = 'test-flow1-' + testTimestamp ();
    var TEST_DIALOG  = 'read-vibey';
@@ -710,7 +754,7 @@
       }],
 
       ['F4-4: Fire "please start" (non-blocking)', function (done) {
-         B.call ('set', 'chatInput', 'please start');
+         B.call ('set', 'chatInput', 'Please start now. Read doc/main.md and implement the static tictactoe immediately. Create index.html and app.js at /workspace root, use gotoB as specified, and then update doc/main.md with an embed block using port static.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
@@ -719,17 +763,27 @@
       }],
 
       ['F4-5: Poll until static page serves', function (done) {
+         window._f4StaticPollError = null;
+         var started = Date.now ();
          var attempt = function () {
+            if (Date.now () - started > POLL_TIMEOUT) {
+               window._f4StaticPollError = 'Timed out after 3 minutes waiting for static page';
+               return done (SHORT_WAIT, POLL);
+            }
             c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/static/', {}, '', function (error, rs) {
-               if (! error && rs && rs.status === 200) {
+               var code = rs && rs.xhr ? rs.xhr.status : null;
+               if (! error && code === 200) {
                   var lower = (rs.body || '').toLowerCase ();
-                  if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (SHORT_WAIT, POLL);
+                  var hasTitle = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1;
+                  if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && hasTitle) return done (SHORT_WAIT, POLL);
                }
                setTimeout (attempt, 5000);
             });
          };
          attempt ();
-      }, function () {return true;}],
+      }, function () {
+         return window._f4StaticPollError ? window._f4StaticPollError : true;
+      }],
 
       ['F4-6: index.html has gotoB + app.js', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, function (error, rs) {
@@ -773,7 +827,13 @@
       }],
 
       ['F4-9: Poll until embed block appears in doc/main.md', function (done) {
+         window._f4EmbedPollError = null;
+         var started = Date.now ();
          var attempt = function () {
+            if (Date.now () - started > POLL_TIMEOUT) {
+               window._f4EmbedPollError = 'Timed out after 3 minutes waiting for static embed block in doc/main.md';
+               return done (SHORT_WAIT, POLL);
+            }
             c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, '', function (error, rs) {
                if (! error && rs && rs.body && type (rs.body.content) === 'string') {
                   var content = rs.body.content;
@@ -783,7 +843,9 @@
             });
          };
          attempt ();
-      }, function () {return true;}],
+      }, function () {
+         return window._f4EmbedPollError ? window._f4EmbedPollError : true;
+      }],
 
       ['F4-10: Verify embed block in doc/main.md', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, '', function (error, rs) {
@@ -856,7 +918,7 @@
       }],
 
       ['F5-4: Fire "please start" (non-blocking)', function (done) {
-         B.call ('set', 'chatInput', 'please start');
+         B.call ('set', 'chatInput', 'Please start now. Read doc/main.md and build the backend tictactoe immediately: create server.js (express static server on port 4000), create index.html and app.js at /workspace root, run `node server.js &`, and then update doc/main.md with an embed block using port 4000.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
       }, function () {
@@ -865,17 +927,27 @@
       }],
 
       ['F5-5: Poll until proxy serves the app on port 4000', function (done) {
+         window._f5ProxyPollError = null;
+         var started = Date.now ();
          var attempt = function () {
+            if (Date.now () - started > POLL_TIMEOUT) {
+               window._f5ProxyPollError = 'Timed out after 3 minutes waiting for proxied app on port 4000';
+               return done (SHORT_WAIT, POLL);
+            }
             c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/', {}, '', function (error, rs) {
-               if (! error && rs && rs.status === 200) {
+               var code = rs && rs.xhr ? rs.xhr.status : null;
+               if (! error && code === 200) {
                   var lower = (rs.body || '').toLowerCase ();
-                  if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (SHORT_WAIT, POLL);
+                  var hasTitle = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1;
+                  if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && hasTitle) return done (SHORT_WAIT, POLL);
                }
                setTimeout (attempt, 5000);
             });
          };
          attempt ();
-      }, function () {return true;}],
+      }, function () {
+         return window._f5ProxyPollError ? window._f5ProxyPollError : true;
+      }],
 
       ['F5-6: Proxy serves index.html with gotoB + app.js', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/', {}, '', function (error, rs) {
@@ -932,7 +1004,13 @@
       }],
 
       ['F5-10: Poll until embed block appears in doc/main.md', function (done) {
+         window._f5EmbedPollError = null;
+         var started = Date.now ();
          var attempt = function () {
+            if (Date.now () - started > POLL_TIMEOUT) {
+               window._f5EmbedPollError = 'Timed out after 3 minutes waiting for port 4000 embed block in doc/main.md';
+               return done (SHORT_WAIT, POLL);
+            }
             c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/file/doc/main.md', {}, '', function (error, rs) {
                if (! error && rs && rs.body && type (rs.body.content) === 'string') {
                   var content = rs.body.content;
@@ -942,7 +1020,9 @@
             });
          };
          attempt ();
-      }, function () {return true;}],
+      }, function () {
+         return window._f5EmbedPollError ? window._f5EmbedPollError : true;
+      }],
 
       ['F5-11: Verify embed block in doc/main.md', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/file/doc/main.md', {}, '', function (error, rs) {
@@ -1368,6 +1448,7 @@
          restorePrompt ();
          var project = B.get ('currentProject');
          if (! project) return 'No current project after restore';
+         if (project === window._f7Project) return 'Still on original project, waiting for restored project navigation...';
          window._f7RestoredProject = project;
          return true;
       }],

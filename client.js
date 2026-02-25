@@ -867,7 +867,11 @@ B.mrespond ([
    }],
 
    [/^(get|post|delete)$/, [], {match: function (ev, responder) {
-      return B.r.compare (ev.verb, responder.verb);
+      if (! B.r.compare (ev.verb, responder.verb)) return false;
+      var first = ev.path && ev.path [0];
+      // Avoid hijacking semantic events like "delete project" / "delete file" / "delete snapshot".
+      if (inc (['project', 'file', 'snapshot'], first)) return false;
+      return true;
    }}, function (x, headers, body, cb) {
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (cb) cb (x, error, rs);
@@ -1092,6 +1096,14 @@ B.mrespond ([
       var currentFile = B.get ('currentFile');
       var project = B.get ('currentProject');
       if (! project) return;
+
+      // This is now an explicit file-load intent; clear any stale hash target
+      // so delayed file-list refreshes don't bounce back to an older target.
+      B.call (x, 'set', 'hashTarget', null);
+
+      // Protect unsaved local edits from late/background reloads of the same file.
+      if (isDirtyDoc (currentFile) && currentFile.name === name) return;
+
       var proceed = function () {
          B.call (x, 'set', 'loadingFile', true);
          B.call (x, 'get', projectPath (project, 'file/' + encodeURIComponent (name)), {}, '', function (x, error, rs) {
@@ -1100,6 +1112,11 @@ B.mrespond ([
                B.call (x, 'set', 'currentFile', null);
                return B.call (x, 'write', 'hash');
             }
+
+            // Prevent late in-flight responses from clobbering unsaved edits.
+            var latest = B.get ('currentFile');
+            if (isDirtyDoc (latest) && latest.name === rs.body.name) return;
+
             var dialogFile = isDialogFile (rs.body.name);
             var nextTab = dialogFile ? 'dialogs' : 'docs';
             if (B.get ('tab') !== nextTab) B.call (x, 'set', 'tab', nextTab);
@@ -2631,7 +2648,7 @@ views.snapshots = function () {
 views.main = function () {
    return B.view ([['tab'], ['currentProject']], function (tab, currentProject) {
       return ['div', {class: 'container'}, [
-         ['style', views.css],
+         ['style', window.vibeyCSS],
 
          ['div', {class: 'header'}, [
             ['h1', {style: style ({margin: 0, 'font-size': '1.5rem', cursor: 'pointer'}), onclick: B.ev ('navigate', 'hash', '#/projects')}, 'vibey'],
