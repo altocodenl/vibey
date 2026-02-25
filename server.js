@@ -574,7 +574,10 @@ var dockerExec = function (projectName, command, cb) {
    var name = containerName (projectName);
    // Escape single quotes in command for sh -c
    var escaped = command.replace (/'/g, "'\\''");
-   exec ('docker exec ' + name + " sh -c '" + escaped + "'", {timeout: 30000, maxBuffer: 1024 * 1024}, cb);
+   // Use setsid so that backgrounded processes (e.g. `node server.js &`) survive
+   // the docker exec session ending. Without setsid, docker kills orphaned children
+   // when the sh process exits.
+   exec ('docker exec ' + name + " setsid sh -c '" + escaped + "'", {timeout: 30000, maxBuffer: 1024 * 1024}, cb);
 };
 
 // *** PROJECT FS ***

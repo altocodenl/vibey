@@ -184,6 +184,33 @@ window.vibeyCSS = [
    ['.editor-textarea:focus', {
       outline: '2px solid #4a69bd',
    }],
+   // Vi mode: hide native caret in normal/command mode, show in insert
+   ['.vi-active', {
+      'caret-color': 'transparent',
+   }],
+   ['.vi-active.vi-insert', {
+      'caret-color': '#eee',
+   }],
+   // Vi block cursor overlay
+   ['.vi-cursor-overlay', {
+      position: 'absolute',
+      'pointer-events': 'none',
+      'background-color': 'rgba(238, 238, 238, 0.7)',
+      'z-index': 10,
+      'animation': 'vi-blink 1s step-end infinite',
+   }],
+   ['@keyframes vi-blink', {
+      '0%, 100%': 'opacity: 1',
+      '50%': 'opacity: 0',
+   }],
+   // Vi textarea wrapper for positioning the cursor overlay
+   ['.vi-textarea-wrap', {
+      position: 'relative',
+      display: 'flex',
+      'flex-direction': 'column',
+      flex: 1,
+      'min-height': 0,
+   }],
    ['.vi-status', {
       display: 'flex',
       'justify-content': 'space-between',
@@ -196,6 +223,23 @@ window.vibeyCSS = [
       'border-top': '1px solid #333'
    }],
    ['.vi-status span', {
+      'white-space': 'pre'
+   }],
+   // Vi status bar in chat input area
+   ['.vi-chat-status', {
+      display: 'flex',
+      'justify-content': 'space-between',
+      padding: '0.15rem 0.5rem',
+      'font-family': 'Monaco, Consolas, monospace',
+      'font-size': '11px',
+      color: '#9aa4bf',
+      'background-color': '#0d0d1a',
+      'border-radius': '0 0 8px 8px',
+      'margin-top': '-0.25rem',
+      'min-width': 0,
+      flex: 1,
+   }],
+   ['.vi-chat-status span', {
       'white-space': 'pre'
    }],
    ['.editor-empty', {
