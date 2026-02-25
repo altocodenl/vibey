@@ -2,9 +2,13 @@
 
 An agentic interface for those who love text.
 
-Use text to coordinate agents. From your browser. Surrounded by a container.
+Build with ideas, not code.
 
 I'm currently recording myself while building vibey. You can check out [the Youtube channel here](https://www.youtube.com/channel/UCEcfQSep8KzW7H2S0HBNj8g). The channel is from [cell](https://github.com/altocodenl/cell) but Vibey hijacked the channel starting on season 5.
+
+## Installation
+
+TODO
 
 ## Usage
 
@@ -30,11 +34,13 @@ docker compose down -v
 
 ## Vibey in a nutshell
 
-1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. Views of your app or images are embedded. A document as the gateway to everything.
-2. **In your browser**: allows to see not just text, but images, audio, and embed little apps in your documents.
-3. **Containerized**: each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or the host.
+1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. Views of your app or images are embedded. A document as the gateway to everything. There is no database.
+2. **Everything in your browser**: allows to see not just text, but images, audio, and even embed small apps in your documents. No terminal or dedicated native app required.
+3. **Safe(r) YOLO**: the agents don't ask for permission, they just run the commands that they deem useful for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
+4. **Orchestration as prose**: there's no agent graph, no task queue, no state machine. You write a small doc describing what you want (including how many agents to use), start one dialog, and that agent reads the doc and decides what to do, including spawning other sibling agents. The "agentic mesh" is just text instructions that you can edit. Agents can read each other's dialogs to coordinate.
+5. **Run locally and bring your own inference**: connect with your openai or claude subscription or API key.
 
-All you need is an AI provider and to install vibey locally.
+For the students of humanities stranded in the digital age: this is your chance to build a world with your words. Not cryptic commands, without the tens of hours of practice that are required to figure out misplaced semicolons. Describe your world and see it come to life.
 
 ## Vibey cloud in a nutshell
 
@@ -68,8 +74,6 @@ The core of all this is one doc, `doc/main.md.` This file contains:
 Rather than hardcoding or customizing an agentic mesh, just describe it.
 
 Vibey is not experimental. It is an experiment.
-
-For the students of humanities stranded in the digital age: this is your chance to build a world with your words. Not cryptic commands, without the tens of hours of practice that are required to figure out misplaced semicolons. Describe your world and see it come to life, somewhat expensively.
 
 ## How can everything be markdown?
 
@@ -586,53 +590,122 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 
 ## Test flows
 
-Flow #1:
+Flow #1 — Dialog + tool-use happy path
 
-- I go to localhost:3001
-- I appear on the projects tab.
-- I create a new project.
-- I appear on the Docs tab
-- I go to the dialogs tab
-- I open a new dialog, entering its name
-- A file named dialog/<timestamp>-<name>-waiting.md is created, but I only see the name of the dialog. The status is shown as an appropriate icon. The entire name is seen, even if it makes the label larger.
-- The dropdown for gpt5.3 is selected. I enter some text on the box below on the right (not a prompt window) and I send it and off the dialog goes. The request is to read the first 20 lines of readme.md.
-- I get a LLM response. I can see tokens used, times of requests. The file sent is compacted, not shown fully. I can expand it (and re-contract it by clicking another button).
-- I ask a question to the LLM which requires tool use (say a diff): please create a little dummy.js file with a console.log on it.
-- The diff is applied. I can see it with a green background.
+- Open Vibey (`GET /`) and confirm the HTML shell loads `client.js`.
+- Create a project with `POST /projects`.
+- Start by creating a **waiting** dialog draft with `POST /project/:project/dialog/new` (provider `openai`, model `gpt-5`, custom slug).
+- Check `GET /project/:project/dialogs`: the new dialog is present and status is `waiting`.
+- Seed an input file for the agent (`test-sample.txt`) using `POST /project/:project/tool/execute` with `write_file`.
+- Continue that dialog via `PUT /project/:project/dialog` with a prompt that explicitly asks for `run_command`.
+  - Response should stream as SSE and finish with a `done` event.
+  - `GET /project/:project/dialog/:id` should show canonical evidence in markdown: `> Time:`, a `run_command` tool request, and a tool result block.
+- Send a second continuation prompt (same endpoint) asking for `write_file` to create `dummy.js`.
+  - Again, SSE finishes with `done`.
+  - Dialog markdown shows `write_file` + corresponding result.
+- Validate output by calling `POST /project/:project/tool/execute` with `run_command: cat dummy.js`; file should contain `console.log`.
+- Cleanup: `DELETE /projects/:name`, then verify project is gone from `GET /projects`.
 
-Flow #2:
+Flow #2 — Docs CRUD + filename guards
 
-- I appear on the Docs tab
-- I click on main.md (which is, under the hood, doc/main.md).
-- I can have a good editing experience of the file.
-- I can save my changes.
-- If I leave before saving my changes, I'm warned and can stay and then save.
-- I can make more changes and discard them.
+- Create a project.
+- Save `doc/main.md` using `POST /project/:project/file/doc/main.md`, then read it back with `GET /project/:project/file/doc/main.md` and verify exact content round-trip.
+- Confirm file discovery with `GET /project/:project/files` (must include `doc/main.md`).
+- Overwrite `doc/main.md` through the same write endpoint, read again, and verify updated content is persisted.
+- Create a second doc (`doc/notes.md`), verify both files are listed, then delete `doc/notes.md` via `DELETE /project/:project/file/doc/notes.md`.
+- Re-list files to confirm `doc/notes.md` is removed while `doc/main.md` remains unchanged.
+- Validate filename/path guardrails:
+  - Reading deleted file returns `404`.
+  - Invalid managed name like `bad..name.md` returns `400`.
+  - Writing outside managed folders (for example `bad.txt`) returns `400`.
+- Cleanup: delete the project and verify it no longer appears in `GET /projects`.
 
-Flow #3:
+Flow #3 — Deleting a project aborts active agents
 
-- I open vibey, already with a project.
-- I can delete the project.
-- Any agents running in that project are stopped.
-- The folder is deleted.
+- Create a project and seed `doc/main.md` so it behaves like a real workspace.
+- Create two waiting dialogs (`agent-a`, `agent-b`) with `POST /project/:project/dialog/new`.
+- Trigger both dialogs with long prompts (non-blocking `PUT /project/:project/dialog`) and poll `GET /project/:project/dialogs` until both are `active`.
+- While they are still running, delete the project with `DELETE /projects/:name`.
+- Verify hard-stop semantics:
+  - Project is absent from `GET /projects`.
+  - Project endpoints return `404` (`GET /project/:project/dialogs`, `GET /project/:project/files`, `GET /project/:project/dialog/:id`).
+- Re-create a project with the same slug to prove full cleanup happened.
+  - New project has no old dialogs.
+  - File list contains only default `doc/main.md`.
+- Final cleanup: delete the re-created project.
 
-Flow #4:
+Flow #4 — Static tictactoe via `/static`
 
-- I write in main.md that I want to create a little game on my browser. A tictactoe, for example. And that two agents should work on it. The game should be simple client side gotoB, provide docs/gotoB.md. Also use a simple express on port 4000 to serve the static file.
-- I go to the dialogs tab.
-- I start a new dialog to say "please start".
-- The agent starts working, spawning another agent.
+- Create a project and write `doc/main.md` with explicit constraints for a static-only gotoB tictactoe (no backend process).
+- Create an orchestrator dialog (`POST /project/:project/dialog/new`) and trigger it with `"please start"` (`PUT /project/:project/dialog`).
+- Poll until the static app is reachable at `GET /project/:project/static/` and the HTML includes expected markers (`gotob`, `app.js`, `tictactoe`).
+- Validate generated artifacts with tool execution:
+  - `index.html` references gotoB and `app.js`.
+  - `app.js` includes gotoB usage (`B.`) plus board/cell/grid game logic.
+- Send a second orchestrator prompt asking it to append an embed section in `doc/main.md`.
+- Poll `GET /project/:project/file/doc/main.md` until an `əəəembed` block appears with `port static`.
+- Final assertion: `doc/main.md` contains the playable embed configuration.
+- This project is intentionally kept alive so the embedded game remains available.
+
+Flow #5 — Backend tictactoe via proxy on port 4000
+
+- Create a project and write `doc/main.md` requiring a backend version of the game: Express server on port `4000`, gotoB frontend assets, and background boot via `node server.js &`.
+- Create an orchestrator dialog and kick it off with `"please start"`.
+- Poll `GET /project/:project/proxy/4000/` until the app is live and HTML includes `gotob`, `app.js`, and `tictactoe`.
+- Verify routed assets via proxy endpoints:
+  - `GET /project/:project/proxy/4000/` serves index HTML.
+  - `GET /project/:project/proxy/4000/app.js` serves JS containing `B.` and board/cell/grid logic.
+- Verify the backend process truly runs inside the project container by executing `ps aux | grep node` through `POST /project/:project/tool/execute`; output should include `server.js`.
+- Ask the agent to append an embed block to `doc/main.md` using `port 4000`.
+- Poll doc content until `əəəembed` + `port 4000` appear.
+- Keep project running intentionally so the embedded backend app stays playable.
+
+Flow #6 — Vi mode settings + persistence
+
+- Confirm baseline state: `GET /settings` returns `editor.viMode = false`.
+- Enable vi mode with `POST /settings` payload `{editor:{viMode:true}}`, then verify with `GET /settings`.
+- Disable again with `{editor:{viMode:false}}`, and verify it returns to false.
+- Verify settings merge behavior (no accidental clobber):
+  - Set `viMode=true`.
+  - Save only `{openaiKey: ...}` via `POST /settings`.
+  - Confirm `GET /settings` still reports `editor.viMode=true` and `openai.hasKey=true`.
+- Verify backward compatibility: top-level payload `{viMode:false}` also updates `editor.viMode`.
+- Sanity-check editor persistence while vi mode exists:
+  - Create project.
+  - Write/read `doc/main.md`.
+  - Overwrite it (simulating `:w`) and verify new content persists.
+- Cleanup: reset vi mode false, clear API key, delete project.
+
+Flow #7 — Snapshots lifecycle (create/list/download/restore/delete)
+
+- Create a project and write at least two files (`doc/main.md`, `doc/notes.md`) so snapshot contents are meaningful.
+- Create snapshot with label using `POST /project/:project/snapshot`.
+  - Returned entry should include `id`, `project`, `created`, `.tar.gz` filename, label, and `fileCount >= 2`.
+- Confirm discoverability with `GET /snapshots`.
+- Create a second snapshot without label; verify list contains both snapshots and is ordered newest-first.
+- Download one snapshot via `GET /snapshots/:id/download` and verify non-empty tar.gz content is returned.
+- Restore snapshot into a new project with `POST /snapshots/:id/restore` (optionally passing a name).
+  - Verify restored project appears in `GET /projects`.
+  - Verify restored files and file contents match original snapshot state exactly.
+- Mutate the original project afterward and verify restored project stays unchanged (restore isolation).
+- Delete the second snapshot and confirm only that entry disappears from `GET /snapshots`.
+- Delete original project and confirm snapshot entries still exist (snapshot storage is independent of project lifecycle).
+- Error paths:
+  - `DELETE /snapshots/nonexistent` returns `400` with error payload.
+  - `GET /snapshots/nonexistent/download` returns `404` with error payload.
+- Cleanup: delete restored project, delete remaining snapshot, and confirm no leftovers for this flow.
 
 ## TODO
 
 Prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
 
-Tests:
-   - Make flows 3 & 4 work on the client.
-   - Add a flow 5 that requires a backend in another container. A tictactoe like that of flow 4 that is served through a port, also embedded.
-   - Flow 6 for testing vi.
-   - Flow 7 for testing snapshot mode.
+- upload files into uploads/ show them at the bottom of the docs on the sidebar always visible (if you have any), if you click on it if it's media you show it, otherwise you just show some metadata as text; add docs, endpoints, client support and a test flow.
+- vi mode is broken
+- run the tests myself
+- website, add link to github
+- Test & fix all frontend flows.
+- Installation?
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
 
 ## TODO vibey cloud

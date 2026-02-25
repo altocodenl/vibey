@@ -24,7 +24,13 @@ Hi! I'm building vibey. See please readme.md, then server.js and client.js, then
    - Flow 7 for testing snapshot mode.
 ---
 - Fantastic! Now extrapolate the tests to the client tests, with the same approach. Uncomment any commented tests on the client tests. Don't run anything yet.
-
+---
+- You can now run vibey, run it dockerized as per the instructions. Then, start running the server tests, flow by flow, until they all work. Don't skip flows, focus on getting each flow done. If you have to fix something in the server, fix it, but don't change major behaviors; if you hit a significant doubt on intent/behavior, stop and ask.
+---
+Can you please document flows 5, 6 and 7 in readme.md? Add a bit more level of detail too to 1-4. your source of truth is the server tests. Don't modify any other files.
+---
+- You can now run vibey, run it dockerized as per the instructions. Then, start running the client tests until they all work. Use pupeteer. Don't skip flows, focus on getting each flow done. If you have to fix something in the server or client, fix it, but don't change major behaviors; if you hit a significant doubt on intent/behavior, stop and ask. You open localhost:5353 and then click on the Test button
+- Can you change the tests so that they stream the console logs onto pupeteer so we can both see what's going on?
 
 ### 2026-02-24
 
