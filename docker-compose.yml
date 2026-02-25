@@ -5,7 +5,8 @@ services:
       - "5353:5353"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - vibey-data:/app/projects
+      - vibey-data:/app/data
+
     labels:
       - vibey=master
     environment:

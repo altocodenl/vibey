@@ -14,7 +14,7 @@ RUN npm install --production
 COPY server.js client.js test-client.js test-server.js prompt.md ./
 
 # Bake secret.json into image as seed if present (API keys etc.)
-RUN mkdir -p /app/seed /app/projects && echo '{}' > /app/seed/secret.json
+RUN mkdir -p /app/seed /app/data/snapshots && echo '{}' > /app/seed/secret.json
 COPY secret.json* /app/seed/
 
 # Entrypoint seeds config into volume on first run, then starts node

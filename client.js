@@ -132,7 +132,7 @@ var renderMarkdownWithEmbeds = function (markdown, project) {
 };
 
 var buildHash = function (project, tab, currentFile) {
-   if (! project) return '#/projects';
+   if (! project) return tab === 'settings' ? '#/settings' : (tab === 'snapshots' ? '#/snapshots' : '#/projects');
    tab = tab === 'dialogs' ? 'dialogs' : 'docs';
    if (! currentFile || ! currentFile.name) return '#/project/' + encodeURIComponent (project) + '/' + tab;
 
@@ -152,7 +152,8 @@ var readHashTarget = function (hashValue) {
    var raw = rawHash.replace (/^#\/?/, '');
    if (! raw) return {project: null, tab: 'projects', target: null};
 
-   if (raw === 'accounts') return {project: null, tab: 'accounts', target: null};
+   if (raw === 'settings') return {project: null, tab: 'settings', target: null};
+   if (raw === 'snapshots') return {project: null, tab: 'snapshots', target: null};
 
    var parts = raw.split ('/');
    if (parts [0] === 'project' && parts [1]) {
@@ -187,6 +188,499 @@ var isChatNearBottom = function (node) {
    return (node.scrollHeight - (node.scrollTop + node.clientHeight)) <= 24;
 };
 
+// *** VI CONTROLLER ***
+
+var viController = {};
+
+var viWordChar = function (ch) {
+   return !! ch && /[A-Za-z0-9_]/.test (ch);
+};
+
+var viClamp = function (value, min, max) {
+   return Math.max (min, Math.min (max, value));
+};
+
+var viLineStarts = function (lines) {
+   var starts = [0];
+   for (var i = 0; i < lines.length; i++) {
+      if (i + 1 < lines.length) starts.push (starts [i] + lines [i].length + 1);
+   }
+   return starts;
+};
+
+var viPositionFromLineCol = function (lines, line, col) {
+   var starts = viLineStarts (lines);
+   line = viClamp (line, 0, lines.length - 1);
+   col = viClamp (col, 0, lines [line].length);
+   return starts [line] + col;
+};
+
+var viFindNext = function (text, term, from, backward) {
+   if (! term) return null;
+   if (! backward) {
+      var idx = text.indexOf (term, from);
+      if (idx === -1 && from > 0) idx = text.indexOf (term, 0);
+      return idx;
+   }
+   var before = text.lastIndexOf (term, from);
+   if (before === -1 && from < text.length - 1) before = text.lastIndexOf (term, text.length - 1);
+   return before;
+};
+
+viController.moveCursor = function (textarea, pos) {
+   textarea.selectionStart = textarea.selectionEnd = viClamp (pos, 0, textarea.value.length);
+};
+
+viController.cursorInfo = function (textarea) {
+   var val = textarea.value || '';
+   var pos = textarea.selectionStart || 0;
+   var before = val.slice (0, pos);
+   var lineNum = before.split ('\n').length - 1;
+   var lines = val.split ('\n');
+   var lastNl = before.lastIndexOf ('\n');
+   var colNum = lastNl === -1 ? pos : (pos - lastNl - 1);
+   return {pos: pos, line: lineNum, col: colNum, lines: lines, text: val};
+};
+
+viController.motion = function (key, info, textarea) {
+   var pos = info.pos;
+   var lines = info.lines;
+   var line = info.line;
+   var col = info.col;
+   var text = info.text;
+
+   if (key === 'h') return viClamp (pos - 1, 0, text.length);
+   if (key === 'l') return viClamp (pos + 1, 0, text.length);
+   if (key === 'j' || key === 'k') {
+      var delta = key === 'j' ? 1 : -1;
+      var nextLine = viClamp (line + delta, 0, lines.length - 1);
+      return viPositionFromLineCol (lines, nextLine, col);
+   }
+   if (key === '0') return viPositionFromLineCol (lines, line, 0);
+   if (key === '$') return viPositionFromLineCol (lines, line, lines [line].length);
+   if (key === 'gg') return 0;
+   if (key === 'G') return text.length;
+
+   if (key === 'w') {
+      var i = pos;
+      while (i < text.length && viWordChar (text [i])) i++;
+      while (i < text.length && ! viWordChar (text [i])) i++;
+      return viClamp (i, 0, text.length);
+   }
+
+   if (key === 'b') {
+      var j = viClamp (pos - 1, 0, text.length);
+      while (j > 0 && ! viWordChar (text [j])) j--;
+      while (j > 0 && viWordChar (text [j - 1])) j--;
+      return viClamp (j, 0, text.length);
+   }
+
+   if (key === 'ctrl-d' || key === 'ctrl-u') {
+      var rows = textarea && textarea.rows ? textarea.rows : 12;
+      var jump = Math.max (1, Math.floor (rows / 2));
+      var next = key === 'ctrl-d' ? line + jump : line - jump;
+      return viPositionFromLineCol (lines, next, col);
+   }
+
+   return pos;
+};
+
+viController.operator = function (key, textarea, info, register) {
+   var text = info.text;
+   var line = info.line;
+   var lines = info.lines;
+   var starts = viLineStarts (lines);
+   var lineStart = starts [line] || 0;
+   var lineEnd = lineStart + lines [line].length;
+   var afterLine = line < lines.length - 1 ? lineEnd + 1 : lineEnd;
+   var result = {value: text, cursor: info.pos, register: register};
+
+   if (key === 'x') {
+      if (info.pos >= text.length) return result;
+      result.value = text.slice (0, info.pos) + text.slice (info.pos + 1);
+      result.cursor = viClamp (info.pos, 0, result.value.length);
+      result.register = text.slice (info.pos, info.pos + 1);
+      return result;
+   }
+
+   if (key === 'dd') {
+      result.register = text.slice (lineStart, afterLine);
+      result.value = text.slice (0, lineStart) + text.slice (afterLine);
+      result.cursor = viClamp (lineStart, 0, result.value.length);
+      return result;
+   }
+
+   if (key === 'yy') {
+      result.register = text.slice (lineStart, afterLine);
+      return result;
+   }
+
+   if (key === 'p') {
+      if (! register) return result;
+      if (register.indexOf ('\n') !== -1) {
+         result.value = text.slice (0, afterLine) + register + text.slice (afterLine);
+         result.cursor = viClamp (afterLine, 0, result.value.length);
+         return result;
+      }
+      result.value = text.slice (0, info.pos + 1) + register + text.slice (info.pos + 1);
+      result.cursor = viClamp (info.pos + register.length + 1, 0, result.value.length);
+      return result;
+   }
+
+   if (key === 'o' || key === 'O') {
+      if (key === 'o') {
+         result.value = text.slice (0, afterLine) + '\n' + text.slice (afterLine);
+         result.cursor = viClamp (afterLine + 1, 0, result.value.length);
+         return result;
+      }
+      result.value = text.slice (0, lineStart) + '\n' + text.slice (lineStart);
+      result.cursor = viClamp (lineStart, 0, result.value.length);
+      return result;
+   }
+
+   return result;
+};
+
+viController.handleKey = function (ev, textarea, store, options) {
+   options = options || {};
+   var mode = store.mode || 'normal';
+   var key = ev.key;
+   var pending = store.pending || '';
+   var register = store.register || '';
+   var lastSearch = store.lastSearch || '';
+   var commandPrefix = store.commandPrefix || '';
+   var undoStack = store.undoStack || [];
+   var redoStack = store.redoStack || [];
+   var result = {preventDefault: false};
+
+   if ((ev.ctrlKey || ev.metaKey) && key === 'Enter' && options.allowSend) {
+      result.send = true;
+      result.preventDefault = true;
+      return result;
+   }
+
+   if ((ev.ctrlKey || ev.metaKey) && key === 's' && ! options.light) {
+      result.save = true;
+      result.preventDefault = true;
+      return result;
+   }
+
+   var info = viController.cursorInfo (textarea);
+
+   var pushUndo = function () {
+      undoStack = undoStack.concat ([{value: textarea.value, cursor: info.pos}]);
+      redoStack = [];
+   };
+
+   var applyChange = function (nextValue, nextCursor) {
+      pushUndo ();
+      textarea.value = nextValue;
+      viController.moveCursor (textarea, nextCursor);
+      result.value = nextValue;
+      result.cursor = nextCursor;
+      result.undoStack = undoStack;
+      result.redoStack = redoStack;
+   };
+
+   var applySearch = function (forward) {
+      if (! lastSearch) return result;
+      var from = forward ? info.pos + 1 : info.pos - 1;
+      var idx = viFindNext (info.text, lastSearch, from, ! forward);
+      if (idx === null || idx === -1) {
+         result.message = 'Pattern not found';
+         return result;
+      }
+      viController.moveCursor (textarea, idx);
+      result.cursor = idx;
+      return result;
+   };
+
+   if (mode === 'insert') {
+      if (key === 'Escape') {
+         result.mode = 'normal';
+         result.pending = '';
+         result.commandPrefix = '';
+         result.message = '';
+         result.preventDefault = true;
+      }
+      return result;
+   }
+
+   if (mode === 'command') {
+      result.preventDefault = true;
+      if (key === 'Escape') {
+         result.mode = 'normal';
+         result.pending = '';
+         result.commandPrefix = '';
+         result.message = '';
+         return result;
+      }
+
+      if (key === 'Enter') {
+         var command = (pending || '').trim ();
+         if (commandPrefix === '/') {
+            if (command) {
+               lastSearch = command;
+               var found = viFindNext (info.text, command, info.pos + 1, false);
+               if (found !== null && found !== -1) {
+                  viController.moveCursor (textarea, found);
+                  result.cursor = found;
+               }
+               else result.message = 'Pattern not found';
+            }
+         }
+         else {
+            if (command === 'w') result.save = true;
+            else if (command === 'q') result.close = true;
+            else if (command === 'wq') {result.save = true; result.close = true;}
+            else if (command === 'q!') {result.close = true; result.forceClose = true;}
+            else if (command) result.message = 'Unknown command: ' + command;
+         }
+         result.mode = 'normal';
+         result.pending = '';
+         result.commandPrefix = '';
+         result.lastSearch = lastSearch;
+         return result;
+      }
+
+      if (key === 'Backspace') {
+         result.pending = pending.slice (0, -1);
+         return result;
+      }
+
+      if (key && key.length === 1 && ! ev.ctrlKey && ! ev.metaKey && ! ev.altKey) {
+         result.pending = pending + key;
+         return result;
+      }
+
+      return result;
+   }
+
+   // NORMAL MODE
+   result.message = '';
+
+   if (options.light) {
+      if (key === 'i' || key === 'a') {
+         if (key === 'a') viController.moveCursor (textarea, viClamp (info.pos + 1, 0, info.text.length));
+         result.mode = 'insert';
+         result.pending = '';
+         result.preventDefault = true;
+         return result;
+      }
+   }
+
+   if (key === ':' && options.allowCommand) {
+      result.mode = 'command';
+      result.pending = '';
+      result.commandPrefix = ':';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (key === '/' && options.allowSearch) {
+      result.mode = 'command';
+      result.pending = '';
+      result.commandPrefix = '/';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if ((key === 'n' || key === 'N') && options.allowSearch) {
+      result.preventDefault = true;
+      result.message = '';
+      applySearch (key === 'n');
+      return result;
+   }
+
+   if (key === 'g') {
+      if (pending === 'g') {
+         var ggPos = viController.motion ('gg', info, textarea);
+         viController.moveCursor (textarea, ggPos);
+         result.pending = '';
+         result.preventDefault = true;
+         return result;
+      }
+      result.pending = 'g';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (pending === 'g' && key !== 'g') {
+      pending = '';
+      result.pending = '';
+   }
+
+   if (/^[0-9]$/.test (key)) {
+      if (key === '0' && ! pending) {
+         var zeroPos = viController.motion ('0', info, textarea);
+         viController.moveCursor (textarea, zeroPos);
+         result.preventDefault = true;
+         result.pending = '';
+         return result;
+      }
+      if (/^\d+$/.test (pending) || pending === '') {
+         result.pending = pending + key;
+         result.preventDefault = true;
+         return result;
+      }
+   }
+
+   var count = 1;
+   if (/^\d+$/.test (pending)) {
+      count = parseInt (pending, 10) || 1;
+      pending = '';
+   }
+
+   var motions = {'h': 'h', 'j': 'j', 'k': 'k', 'l': 'l', 'w': 'w', 'b': 'b', '$': '$', '0': '0', 'G': 'G'};
+   if (key === 'h' || key === 'j' || key === 'k' || key === 'l' || key === 'w' || key === 'b' || key === '0' || key === '$' || key === 'G') {
+      var nextPos = info.pos;
+      for (var step = 0; step < count; step++) {
+         nextPos = viController.motion (motions [key], viController.cursorInfo (textarea), textarea);
+         viController.moveCursor (textarea, nextPos);
+      }
+      result.pending = '';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (ev.ctrlKey && (key === 'd' || key === 'u')) {
+      var ctrlKey = key === 'd' ? 'ctrl-d' : 'ctrl-u';
+      var ctrlPos = viController.motion (ctrlKey, info, textarea);
+      viController.moveCursor (textarea, ctrlPos);
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (pending === 'd' && key === 'd' && ! options.light) {
+      var dd = viController.operator ('dd', textarea, info, register);
+      applyChange (dd.value, dd.cursor);
+      result.register = dd.register;
+      result.message = '1 line deleted';
+      result.pending = '';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (pending === 'y' && key === 'y' && ! options.light) {
+      var yy = viController.operator ('yy', textarea, info, register);
+      result.register = yy.register;
+      result.message = '1 line yanked';
+      result.pending = '';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if ((pending === 'd' || pending === 'y') && key !== pending) {
+      pending = '';
+      result.pending = '';
+   }
+
+   if (! options.light && (key === 'd' || key === 'y')) {
+      result.pending = key;
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && key === 'x') {
+      var xop = viController.operator ('x', textarea, info, register);
+      if (xop.value !== info.text) {
+         applyChange (xop.value, xop.cursor);
+         result.register = xop.register;
+      }
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && key === 'p') {
+      var pop = viController.operator ('p', textarea, info, register);
+      if (pop.value !== info.text) applyChange (pop.value, pop.cursor);
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && (key === 'o' || key === 'O')) {
+      var oop = viController.operator (key, textarea, info, register);
+      applyChange (oop.value, oop.cursor);
+      result.mode = 'insert';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && key === 'A') {
+      var apos = viController.motion ('$', info, textarea);
+      viController.moveCursor (textarea, apos);
+      result.mode = 'insert';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && key === 'I') {
+      var ipos = viController.motion ('0', info, textarea);
+      viController.moveCursor (textarea, ipos);
+      result.mode = 'insert';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && key === 'a') {
+      viController.moveCursor (textarea, viClamp (info.pos + 1, 0, info.text.length));
+      result.mode = 'insert';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && key === 'i') {
+      result.mode = 'insert';
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && key === 'u') {
+      if (undoStack.length) {
+         var last = undoStack [undoStack.length - 1];
+         undoStack = undoStack.slice (0, -1);
+         redoStack = redoStack.concat ([{value: info.text, cursor: info.pos}]);
+         textarea.value = last.value;
+         viController.moveCursor (textarea, last.cursor);
+         result.value = last.value;
+         result.cursor = last.cursor;
+         result.undoStack = undoStack;
+         result.redoStack = redoStack;
+      }
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (! options.light && ev.ctrlKey && key === 'r') {
+      if (redoStack.length) {
+         var redo = redoStack [redoStack.length - 1];
+         redoStack = redoStack.slice (0, -1);
+         undoStack = undoStack.concat ([{value: info.text, cursor: info.pos}]);
+         textarea.value = redo.value;
+         viController.moveCursor (textarea, redo.cursor);
+         result.value = redo.value;
+         result.cursor = redo.cursor;
+         result.undoStack = undoStack;
+         result.redoStack = redoStack;
+      }
+      result.preventDefault = true;
+      return result;
+   }
+
+   if (options.light && (key === 'h' || key === 'j' || key === 'k' || key === 'l' || key === 'w' || key === 'b' || key === '0' || key === '$' || key === 'G')) {
+      var lpos = info.pos;
+      for (var step2 = 0; step2 < count; step2++) {
+         lpos = viController.motion (motions [key] || key, viController.cursorInfo (textarea), textarea);
+         viController.moveCursor (textarea, lpos);
+      }
+      result.pending = '';
+      result.preventDefault = true;
+      return result;
+   }
+
+   return result;
+};
+
 // *** RESPONDERS ***
 
 B.mrespond ([
@@ -202,7 +696,20 @@ B.mrespond ([
       B.call (x, 'set', 'editorPreview', true);
       B.call (x, 'set', 'voiceActive', false);
       B.call (x, 'set', 'voiceSupported', !! (window.SpeechRecognition || window.webkitSpeechRecognition));
+      B.call (x, 'set', 'viMode', false);
+      B.call (x, 'set', 'viState', {
+         mode: 'insert',
+         pending: '',
+         register: '',
+         lastSearch: '',
+         message: '',
+         commandPrefix: '',
+         undoStack: [],
+         redoStack: []
+      });
+      B.call (x, 'set', 'viCursor', {line: 1, col: 1});
       B.call (x, 'load', 'projects');
+      B.call (x, 'load', 'settings');
       B.call (x, 'read', 'hash');
    }],
 
@@ -214,7 +721,8 @@ B.mrespond ([
       var applyParsed = function () {
          B.call (x, 'set', 'tab', parsed.tab);
          if (parsed.tab === 'dialogs') B.call (x, 'reset', 'chatInput');
-         if (parsed.tab === 'accounts') B.call (x, 'load', 'accounts');
+         if (parsed.tab === 'settings') B.call (x, 'load', 'settings');
+         if (parsed.tab === 'snapshots') B.call (x, 'load', 'snapshots');
          B.call (x, 'set', 'currentProject', parsed.project);
          B.call (x, 'set', 'hashTarget', parsed);
          if (! parsed.project || ! parsed.target) B.call (x, 'set', 'currentFile', null);
@@ -388,44 +896,96 @@ B.mrespond ([
       });
    }],
 
-   ['snapshot', 'project', function (x, type) {
+   ['create', 'snapshot', function (x) {
       var project = B.get ('currentProject');
       if (! project) return;
-      B.call (x, 'post', projectPath (project, 'snapshot'), {}, {type: type}, function (x, error, rs) {
+      var label = prompt ('Snapshot label (optional):') || '';
+      B.call (x, 'post', projectPath (project, 'snapshot'), {}, {label: label}, function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to create snapshot');
+         B.call (x, 'load', 'snapshots');
+         alert ('Snapshot created: ' + (rs.body.label || rs.body.id));
+      });
+   }],
+
+   ['load', 'snapshots', function (x) {
+      B.call (x, 'get', 'snapshots', {}, '', function (x, error, rs) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to load snapshots');
+         B.call (x, 'set', 'snapshots', rs.body || []);
+      });
+   }],
+
+   ['restore', 'snapshot', function (x, id, projectName) {
+      var name = prompt ('New project name:', projectName + ' (restored)');
+      if (! name || ! name.trim ()) return;
+      B.call (x, 'post', 'snapshots/' + encodeURIComponent (id) + '/restore', {}, {name: name.trim ()}, function (x, error, rs) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to restore snapshot');
          B.call (x, 'load', 'projects');
-         alert (type === 'zip' ? ('Zip created: ' + rs.body.file) : ('Project snapshot created: ' + rs.body.name));
+         B.call (x, 'load', 'snapshots');
+         B.call (x, 'navigate', 'hash', '#/project/' + encodeURIComponent (rs.body.slug) + '/docs');
       });
    }],
 
-   // *** ACCOUNTS ***
-
-   ['load', 'accounts', function (x) {
-      B.call (x, 'get', 'accounts', {}, '', function (x, error, rs) {
-         if (error) return B.call (x, 'report', 'error', 'Failed to load accounts');
-         B.call (x, 'set', 'accounts', rs.body || {});
+   ['delete', 'snapshot', function (x, id) {
+      if (! confirm ('Delete this snapshot? This cannot be undone.')) return;
+      B.call (x, 'delete', 'snapshots/' + encodeURIComponent (id), {}, '', function (x, error, rs) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to delete snapshot');
+         B.call (x, 'load', 'snapshots');
       });
    }],
 
-   ['save', 'accounts', function (x) {
-      var edits = B.get ('accountEdits') || {};
+   ['download', 'snapshot', function (x, id) {
+      window.open ('snapshots/' + encodeURIComponent (id) + '/download', '_blank');
+   }],
+
+   // *** SETTINGS ***
+
+   ['load', 'settings', function (x) {
+      B.call (x, 'get', 'settings', {}, '', function (x, error, rs) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to load settings');
+         var settings = rs.body || {};
+         B.call (x, 'set', 'settings', settings);
+         if (settings.editor && type (settings.editor.viMode) === 'boolean') {
+            B.call (x, 'set', 'viMode', settings.editor.viMode);
+            B.call (x, 'set', ['viState', 'mode'], settings.editor.viMode ? 'normal' : 'insert');
+         }
+      });
+   }],
+
+   ['save', 'settings', function (x) {
+      var edits = B.get ('settingsEdits') || {};
       var body = {};
       if (edits.openaiKey !== undefined) body.openaiKey = edits.openaiKey;
       if (edits.claudeKey !== undefined) body.claudeKey = edits.claudeKey;
 
-      B.call (x, 'set', 'savingAccounts', true);
-      B.call (x, 'post', 'accounts', {}, body, function (x, error, rs) {
-         B.call (x, 'set', 'savingAccounts', false);
-         if (error) return B.call (x, 'report', 'error', 'Failed to save accounts');
-         B.call (x, 'set', 'accountEdits', {});
-         B.call (x, 'load', 'accounts');
+      B.call (x, 'set', 'savingSettings', true);
+      B.call (x, 'post', 'settings', {}, body, function (x, error, rs) {
+         B.call (x, 'set', 'savingSettings', false);
+         if (error) return B.call (x, 'report', 'error', 'Failed to save settings');
+         B.call (x, 'set', 'settingsEdits', {});
+         B.call (x, 'load', 'settings');
+      });
+   }],
+
+   ['toggle', 'viMode', function (x) {
+      var next = ! B.get ('viMode');
+      var previous = B.get ('viMode');
+      B.call (x, 'set', 'viMode', next);
+      B.call (x, 'set', ['settings', 'editor', 'viMode'], next);
+      B.call (x, 'set', ['viState', 'mode'], next ? 'normal' : 'insert');
+      B.call (x, 'post', 'settings', {}, {editor: {viMode: next}}, function (x, error, rs) {
+         if (error) {
+            B.call (x, 'set', 'viMode', previous);
+            B.call (x, 'set', ['settings', 'editor', 'viMode'], previous);
+            B.call (x, 'set', ['viState', 'mode'], previous ? 'normal' : 'insert');
+            return B.call (x, 'report', 'error', 'Failed to save vi mode setting');
+         }
       });
    }],
 
    ['login', 'oauth', function (x, provider) {
       B.call (x, 'set', 'oauthLoading', provider);
       B.call (x, 'set', 'oauthStep', null);
-      B.call (x, 'post', 'accounts/login/' + provider, {}, {}, function (x, error, rs) {
+      B.call (x, 'post', 'settings/login/' + provider, {}, {}, function (x, error, rs) {
          if (error) {
             B.call (x, 'set', 'oauthLoading', null);
             return B.call (x, 'report', 'error', 'Failed to start login');
@@ -450,20 +1010,20 @@ B.mrespond ([
    ['complete', 'oauthCallback', function (x, provider, manualCode) {
       B.call (x, 'set', 'oauthLoading', provider);
       var body = manualCode ? {code: manualCode} : {};
-      B.call (x, 'post', 'accounts/login/' + provider + '/callback', {}, body, function (x, error, rs) {
+      B.call (x, 'post', 'settings/login/' + provider + '/callback', {}, body, function (x, error, rs) {
          B.call (x, 'set', 'oauthLoading', null);
          B.call (x, 'set', 'oauthStep', null);
          B.call (x, 'set', 'oauthCode', '');
          if (error) return B.call (x, 'report', 'error', 'Login failed: ' + (rs && rs.body && rs.body.error ? rs.body.error : 'unknown error'));
-         B.call (x, 'load', 'accounts');
+         B.call (x, 'load', 'settings');
       });
    }],
 
    ['logout', 'oauth', function (x, provider) {
       if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
-      B.call (x, 'post', 'accounts/logout/' + provider, {}, {}, function (x, error, rs) {
+      B.call (x, 'post', 'settings/logout/' + provider, {}, {}, function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to logout');
-         B.call (x, 'load', 'accounts');
+         B.call (x, 'load', 'settings');
       });
    }],
 
@@ -522,6 +1082,7 @@ B.mrespond ([
                content: rs.body.content,
                original: rs.body.content
             });
+            B.call (x, 'set', 'viCursor', {line: 1, col: 1});
             if (isDialogFile) B.call (x, 'reset', 'chatInput');
             B.call (x, 'write', 'hash');
          });
@@ -592,13 +1153,13 @@ B.mrespond ([
       });
    }],
 
-   ['close', 'file', function (x) {
+   ['close', 'file', function (x, force) {
       var proceed = function () {
          B.call (x, 'set', 'currentFile', null);
          B.call (x, 'write', 'hash');
       };
 
-      if (isDirtyDoc (B.get ('currentFile'))) return B.call (x, 'confirm', 'leaveCurrentDoc', proceed);
+      if (! force && isDirtyDoc (B.get ('currentFile'))) return B.call (x, 'confirm', 'leaveCurrentDoc', proceed);
       proceed ();
    }],
 
@@ -608,6 +1169,54 @@ B.mrespond ([
          ev.preventDefault ();
          B.call (x, 'save', 'file');
       }
+   }],
+
+   ['vi', 'key', function (x, ev) {
+      var textarea = ev.target;
+      if (! textarea) return;
+
+      var viState = B.get ('viState') || {};
+      var isChat = (textarea.classList || {}).contains && textarea.classList.contains ('chat-input');
+      var options = {
+         allowCommand: ! isChat,
+         allowSearch: ! isChat,
+         allowSend: isChat,
+         light: isChat
+      };
+
+      var result = viController.handleKey (ev, textarea, viState, options) || {};
+
+      if (result.mode) B.call (x, 'set', ['viState', 'mode'], result.mode);
+      if (result.pending !== undefined) B.call (x, 'set', ['viState', 'pending'], result.pending);
+      if (result.register !== undefined) B.call (x, 'set', ['viState', 'register'], result.register);
+      if (result.message !== undefined) B.call (x, 'set', ['viState', 'message'], result.message);
+      if (result.lastSearch !== undefined) B.call (x, 'set', ['viState', 'lastSearch'], result.lastSearch);
+      if (result.commandPrefix !== undefined) B.call (x, 'set', ['viState', 'commandPrefix'], result.commandPrefix);
+      if (result.undoStack !== undefined) B.call (x, 'set', ['viState', 'undoStack'], result.undoStack);
+      if (result.redoStack !== undefined) B.call (x, 'set', ['viState', 'redoStack'], result.redoStack);
+
+      if (result.value !== undefined) {
+         if (isChat) B.call (x, 'set', 'chatInput', result.value);
+         else B.call (x, 'set', ['currentFile', 'content'], result.value);
+      }
+
+      if (result.cursor !== undefined) {
+         var info = viController.cursorInfo (textarea);
+         B.call (x, 'set', 'viCursor', {line: info.line + 1, col: info.col + 1});
+      }
+
+      if (result.save) B.call (x, 'save', 'file');
+      if (result.close) B.call (x, 'close', 'file', !! result.forceClose);
+      if (result.send) B.call (x, 'send', 'message');
+
+      if (result.preventDefault) ev.preventDefault ();
+   }],
+
+   ['vi', 'cursor', function (x, ev) {
+      var textarea = ev.target;
+      if (! textarea) return;
+      var info = viController.cursorInfo (textarea);
+      B.call (x, 'set', 'viCursor', {line: info.line + 1, col: info.col + 1});
    }],
 
    ['toggle', 'editorPreview', function (x) {
@@ -1147,6 +1756,20 @@ views.css = [
    ['.editor-textarea:focus', {
       outline: '2px solid #4a69bd',
    }],
+   ['.vi-status', {
+      display: 'flex',
+      'justify-content': 'space-between',
+      padding: '0.25rem 0.75rem',
+      'background-color': '#0d0d1a',
+      'font-family': 'Monaco, Consolas, monospace',
+      'font-size': '12px',
+      color: '#9aa4bf',
+      'border-radius': '0 0 8px 8px',
+      'border-top': '1px solid #333'
+   }],
+   ['.vi-status span', {
+      'white-space': 'pre'
+   }],
    ['.editor-empty', {
       flex: 1,
       display: 'flex',
@@ -1443,12 +2066,15 @@ views.css = [
 ];
 
 views.files = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor) {
       var docFiles = dale.fil (files || [], undefined, function (name) {
          if (! name.startsWith ('dialog-')) return name;
       });
       var isDirty = currentFile && currentFile.content !== currentFile.original;
       var hasEmbeds = currentFile && type (currentFile.content) === 'string' && currentFile.content.indexOf ('əəəembed') !== -1;
+      viMode = !! viMode;
+      viState = viState || {};
+      viCursor = viCursor || {line: 1, col: 1};
 
       return ['div', {class: 'files-container'}, [
          // File list sidebar
@@ -1500,11 +2126,28 @@ views.files = function () {
             ]],
             editorPreview
                ? ['div', {class: 'editor-preview', opaque: true}, ['LITERAL', renderMarkdownWithEmbeds (currentFile.content, currentProject)]]
-               : ['textarea', {
-                  class: 'editor-textarea',
-                  oninput: B.ev ('set', ['currentFile', 'content']),
-                  onkeydown: B.ev ('keydown', 'editor', {raw: 'event'})
-               }, currentFile.content]
+               : ['div', {style: style ({display: 'flex', 'flex-direction': 'column', flex: 1, 'min-height': 0})}, [
+                  ['textarea', {
+                     class: 'editor-textarea' + (viMode ? ' vi-active' : ''),
+                     readonly: viMode && viState.mode !== 'insert',
+                     oninput: viMode
+                        ? B.ev (['set', ['currentFile', 'content']], ['vi', 'cursor', {raw: 'event'}])
+                        : B.ev ('set', ['currentFile', 'content']),
+                     onkeydown: viMode
+                        ? B.ev ('vi', 'key', {raw: 'event'})
+                        : B.ev ('keydown', 'editor', {raw: 'event'}),
+                     onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                     onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined
+                  }, currentFile.content],
+                  viMode ? ['div', {class: 'vi-status'}, [
+                     ['span', viState.mode === 'insert'
+                        ? '-- INSERT --'
+                        : (viState.mode === 'command'
+                           ? (viState.commandPrefix || ':') + (viState.pending || '')
+                           : (viState.message || ''))],
+                     ['span', 'Ln ' + (viCursor.line || 1) + ', Col ' + (viCursor.col || 1)]
+                  ]] : ''
+               ]]
          ] : ['div', {class: 'editor-empty'}, loadingFile ? 'Loading...' : 'Select a doc to edit']]
       ]];
    });
@@ -2052,7 +2695,7 @@ var renderEditDiff = function (tool, index) {
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState) {
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (f.startsWith ('dialog-')) return f;
@@ -2060,8 +2703,8 @@ views.dialogs = function () {
 
       var isDialog = currentFile && currentFile.name.startsWith ('dialog-');
       var messages = isDialog ? parseDialogContent (currentFile.content) : [];
-
-
+      viMode = !! viMode;
+      viState = viState || {};
 
       return ['div', {class: 'files-container'}, [
          // Dialog list sidebar
@@ -2146,12 +2789,17 @@ views.dialogs = function () {
                   return ['option', {value: option.value, selected: (chatModel || defaultModelForProvider (chatProvider || 'openai')) === option.value}, option.label];
                })],
                ['textarea', {
-                  class: 'chat-input',
+                  class: 'chat-input' + (viMode ? ' vi-active' : ''),
                   rows: 2,
                   value: chatInput || '',
                   placeholder: 'Type a message... (Cmd+Enter to send)',
+                  readonly: viMode && viState.mode !== 'insert',
                   oninput: B.ev ('set', 'chatInput'),
-                  onkeydown: B.ev ('keydown', 'chatInput', {raw: 'event'}),
+                  onkeydown: viMode
+                     ? B.ev ('vi', 'key', {raw: 'event'})
+                     : B.ev ('keydown', 'chatInput', {raw: 'event'}),
+                  onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                  onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                   disabled: streaming
                }],
                voiceSupported ? ['button', {
@@ -2211,15 +2859,16 @@ views.projects = function () {
    });
 };
 
-views.accounts = function () {
-   return B.view ([['accounts'], ['accountEdits'], ['savingAccounts'], ['showApiKeys'], ['oauthLoading'], ['oauthStep'], ['oauthCode']], function (accounts, edits, saving, showKeys, oauthLoading, oauthStep, oauthCode) {
-      accounts = accounts || {};
+views.settings = function () {
+   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauthLoading'], ['oauthStep'], ['oauthCode'], ['viMode']], function (settingsData, edits, saving, showKeys, oauthLoading, oauthStep, oauthCode, viMode) {
+      settingsData = settingsData || {};
       edits = edits || {};
-      var openai = accounts.openai || {};
-      var claude = accounts.claude || {};
-      var openaiOAuth = accounts.openaiOAuth || {};
-      var claudeOAuth = accounts.claudeOAuth || {};
-      var settings = accounts.settings || {};
+      var openai = settingsData.openai || {};
+      var claude = settingsData.claude || {};
+      var openaiOAuth = settingsData.openaiOAuth || {};
+      var claudeOAuth = settingsData.claudeOAuth || {};
+      var settings = settingsData.editor || {};
+      viMode = !! viMode;
 
       var sectionTitle = function (title) {
          return ['h3', {style: style ({color: '#94b8ff', 'font-size': '14px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '0.75rem', 'margin-top': '1.5rem', 'border-bottom': '1px solid #333', 'padding-bottom': '0.5rem'})}, title];
@@ -2241,7 +2890,7 @@ views.accounts = function () {
                   type: showKeys ? 'text' : 'password',
                   value: currentDisplay,
                   placeholder: 'Paste API key here...',
-                  oninput: B.ev ('set', ['accountEdits', editKey]),
+                  oninput: B.ev ('set', ['settingsEdits', editKey]),
                   style: style ({
                      flex: 1, padding: '0.6rem', 'border-radius': '6px', border: 'none',
                      'background-color': '#1a1a2e', color: '#eee', 'font-family': 'Monaco, Consolas, monospace', 'font-size': '13px'
@@ -2340,7 +2989,7 @@ views.accounts = function () {
       return ['div', {class: 'editor-empty'}, [
          ['div', {style: style ({width: '100%', 'max-width': '640px', 'overflow-y': 'auto', 'max-height': 'calc(100vh - 120px)'})}, [
             ['div', {class: 'editor-header'}, [
-               ['span', {class: 'editor-filename'}, 'Accounts']
+               ['span', {class: 'editor-filename'}, 'Settings']
             ]],
 
             // *** API KEYS SECTION ***
@@ -2354,7 +3003,7 @@ views.accounts = function () {
                }, showKeys ? 'Hide keys' : 'Show keys'],
                ['button', {
                   class: 'primary btn-small',
-                  onclick: B.ev ('save', 'accounts'),
+                  onclick: B.ev ('save', 'settings'),
                   disabled: saving || ! hasEdits
                }, saving ? 'Saving...' : 'Save']
             ]],
@@ -2365,7 +3014,84 @@ views.accounts = function () {
             sectionTitle ('Subscriptions'),
             ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Use your existing ChatGPT or Claude subscription. Logs in via OAuth — no API key needed.'],
             renderOAuthProvider ('openai', 'ChatGPT Plus/Pro', 'Use your ChatGPT subscription (Plus, Pro, Team)', openaiOAuth),
-            renderOAuthProvider ('claude', 'Claude Pro/Max', 'Use your Anthropic Claude subscription (Pro, Max)', claudeOAuth)
+            renderOAuthProvider ('claude', 'Claude Pro/Max', 'Use your Anthropic Claude subscription (Pro, Max)', claudeOAuth),
+
+            // *** EDITOR SECTION ***
+            sectionTitle ('Editor'),
+            ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1rem'})}, [
+               ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', color: '#c9d4ff', 'font-size': '13px'})}, [
+                  ['input', {
+                     type: 'checkbox',
+                     checked: viMode,
+                     onclick: B.ev ('toggle', 'viMode')
+                  }],
+                  'Vi mode'
+               ]]
+            ]]
+         ]]
+      ]];
+   });
+};
+
+views.snapshots = function () {
+   return B.view ([['snapshots']], function (snapshots) {
+      snapshots = snapshots || [];
+
+      var formatDate = function (iso) {
+         if (type (iso) !== 'string') return '';
+         var d = new Date (iso);
+         if (isNaN (d.getTime ())) return iso;
+         var now = new Date ();
+         var isToday = d.getFullYear () === now.getFullYear () && d.getMonth () === now.getMonth () && d.getDate () === now.getDate ();
+         var hh = pad2 (d.getHours ()), mi = pad2 (d.getMinutes ()), ss = pad2 (d.getSeconds ());
+         if (isToday) return hh + ':' + mi + ':' + ss;
+         return d.getFullYear () + '-' + pad2 (d.getMonth () + 1) + '-' + pad2 (d.getDate ()) + ' ' + hh + ':' + mi;
+      };
+
+      return ['div', {class: 'editor-empty'}, [
+         ['div', {style: style ({width: '100%', 'max-width': '800px'})}, [
+            ['div', {class: 'editor-header'}, [
+               ['span', {class: 'editor-filename'}, 'Snapshots'],
+            ]],
+            snapshots.length > 0
+               ? ['div', {class: 'file-list', style: style ({width: '100%'})},
+                  dale.go (snapshots, function (snap) {
+                     var labelText = snap.label ? snap.label : snap.projectName;
+                     var meta = formatDate (snap.created) + ' · ' + snap.fileCount + ' files · from ' + snap.projectName;
+                     return ['div', {
+                        class: 'file-item',
+                        style: style ({display: 'flex', 'align-items': 'center', gap: '0.75rem', padding: '0.6rem 0.75rem'})
+                     }, [
+                        ['div', {style: style ({flex: 1, 'min-width': 0})}, [
+                           ['div', {style: style ({'font-weight': 'bold', color: '#eee', 'margin-bottom': '0.2rem'})}, labelText],
+                           ['div', {style: style ({color: '#9aa4bf', 'font-size': '12px'})}, meta]
+                        ]],
+                        ['div', {style: style ({display: 'flex', gap: '0.35rem', 'flex-shrink': 0})}, [
+                           ['button', {
+                              class: 'primary btn-small',
+                              onclick: B.ev ('restore', 'snapshot', snap.id, snap.projectName),
+                              title: 'Restore as new project'
+                           }, '↻ Restore'],
+                           ['button', {
+                              class: 'btn-small',
+                              style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
+                              onclick: B.ev ('download', 'snapshot', snap.id),
+                              title: 'Download .tar.gz'
+                           }, '⬇ Download'],
+                           ['button', {
+                              class: 'btn-small',
+                              style: style ({'background-color': '#5a2a2a', color: '#ff8b94'}),
+                              onclick: B.ev ('delete', 'snapshot', snap.id),
+                              title: 'Delete snapshot'
+                           }, '×']
+                        ]]
+                     ]];
+                  })
+               ]
+               : ['div', {style: style ({color: '#888', padding: '2rem', 'text-align': 'center'})}, [
+                  ['div', {style: style ({'font-size': '1.5rem', 'margin-bottom': '0.5rem'})}, '📸'],
+                  'No snapshots yet. Open a project and click Snapshot to create one.'
+               ]]
          ]]
       ]];
    });
@@ -2380,16 +3106,19 @@ views.main = function () {
             ['h1', {style: style ({margin: 0, 'font-size': '1.5rem', cursor: 'pointer'}), onclick: B.ev ('navigate', 'hash', '#/projects')}, 'vibey'],
             ['div', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center'})}, [
                currentProject ? ['span', {style: style ({color: '#9aa4bf'})}, currentProject] : '',
-               currentProject ? ['button', {class: 'btn-small', onclick: B.ev ('snapshot', 'project', 'project')}, 'Snapshot project'] : '',
-               currentProject ? ['button', {class: 'btn-small', onclick: B.ev ('snapshot', 'project', 'zip')}, 'Export zip'] : '',
+               currentProject ? ['button', {class: 'btn-small', onclick: B.ev ('create', 'snapshot')}, '📸 Snapshot'] : '',
                ['button', {
                   class: 'btn-small' + (tab === 'projects' ? ' primary' : ''),
                   onclick: B.ev ('navigate', 'hash', '#/projects')
                }, 'Projects'],
                ['button', {
-                  class: 'btn-small' + (tab === 'accounts' ? ' primary' : ''),
-                  onclick: B.ev ('navigate', 'hash', '#/accounts')
-               }, 'Accounts'],
+                  class: 'btn-small' + (tab === 'snapshots' ? ' primary' : ''),
+                  onclick: B.ev ('navigate', 'hash', '#/snapshots')
+               }, 'Snapshots'],
+               ['button', {
+                  class: 'btn-small' + (tab === 'settings' ? ' primary' : ''),
+                  onclick: B.ev ('navigate', 'hash', '#/settings')
+               }, 'Settings'],
                ['button', {
                   class: 'btn-small',
                   style: style ({'background-color': '#2d6a4f', color: '#b7e4c7'}),
@@ -2409,7 +3138,7 @@ views.main = function () {
             }, 'Docs'],
          ]] : '',
 
-         tab === 'accounts' ? views.accounts () : (! currentProject || tab === 'projects' ? views.projects () : (tab === 'docs' ? views.files () : views.dialogs ()))
+         tab === 'settings' ? views.settings () : (tab === 'snapshots' ? views.snapshots () : (! currentProject || tab === 'projects' ? views.projects () : (tab === 'docs' ? views.files () : views.dialogs ())))
       ]];
    });
 };

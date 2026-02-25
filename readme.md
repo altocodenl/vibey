@@ -75,7 +75,7 @@ For the students of humanities stranded in the digital age: this is your chance 
 
 Well, everything except what you're building (unless you're building the Next American Novel). The state of the agents is also expressed in markdown.
 
-What about versioning? You can save the project at any point and get out a zip file with a snapshot of the project at that time (docs only, docs + dialogs, everything).
+What about versioning? You can snapshot a project at any point. Snapshots are tar.gz archives stored inside vibey's own data volume — not in any project container. You can restore any snapshot as a new project, download it, or delete it. There's also a dedicated snapshots view to browse and manage them.
 
 We take great inspiration from Unix's "everything is a file": here, everything is text, except for the artifacts that your agents build, which might be something else than text.
 
@@ -124,6 +124,34 @@ Projects tab lists all projects with + New and × delete.
 - Clicking a project opens its Docs tab.
 - Deleting asks for confirmation and removes the project from disk.
 - If the deleted project is currently open, client state resets and navigation returns to `#/projects`.
+
+### Server: snapshots
+
+Snapshots are tar.gz archives of a project's `/workspace`, stored inside vibey's own data volume at `/app/data/snapshots/`. A `snapshots.json` index file tracks metadata. Snapshots are not stored inside project containers — they survive project deletion.
+
+- `POST /project/:project/snapshot` — create a snapshot. Body: `{label?}`. Tars the project container's `/workspace` and stores it. Returns the snapshot entry.
+- `GET /snapshots` — list all snapshots, newest first. Returns array of snapshot entries.
+- `POST /snapshots/:id/restore` — restore a snapshot as a new project. Body: `{name?}`. Creates a new project container and unpacks the archive into it. Returns `{slug, name, snapshotId}`.
+- `DELETE /snapshots/:id` — delete a snapshot. Removes the archive file and index entry.
+- `GET /snapshots/:id/download` — download the snapshot archive as a `.tar.gz` file.
+
+Snapshot entry shape:
+
+```json
+{
+  "id": "20260225-122518-a1b2c3d4",
+  "project": "my-project-slug",
+  "projectName": "My Project",
+  "label": "before refactor",
+  "file": "20260225-122518-a1b2c3d4.tar.gz",
+  "created": "2026-02-25T12:25:18.000Z",
+  "fileCount": 12
+}
+```
+
+### Client: snapshots
+
+Snapshots view lists all snapshots with restore, download, and delete actions. Creating a snapshot is available from the project header. Restoring a snapshot creates a new project and navigates to it.
 
 ### Server: files
 
@@ -534,9 +562,25 @@ Agent prompt says: *"Your working directory is /workspace. If you run a server, 
 - `edit_file`: `projectFS.readFile` → find/replace in vibey's memory → `projectFS.writeFile`.
 - `launch_agent`: spawns a new dialog in the same project container (same container, new dialog file).
 
-### Hosted vibey (future)
+### Vi mode
 
-For hosted vibey on Ubuntu, Docker-in-Docker or sibling containers via the Docker socket. Same architecture — each project is a container with a volume, vibey proxies to container IPs. The transition from local to hosted is: add DNS, TLS, and session cookies. The container topology stays the same.
+Vi mode is available for the docs editor and the chat input. Toggle it in **Settings → Editor → Vi mode**. The setting is persisted in `secret.json` under `editor.viMode` and loaded via `GET /settings`.
+
+**Docs editor**
+- Modes: normal / insert / command.
+- Save with `:w`, close with `:q`, save+close with `:wq`, force close with `:q!`.
+- Status bar shows mode or command input + cursor position.
+
+**Chat input (lighter)**
+- Modes: normal / insert (no command mode).
+- `Ctrl+Enter` sends in both modes.
+
+**Keymap (normal mode)**
+- Movement: `h` `j` `k` `l`, `w`/`b`, `0`/`$`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`.
+- Insert: `i` `a` `o` `O` `A` `I`.
+- Editing: `x`, `dd`, `yy`, `p`, `u`, `Ctrl-r`.
+- Search: `/` then `n`/`N`.
+- Commands: `:` enters command mode.
 
 ## Test flows
 
@@ -577,301 +621,22 @@ Flow #4:
 - I start a new dialog to say "please start".
 - The agent starts working, spawning another agent.
 
-
 ## TODO
 
 Prompt:
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
 
+- Move the CSS to a different file: client-css.js; keep the litc format.
+- Remove the dialog- and doc- convention and instead use dedicated folders for that on each project (dialog/, doc/). Also remove the "must end with .md" from the client. Please autocreate these folders on project creation, and modify prompt.md to let the agents know about these folders, which they can read if they need to.
 
-
-- Snapshots
-   - Snapshots are stored inside the vibey container, in its data volume.
-   - Restoring a snapshot creates a new project with those files.
-   - We have a snapshots view.
-
-- Make flows 3 & 4 work on the client.
-- Add a flow 5 that requires a backend in another container.
+Tests:
+   - Make flows 3 & 4 work on the client.
+   - Add a flow 5 that requires a backend in another container.
+   - Flow 6 for testing vi.
+   - Flow 7 for snapshot mode.
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
 
-### TODO vi mode
-
- Vi mode applies to the docs editor textarea and the chat input textarea. It's a client-side concern only — no server changes.
-
- ### Settings (rename Accounts → Settings)
-
- Rename the accounts tab/route to settings. Add vi mode toggle:
-
- ```
-   Settings
-   ├── API Keys (existing)
-   ├── Subscriptions (existing)
-   └── Editor
-       └── [x] Vi mode
- ```
-
- Persisted in secret.json alongside accounts:
-
- ```json
-   {
-     "accounts": { ... },
-     "editor": {
-       "viMode": true
-     }
-   }
- ```
-
- New routes:
- - GET /settings → returns accounts + editor config (merge current GET /accounts)
- - POST /settings → saves accounts + editor config (merge current POST /accounts)
-
- ### Store shape
-
- ```js
-   B.store = {
-     // ...existing...
-     viMode: true,          // from settings
-     viState: {
-       mode: 'normal',      // 'normal' | 'insert' | 'command'
-       pending: '',         // partial command buffer: 'd' waiting for 'w', '3' waiting for 'j', etc.
-       register: '',        // yanked text
-       lastSearch: '',      // for n/N
-       message: ''          // bottom bar: "-- INSERT --", ":w", "3 lines yanked"
-     }
-   }
- ```
-
- ### Modes
-
- ```
-     NORMAL ──── i/a/o/O ────► INSERT
-       ▲                          │
-       └──────── Escape ──────────┘
-       │
-       : ────────────────────► COMMAND
-       ▲                          │
-       └──────── Escape/Enter ────┘
- ```
-
- Normal mode: cursor movement, operators, mode switches. Textarea is readonly.
-
- Insert mode: textarea is editable normally. Show -- INSERT -- in status bar.
-
- Command mode: a one-line input appears at the bottom of the editor. Supports :w (save), :q (close file), :wq (save + close).
-
- ### Keymap: Normal mode
-
- Essentials only — keep it small, extend later:
-
- ```
-   Movement
-     h/l         char left/right
-     j/k         line down/up
-     w/b         word forward/backward
-     0/$         line start/end
-     gg/G        file start/end
-     Ctrl-d/u    half-page down/up
-
-
-
-   Insert entry
-     i           insert at cursor
-     a           insert after cursor
-     o           open line below, insert
-     O           open line above, insert
-     A           insert at end of line
-     I           insert at start of line
-
-   Editing (normal mode)
-     x           delete char under cursor
-     dd          delete line
-     yy          yank line
-     p           paste after cursor
-     u           undo
-     Ctrl-r      redo
-
-   Search
-     /           forward search (opens command bar with /)
-     n/N         next/prev match
-
-   Commands
-     :           enter command mode
- ```
-
- ### Keymap: Insert mode
-
- ```
-     Escape      back to normal
-     All other   default textarea behavior (typing, arrows, etc.)
- ```
-
- ### Keymap: Command mode
-
- ```
-     :w          save (calls B.call('save', 'file'))
-     :q          close (calls B.call('close', 'file'))
-     :wq         save then close
-     :q!         close without save (discard dirty)
-     Escape      cancel, back to normal
-     Enter       execute command
- ```
-
- ### Implementation: viController
-
- One module, viController, that wraps textarea interaction:
-
- ```js
-   var viController = {
-
-     // Called on every keydown in the textarea
-     handleKey: function (ev, textarea, store) {
-       var mode = store.viState.mode;
-
-       if (mode === 'normal')  return viController.normalKey(ev, textarea, store);
-       if (mode === 'insert')  return viController.insertKey(ev, textarea, store);
-       if (mode === 'command') return viController.commandKey(ev, textarea, store);
-     },
-
-     // Cursor manipulation via textarea.selectionStart / selectionEnd
-     moveCursor: function (textarea, pos) {
-       textarea.selectionStart = textarea.selectionEnd = pos;
-     },
-
-     // Get current line number, column, line content
-     cursorInfo: function (textarea) {
-       var val = textarea.value;
-       var pos = textarea.selectionStart;
-       var before = val.slice(0, pos);
-       var lineNum = before.split('\n').length - 1;
-       var lines = val.split('\n');
-       var colNum = pos - before.lastIndexOf('\n') - 1;
-       return {pos: pos, line: lineNum, col: colNum, lines: lines, text: val};
-     },
-
-     // Execute a normal-mode motion, return new cursor position
-     motion: function (key, info) {
-       // h/j/k/l/w/b/0/$/gg/G/ctrl-d/ctrl-u
-       // Returns new pos (integer)
-     },
-
-     // Execute an operator (dd, yy, x, p)
-     operator: function (key, textarea, info, register) {
-       // Mutates textarea.value, returns {value, cursor, register}
-     }
-   };
- ```
-
- ### Integration with gotoB views
-
- The textarea in views.files gains a onkeydown handler that routes through vi:
-
- ```js
-   ['textarea', {
-     class: 'editor-textarea' + (viMode ? ' vi-active' : ''),
-     readonly: viMode && viState.mode === 'normal',
-     oninput: B.ev('set', ['currentFile', 'content']),
-     onkeydown: viMode
-       ? B.ev('vi', 'key', {raw: 'event'})
-       : B.ev('keydown', 'editor', {raw: 'event'})
-   }]
- ```
-
- New responders:
-
- ```js
-   ['vi', 'key', function (x, ev) {
-     var textarea = ev.target;
-     var viState = B.get('viState');
-     var result = viController.handleKey(ev, textarea, viState);
-
-     if (result.mode)     B.call(x, 'set', ['viState', 'mode'], result.mode);
-     if (result.pending !== undefined) B.call(x, 'set', ['viState', 'pending'], result.pending);
-     if (result.register) B.call(x, 'set', ['viState', 'register'], result.register);
-     if (result.message !== undefined) B.call(x, 'set', ['viState', 'message'], result.message);
-     if (result.save)     B.call(x, 'save', 'file');
-     if (result.close)    B.call(x, 'close', 'file');
-
-     if (result.preventDefault) ev.preventDefault();
-   }],
- ```
-
- ### Status bar
-
- A thin bar below the editor textarea:
-
- ```
-   ┌─────────────────────────────────────┐
-   │  (textarea content)                 │
-   │                                     │
-   ├─────────────────────────────────────┤
-   │ -- INSERT --          Ln 42, Col 17 │  ← vi status bar
-   └─────────────────────────────────────┘
- ```
-
- In command mode, the left side shows the command being typed:
-
- ```
-   │ :wq                   Ln 42, Col 17 │
- ```
-
- CSS:
-
- ```js
-   ['.vi-status', {
-     display: 'flex',
-     'justify-content': 'space-between',
-     padding: '0.25rem 0.75rem',
-     'background-color': '#0d0d1a',
-     'font-family': 'Monaco, Consolas, monospace',
-     'font-size': '12px',
-     color: '#9aa4bf',
-     'border-radius': '0 0 8px 8px'
-   }]
- ```
-
- View:
-
- ```js
-   viMode ? ['div', {class: 'vi-status'}, [
-     ['span', viState.mode === 'insert'  ? '-- INSERT --' :
-              viState.mode === 'command' ? ':' + (viState.pending || '') :
-              ''],
-     ['span', 'Ln ' + cursorLine + ', Col ' + cursorCol]
-   ]] : ''
- ```
-
- ### Chat input: lighter vi
-
- The chat textarea gets vi too, but simpler:
- - Normal/insert modes only (no command mode — no :w for chat)
- - Escape → normal, i/a → insert
- - Movement keys in normal mode
- - Ctrl+Enter sends in both modes (override vi)
-
- ### What NOT to build (keep scope small)
-
- - No visual mode (v/V/Ctrl-v)
- - No macros (q/@ recording)
- - No marks (m/')
- - No registers beyond one (no "a/"b)
- - No . repeat
- - No ciw/diw text objects
- - No split/tabs (this isn't vim, it's a vi-flavored textarea)
-
- These can all be added later. The core — normal/insert/command, basic motions, dd/yy/p, :w/:q — is what makes it feel like vi.
-
- ### Order of work
-
- 1. Rename Accounts → Settings, add viMode toggle + persistence
- 2. Add viState to store, viController object
- 3. Wire onkeydown routing in editor textarea
- 4. Implement normal mode motions (h/j/k/l/w/b/0/$)
- 5. Implement insert mode (Escape to exit)
- 6. Implement dd, yy, x, p
- 7. Implement command mode (:w, :q, :wq)
- 8. Add status bar
- 9. Wire chat input (lighter variant)
-
-## TODO vibey online
+## TODO vibey cloud
 
 - Make a document public
+- For hosted vibey on Ubuntu, Docker-in-Docker or sibling containers via the Docker socket. Same architecture — each project is a container with a volume, vibey proxies to container IPs. The transition from local to hosted is: add DNS, TLS, and session cookies. The container topology stays the same.

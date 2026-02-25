@@ -693,6 +693,120 @@ var pfs = {
    }
 };
 
+// *** SNAPSHOTS ***
+
+var pad2 = function (n) {return n < 10 ? '0' + n : '' + n;};
+
+var formatDialogTimestamp = function () {
+   var d = new Date ();
+   return d.getUTCFullYear () + '' + pad2 (d.getUTCMonth () + 1) + pad2 (d.getUTCDate ()) + '-' + pad2 (d.getUTCHours ()) + pad2 (d.getUTCMinutes ()) + pad2 (d.getUTCSeconds ());
+};
+
+var DATA_DIR = Path.join (__dirname, 'data');
+var SNAPSHOTS_DIR = Path.join (DATA_DIR, 'snapshots');
+
+var ensureSnapshotsDir = function () {
+   if (! fs.existsSync (SNAPSHOTS_DIR)) fs.mkdirSync (SNAPSHOTS_DIR, {recursive: true});
+};
+
+var SNAPSHOTS_INDEX = Path.join (SNAPSHOTS_DIR, 'snapshots.json');
+
+var loadSnapshotsIndex = function () {
+   ensureSnapshotsDir ();
+   try {
+      if (fs.existsSync (SNAPSHOTS_INDEX)) return JSON.parse (fs.readFileSync (SNAPSHOTS_INDEX, 'utf8'));
+   }
+   catch (e) {}
+   return [];
+};
+
+var saveSnapshotsIndex = function (index) {
+   ensureSnapshotsDir ();
+   fs.writeFileSync (SNAPSHOTS_INDEX, JSON.stringify (index, null, 2), 'utf8');
+};
+
+var generateSnapshotId = function () {
+   return formatDialogTimestamp () + '-' + crypto.randomBytes (4).toString ('hex');
+};
+
+var createSnapshot = function (projectName, label) {
+   getExistingProject (projectName);
+   ensureSnapshotsDir ();
+
+   var id = generateSnapshotId ();
+   var archiveName = id + '.tar.gz';
+   var archivePath = Path.join (SNAPSHOTS_DIR, archiveName);
+   var name = containerName (projectName);
+
+   // Create tar.gz of /workspace inside the project container, pipe it out
+   execSync ('docker exec ' + name + ' tar czf - -C /workspace . > ' + JSON.stringify (archivePath), {encoding: 'buffer', shell: '/bin/sh'});
+
+   var fileCount = 0;
+   try {
+      // Count all files recursively under /workspace
+      fileCount = Number (execSync ('docker exec ' + name + " sh -c 'find /workspace -type f | wc -l'", {encoding: 'utf8'}).trim ()) || 0;
+   }
+   catch (e) {}
+
+   var displayName = unslugifyProjectName (projectName);
+
+   var entry = {
+      id: id,
+      project: projectName,
+      projectName: displayName,
+      label: label || '',
+      file: archiveName,
+      created: new Date ().toISOString (),
+      fileCount: fileCount
+   };
+
+   var index = loadSnapshotsIndex ();
+   index.unshift (entry);
+   saveSnapshotsIndex (index);
+
+   return entry;
+};
+
+var restoreSnapshot = function (snapshotId, newProjectName) {
+   var index = loadSnapshotsIndex ();
+   var entry = dale.stopNot (index, undefined, function (e) {
+      if (e.id === snapshotId) return e;
+   });
+   if (! entry) throw new Error ('Snapshot not found: ' + snapshotId);
+
+   var archivePath = Path.join (SNAPSHOTS_DIR, entry.file);
+   if (! fs.existsSync (archivePath)) throw new Error ('Snapshot archive missing: ' + entry.file);
+
+   var displayName = newProjectName || (entry.projectName + ' (restored ' + formatDialogTimestamp () + ')');
+   var slug = ensureProject (displayName);
+
+   var name = containerName (slug);
+   // Pipe the tar.gz into the new container's /workspace
+   execSync ('cat ' + JSON.stringify (archivePath) + ' | docker exec -i ' + name + ' tar xzf - -C /workspace', {encoding: 'buffer', shell: '/bin/sh'});
+
+   return {slug: slug, name: displayName, snapshotId: snapshotId};
+};
+
+var deleteSnapshot = function (snapshotId) {
+   var index = loadSnapshotsIndex ();
+   var found = false;
+   var newIndex = dale.fil (index, undefined, function (e) {
+      if (e.id === snapshotId) {
+         found = true;
+         // Delete archive file
+         var archivePath = Path.join (SNAPSHOTS_DIR, e.file);
+         try {
+            if (fs.existsSync (archivePath)) fs.unlinkSync (archivePath);
+         }
+         catch (err) {}
+         return;
+      }
+      return e;
+   });
+   if (! found) throw new Error ('Snapshot not found: ' + snapshotId);
+   saveSnapshotsIndex (newIndex);
+};
+
 // *** PROJECT HELPERS ***
 
 var slugifyProjectName = function (name) {
@@ -1268,13 +1382,6 @@ var parseDialogForProvider = function (markdown, provider) {
 };
 
 var DIALOG_STATUSES = ['active', 'waiting', 'done'];
-
-var pad2 = function (n) {return n < 10 ? '0' + n : '' + n;};
-
-var formatDialogTimestamp = function () {
-   var d = new Date ();
-   return d.getUTCFullYear () + '' + pad2 (d.getUTCMonth () + 1) + pad2 (d.getUTCDate ()) + '-' + pad2 (d.getUTCHours ()) + pad2 (d.getUTCMinutes ()) + pad2 (d.getUTCSeconds ());
-};
 
 var slugify = function (text) {
    text = (text || 'dialog').toLowerCase ().replace (/[^a-z0-9\-]+/g, '-').replace (/\-+/g, '-').replace (/^\-+|\-+$/g, '');
@@ -1906,6 +2013,59 @@ var resolveProject = function (rs, projectName) {
 
 // *** ROUTES ***
 
+var buildSettingsResponse = function (config) {
+   config = config || {};
+   var accounts = config.accounts || {};
+   var editor = config.editor || {};
+
+   return {
+      openai: {
+         apiKey: maskApiKey ((accounts.openai && accounts.openai.apiKey) || ''),
+         hasKey: !! (accounts.openai && accounts.openai.apiKey)
+      },
+      claude: {
+         apiKey: maskApiKey ((accounts.claude && accounts.claude.apiKey) || ''),
+         hasKey: !! (accounts.claude && accounts.claude.apiKey)
+      },
+      openaiOAuth: {
+         loggedIn: !! (accounts.openaiOAuth && accounts.openaiOAuth.type === 'oauth'),
+         expired: accounts.openaiOAuth ? Date.now () >= (accounts.openaiOAuth.expires || 0) : false
+      },
+      claudeOAuth: {
+         loggedIn: !! (accounts.claudeOAuth && accounts.claudeOAuth.type === 'oauth'),
+         expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
+      },
+      editor: {
+         viMode: !! editor.viMode
+      }
+   };
+};
+
+var applySettingsUpdate = function (config, body) {
+   config = config || {};
+   body = body || {};
+   if (! config.accounts) config.accounts = {};
+
+   if (type (body.openaiKey) === 'string') {
+      if (! config.accounts.openai) config.accounts.openai = {};
+      config.accounts.openai.apiKey = body.openaiKey.trim ();
+   }
+   if (type (body.claudeKey) === 'string') {
+      if (! config.accounts.claude) config.accounts.claude = {};
+      config.accounts.claude.apiKey = body.claudeKey.trim ();
+   }
+
+   var editorInput = body.editor || {};
+   if (type (body.viMode) === 'boolean') editorInput = {viMode: body.viMode};
+
+   if (type (editorInput.viMode) === 'boolean') {
+      if (! config.editor) config.editor = {};
+      config.editor.viMode = editorInput.viMode;
+   }
+
+   return config;
+};
+
 var routes = [
 
    // *** STATIC ***
@@ -1930,50 +2090,22 @@ var routes = [
    ['get', 'client.js', cicek.file],
    ['get', 'test-client.js', cicek.file],
 
-   // *** ACCOUNTS ***
+   // *** SETTINGS ***
 
-   ['get', 'accounts', function (rq, rs) {
+   ['get', 'settings', function (rq, rs) {
       var config = loadConfigJson ();
-      var accounts = config.accounts || {};
-      reply (rs, 200, {
-         openai: {
-            apiKey: maskApiKey ((accounts.openai && accounts.openai.apiKey) || ''),
-            hasKey: !! (accounts.openai && accounts.openai.apiKey)
-         },
-         claude: {
-            apiKey: maskApiKey ((accounts.claude && accounts.claude.apiKey) || ''),
-            hasKey: !! (accounts.claude && accounts.claude.apiKey)
-         },
-         openaiOAuth: {
-            loggedIn: !! (accounts.openaiOAuth && accounts.openaiOAuth.type === 'oauth'),
-            expired: accounts.openaiOAuth ? Date.now () >= (accounts.openaiOAuth.expires || 0) : false
-         },
-         claudeOAuth: {
-            loggedIn: !! (accounts.claudeOAuth && accounts.claudeOAuth.type === 'oauth'),
-            expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
-         }
-      });
+      reply (rs, 200, buildSettingsResponse (config));
    }],
 
-   ['post', 'accounts', function (rq, rs) {
+   ['post', 'settings', function (rq, rs) {
       var config = loadConfigJson ();
-      if (! config.accounts) config.accounts = {};
-
-      if (type (rq.body.openaiKey) === 'string') {
-         if (! config.accounts.openai) config.accounts.openai = {};
-         config.accounts.openai.apiKey = rq.body.openaiKey.trim ();
-      }
-      if (type (rq.body.claudeKey) === 'string') {
-         if (! config.accounts.claude) config.accounts.claude = {};
-         config.accounts.claude.apiKey = rq.body.claudeKey.trim ();
-      }
-
+      config = applySettingsUpdate (config, rq.body);
       saveConfigJson (config);
       reply (rs, 200, {ok: true});
    }],
 
    // OAuth login: start flow
-   ['post', 'accounts/login/:provider', async function (rq, rs) {
+   ['post', 'settings/login/:provider', async function (rq, rs) {
       var provider = rq.data.params.provider;
       try {
          if (provider === 'claude') {
@@ -1994,7 +2126,7 @@ var routes = [
    }],
 
    // OAuth login: complete flow (paste code or wait for callback)
-   ['post', 'accounts/login/:provider/callback', async function (rq, rs) {
+   ['post', 'settings/login/:provider/callback', async function (rq, rs) {
       var provider = rq.data.params.provider;
       try {
          if (provider === 'claude') {
@@ -2017,7 +2149,7 @@ var routes = [
    }],
 
    // OAuth logout
-   ['post', 'accounts/logout/:provider', function (rq, rs) {
+   ['post', 'settings/logout/:provider', function (rq, rs) {
       var provider = rq.data.params.provider;
       var config = loadConfigJson ();
       if (! config.accounts) config.accounts = {};
@@ -2094,38 +2226,75 @@ var routes = [
    }],
 
    ['post', 'project/:project/snapshot', function (rq, rs) {
-      if (stop (rs, [['type', rq.body.type, 'string', {oneOf: ['zip', 'project']}]])) return;
-
       var projectName = rq.data.params.project;
       try {
-         getExistingProject (projectName);
-         var stamp = formatDialogTimestamp ();
-
-         if (rq.body.type === 'project') {
-            var snapshotName = (rq.body.name && rq.body.name.trim ()) || ('snapshot-' + projectName + '-' + stamp);
-            ensureProject (snapshotName);
-            // Copy files from source container to snapshot container
-            var files = pfs.readdir (projectName);
-            dale.go (files, function (file) {
-               try {
-                  var content = pfs.readFile (projectName, file);
-                  pfs.writeFile (snapshotName, file, content);
-               }
-               catch (e) {}
-            });
-            return reply (rs, 200, {ok: true, type: 'project', name: snapshotName});
-         }
-
-         // zip snapshot: create zip inside the container, then we just report success
-         var zipName = (rq.body.name && rq.body.name.trim ()) || (projectName + '-snapshot-' + stamp + '.zip');
-         if (! /\.zip$/i.test (zipName)) zipName += '.zip';
-         dockerExec (projectName, 'cd /workspace && zip -r ' + JSON.stringify (zipName) + ' .', function (error, stdout, stderr) {
-            if (error) return reply (rs, 500, {error: 'zip failed: ' + error.message, stderr: stderr});
-            reply (rs, 200, {ok: true, type: 'zip', file: zipName});
-         });
+         var label = (rq.body.label && type (rq.body.label) === 'string') ? rq.body.label.trim () : '';
+         var entry = createSnapshot (projectName, label);
+         reply (rs, 200, entry);
       }
       catch (error) {
          reply (rs, 400, {error: error.message});
+      }
+   }],
+
+   // *** SNAPSHOTS ***
+
+   ['get', 'snapshots', function (rq, rs) {
+      try {
+         reply (rs, 200, loadSnapshotsIndex ());
+      }
+      catch (error) {
+         reply (rs, 500, {error: error.message});
+      }
+   }],
+
+   ['post', 'snapshots/:id/restore', function (rq, rs) {
+      var snapshotId = rq.data.params.id;
+      try {
+         var newName = (rq.body.name && type (rq.body.name) === 'string') ? rq.body.name.trim () : null;
+         var result = restoreSnapshot (snapshotId, newName);
+         reply (rs, 200, result);
+      }
+      catch (error) {
+         reply (rs, 400, {error: error.message});
+      }
+   }],
+
+   ['delete', 'snapshots/:id', function (rq, rs) {
+      var snapshotId = rq.data.params.id;
+      try {
+         deleteSnapshot (snapshotId);
+         reply (rs, 200, {ok: true});
+      }
+      catch (error) {
+         reply (rs, 400, {error: error.message});
+      }
+   }],
+
+   ['get', 'snapshots/:id/download', function (rq, rs) {
+      var snapshotId = rq.data.params.id;
+      try {
+         var index = loadSnapshotsIndex ();
+         var entry = dale.stopNot (index, undefined, function (e) {
+            if (e.id === snapshotId) return e;
+         });
+         if (! entry) return reply (rs, 404, {error: 'Snapshot not found'});
+
+         var archivePath = Path.join (SNAPSHOTS_DIR, entry.file);
+         if (! fs.existsSync (archivePath)) return reply (rs, 404, {error: 'Snapshot archive missing'});
+
+         var stat = fs.statSync (archivePath);
+         var downloadName = (entry.projectName || 'snapshot') + '-' + entry.id + '.tar.gz';
+
+         rs.writeHead (200, {
+            'Content-Type': 'application/gzip',
+            'Content-Length': stat.size,
+            'Content-Disposition': 'attachment; filename="' + downloadName.replace (/"/g, '\\"') + '"'
+         });
+         fs.createReadStream (archivePath).pipe (rs);
+      }
+      catch (error) {
+         if (! rs.headersSent) reply (rs, 500, {error: error.message});
       }
    }],
 
