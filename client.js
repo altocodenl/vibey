@@ -707,6 +707,71 @@ viController.handleKey = function (ev, textarea, store, options) {
    return result;
 };
 
+// --- vi cursor overlay helpers ---
+
+var viMeasureSpan = null;
+
+var getViMeasureSpan = function () {
+   if (viMeasureSpan) return viMeasureSpan;
+   viMeasureSpan = document.createElement ('span');
+   viMeasureSpan.style.position = 'absolute';
+   viMeasureSpan.style.top = '-9999px';
+   viMeasureSpan.style.left = '-9999px';
+   viMeasureSpan.style.visibility = 'hidden';
+   viMeasureSpan.style.whiteSpace = 'pre';
+   document.body.appendChild (viMeasureSpan);
+   return viMeasureSpan;
+};
+
+var viMeasureCharWidth = function (textarea, computed) {
+   if (! textarea || ! document.body) return 8;
+   var span = getViMeasureSpan ();
+   var style = computed || window.getComputedStyle (textarea);
+   if (style.font && style.font !== 'normal') span.style.font = style.font;
+   else {
+      span.style.fontFamily = style.fontFamily;
+      span.style.fontSize = style.fontSize;
+      span.style.fontWeight = style.fontWeight;
+   }
+   span.textContent = 'M';
+   var rect = span.getBoundingClientRect ();
+   return rect.width || 8;
+};
+
+var computeViOverlay = function (textarea, line, col) {
+   if (! textarea || ! window.getComputedStyle) return null;
+   var style = window.getComputedStyle (textarea);
+   var lineHeight = parseFloat (style.lineHeight);
+   if (! lineHeight || isNaN (lineHeight)) {
+      var fontSize = parseFloat (style.fontSize) || 14;
+      lineHeight = fontSize * 1.4;
+   }
+   var paddingTop = parseFloat (style.paddingTop) || 0;
+   var paddingLeft = parseFloat (style.paddingLeft) || 0;
+   var borderTop = parseFloat (style.borderTopWidth) || 0;
+   var borderLeft = parseFloat (style.borderLeftWidth) || 0;
+   var charWidth = viMeasureCharWidth (textarea, style);
+
+   return {
+      top: paddingTop + borderTop + (line * lineHeight) - (textarea.scrollTop || 0),
+      left: paddingLeft + borderLeft + (col * charWidth) - (textarea.scrollLeft || 0),
+      height: lineHeight,
+      width: charWidth,
+      visible: true
+   };
+};
+
+var updateViCursorState = function (x, textarea) {
+   if (! textarea) return;
+   var info = viController.cursorInfo (textarea);
+   B.call (x, 'set', 'viCursor', {line: info.line + 1, col: info.col + 1});
+   var overlay = computeViOverlay (textarea, info.line, info.col);
+   if (overlay) {
+      var isChat = textarea.classList && textarea.classList.contains ('chat-input');
+      B.call (x, 'set', isChat ? 'viOverlayChat' : 'viOverlayEditor', overlay);
+   }
+};
+
 // *** RESPONDERS ***
 
 B.mrespond ([
@@ -734,6 +799,11 @@ B.mrespond ([
          redoStack: []
       });
       B.call (x, 'set', 'viCursor', {line: 1, col: 1});
+      B.call (x, 'set', 'viOverlayEditor', null);
+      B.call (x, 'set', 'viOverlayChat', null);
+      B.call (x, 'set', 'uploads', []);
+      B.call (x, 'set', 'currentUpload', null);
+      B.call (x, 'set', 'uploading', false);
       B.call (x, 'load', 'projects');
       B.call (x, 'load', 'settings');
       B.call (x, 'read', 'hash');
@@ -1067,6 +1137,7 @@ B.mrespond ([
          if (error) return B.call (x, 'report', 'error', 'Failed to load files');
          B.call (x, 'set', 'files', rs.body);
          B.call (x, 'apply', 'hashTarget');
+         B.call (x, 'load', 'uploads', project);
 
          setTimeout (function () {
             if (B.get ('currentFile')) return;
@@ -1244,8 +1315,10 @@ B.mrespond ([
       }
 
       if (result.cursor !== undefined) {
-         var info = viController.cursorInfo (textarea);
-         B.call (x, 'set', 'viCursor', {line: info.line + 1, col: info.col + 1});
+         updateViCursorState (x, textarea);
+      }
+      if (result.mode) {
+         updateViCursorState (x, textarea);
       }
 
       if (result.save) B.call (x, 'save', 'file');
@@ -1258,14 +1331,87 @@ B.mrespond ([
    ['vi', 'cursor', function (x, ev) {
       var textarea = ev.target;
       if (! textarea) return;
-      var info = viController.cursorInfo (textarea);
-      B.call (x, 'set', 'viCursor', {line: info.line + 1, col: info.col + 1});
+      updateViCursorState (x, textarea);
    }],
 
    ['toggle', 'editorPreview', function (x) {
       B.call (x, 'set', 'editorPreview', ! B.get ('editorPreview'));
    }],
 
+   // *** UPLOADS ***
+
+   ['load', 'uploads', function (x, project) {
+      project = project || B.get ('currentProject');
+      if (! project) return B.call (x, 'set', 'uploads', []);
+
+      B.call (x, 'get', projectPath (project, 'uploads'), {}, '', function (x, error, rs) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to load uploads');
+         var uploads = rs.body || [];
+         B.call (x, 'set', 'uploads', uploads);
+
+         var current = B.get ('currentUpload');
+         if (current) {
+            var stillThere = dale.stopNot (uploads, undefined, function (item) {
+               if (item.name === current.name) return item;
+            });
+            if (! stillThere) B.call (x, 'set', 'currentUpload', null);
+         }
+      });
+   }],
+
+   ['open', 'uploadPicker', function (x) {
+      var input = document.getElementById ('upload-input');
+      if (input) input.click ();
+   }],
+
+   ['upload', 'file', function (x, ev) {
+      var project = B.get ('currentProject');
+      if (! project) return;
+      var input = ev && ev.target;
+      var files = input && input.files ? Array.prototype.slice.call (input.files) : [];
+      if (! files.length) return;
+
+      B.call (x, 'set', 'uploading', true);
+      var lastUploaded = null;
+
+      var uploadNext = function (idx) {
+         if (idx >= files.length) {
+            B.call (x, 'set', 'uploading', false);
+            B.call (x, 'load', 'uploads', project);
+            if (lastUploaded) B.call (x, 'set', 'currentUpload', lastUploaded);
+            return;
+         }
+
+         var file = files [idx];
+         var reader = new FileReader ();
+         reader.onload = function () {
+            B.call (x, 'post', projectPath (project, 'upload'), {}, {
+               name: file.name,
+               content: reader.result,
+               contentType: file.type || ''
+            }, function (x, error, rs) {
+               if (error) {
+                  B.call (x, 'set', 'uploading', false);
+                  return B.call (x, 'report', 'error', 'Failed to upload ' + file.name);
+               }
+               if (rs && rs.body) lastUploaded = rs.body;
+               uploadNext (idx + 1);
+            });
+         };
+         reader.onerror = function () {
+            B.call (x, 'set', 'uploading', false);
+            B.call (x, 'report', 'error', 'Failed to read ' + file.name);
+         };
+         reader.readAsDataURL (file);
+      };
+
+      uploadNext (0);
+      if (input) input.value = '';
+   }],
+
+   ['select', 'upload', function (x, upload) {
+      B.call (x, 'set', 'currentUpload', upload || null);
+   }],
 
 
    // *** DIALOGS ***
@@ -1603,7 +1749,7 @@ B.mrespond ([
    }],
 
    ['run', 'tests', function (x) {
-      var choice = prompt ('Which flow to run?\n1 = Dialog + tools\n2 = Docs CRUD\n3 = Delete project aborts agents\n4 = Static tictactoe\n5 = Backend tictactoe\n6 = Vi mode\n7 = Snapshots\nALL = run everything', 'ALL');
+      var choice = prompt ('Which flow to run?\n1 = Dialog + tools\n2 = Docs CRUD\n3 = Delete project aborts agents\n4 = Static tictactoe\n5 = Backend tictactoe\n6 = Vi mode\n7 = Snapshots\n8 = Uploads\nALL = run everything', 'ALL');
       if (choice === null) return;
       window._vibeyTestFlow = (choice || 'ALL').trim ().toUpperCase ();
       c.loadScript ('test-client.js', function (error) {
@@ -1617,7 +1763,7 @@ B.mrespond ([
 var views = {};
 
 views.files = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor'], ['viOverlayEditor'], ['uploads'], ['currentUpload'], ['uploading']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor, viOverlayEditor, uploads, currentUpload, uploading) {
       var docFiles = dale.fil (files || [], undefined, function (name) {
          if (isDocFile (name)) return name;
       });
@@ -1626,6 +1772,31 @@ views.files = function () {
       viMode = !! viMode;
       viState = viState || {};
       viCursor = viCursor || {line: 1, col: 1};
+      uploads = uploads || [];
+      var selectedUpload = currentUpload;
+      if (selectedUpload && ! selectedUpload.url) {
+         selectedUpload = dale.stopNot (uploads, undefined, function (item) {
+            if (item.name === selectedUpload.name) return item;
+         }) || selectedUpload;
+      }
+
+      var renderUploadPreview = function (upload) {
+         if (! upload) return '';
+         var contentType = upload.contentType || '';
+         var url = upload.url || '';
+         var meta = [
+            ['div', {class: 'upload-meta-line'}, ['Name: ', upload.name || '']],
+            ['div', {class: 'upload-meta-line'}, ['Type: ', contentType || 'unknown']],
+            ['div', {class: 'upload-meta-line'}, ['Size: ', formatBytes (upload.size)]],
+            ['div', {class: 'upload-meta-line'}, ['Modified: ', upload.mtime ? new Date (upload.mtime).toLocaleString () : 'unknown']],
+            url ? ['div', {class: 'upload-meta-line'}, ['Open: ', ['a', {href: url, target: '_blank'}, url]]] : ''
+         ];
+
+         if (contentType.indexOf ('image/') === 0) return ['img', {class: 'upload-media', src: url}];
+         if (contentType.indexOf ('audio/') === 0) return ['audio', {class: 'upload-media', src: url, controls: true}];
+         if (contentType.indexOf ('video/') === 0) return ['video', {class: 'upload-media', src: url, controls: true}];
+         return ['div', {class: 'upload-meta'}, meta];
+      };
 
       return ['div', {class: 'files-container'}, [
          // File list sidebar
@@ -1634,21 +1805,47 @@ views.files = function () {
                ['span', {class: 'file-list-title'}, 'Docs'],
                ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'file')}, '+ New']
             ]],
-            docFiles && docFiles.length > 0
-               ? dale.go (docFiles, function (name) {
-                  var isActive = currentFile && currentFile.name === name;
-                  return ['div', {
-                     class: 'file-item' + (isActive ? ' file-item-active' : ''),
-                     onclick: B.ev ('load', 'file', name)
-                  }, [
-                     ['span', {class: 'file-name'}, docDisplayName (name)],
-                     ['span', {
-                        class: 'file-delete',
-                        onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
-                     }, '×']
-                  ]];
-               })
-               : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No docs yet']
+            ['div', {class: 'file-list-scroll'}, [
+               docFiles && docFiles.length > 0
+                  ? dale.go (docFiles, function (name) {
+                     var isActive = currentFile && currentFile.name === name;
+                     return ['div', {
+                        class: 'file-item' + (isActive ? ' file-item-active' : ''),
+                        onclick: B.ev ('load', 'file', name)
+                     }, [
+                        ['span', {class: 'file-name'}, docDisplayName (name)],
+                        ['span', {
+                           class: 'file-delete',
+                           onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
+                        }, '×']
+                     ]];
+                  })
+                  : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No docs yet']
+            ]],
+            ['div', {class: 'upload-section'}, [
+               ['div', {class: 'upload-header'}, [
+                  ['span', {class: 'file-list-title'}, 'Uploads'],
+                  ['button', {
+                     class: 'btn-small' + (uploading ? ' primary' : ''),
+                     style: style ({'background-color': uploading ? '#4a69bd' : '#3a3a5f', color: uploading ? 'white' : '#c9d4ff'}),
+                     onclick: B.ev ('open', 'uploadPicker'),
+                     disabled: uploading
+                  }, uploading ? 'Uploading...' : 'Upload']
+               ]],
+               ['input', {id: 'upload-input', type: 'file', multiple: true, style: style ({display: 'none'}), onchange: B.ev ('upload', 'file', {raw: 'event'})}],
+               uploads.length
+                  ? ['div', {class: 'upload-list'}, dale.go (uploads, function (upload) {
+                     var isSelected = selectedUpload && selectedUpload.name === upload.name;
+                     return ['div', {
+                        class: 'upload-item' + (isSelected ? ' upload-item-active' : ''),
+                        onclick: B.ev ('select', 'upload', upload)
+                     }, [
+                        ['span', {class: 'upload-name'}, upload.name],
+                        ['span', {class: 'upload-size'}, formatBytes (upload.size)]
+                     ]];
+                  })]
+                  : ['div', {class: 'upload-empty'}, 'No uploads yet']
+            ]]
          ]],
          // Editor
          ['div', {class: 'editor-container'}, currentFile ? [
@@ -1678,18 +1875,30 @@ views.files = function () {
             editorPreview
                ? ['div', {class: 'editor-preview', opaque: true}, ['LITERAL', renderMarkdownWithEmbeds (currentFile.content, currentProject)]]
                : ['div', {style: style ({display: 'flex', 'flex-direction': 'column', flex: 1, 'min-height': 0})}, [
-                  ['textarea', {
-                     class: 'editor-textarea' + (viMode ? ' vi-active' : ''),
-                     readonly: viMode && viState.mode !== 'insert',
-                     oninput: viMode
-                        ? B.ev (['set', ['currentFile', 'content']], ['vi', 'cursor', {raw: 'event'}])
-                        : B.ev ('set', ['currentFile', 'content']),
-                     onkeydown: viMode
-                        ? B.ev ('vi', 'key', {raw: 'event'})
-                        : B.ev ('keydown', 'editor', {raw: 'event'}),
-                     onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
-                     onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined
-                  }, currentFile.content],
+                  ['div', {class: 'vi-textarea-wrap'}, [
+                     ['textarea', {
+                        class: 'editor-textarea' + (viMode ? (' vi-active' + (viState.mode === 'insert' ? ' vi-insert' : '')) : ''),
+                        readonly: viMode && viState.mode !== 'insert',
+                        oninput: viMode
+                           ? B.ev (['set', ['currentFile', 'content']], ['vi', 'cursor', {raw: 'event'}])
+                           : B.ev ('set', ['currentFile', 'content']),
+                        onkeydown: viMode
+                           ? B.ev ('vi', 'key', {raw: 'event'})
+                           : B.ev ('keydown', 'editor', {raw: 'event'}),
+                        onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                        onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                        onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined
+                     }, currentFile.content],
+                     (viMode && viState.mode !== 'insert' && viOverlayEditor && viOverlayEditor.visible) ? ['div', {
+                        class: 'vi-cursor-overlay',
+                        style: style ({
+                           top: (viOverlayEditor.top || 0) + 'px',
+                           left: (viOverlayEditor.left || 0) + 'px',
+                           width: (viOverlayEditor.width || 8) + 'px',
+                           height: (viOverlayEditor.height || 18) + 'px'
+                        })
+                     }] : ''
+                  ]],
                   viMode ? ['div', {class: 'vi-status'}, [
                      ['span', viState.mode === 'insert'
                         ? '-- INSERT --'
@@ -1699,7 +1908,17 @@ views.files = function () {
                      ['span', 'Ln ' + (viCursor.line || 1) + ', Col ' + (viCursor.col || 1)]
                   ]] : ''
                ]]
-         ] : ['div', {class: 'editor-empty'}, loadingFile ? 'Loading...' : 'Select a doc to edit']]
+            , selectedUpload ? ['div', {class: 'upload-preview'}, [
+               ['div', {class: 'upload-preview-header'}, selectedUpload.name || 'Upload'],
+               renderUploadPreview (selectedUpload)
+            ]] : ''
+         ] : [
+            ['div', {class: 'editor-empty'}, loadingFile ? 'Loading...' : 'Select a doc to edit'],
+            selectedUpload ? ['div', {class: 'upload-preview'}, [
+               ['div', {class: 'upload-preview-header'}, selectedUpload.name || 'Upload'],
+               renderUploadPreview (selectedUpload)
+            ]] : ''
+         ]]
       ]];
    });
 };
@@ -1724,6 +1943,19 @@ var wrapLongLines = function (text, maxCol) {
          return line.slice (k * maxCol, (k + 1) * maxCol);
       }).join ('\n');
    }).join ('\n');
+};
+
+var formatBytes = function (bytes) {
+   bytes = Number (bytes) || 0;
+   if (bytes < 1024) return bytes + ' B';
+   var units = ['KB', 'MB', 'GB', 'TB'];
+   var size = bytes / 1024;
+   var idx = 0;
+   while (size >= 1024 && idx < units.length - 1) {
+      size = size / 1024;
+      idx++;
+   }
+   return (Math.round (size * 10) / 10) + ' ' + units [idx];
 };
 
 var normalizeToolPreviewValue = function (value) {
@@ -2246,7 +2478,7 @@ var renderEditDiff = function (tool, index) {
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat) {
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (isDialogFile (f)) return f;
@@ -2339,20 +2571,32 @@ views.dialogs = function () {
                }, dale.go (MODEL_OPTIONS [chatProvider || 'openai'] || [], function (option) {
                   return ['option', {value: option.value, selected: (chatModel || defaultModelForProvider (chatProvider || 'openai')) === option.value}, option.label];
                })],
-               ['textarea', {
-                  class: 'chat-input' + (viMode ? ' vi-active' : ''),
-                  rows: 2,
-                  value: chatInput || '',
-                  placeholder: 'Type a message... (Cmd+Enter to send)',
-                  readonly: viMode && viState.mode !== 'insert',
-                  oninput: B.ev ('set', 'chatInput'),
-                  onkeydown: viMode
-                     ? B.ev ('vi', 'key', {raw: 'event'})
-                     : B.ev ('keydown', 'chatInput', {raw: 'event'}),
-                  onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
-                  onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
-                  disabled: streaming
-               }],
+               ['div', {class: 'vi-textarea-wrap', style: style ({flex: 1})}, [
+                  ['textarea', {
+                     class: 'chat-input' + (viMode ? (' vi-active' + (viState.mode === 'insert' ? ' vi-insert' : '')) : ''),
+                     rows: 2,
+                     value: chatInput || '',
+                     placeholder: 'Type a message... (Cmd+Enter to send)',
+                     readonly: viMode && viState.mode !== 'insert',
+                     oninput: B.ev ('set', 'chatInput'),
+                     onkeydown: viMode
+                        ? B.ev ('vi', 'key', {raw: 'event'})
+                        : B.ev ('keydown', 'chatInput', {raw: 'event'}),
+                     onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                     onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                     onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                     disabled: streaming
+                  }],
+                  (viMode && viState.mode !== 'insert' && viOverlayChat && viOverlayChat.visible) ? ['div', {
+                     class: 'vi-cursor-overlay',
+                     style: style ({
+                        top: (viOverlayChat.top || 0) + 'px',
+                        left: (viOverlayChat.left || 0) + 'px',
+                        width: (viOverlayChat.width || 8) + 'px',
+                        height: (viOverlayChat.height || 18) + 'px'
+                     })
+                  }] : ''
+               ]],
                voiceSupported ? ['button', {
                   class: 'btn-small',
                   style: style ({
@@ -2649,7 +2893,7 @@ views.snapshots = function () {
 };
 
 views.main = function () {
-   return B.view ([['tab'], ['currentProject']], function (tab, currentProject) {
+   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton']], function (tab, currentProject, testButton) {
       return ['div', {class: 'container'}, [
          ['style', window.vibeyCSS],
 
@@ -2670,11 +2914,11 @@ views.main = function () {
                   class: 'btn-small' + (tab === 'settings' ? ' primary' : ''),
                   onclick: B.ev ('navigate', 'hash', '#/settings')
                }, 'Settings'],
-               ['button', {
+               testButton ? ['button', {
                   class: 'btn-small',
                   style: style ({'background-color': '#2d6a4f', color: '#b7e4c7'}),
                   onclick: B.ev ('run', 'tests')
-               }, '🧪 Test']
+               }, '🧪 Test'] : ''
             ]]
          ]],
 

@@ -2,6 +2,12 @@
 
 ### 2026-02-25
 
+http://www.incompleteideas.net/IncIdeas/BitterLesson.html
+"One thing that should be learned from the bitter lesson is the great power of general purpose methods, of methods that continue to scale with increased computation even as the available computation becomes very great. The two methods that seem to scale arbitrarily in this way are search and learning."
+
+https://en.wikipedia.org/wiki/Richard_S._Sutton#Reinforcement_learning
+"Sutton argues that large language models aren’t capable of learning on-the-job, and so new model architectures are required to enable continual learning.[25][non-primary source needed] Sutton further argues that a special training phase will be unnecessary — the agent will learn on-the-fly, rendering large language models obsolete.[25]"
+
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
 
 - Can you implement vi mode in client? No other agent will touch it. The details are in the corresponding TODO in readme.md.
@@ -29,8 +35,26 @@ Hi! I'm building vibey. See please readme.md, then server.js and client.js, then
 ---
 Can you please document flows 5, 6 and 7 in readme.md? Add a bit more level of detail too to 1-4. your source of truth is the server tests. Don't modify any other files.
 ---
-- You can now run vibey, run it dockerized as per the instructions. Then, start running the client tests until they all work. Use pupeteer. Don't skip flows, focus on getting each flow done. If you have to fix something in the server or client, fix it, but don't change major behaviors; if you hit a significant doubt on intent/behavior, stop and ask. You open localhost:5353 and then click on the Test button
+- You can now run vibey, run it dockerized as per the instructions. Then, start running the client tests until they all work. Use the global pupeteer. Don't skip flows, focus on getting each flow done. If you have to fix something in the server or client, fix it, but don't change major behaviors; if you hit a significant doubt on intent/behavior, stop and ask. You open localhost:5353 and then click on the Test button
 - Can you change the tests so that they stream the console logs onto pupeteer so we can both see what's going on?
+---
+ Can you change the tests so that we can run just one passing a parameter? ANd uncomment them? And ask in client.js with a modal what do I want to run with ALL set as default in the prompt to run all?
+- Great! Please now hide the test button unless there's a setting in secret.json that says testButton: true
+
+New prompt:
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). When you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry.
+
+- The vi cursor is not visible, can you fix that?
+---
+- upload files into uploads/ show them at the bottom of the docs on the sidebar always visible (if you have any), if you click on it if it's media you show it, otherwise you just show some metadata as text; add docs, endpoints, client support and a test flow.
+Brilliant! Can you add the tests please?
+- I don't see a button for adding an upload, where is this?
+- Great! Can you add support for spaces in files? Whatever we upload, it should be possible. Also enable multiselect to upload several files.
+---
+Can you add the tests for flow 8 in test-server? Unless they're already there.
+---
+Let's think how we can help others install vibey locally. The only requirement is that they should have docker installed already, nothing else. I'm thinking of a curl command that can take the latest release from github, download it, untar it and put it in their Downloads folder. Thoughts?
 
 ### 2026-02-24
 

@@ -11,6 +11,10 @@
       const puppeteer = require ('puppeteer');
 
       (async function () {
+         // Accept flow filter from CLI: node test-client.js [flow]
+         // e.g. node test-client.js 6   or   node test-client.js ALL
+         var cliFlow = (process.argv [2] || 'ALL').trim ().toUpperCase ();
+
          var launchOptions = {headless: true};
          if (process.env.PUPPETEER_EXECUTABLE_PATH) launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
 
@@ -40,26 +44,32 @@
             console.log ('[vibey-request-failed] ' + request.method () + ' ' + request.url () + ' :: ' + (fail && fail.errorText ? fail.errorText : 'unknown'));
          });
 
-         page.on ('dialog', async function (dialog) {
-            var message = dialog.message ();
-            console.log ('[vibey-test-alert] ' + message.replace (/\n/g, ' | '));
-            await dialog.accept ();
-
-            // Only finish on the final c.test alerts.
-            if (message.indexOf ('✅ All tests passed!') === 0) {
-               gotDialog = true;
-               await browser.close ();
-               process.exit (0);
-            }
-            if (message.indexOf ('❌ Test FAILED:') === 0) {
-               gotDialog = true;
-               await browser.close ();
-               process.exit (1);
-            }
-         });
-
          try {
             await page.goto ('http://localhost:5353', {waitUntil: 'networkidle2', timeout: 30000});
+
+            // Intercept the prompt dialog from client.js and answer with our CLI flow choice.
+            page.on ('dialog', async function (dialog) {
+               if (dialog.type () === 'prompt') {
+                  console.log ('[vibey-test] Answering flow prompt with: ' + cliFlow);
+                  await dialog.accept (cliFlow);
+                  return;
+               }
+               // Handle alert dialogs (test results) — existing logic below
+               var message = dialog.message ();
+               console.log ('[vibey-test-alert] ' + message.replace (/\n/g, ' | '));
+               await dialog.accept ();
+
+               if (message.indexOf ('✅ All tests passed!') === 0) {
+                  gotDialog = true;
+                  await browser.close ();
+                  process.exit (0);
+               }
+               if (message.indexOf ('❌ Test FAILED:') === 0) {
+                  gotDialog = true;
+                  await browser.close ();
+                  process.exit (1);
+               }
+            });
 
             // Click the top-right "🧪 Test" button.
             var clicked = await page.evaluate (function () {
@@ -165,7 +175,19 @@
 
    // *** TESTS ***
 
-   c.test ([
+   // Flow filter: set by client.js prompt or puppeteer CLI arg.
+   // 'ALL' runs everything, '1'-'8' runs only that flow.
+   var flowFilter = (window._vibeyTestFlow || 'ALL').toUpperCase ();
+
+   // Tag helper: prefix test name with flow number for filtering.
+   // Tests named "Step N:" or "Cleanup:" belong to flow 1.
+   // Tests named "F<n>-..." belong to flow <n>.
+   var testFlow = function (name) {
+      if (/^F(\d+)/.test (name)) return RegExp.$1;
+      return '1';
+   };
+
+   var allTests = [
 
       // --- Step 1: We start on the projects tab ---
       ['Step 1: Navigate to projects tab', function (done) {
@@ -1590,14 +1612,205 @@
          return true;
       }],
 
-   ], function (error, time) {
+      // =============================================
+      // *** FLOW #8: Uploads ***
+      // =============================================
+
+      ['F8-1: Create project for uploads', function (done) {
+         window._f8Project = 'test-flow8-' + testTimestamp ();
+         mockPrompt (window._f8Project);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         return B.get ('currentProject') === window._f8Project || 'Failed to create flow #8 project';
+      }],
+
+      ['F8-2: Upload image via API', function (done) {
+         var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f8Project) + '/upload', {}, {
+            name: 'pixel.png',
+            content: dataUrl,
+            contentType: 'image/png'
+         }, function (error, rs) {
+            window._f8UploadImage = rs && rs.body;
+            window._f8UploadImageError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f8UploadImageError) return 'Image upload failed: ' + window._f8UploadImageError;
+         var entry = window._f8UploadImage || {};
+         if (entry.name !== 'pixel.png') return 'Upload response missing pixel.png';
+         if (! entry.url) return 'Upload response missing url';
+         return true;
+      }],
+
+      ['F8-3: Uploads list includes image metadata', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f8Project) + '/uploads', {}, '', function (error, rs) {
+            window._f8Uploads = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var uploads = window._f8Uploads;
+         if (type (uploads) !== 'array') return 'Uploads list missing or not array';
+         var image = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'pixel.png') return item; });
+         if (! image) return 'pixel.png not found in uploads list';
+         if (! image.size || image.size <= 0) return 'pixel.png size invalid';
+         if (! image.contentType || image.contentType.indexOf ('image/') !== 0) return 'pixel.png contentType invalid: ' + image.contentType;
+         window._f8UploadImage = image;
+         return true;
+      }],
+
+      ['F8-4: Fetch image upload', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f8Project) + '/upload/pixel.png', {}, '', function (error, rs) {
+            window._f8UploadFetch = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f8UploadFetch || {};
+         if (result.error) return 'Upload fetch failed';
+         var rs = result.rs || {};
+         var status = rs.xhr ? rs.xhr.status : null;
+         if (status !== 200) return 'Expected status 200 for pixel.png, got ' + status;
+         var body = rs.body || '';
+         if (! body || body.length === 0) return 'Upload fetch returned empty body';
+         var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
+         if (contentType && contentType.indexOf ('image/png') === -1) return 'Expected image/png content-type, got ' + contentType;
+         return true;
+      }],
+
+      ['F8-5: Upload text file via API', function (done) {
+         var text = 'Hello uploads.';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f8Project) + '/upload', {}, {
+            name: 'notes.txt',
+            content: btoa (text),
+            contentType: 'text/plain'
+         }, function (error, rs) {
+            window._f8UploadText = rs && rs.body;
+            window._f8UploadTextError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f8UploadTextError) return 'Text upload failed: ' + window._f8UploadTextError;
+         var entry = window._f8UploadText || {};
+         if (entry.name !== 'notes.txt') return 'Upload response missing notes.txt';
+         return true;
+      }],
+
+      ['F8-6: Upload file with space in name', function (done) {
+         var text = 'Hello spaced uploads.';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f8Project) + '/upload', {}, {
+            name: 'space name.txt',
+            content: btoa (text),
+            contentType: 'text/plain'
+         }, function (error, rs) {
+            window._f8UploadSpace = rs && rs.body;
+            window._f8UploadSpaceError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f8UploadSpaceError) return 'Space-name upload failed: ' + window._f8UploadSpaceError;
+         var entry = window._f8UploadSpace || {};
+         if (entry.name !== 'space name.txt') return 'Upload response missing space name.txt';
+         return true;
+      }],
+
+      ['F8-7: Uploads list contains all files', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f8Project) + '/uploads', {}, '', function (error, rs) {
+            window._f8Uploads = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var uploads = window._f8Uploads;
+         if (type (uploads) !== 'array' || uploads.length < 3) return 'Expected at least 3 uploads';
+         var text = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'notes.txt') return item; });
+         if (! text) return 'notes.txt not found in uploads list';
+         if (! text.contentType || text.contentType.indexOf ('text/plain') === -1) return 'notes.txt contentType invalid';
+         var spaced = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'space name.txt') return item; });
+         if (! spaced) return 'space name.txt not found in uploads list';
+         window._f8UploadText = text;
+         window._f8UploadSpace = spaced;
+         return true;
+      }],
+
+      ['F8-8: Navigate to docs view', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f8Project) + '/docs');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'docs') return 'Expected docs tab for uploads';
+         return true;
+      }],
+
+      ['F8-9: Uploads section visible with items', function () {
+         var section = document.querySelector ('.upload-section');
+         if (! section) return 'Uploads section not found in sidebar';
+         var item = findByText ('.upload-item', 'pixel.png');
+         if (! item) return 'pixel.png not listed in uploads sidebar';
+         return true;
+      }],
+
+      ['F8-10: Select image upload shows preview', function (done) {
+         B.call ('select', 'upload', window._f8UploadImage);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var preview = document.querySelector ('.upload-preview img');
+         if (! preview) return 'Image preview not shown';
+         return true;
+      }],
+
+      ['F8-11: Select text upload shows metadata', function (done) {
+         B.call ('select', 'upload', window._f8UploadText);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var meta = document.querySelector ('.upload-meta');
+         if (! meta) return 'Upload metadata panel not shown for text file';
+         if (meta.textContent.indexOf ('Type:') === -1) return 'Metadata panel missing Type line';
+         return true;
+      }],
+
+      ['F8-12: Select spaced upload shows metadata', function (done) {
+         B.call ('select', 'upload', window._f8UploadSpace);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var meta = document.querySelector ('.upload-meta');
+         if (! meta) return 'Upload metadata panel not shown for spaced file';
+         if (meta.textContent.indexOf ('space name.txt') === -1) return 'Metadata panel missing spaced filename';
+         return true;
+      }],
+
+      ['F8-13: Delete uploads project', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f8Project);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         return true;
+      }],
+
+   ];
+
+   // Filter tests by flow
+   var filteredTests = flowFilter === 'ALL' ? allTests : dale.fil (allTests, undefined, function (test) {
+      if (testFlow (test [0]) === flowFilter) return test;
+   });
+
+   if (filteredTests.length === 0) {
+      alert ('❌ No tests found for flow: ' + flowFilter);
+      return;
+   }
+
+   console.log ('Running ' + filteredTests.length + ' tests (flow: ' + flowFilter + ')');
+
+   c.test (filteredTests, function (error, time) {
+      var label = flowFilter === 'ALL' ? 'all flows' : 'flow ' + flowFilter;
       if (error) {
          console.error ('❌ Test FAILED:', error.test, '— Result:', error.result);
          alert ('❌ Test FAILED: ' + error.test + '\n\nResult: ' + error.result);
       }
       else {
-         console.log ('✅ All tests passed! (' + time + 'ms)');
-         alert ('✅ All tests passed! (' + time + 'ms)');
+         console.log ('✅ All tests passed! (' + label + ', ' + time + 'ms)');
+         alert ('✅ All tests passed! (' + label + ', ' + time + 'ms)');
       }
    });
 

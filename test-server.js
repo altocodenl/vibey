@@ -1154,9 +1154,144 @@ var flow7Sequence = [
    }]
 ];
 
+// *** FLOW #8: Uploads (create/list/preview) ***
+
+var PROJECT8 = 'flow8-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
+
+// A tiny 1x1 red PNG (base64)
+var TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+var TINY_PNG_DATA_URL = 'data:image/png;base64,' + TINY_PNG_BASE64;
+var TINY_PNG_BYTES = Buffer.from (TINY_PNG_BASE64, 'base64');
+
+var TEXT_CONTENT_BASE64 = Buffer.from ('Hello from uploads test!\nLine 2.\n').toString ('base64');
+
+var flow8Sequence = [
+
+   ['F8: Create project', 'post', 'projects', {}, {name: PROJECT8}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
+      return true;
+   }],
+
+   // *** Upload an image (data URL format) ***
+
+   ['F8: Upload image via data URL', 'post', 'project/' + PROJECT8 + '/upload', {}, {name: 'test-image.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('Expected object body');
+      if (rs.body.name !== 'test-image.png') return log ('Upload name mismatch: ' + rs.body.name);
+      if (type (rs.body.size) !== 'integer' || rs.body.size < 1) return log ('Upload size should be a positive integer, got: ' + rs.body.size);
+      if (type (rs.body.mtime) !== 'integer') return log ('Upload mtime should be an integer, got: ' + type (rs.body.mtime));
+      if (rs.body.contentType !== 'image/png') return log ('Upload contentType mismatch: ' + rs.body.contentType);
+      if (type (rs.body.url) !== 'string' || rs.body.url.indexOf ('upload') === -1) return log ('Upload url missing or malformed: ' + rs.body.url);
+      return true;
+   }],
+
+   // *** List uploads — image should be present ***
+
+   ['F8: List uploads includes image', 'get', 'project/' + PROJECT8 + '/uploads', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (rs.body.length < 1) return log ('Expected at least 1 upload, got ' + rs.body.length);
+      var found = dale.stopNot (rs.body, undefined, function (entry) {
+         if (entry.name === 'test-image.png') return entry;
+      });
+      if (! found) return log ('test-image.png not found in uploads list');
+      if (found.contentType !== 'image/png') return log ('Listed contentType mismatch: ' + found.contentType);
+      if (type (found.size) !== 'integer' || found.size < 1) return log ('Listed size should be positive integer');
+      if (type (found.url) !== 'string') return log ('Listed url missing');
+      return true;
+   }],
+
+   // *** Fetch the uploaded image and verify bytes + Content-Type ***
+
+   ['F8: Fetch uploaded image', 'get', 'project/' + PROJECT8 + '/upload/test-image.png', {}, '', 200, function (s, rq, rs, next) {
+      httpGet (5353, '/project/' + PROJECT8 + '/upload/test-image.png', function (error, status, body) {
+         if (error) return log ('Fetch upload failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         if (! body || body.length < 10) return log ('Upload body too small: ' + (body ? body.length : 0) + ' bytes');
+         next ();
+      });
+   }],
+
+   // Verify Content-Type via raw HTTP request
+   ['F8: Verify image Content-Type header', 'get', 'project/' + PROJECT8 + '/uploads', {}, '', 200, function (s, rq, rs, next) {
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/project/' + PROJECT8 + '/upload/test-image.png',
+         method: 'GET'
+      }, function (res) {
+         var ct = res.headers ['content-type'] || '';
+         if (ct.indexOf ('image/png') === -1) return log ('Expected Content-Type image/png, got: ' + ct);
+         // Consume the body
+         res.on ('data', function () {});
+         res.on ('end', function () {next ();});
+      });
+      req.on ('error', function (err) {log ('Request error: ' + err.message);});
+      req.end ();
+   }],
+
+   // *** Upload a non-media file ***
+
+   ['F8: Upload text file', 'post', 'project/' + PROJECT8 + '/upload', {}, {name: 'notes.txt', content: TEXT_CONTENT_BASE64, contentType: 'text/plain'}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('Expected object body');
+      if (rs.body.name !== 'notes.txt') return log ('Upload name mismatch: ' + rs.body.name);
+      if (rs.body.contentType !== 'text/plain') return log ('Upload contentType mismatch: ' + rs.body.contentType);
+      if (type (rs.body.size) !== 'integer' || rs.body.size < 1) return log ('Upload size should be positive, got: ' + rs.body.size);
+      return true;
+   }],
+
+   // *** List uploads — both entries ***
+
+   ['F8: List uploads includes both entries', 'get', 'project/' + PROJECT8 + '/uploads', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (rs.body.length < 2) return log ('Expected at least 2 uploads, got ' + rs.body.length);
+      var names = dale.go (rs.body, function (entry) {return entry.name;});
+      if (! inc (names, 'test-image.png')) return log ('test-image.png missing from list');
+      if (! inc (names, 'notes.txt')) return log ('notes.txt missing from list');
+      return true;
+   }],
+
+   // *** Fetch the text file and verify content ***
+
+   ['F8: Fetch text file content', 'get', 'project/' + PROJECT8 + '/uploads', {}, '', 200, function (s, rq, rs, next) {
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/project/' + PROJECT8 + '/upload/notes.txt',
+         method: 'GET'
+      }, function (res) {
+         var ct = res.headers ['content-type'] || '';
+         if (ct.indexOf ('text/plain') === -1) return log ('Expected Content-Type text/plain, got: ' + ct);
+         var body = '';
+         res.on ('data', function (chunk) {body += chunk;});
+         res.on ('end', function () {
+            if (body.indexOf ('Hello from uploads test!') === -1) return log ('Text file content mismatch: ' + body.slice (0, 100));
+            next ();
+         });
+      });
+      req.on ('error', function (err) {log ('Request error: ' + err.message);});
+      req.end ();
+   }],
+
+   // *** Fetch nonexistent upload returns 404 ***
+
+   ['F8: Fetch nonexistent upload returns 404', 'get', 'project/' + PROJECT8 + '/upload/nonexistent.png', {}, '', 404],
+
+   // *** Cleanup ***
+
+   ['F8: Delete project', 'delete', 'projects/' + PROJECT8, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
+      return true;
+   }],
+
+   ['F8: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (projectListHasSlug (rs.body, PROJECT8)) return log ('Project still exists after deletion');
+      return true;
+   }]
+];
+
 // *** RUNNER ***
 
-var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence, 5: flow5Sequence, 6: flow6Sequence, 7: flow7Sequence};
+var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence, 5: flow5Sequence, 6: flow6Sequence, 7: flow7Sequence, 8: flow8Sequence};
 
 var requestedFlows = [];
 dale.go (process.argv.slice (2), function (arg) {
@@ -1164,7 +1299,7 @@ dale.go (process.argv.slice (2), function (arg) {
    if (match) requestedFlows.push (Number (match [1]));
 });
 
-if (! requestedFlows.length) requestedFlows = [1, 2, 3, 4, 5, 6, 7];
+if (! requestedFlows.length) requestedFlows = [1, 2, 3, 4, 5, 6, 7, 8];
 
 var sequences = dale.go (requestedFlows, function (n) {return allFlows [n];});
 var label = 'Flow #' + requestedFlows.join (' + Flow #');

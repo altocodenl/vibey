@@ -172,6 +172,18 @@ All files live inside `/workspace/` in the project container. All file I/O goes 
 
 Left sidebar lists all files with + New and × delete. Right side is a textarea editor. Cmd+S saves. Tracks dirty state, warns on close with unsaved changes. Deleting the currently open file clears the editor immediately. Loading a file that no longer exists silently deselects it.
 
+### Server: uploads
+
+Uploads live under `/workspace/uploads/` inside the project container.
+
+- `GET /project/:project/uploads` — list uploads (newest first). Returns entries with `{name, size, mtime, contentType, url}`.
+- `POST /project/:project/upload` — upload a file. Body: `{name, content, contentType?}` where `content` is base64 (data URL allowed). Returns the stored entry.
+- `GET /project/:project/upload/:name` — download/stream the upload (Content-Type inferred from filename).
+
+### Client: uploads
+
+Docs sidebar shows an Uploads section at the bottom (always visible when uploads exist). Upload button opens a file picker (multi-select supported), uploads to `/uploads/`. Filenames can include spaces. Clicking an upload shows a preview: images/audio/video render inline; other files show metadata + a link.
+
 ### Server: dialogs
 
 - `POST /project/:project/dialog/new` — create a waiting dialog draft. Body: `{provider, model?, slug?}`.
@@ -695,17 +707,24 @@ Flow #7 — Snapshots lifecycle (create/list/download/restore/delete)
   - `GET /snapshots/nonexistent/download` returns `404` with error payload.
 - Cleanup: delete restored project, delete remaining snapshot, and confirm no leftovers for this flow.
 
+Flow #8 — Uploads (create/list/preview)
+
+- Create a project and open its Docs tab.
+- Upload an image via `POST /project/:project/upload` with `{name, content, contentType}` (base64 or data URL).
+  - Verify response includes `name`, `size`, `mtime`, `contentType`, and `url`.
+- Call `GET /project/:project/uploads` and verify the uploaded entry is listed with matching metadata.
+- Fetch the upload via `GET /project/:project/upload/:name` and verify the file bytes and `Content-Type`.
+- Upload a non-media file (for example `notes.txt`) and verify the list contains both entries.
+- In the client, confirm the uploads section appears in the Docs sidebar, clicking the image shows a preview, and clicking the text file shows metadata + link.
+- Cleanup: delete the project.
+
 ## TODO
 
-Prompt:
-Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/hitit.md (backend tests) and docs/gotoB.md (frontend framework).
+Intro prompt:
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). When you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry.
 
-- upload files into uploads/ show them at the bottom of the docs on the sidebar always visible (if you have any), if you click on it if it's media you show it, otherwise you just show some metadata as text; add docs, endpoints, client support and a test flow.
-- vi mode is broken
-- run the tests myself
-- website, add link to github
-- Test & fix all frontend flows.
-- Installation?
+
+- Website, add link to github
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
 
 ## TODO vibey cloud

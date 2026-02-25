@@ -80,6 +80,14 @@ window.vibeyCSS = [
       'background-color': '#16213e',
       'border-radius': '8px',
       padding: '1rem',
+      display: 'flex',
+      'flex-direction': 'column',
+      'min-height': 0,
+      overflow: 'hidden',
+   }],
+   ['.file-list-scroll', {
+      flex: 1,
+      'min-height': 0,
       'overflow-y': 'auto',
    }],
    ['.file-list-header', {
@@ -119,6 +127,57 @@ window.vibeyCSS = [
       'white-space': 'nowrap',
       overflow: 'hidden',
       'text-overflow': 'ellipsis',
+   }],
+   ['.upload-section', {
+      'margin-top': '0.75rem',
+      'padding-top': '0.5rem',
+      'border-top': '1px solid #333',
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '0.5rem',
+      'max-height': '40%',
+   }],
+   ['.upload-header', {
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'space-between',
+      gap: '0.5rem',
+   }],
+   ['.upload-list', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '0.25rem',
+      'overflow-y': 'auto',
+      'max-height': '180px',
+   }],
+   ['.upload-item', {
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'space-between',
+      padding: '0.35rem 0.5rem',
+      'border-radius': '4px',
+      cursor: 'pointer',
+      'background-color': '#101827',
+   }],
+   ['.upload-item:hover', {
+      'background-color': '#1a2a4a',
+   }],
+   ['.upload-item-active', {
+      'background-color': '#4a69bd',
+   }],
+   ['.upload-name', {
+      'white-space': 'nowrap',
+      overflow: 'hidden',
+      'text-overflow': 'ellipsis',
+      'max-width': '140px',
+   }],
+   ['.upload-size', {
+      color: '#9aa4bf',
+      'font-size': '11px',
+   }],
+   ['.upload-empty', {
+      color: '#666',
+      'font-size': '12px',
    }],
    ['.dialog-name', {
       flex: 1,
@@ -250,6 +309,36 @@ window.vibeyCSS = [
       color: '#888',
       'background-color': '#16213e',
       'border-radius': '8px',
+   }],
+   ['.upload-preview', {
+      'margin-top': '1rem',
+      padding: '0.75rem',
+      'background-color': '#16213e',
+      'border-radius': '8px',
+      border: '1px solid #29304d',
+   }],
+   ['.upload-preview-header', {
+      'font-weight': 'bold',
+      'margin-bottom': '0.5rem',
+      color: '#c9d4ff',
+      'font-size': '13px',
+   }],
+   ['.upload-media', {
+      width: '100%',
+      'max-height': '360px',
+      'border-radius': '6px',
+      border: '1px solid #2d3652',
+   }],
+   ['.upload-meta', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '0.35rem',
+      color: '#d5d8e6',
+      'font-size': '13px',
+   }],
+   ['.upload-meta-line a', {
+      color: '#94b8ff',
+      'text-decoration': 'none',
    }],
    // Dialogs
    ['.chat-container', {

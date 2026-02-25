@@ -570,6 +570,10 @@ var getContainerIP = function (projectName) {
    return ip;
 };
 
+var shQuote = function (value) {
+   return "'" + String (value).replace (/'/g, "'\\''") + "'";
+};
+
 var dockerExec = function (projectName, command, cb) {
    var name = containerName (projectName);
    // Escape single quotes in command for sh -c
@@ -603,33 +607,35 @@ var pfs = {
 
    readFile: function (projectName, filename) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat /workspace/' + filename, {encoding: 'utf8'});
+      return execSync ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'});
    },
 
    writeFile: function (projectName, filename, content) {
       var name = containerName (projectName);
-      execSync ('docker exec -i ' + name + " sh -c 'cat > /workspace/" + filename + "'", {input: content, encoding: 'utf8'});
+      var command = 'cat > /workspace/' + filename;
+      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
    },
 
    appendFile: function (projectName, filename, content) {
       var name = containerName (projectName);
-      execSync ('docker exec -i ' + name + " sh -c 'cat >> /workspace/" + filename + "'", {input: content, encoding: 'utf8'});
+      var command = 'cat >> /workspace/' + filename;
+      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
    },
 
    rename: function (projectName, oldName, newName) {
       var name = containerName (projectName);
-      execSync ('docker exec ' + name + ' mv /workspace/' + oldName + ' /workspace/' + newName, {encoding: 'utf8'});
+      execSync ('docker exec ' + name + ' mv ' + shQuote ('/workspace/' + oldName) + ' ' + shQuote ('/workspace/' + newName), {encoding: 'utf8'});
    },
 
    unlink: function (projectName, filename) {
       var name = containerName (projectName);
-      execSync ('docker exec ' + name + ' rm /workspace/' + filename, {encoding: 'utf8'});
+      execSync ('docker exec ' + name + ' rm ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'});
    },
 
    exists: function (projectName, filename) {
       var name = containerName (projectName);
       try {
-         execSync ('docker exec ' + name + ' test -f /workspace/' + filename, {encoding: 'utf8'});
+         execSync ('docker exec ' + name + ' test -f ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'});
          return true;
       }
       catch (e) {
@@ -641,7 +647,7 @@ var pfs = {
       var name = containerName (projectName);
       try {
          // stat -c %Y gives mtime as unix epoch seconds
-         var output = execSync ('docker exec ' + name + ' stat -c %Y /workspace/' + filename, {encoding: 'utf8'}).trim ();
+         var output = execSync ('docker exec ' + name + ' stat -c %Y ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'}).trim ();
          return {mtime: new Date (Number (output) * 1000)};
       }
       catch (e) {
@@ -649,22 +655,38 @@ var pfs = {
       }
    },
 
+   statDetailed: function (projectName, filename) {
+      var name = containerName (projectName);
+      try {
+         // stat -c '%Y %s' gives mtime and size in bytes
+         var output = execSync ('docker exec ' + name + ' stat -c "%Y %s" ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'}).trim ();
+         var parts = output.split (' ');
+         return {
+            mtime: new Date (Number (parts [0]) * 1000),
+            size: Number (parts [1] || 0)
+         };
+      }
+      catch (e) {
+         return {mtime: new Date (0), size: 0};
+      }
+   },
+
    // Read a file from any path inside the container (for static proxy)
    readFileAt: function (projectName, path) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat ' + path, {encoding: 'utf8'});
+      return execSync ('docker exec ' + name + ' cat ' + shQuote (path), {encoding: 'utf8'});
    },
 
    // Read a binary file from any path inside the container (for static proxy)
    readFileBinaryAt: function (projectName, path) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat ' + path, {encoding: 'buffer'});
+      return execSync ('docker exec ' + name + ' cat ' + shQuote (path), {encoding: 'buffer'});
    },
 
    existsAt: function (projectName, path) {
       var name = containerName (projectName);
       try {
-         execSync ('docker exec ' + name + ' test -f ' + path, {encoding: 'utf8'});
+         execSync ('docker exec ' + name + ' test -f ' + shQuote (path), {encoding: 'utf8'});
          return true;
       }
       catch (e) {
@@ -675,7 +697,7 @@ var pfs = {
    // mkdir -p for a path inside /workspace
    mkdirp: function (projectName, dirpath) {
       var name = containerName (projectName);
-      execSync ('docker exec ' + name + ' mkdir -p /workspace/' + dirpath, {encoding: 'utf8'});
+      execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dirpath), {encoding: 'utf8'});
    },
 
    // Write file at any path inside /workspace (for tool write_file)
@@ -685,17 +707,32 @@ var pfs = {
       var dir = filepath.replace (/\/[^/]+$/, '');
       if (dir && dir !== filepath) {
          try {
-            execSync ('docker exec ' + name + ' mkdir -p /workspace/' + dir, {encoding: 'utf8'});
+            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
          }
          catch (e) {}
       }
-      execSync ('docker exec -i ' + name + " sh -c 'cat > /workspace/" + filepath + "'", {input: content, encoding: 'utf8'});
+      var command = 'cat > ' + shQuote ('/workspace/' + filepath);
+      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
+   },
+
+   // Write binary file at any path inside /workspace (for uploads)
+   writeFileBinaryAt: function (projectName, filepath, content) {
+      var name = containerName (projectName);
+      var dir = filepath.replace (/\/[^/]+$/, '');
+      if (dir && dir !== filepath) {
+         try {
+            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
+         }
+         catch (e) {}
+      }
+      var command = 'cat > ' + shQuote ('/workspace/' + filepath);
+      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'buffer'});
    },
 
    // Read file at any path inside /workspace (for tool edit_file)
    readFileInWorkspace: function (projectName, filepath) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat /workspace/' + filepath, {encoding: 'utf8'});
+      return execSync ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filepath), {encoding: 'utf8'});
    }
 };
 
@@ -908,6 +945,7 @@ var endActiveStream = function (dialogId) {
 
 var DOC_DIR = 'doc';
 var DIALOG_DIR = 'dialog';
+var UPLOAD_DIR = 'uploads';
 var DOC_MAIN_FILE = DOC_DIR + '/main.md';
 
 var managedFilePath = function (name) {
@@ -915,10 +953,16 @@ var managedFilePath = function (name) {
    return name.indexOf (DOC_DIR + '/') === 0 || name.indexOf (DIALOG_DIR + '/') === 0;
 };
 
+var isUploadPath = function (name) {
+   if (type (name) !== 'string') return false;
+   return name.indexOf (UPLOAD_DIR + '/') === 0;
+};
+
 var ensureProjectLayout = function (projectName) {
    try {
       pfs.mkdirp (projectName, DOC_DIR);
       pfs.mkdirp (projectName, DIALOG_DIR);
+      pfs.mkdirp (projectName, UPLOAD_DIR);
    }
    catch (e) {}
 };
@@ -2038,6 +2082,58 @@ var validFilename = function (name) {
    return true;
 }
 
+var validUploadName = function (name) {
+   if (type (name) !== 'string') return false;
+   if (! name.trim ()) return false;
+   if (name.includes ('..')) return false;
+   if (name [0] === '/' || name.includes ('\\')) return false;
+   if (! /^[a-zA-Z0-9_\-\.\/ ]+$/.test (name)) return false;
+   return true;
+};
+
+var uploadContentType = function (name, provided) {
+   if (type (provided) === 'string' && provided.trim ()) return provided.trim ();
+   var lower = (name || '').toLowerCase ();
+   if (lower.match (/\.png$/)) return 'image/png';
+   if (lower.match (/\.jpe?g$/)) return 'image/jpeg';
+   if (lower.match (/\.gif$/)) return 'image/gif';
+   if (lower.match (/\.webp$/)) return 'image/webp';
+   if (lower.match (/\.svg$/)) return 'image/svg+xml';
+   if (lower.match (/\.mp3$/)) return 'audio/mpeg';
+   if (lower.match (/\.wav$/)) return 'audio/wav';
+   if (lower.match (/\.ogg$/)) return 'audio/ogg';
+   if (lower.match (/\.mp4$/)) return 'video/mp4';
+   if (lower.match (/\.webm$/)) return 'video/webm';
+   if (lower.match (/\.mov$/)) return 'video/quicktime';
+   if (lower.match (/\.pdf$/)) return 'application/pdf';
+   if (lower.match (/\.json$/)) return 'application/json';
+   if (lower.match (/\.txt$/)) return 'text/plain';
+   if (lower.match (/\.md$/)) return 'text/markdown';
+   return 'application/octet-stream';
+};
+
+var listUploads = function (projectName) {
+   var files = pfs.readdir (projectName);
+   var uploadFiles = dale.fil (files, undefined, function (file) {
+      if (isUploadPath (file)) return file;
+   });
+
+   var entries = dale.go (uploadFiles, function (file) {
+      var shortName = file.slice (UPLOAD_DIR.length + 1);
+      var stat = pfs.statDetailed (projectName, file);
+      return {
+         name: shortName,
+         path: file,
+         size: stat.size || 0,
+         mtime: stat.mtime.getTime (),
+         contentType: uploadContentType (shortName),
+      };
+   });
+
+   entries.sort (function (a, b) { return b.mtime - a.mtime; });
+   return entries;
+};
+
 // Resolve project for route handlers; replies with error and returns null on failure
 var resolveProject = function (rs, projectName) {
    try {
@@ -2075,7 +2171,8 @@ var buildSettingsResponse = function (config) {
       },
       editor: {
          viMode: !! editor.viMode
-      }
+      },
+      testButton: !! config.testButton
    };
 };
 
@@ -2487,6 +2584,92 @@ var routes = [
       }
       catch (error) {
          reply (rs, 500, {error: 'Failed to delete file'});
+      }
+   }],
+
+   // *** UPLOADS ***
+
+   ['get', 'project/:project/uploads', function (rq, rs) {
+      var projectName = resolveProject (rs, rq.data.params.project);
+      if (! projectName) return;
+
+      try {
+         var entries = listUploads (projectName);
+         reply (rs, 200, dale.go (entries, function (entry) {
+            entry.url = '/project/' + encodeURIComponent (projectName) + '/upload/' + encodeURIComponent (entry.name);
+            return entry;
+         }));
+      }
+      catch (error) {
+         reply (rs, 500, {error: 'Failed to list uploads'});
+      }
+   }],
+
+   ['post', 'project/:project/upload', function (rq, rs) {
+      if (stop (rs, [
+         ['name', rq.body.name, 'string'],
+         ['content', rq.body.content, 'string']
+      ])) return;
+
+      var projectName = resolveProject (rs, rq.data.params.project);
+      if (! projectName) return;
+
+      var name = rq.body.name.trim ();
+      if (! validUploadName (name)) return reply (rs, 400, {error: 'Invalid upload name'});
+
+      try {
+         var content = rq.body.content;
+         var contentType = rq.body.contentType || '';
+         var base64 = content;
+         if (content.indexOf ('data:') === 0) {
+            var splits = content.split (',');
+            if (splits.length > 1) {
+               var header = splits [0];
+               base64 = splits.slice (1).join (',');
+               var match = header.match (/data:([^;]+)/);
+               if (match && ! contentType) contentType = match [1];
+            }
+         }
+         var buffer = Buffer.from (base64, 'base64');
+         var filepath = UPLOAD_DIR + '/' + name;
+         pfs.writeFileBinaryAt (projectName, filepath, buffer);
+
+         var stat = pfs.statDetailed (projectName, filepath);
+         reply (rs, 200, {
+            ok: true,
+            name: name,
+            size: stat.size || buffer.length,
+            mtime: stat.mtime.getTime (),
+            contentType: uploadContentType (name, contentType),
+            url: '/project/' + encodeURIComponent (projectName) + '/upload/' + encodeURIComponent (name)
+         });
+      }
+      catch (error) {
+         reply (rs, 500, {error: 'Failed to save upload'});
+      }
+   }],
+
+   ['get', /^\/project\/([^/]+)\/upload\/(.+)$/, function (rq, rs) {
+      var projectSlug = decodeURIComponent (rq.data.params [0]);
+      var name = decodeURIComponent (rq.data.params [1]);
+      if (! validUploadName (name)) return reply (rs, 400, {error: 'Invalid upload name'});
+
+      var projectName = resolveProject (rs, projectSlug);
+      if (! projectName) return;
+
+      try {
+         var filepath = UPLOAD_DIR + '/' + name;
+         if (! pfs.existsAt (projectName, '/workspace/' + filepath)) return reply (rs, 404, {error: 'Upload not found'});
+         var buffer = pfs.readFileBinaryAt (projectName, '/workspace/' + filepath);
+         var contentType = uploadContentType (name);
+         rs.writeHead (200, {
+            'Content-Type': contentType,
+            'Content-Length': buffer.length
+         });
+         rs.end (buffer);
+      }
+      catch (error) {
+         if (! rs.headersSent) reply (rs, 500, {error: 'Failed to read upload'});
       }
    }],
 
