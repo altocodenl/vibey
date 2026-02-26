@@ -1075,6 +1075,13 @@
          return true;
       }],
 
+      ['F6-1b: Ensure viMode disabled', function (done) {
+         if (B.get ('viMode')) B.call ('toggle', 'viMode');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         return B.get ('viMode') === false || 'Expected viMode false after reset';
+      }],
+
       ['F6-2: Default viMode is false', function () {
          var viMode = B.get ('viMode');
          if (viMode !== false) return 'Expected default viMode to be false, got: ' + viMode;
@@ -1835,6 +1842,31 @@
          var viState = B.get ('viState') || {};
          if (viState.mode !== 'normal') return 'Expected normal mode, got: ' + viState.mode;
          return true;
+      }],
+
+      ['F6-28b: Normal mode move right (l) moves cursor', function (done) {
+         var ta = document.querySelector ('.editor-textarea');
+         if (! ta) return done (SHORT_WAIT, POLL);
+         ta.focus ();
+         ta.selectionStart = ta.selectionEnd = 0;
+         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'l', bubbles: true}));
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var ta = document.querySelector ('.editor-textarea');
+         if (! ta) return 'Textarea not found';
+         return ta.selectionStart === 1 || ('Expected cursor at 1 after l, got: ' + ta.selectionStart);
+      }],
+
+      ['F6-28c: Normal mode move down (j) keeps column', function (done) {
+         var ta = document.querySelector ('.editor-textarea');
+         if (! ta) return done (SHORT_WAIT, POLL);
+         ta.focus ();
+         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'j', bubbles: true}));
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var ta = document.querySelector ('.editor-textarea');
+         if (! ta) return 'Textarea not found';
+         return ta.selectionStart === 10 || ('Expected cursor at 10 after j, got: ' + ta.selectionStart);
       }],
 
       // --- Test i: enter insert at current cursor position ---
