@@ -128,7 +128,7 @@ Note that the deed is missing; if it's code, go use your IDE, or just open your 
 
 Each project is a container (`vibey-proj-<name>`) with its own named volume (`vibey-vol-<name>`).
 
-- `GET /projects` - list project names.
+- `GET /projects` - list project names. Includes projects backed by containers and volume-only projects (for example after rebuilds).
 - `POST /projects` - create project. Body: `{name}`. Creates the project container and volume.
 - `DELETE /projects/:name` - delete a project.
   - If any dialog streams are active for dialogs in that project, they are aborted before deletion.
@@ -733,11 +733,8 @@ Flow #8 — Uploads (create/list/preview)
 
 ## TODO
 
-Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
-Workflow: when you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry. When you update agents-now.md, only update your entry! Always read before you write.
+Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md.
 
-
-- Website, add link to github
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
 
 ## TODO vibey cloud

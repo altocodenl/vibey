@@ -1209,6 +1209,7 @@ B.mrespond ([
                content: rs.body.content,
                original: rs.body.content
             });
+            B.call (x, 'set', 'currentUpload', null);
             B.call (x, 'set', 'viCursor', {line: 1, col: 1});
             if (dialogFile) B.call (x, 'reset', 'chatInput');
             B.call (x, 'write', 'hash');
@@ -2964,13 +2965,13 @@ views.main = function () {
 
          currentProject ? ['div', {class: 'tabs'}, [
             ['button', {
-               class: 'tab' + (tab === 'dialogs' ? ' tab-active' : ''),
-               onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (currentProject) + '/dialogs')
-            }, 'Dialogs'],
-            ['button', {
                class: 'tab' + (tab === 'docs' ? ' tab-active' : ''),
                onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (currentProject) + '/docs')
             }, 'Docs'],
+            ['button', {
+               class: 'tab' + (tab === 'dialogs' ? ' tab-active' : ''),
+               onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (currentProject) + '/dialogs')
+            }, 'Dialogs'],
          ]] : '',
 
          tab === 'settings' ? views.settings () : (tab === 'snapshots' ? views.snapshots () : (! currentProject || tab === 'projects' ? views.projects () : (tab === 'docs' ? views.files () : views.dialogs ())))

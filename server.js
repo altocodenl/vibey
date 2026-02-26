@@ -875,8 +875,19 @@ var validateProjectName = function (projectName) {
    return projectName;
 };
 
+var volumeExists = function (projectName) {
+   var vol = volumeName (projectName);
+   try {
+      execSync ('docker volume inspect ' + vol + ' >/dev/null 2>&1', {encoding: 'utf8'});
+      return true;
+   }
+   catch (e) {
+      return false;
+   }
+};
+
 var projectExists = function (projectName) {
-   return containerExists (projectName);
+   return containerExists (projectName) || volumeExists (projectName);
 };
 
 var ensureProject = function (projectName) {
@@ -889,24 +900,49 @@ var ensureProject = function (projectName) {
 var getExistingProject = function (projectName) {
    projectName = validateProjectName (projectName);
    if (! projectExists (projectName)) throw new Error ('Project not found');
-   if (! containerRunning (projectName)) {
-      execSync ('docker start ' + containerName (projectName), {encoding: 'utf8'});
-   }
+   // ensureProjectContainer handles all cases: running, stopped, or missing container (volume-only)
+   ensureProjectContainer (projectName);
    ensureProjectLayout (projectName);
    return projectName;
 };
 
 var listProjects = function () {
    try {
+      var projectsBySlug = {};
+
       var output = execSync ('docker ps -a --filter label=vibey=project --format "{{.Names}}"', {encoding: 'utf8'}).trim ();
-      if (! output) return [];
-      var names = output.split ('\n');
-      var projects = dale.fil (names, undefined, function (name) {
-         if (name.indexOf ('vibey-proj-') === 0) {
+      if (output) {
+         var names = output.split ('\n');
+         dale.go (names, function (name) {
+            if (name.indexOf ('vibey-proj-') !== 0) return;
             var slug = name.slice ('vibey-proj-'.length);
-            return {slug: slug, name: unslugifyProjectName (slug)};
+            projectsBySlug [slug] = {slug: slug, name: unslugifyProjectName (slug)};
+         });
+      }
+
+      var volumes = execSync ('docker volume ls -q --filter label=vibey=project', {encoding: 'utf8'}).trim ();
+      if (volumes) {
+         var volumeNames = volumes.split ('\n').filter (Boolean);
+         if (volumeNames.length) {
+            var format = '{{.Name}} {{index .Labels "vibey-project"}}';
+            var inspect = execSync ('docker volume inspect -f ' + shQuote (format) + ' ' + dale.go (volumeNames, shQuote).join (' '), {encoding: 'utf8'}).trim ();
+            if (inspect) {
+               dale.go (inspect.split ('\n'), function (line) {
+                  line = line.trim ();
+                  if (! line) return;
+                  var parts = line.split (' ');
+                  var volName = parts [0] || '';
+                  var labelSlug = parts.slice (1).join (' ').trim ();
+                  var slug = labelSlug;
+                  if (! slug && volName.indexOf ('vibey-vol-') === 0) slug = volName.slice ('vibey-vol-'.length);
+                  if (! slug) return;
+                  if (! projectsBySlug [slug]) projectsBySlug [slug] = {slug: slug, name: unslugifyProjectName (slug)};
+               });
+            }
          }
-      });
+      }
+
+      var projects = dale.go (projectsBySlug, function (project) {return project;});
       projects.sort (function (a, b) {return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);});
       return projects;
    }
@@ -2075,7 +2111,7 @@ var validUploadName = function (name) {
    if (! name.trim ()) return false;
    if (name.includes ('..')) return false;
    if (name [0] === '/' || name.includes ('\\')) return false;
-   if (! /^[a-zA-Z0-9_\-\.\/ ]+$/.test (name)) return false;
+   if (/[\u0000\r\n]/.test (name)) return false;
    return true;
 };
 

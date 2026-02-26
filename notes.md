@@ -1,5 +1,9 @@
 ## Vibey development notes
 
+### 2026-02-26
+
+I want to make a website. The website should be written in lith/litc and when run, it should output static html with the css inside. I want the website to contain the intro to vibey (the big four plus bring your own inference). Installation instructions that are easily copiable. Please start.
+
 ### 2026-02-25
 
 http://www.incompleteideas.net/IncIdeas/BitterLesson.html
