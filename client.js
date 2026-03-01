@@ -827,6 +827,19 @@ B.mrespond ([
       B.call (x, 'load', 'projects');
       B.call (x, 'load', 'settings');
       B.call (x, 'read', 'hash');
+
+      if (! window.__vibeyDialogPoller) {
+         window.__vibeyDialogPoller = setInterval (function () {
+            var tab = B.get ('tab');
+            var project = B.get ('currentProject');
+            var currentFile = B.get ('currentFile');
+            if (tab !== 'dialogs') return;
+            if (! project || ! currentFile || ! isDialogFile (currentFile.name)) return;
+            if (B.get ('loadingFile')) return;
+            B.call ('load', 'file', currentFile.name);
+            B.call ('load', 'files', project);
+         }, 2000);
+      }
    }],
 
    ['read', 'hash', function (x) {

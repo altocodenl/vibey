@@ -1,5 +1,201 @@
 ## Vibey development notes
 
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+
+- Can you debug why the client doesn't auto-update the dialog? I have to refresh the page when the agent is working.
+
+### civ2 analytics schema
+
+Tables
+- turn Hash
+- civilizations List (each item is a civ row)
+- units List (each item is a unit row)
+- tiles List (each item is a tile row)
+- cities List (each item is a city row)
+
+Table: turn (one Hash per save/turn)
+- save_path Text
+- save_sha256 Text (optional)
+- savtype Text (classic|fantastic|MGE|tot1.0|tot1.1)
+- turn_elapsed Number (raw counter)
+- display_total Number (raw counter)
+- display_year Number (best‑effort; may be null/omitted for scenarios)
+- display_month Number (1–12; may be null/omitted)
+- difficulty Text
+- barbarian_activity Text
+- scenario_flag Number (0/1)
+- reveal_map Number (0/1)
+- unit_selected_on_start Number
+- visible_map_civ_slot Number
+- visible_map_civ_name Text
+- player_civ_number_used Number
+- alive_players_mask Number (bitmask)
+- alive_players_names List of Text (expanded from mask)
+- human_players_mask Number (bitmask)
+- human_players_names List of Text (expanded from mask)
+- current_pollution Number
+- global_temp_raises Number
+- turns_of_peace Number
+- map_width Number
+- map_height Number
+- tiles_expected Number (width*height)
+- n_units Number
+- options_play Hash
+  - bloodlust 0/1
+  - simplified_combat 0/1
+  - world_type Text (flat|round)
+  - dont_restart_eliminated 0/1
+- options_game Hash
+  - move_units_without_mouse 0/1
+  - enter_closes_city_screen 0/1
+  - map_grid 0/1
+  - sound_effects 0/1
+  - music 0/1
+  - cheat_menu 0/1
+  - always_wait_end_of_turn 0/1
+  - autosave 0/1
+  - show_enemy_moves 0/1
+  - no_pause_after_enemy_moves 0/1
+  - fast_piece_slide 0/1
+  - instant_advice 0/1
+  - tutorial_help 0/1
+- options_graphic Hash
+  - animated_heralds 0/1
+  - high_council 0/1
+  - civilopedia_for_advances 0/1
+  - throne_room_graphics 0/1
+  - diplomacy_screen_graphics 0/1
+  - wonder_movies 0/1
+- options_report Hash
+  - announce_love_the_day 0/1
+  - warn_when_food_low 0/1
+  - announce_disorder 0/1
+  - announce_order_restored 0/1
+  - show_non_combat_units_built 0/1
+  - show_invalid_build_instructions 0/1
+  - warn_when_city_growth_halted 0/1
+  - show_city_improvements_built 0/1
+  - zoom_to_city_not_default_option 0/1
+  - warn_when_new_pollution_occurs 0/1
+  - warn_when_changing_production_will_cost_shields 0/1
+- wonders Hash (optional but cheap, global state)
+  - The Pyramids Text (owner civ name | Destroyed | Not Built | city id if you prefer)
+  - … all 28 wonders
+- tech_first_discovered_by Hash (tech name -> civ name Text)
+- tech_discovered_by Hash of Lists (tech name -> List of civ names)
+
+Table: civilization (List; one Hash per civ slot 0..7)
+- civ_slot Number (0=Barbarian)
+- civ_name Text
+- leader_name Text
+- is_human 0/1
+- is_alive 0/1
+- treasury Number
+- science_rate Number (0..100)
+- tax_rate Number (0..100)
+- luxury_rate Number (0..100)
+- government Text
+- reputation Text
+- researching_name Text (or None)
+- research_progress Number
+- acquired_techs Number
+- acquired_future_techs Number
+- military_demographics Number
+- sum_of_city_sizes Number
+- units_active_total Number
+- units_casualties_total Number
+- units_producing_total Number
+- units_active_by_type Hash (unit name -> Number)
+- units_casualties_by_type Hash (unit name -> Number)
+- units_producing_by_type Hash (unit name -> Number)
+
+Table: unit (List; one Hash per unit record)
+- unit_id Number (sequential as read)
+- owner_civ_slot Number
+- owner_civ_name Text
+- type_id Number (as in save)
+- type_name Text
+- lat Number
+- long Number
+- veteran 0/1
+- hitpoints_lost Number
+- home_city_id Number (255/None → omit or set -1)
+- home_city_name Text (if resolvable; else empty)
+- goto_lat Number (omit if none)
+- goto_long Number (omit if none)
+- record_size Number (26 or 32; useful QA)
+- savtype Text (copy for convenience)
+
+Table: tile (List; one Hash per map tile)
+- tile_index Number (row*width + col)
+- lat Number (row)
+- long Number (map long)
+- col Number (derived from long if useful)
+- row Number (alias of lat)
+- terrain_id Number
+- terrain_name Text (Desert..Ocean)
+- river 0/1
+- irrigation 0/1
+- farmland 0/1
+- mining 0/1
+- road 0/1
+- railroad 0/1
+- pollution 0/1
+- city_present 0/1
+- fortress 0/1
+- airbase 0/1
+- unit_present 0/1
+- owner_civ_slot Number (omit if none)
+- owner_civ_name Text (omit if none)
+- city_radius_owner_civ_slot Number (omit if none)
+- city_radius_owner_civ_name Text (omit if none)
+- land_sea_body_counter Number
+- discovered_by_mask Number
+- discovered_by_names List of Text
+
+Note: If/when we enable per‑civ “as seen by” flags, we’ll add:
+- seen_by Hash where key is civ_name and value is a Hash of flags seen (unit/road/rail/irrigation/farmland/fortress/airbase/city/pollution).
+
+Table: city (List; one Hash per city)
+- city_id Number (sequential as read)
+- owner_civ_slot Number
+- owner_civ_name Text
+- name Text
+- lat Number
+- long Number
+- size Number
+- food_box Number
+- shields_box Number
+- base_trade Number
+- total_trade Number
+- science Number
+- tax Number
+- food Number
+- shields Number
+- happy Number
+- unhappy Number
+- coastal 0/1
+- love_king 0/1
+- disorder 0/1
+- workers_inner Number
+- workers_outer1 Number
+- workers_outer2 Number
+- improvements_count Number
+- producing_code Text (raw hex or id)
+- producing_name Text (if we decode; otherwise mirror code)
+- specialists_dist Text (raw bitfield if helpful)
+- specialists_q Number (raw value)
+
+If you want, I can extend the fourdata schema right away with:
+- diplomacy (treaties, attitudes),
+- per‑civ tile visibility,
+- city_improvements (list),
+- city_trade_routes (list with partner city id and value),
+- unit_status (activity/orders/moves),
+- tile_special (bonus/hut),
+- plus scenario_file and cheat_penalty under turn.options.
+
 ### 2026-02-26
 
 https://lucumr.pocoo.org/2026/2/9/a-language-for-agents/

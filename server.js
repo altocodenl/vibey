@@ -262,7 +262,7 @@ var startOpenAICallbackServer = function (expectedState) {
          }
       });
 
-      server.listen (1455, '127.0.0.1', function () {
+      server.listen (1455, '0.0.0.0', function () {
          resolveOuter ({
             close: function () {server.close ();},
             cancelWait: function () {cancelled = true;},

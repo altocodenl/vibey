@@ -1,0 +1,45 @@
+Hi! I decided to start a new channel, called "Build with Vibey". I'm going to record myself building Vibey itself, and building things with Vibey.
+
+The overarching idea is to have some fun. I've been working on things perhaps too seriously lately, and I feel that has had the (paradoxical) effect of not getting out the best in me.
+
+You can read about vibey here: https://github.com/altocodenl/vibey
+And here: https://buildwithvibey.com
+
+BTW, silent episode today, to not bother those around me in the same room.
+
+To build vibey properly, I want to use it. And I thought of a fun project: I have a ton of old civilization 2 savegames. I also have an unfinished script to get info out of those savegames. I want to vibe code an extension to that script that stores the data for entire games (not just a single savegame) in a relational database, which I can later query (or rather, let the AI make queries to it) so I can write stories about those savegames like they were economic history or military history pieces. That, to me, sounds like a lot of fun. And I'd like to do it through vibey.
+
+So let's start!
+
+Let me login to openai/anthropic and also to get some savegames.
+
+Alright! I'm logged in. And I copied the savegames to have them handy.
+
+I'm working on two levels:
+- Working with vibey.
+- Working on vibey.
+
+Things I notice that are not good:
+
+- I don't trust vibey that much yet to store my documents.
+- I still miss vi, particularly when I'm interacting with AI.
+- The dialog is too dissimilar to a document, because it has the box on the bottom.
+- Yep, the vi mode is not working at all, the cursor jumps wrongly.
+- I wonder if there's a vim-like editor for the browser that we can use.
+- I have to refresh the page to see what the assistant is doing, I don't know why.
+
+Things that are good:
+- Having URLs for every part of the app, and being able to go back.
+- That you can refresh the page and the dialog is still there, not lost (compare to typical chat with chatgpt or claude in a browser).
+
+OK, onto the more fun part:
+- I want to extract data from civ2 savegames, to later run analytics.
+- Extract and store the data from the savegames in a relational database.
+- I'm thinking of four tables: civilization, unit, tile, city. And a fifth one: turn (with the general game parameters, which can be changed sometimes from turn to turn).
+- We need an intermediate representation: let's store the data in fourdata format (https://github.com/altocodenl/TODIS?tab=readme-ov-file#pillar-1-single-representation-of-data).
+- We have already three source docs: two from great people who researched this; plus an unfinished script I did to get some data out.
+- I also uploaded a savegame.
+- Let's define what would the columns be for those tables.
+- What you propose is crazy optimized. Let's use the four fourdata types, text, number, list and hash. Be wasteful, it's all good. It'll still blaze through. Let's focus on the columns we need to extract.
+
+I'm going to stop here. Thanks for watching!
