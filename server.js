@@ -2729,9 +2729,14 @@ var routes = [
 
       rs.writeHead (200, {
          'Content-Type': 'text/event-stream',
-         'Cache-Control': 'no-cache',
-         'Connection': 'keep-alive'
+         'Cache-Control': 'no-cache, no-transform',
+         'Connection': 'keep-alive',
+         'X-Accel-Buffering': 'no'
       });
+
+      if (rs.flushHeaders) rs.flushHeaders ();
+      // Kickstart the stream so intermediaries flush headers immediately.
+      rs.write (':ok\n\n');
 
       try {
          var result = await startDialogTurn (
@@ -2742,6 +2747,7 @@ var routes = [
             rq.body.slug,
             function (chunk) {
                rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
+               if (rs.flush) rs.flush ();
             }
          );
 
@@ -2787,9 +2793,14 @@ var routes = [
 
       rs.writeHead (200, {
          'Content-Type': 'text/event-stream',
-         'Cache-Control': 'no-cache',
-         'Connection': 'keep-alive'
+         'Cache-Control': 'no-cache, no-transform',
+         'Connection': 'keep-alive',
+         'X-Accel-Buffering': 'no'
       });
+
+      if (rs.flushHeaders) rs.flushHeaders ();
+      // Kickstart the stream so intermediaries flush headers immediately.
+      rs.write (':ok\n\n');
 
       var controller = beginActiveStream (rq.body.dialogId);
 
@@ -2803,6 +2814,7 @@ var routes = [
             rq.body.model,
             function (chunk) {
                rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
+               if (rs.flush) rs.flush ();
             },
             controller.signal
          );

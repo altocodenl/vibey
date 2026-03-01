@@ -2,6 +2,10 @@
 
 ### 2026-02-26
 
+https://lucumr.pocoo.org/2026/2/9/a-language-for-agents/
+"Now though, we are slowly getting to the point where facts matter more, because you can actually measure what works by seeing how well agents perform with it. No human wants to be subject to surveys, but agents don’t care. We can see how successful they are and where they are struggling."
+
+Prompt:
 I want to make a website. The website should be written in lith/litc and when run, it should output static html with the css inside. I want the website to contain the intro to vibey (the big four plus bring your own inference). Installation instructions that are easily copiable. Please start.
 
 ### 2026-02-25

@@ -492,7 +492,12 @@ viController.handleKey = function (ev, textarea, store, options) {
 
    if (options.light) {
       if (key === 'i' || key === 'a') {
-         if (key === 'a') viController.moveCursor (textarea, viClamp (info.pos + 1, 0, info.text.length));
+         var nextLight = info.pos;
+         if (key === 'a') {
+            nextLight = viClamp (info.pos + 1, 0, info.text.length);
+            viController.moveCursor (textarea, nextLight);
+         }
+         result.cursor = nextLight;
          result.mode = 'insert';
          result.pending = '';
          result.preventDefault = true;
@@ -527,6 +532,7 @@ viController.handleKey = function (ev, textarea, store, options) {
       if (pending === 'g') {
          var ggPos = viController.motion ('gg', info, textarea);
          viController.moveCursor (textarea, ggPos);
+         result.cursor = ggPos;
          result.pending = '';
          result.preventDefault = true;
          return result;
@@ -545,6 +551,7 @@ viController.handleKey = function (ev, textarea, store, options) {
       if (key === '0' && ! pending) {
          var zeroPos = viController.motion ('0', info, textarea);
          viController.moveCursor (textarea, zeroPos);
+         result.cursor = zeroPos;
          result.preventDefault = true;
          result.pending = '';
          return result;
@@ -569,6 +576,7 @@ viController.handleKey = function (ev, textarea, store, options) {
          nextPos = viController.motion (motions [key], viController.cursorInfo (textarea), textarea);
          viController.moveCursor (textarea, nextPos);
       }
+      result.cursor = nextPos;
       result.pending = '';
       result.preventDefault = true;
       return result;
@@ -578,6 +586,7 @@ viController.handleKey = function (ev, textarea, store, options) {
       var ctrlKey = key === 'd' ? 'ctrl-d' : 'ctrl-u';
       var ctrlPos = viController.motion (ctrlKey, info, textarea);
       viController.moveCursor (textarea, ctrlPos);
+      result.cursor = ctrlPos;
       result.preventDefault = true;
       return result;
    }
@@ -640,6 +649,7 @@ viController.handleKey = function (ev, textarea, store, options) {
    if (! options.light && key === 'A') {
       var apos = viController.motion ('$', info, textarea);
       viController.moveCursor (textarea, apos);
+      result.cursor = apos;
       result.mode = 'insert';
       result.preventDefault = true;
       return result;
@@ -648,19 +658,23 @@ viController.handleKey = function (ev, textarea, store, options) {
    if (! options.light && key === 'I') {
       var ipos = viController.motion ('0', info, textarea);
       viController.moveCursor (textarea, ipos);
+      result.cursor = ipos;
       result.mode = 'insert';
       result.preventDefault = true;
       return result;
    }
 
    if (! options.light && key === 'a') {
-      viController.moveCursor (textarea, viClamp (info.pos + 1, 0, info.text.length));
+      var nextA = viClamp (info.pos + 1, 0, info.text.length);
+      viController.moveCursor (textarea, nextA);
+      result.cursor = nextA;
       result.mode = 'insert';
       result.preventDefault = true;
       return result;
    }
 
    if (! options.light && key === 'i') {
+      result.cursor = info.pos;
       result.mode = 'insert';
       result.preventDefault = true;
       return result;
@@ -704,6 +718,7 @@ viController.handleKey = function (ev, textarea, store, options) {
          lpos = viController.motion (motions [key] || key, viController.cursorInfo (textarea), textarea);
          viController.moveCursor (textarea, lpos);
       }
+      result.cursor = lpos;
       result.pending = '';
       result.preventDefault = true;
       return result;
@@ -1322,6 +1337,12 @@ B.mrespond ([
 
       var result = viController.handleKey (ev, textarea, viState, options) || {};
 
+      // Capture desired cursor + scroll before store updates trigger a re-render.
+      var desiredCursor = textarea.selectionStart;
+      var desiredScrollTop = textarea.scrollTop || 0;
+      var desiredScrollLeft = textarea.scrollLeft || 0;
+      if (result.cursor !== undefined) desiredCursor = result.cursor;
+
       if (result.mode) B.call (x, 'set', ['viState', 'mode'], result.mode);
       if (result.pending !== undefined) B.call (x, 'set', ['viState', 'pending'], result.pending);
       if (result.register !== undefined) B.call (x, 'set', ['viState', 'register'], result.register);
@@ -1337,10 +1358,7 @@ B.mrespond ([
       }
 
       // After store changes, gotoB re-renders the textarea which can
-      // reset selectionStart/selectionEnd.  Capture the desired cursor
-      // position and restore it after the DOM settles.
-      var desiredCursor = textarea.selectionStart;
-      if (result.cursor !== undefined) desiredCursor = result.cursor;
+      // reset selectionStart/selectionEnd.  Restore it after the DOM settles.
 
       // Always update the cursor overlay after any vi key press.
       // Motions (h/j/k/l/w/b etc.) move the textarea cursor directly
@@ -1348,18 +1366,26 @@ B.mrespond ([
       // so we must unconditionally sync the overlay position.
       updateViCursorState (x, textarea);
 
-      // Restore cursor position after gotoB's synchronous re-render
+      // Restore cursor + scroll position after gotoB's synchronous re-render
       // may have reset it (e.g. entering insert mode via o/O/i).
-      if (result.value !== undefined || result.mode) {
-         setTimeout (function () {
+      if (result.value !== undefined || result.mode || result.cursor !== undefined) {
+         var restoreCursor = function () {
             var sel = isChat ? '.chat-input' : '.editor-textarea';
             var ta = document.querySelector (sel);
             if (ta) {
                viController.moveCursor (ta, desiredCursor);
+               ta.scrollTop = desiredScrollTop;
+               ta.scrollLeft = desiredScrollLeft;
                ta.focus ();
                updateViCursorState (x, ta);
             }
-         }, 0);
+         };
+         if (window.requestAnimationFrame) {
+            window.requestAnimationFrame (function () {
+               window.requestAnimationFrame (restoreCursor);
+            });
+         }
+         else setTimeout (restoreCursor, 0);
       }
 
       if (result.save) B.call (x, 'save', 'file');
@@ -2590,9 +2616,9 @@ views.dialogs = function () {
                   ['div', {class: 'chat-role'}, 'user'],
                   ['div', {class: 'chat-content'}, optimisticUserMessage]
                ]] : '',
-               streaming && streamingContent ? ['div', {class: 'chat-message chat-assistant'}, [
+               streaming ? ['div', {class: 'chat-message chat-assistant'}, [
                   ['div', {class: 'chat-role'}, 'assistant'],
-                  ['div', {class: 'chat-content'}, streamingContent + '▊']
+                  ['div', {class: 'chat-content'}, (streamingContent || '') + '▊']
                ]] : ''
             ]],
             // Input area

@@ -1889,6 +1889,13 @@
          return true;
       }],
 
+      ['F6-29b: Vi cursor state matches selection after i', function () {
+         var cursor = B.get ('viCursor') || {};
+         if (cursor.line !== 1) return 'Expected viCursor line 1 after i, got: ' + cursor.line;
+         if (cursor.col !== 6) return 'Expected viCursor col 6 after i (pos 5), got: ' + cursor.col;
+         return true;
+      }],
+
       ['F6-30: Escape back to normal', function (done) {
          var ta = document.querySelector ('.editor-textarea');
          if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
@@ -2019,6 +2026,13 @@
          if (file.content !== expected) return 'Content after o wrong. Expected ' + JSON.stringify (expected) + ', got ' + JSON.stringify (file.content);
          // Cursor should be at position 9 (start of new empty line)
          if (ta.selectionStart !== 9) return 'After o on line 0, cursor should be at 9 (new line), got: ' + ta.selectionStart;
+         return true;
+      }],
+
+      ['F6-38b: Vi cursor state matches selection after o', function () {
+         var cursor = B.get ('viCursor') || {};
+         if (cursor.line !== 2) return 'Expected viCursor line 2 after o, got: ' + cursor.line;
+         if (cursor.col !== 1) return 'Expected viCursor col 1 after o, got: ' + cursor.col;
          return true;
       }],
 
