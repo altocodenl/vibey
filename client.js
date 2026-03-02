@@ -254,12 +254,13 @@ var viFindNext = function (text, term, from, backward) {
 };
 
 viController.moveCursor = function (textarea, pos) {
-   textarea.selectionStart = textarea.selectionEnd = viClamp (pos, 0, textarea.value.length);
+   var max = (textarea && textarea.value) ? textarea.value.length : 0;
+   return viClamp (pos, 0, max);
 };
 
-viController.cursorInfo = function (textarea) {
+viController.cursorInfo = function (textarea, posOverride) {
    var val = textarea.value || '';
-   var pos = textarea.selectionStart || 0;
+   var pos = (typeof posOverride === 'number' && ! isNaN (posOverride)) ? posOverride : (textarea.selectionStart || 0);
    var before = val.slice (0, pos);
    var lineNum = before.split ('\n').length - 1;
    var lines = val.split ('\n');
@@ -396,7 +397,7 @@ viController.handleKey = function (ev, textarea, store, options) {
       return result;
    }
 
-   var info = viController.cursorInfo (textarea);
+   var info = viController.cursorInfo (textarea, options.cursorPos);
 
    var pushUndo = function () {
       undoStack = undoStack.concat ([{value: textarea.value, cursor: info.pos}]);
@@ -405,8 +406,6 @@ viController.handleKey = function (ev, textarea, store, options) {
 
    var applyChange = function (nextValue, nextCursor) {
       pushUndo ();
-      textarea.value = nextValue;
-      viController.moveCursor (textarea, nextCursor);
       result.value = nextValue;
       result.cursor = nextCursor;
       result.undoStack = undoStack;
@@ -421,8 +420,7 @@ viController.handleKey = function (ev, textarea, store, options) {
          result.message = 'Pattern not found';
          return result;
       }
-      viController.moveCursor (textarea, idx);
-      result.cursor = idx;
+      result.cursor = viController.moveCursor (textarea, idx);
       return result;
    };
 
@@ -454,8 +452,7 @@ viController.handleKey = function (ev, textarea, store, options) {
                lastSearch = command;
                var found = viFindNext (info.text, command, info.pos + 1, false);
                if (found !== null && found !== -1) {
-                  viController.moveCursor (textarea, found);
-                  result.cursor = found;
+                  result.cursor = viController.moveCursor (textarea, found);
                }
                else result.message = 'Pattern not found';
             }
@@ -495,7 +492,6 @@ viController.handleKey = function (ev, textarea, store, options) {
          var nextLight = info.pos;
          if (key === 'a') {
             nextLight = viClamp (info.pos + 1, 0, info.text.length);
-            viController.moveCursor (textarea, nextLight);
          }
          result.cursor = nextLight;
          result.mode = 'insert';
@@ -531,7 +527,6 @@ viController.handleKey = function (ev, textarea, store, options) {
    if (key === 'g') {
       if (pending === 'g') {
          var ggPos = viController.motion ('gg', info, textarea);
-         viController.moveCursor (textarea, ggPos);
          result.cursor = ggPos;
          result.pending = '';
          result.preventDefault = true;
@@ -550,7 +545,6 @@ viController.handleKey = function (ev, textarea, store, options) {
    if (/^[0-9]$/.test (key)) {
       if (key === '0' && ! pending) {
          var zeroPos = viController.motion ('0', info, textarea);
-         viController.moveCursor (textarea, zeroPos);
          result.cursor = zeroPos;
          result.preventDefault = true;
          result.pending = '';
@@ -573,8 +567,7 @@ viController.handleKey = function (ev, textarea, store, options) {
    if (key === 'h' || key === 'j' || key === 'k' || key === 'l' || key === 'w' || key === 'b' || key === '0' || key === '$' || key === 'G') {
       var nextPos = info.pos;
       for (var step = 0; step < count; step++) {
-         nextPos = viController.motion (motions [key], viController.cursorInfo (textarea), textarea);
-         viController.moveCursor (textarea, nextPos);
+         nextPos = viController.motion (motions [key], viController.cursorInfo (textarea, nextPos), textarea);
       }
       result.cursor = nextPos;
       result.pending = '';
@@ -585,7 +578,6 @@ viController.handleKey = function (ev, textarea, store, options) {
    if (ev.ctrlKey && (key === 'd' || key === 'u')) {
       var ctrlKey = key === 'd' ? 'ctrl-d' : 'ctrl-u';
       var ctrlPos = viController.motion (ctrlKey, info, textarea);
-      viController.moveCursor (textarea, ctrlPos);
       result.cursor = ctrlPos;
       result.preventDefault = true;
       return result;
@@ -648,7 +640,6 @@ viController.handleKey = function (ev, textarea, store, options) {
 
    if (! options.light && key === 'A') {
       var apos = viController.motion ('$', info, textarea);
-      viController.moveCursor (textarea, apos);
       result.cursor = apos;
       result.mode = 'insert';
       result.preventDefault = true;
@@ -657,7 +648,6 @@ viController.handleKey = function (ev, textarea, store, options) {
 
    if (! options.light && key === 'I') {
       var ipos = viController.motion ('0', info, textarea);
-      viController.moveCursor (textarea, ipos);
       result.cursor = ipos;
       result.mode = 'insert';
       result.preventDefault = true;
@@ -666,7 +656,6 @@ viController.handleKey = function (ev, textarea, store, options) {
 
    if (! options.light && key === 'a') {
       var nextA = viClamp (info.pos + 1, 0, info.text.length);
-      viController.moveCursor (textarea, nextA);
       result.cursor = nextA;
       result.mode = 'insert';
       result.preventDefault = true;
@@ -685,8 +674,6 @@ viController.handleKey = function (ev, textarea, store, options) {
          var last = undoStack [undoStack.length - 1];
          undoStack = undoStack.slice (0, -1);
          redoStack = redoStack.concat ([{value: info.text, cursor: info.pos}]);
-         textarea.value = last.value;
-         viController.moveCursor (textarea, last.cursor);
          result.value = last.value;
          result.cursor = last.cursor;
          result.undoStack = undoStack;
@@ -701,8 +688,6 @@ viController.handleKey = function (ev, textarea, store, options) {
          var redo = redoStack [redoStack.length - 1];
          redoStack = redoStack.slice (0, -1);
          undoStack = undoStack.concat ([{value: info.text, cursor: info.pos}]);
-         textarea.value = redo.value;
-         viController.moveCursor (textarea, redo.cursor);
          result.value = redo.value;
          result.cursor = redo.cursor;
          result.undoStack = undoStack;
@@ -715,8 +700,7 @@ viController.handleKey = function (ev, textarea, store, options) {
    if (options.light && (key === 'h' || key === 'j' || key === 'k' || key === 'l' || key === 'w' || key === 'b' || key === '0' || key === '$' || key === 'G')) {
       var lpos = info.pos;
       for (var step2 = 0; step2 < count; step2++) {
-         lpos = viController.motion (motions [key] || key, viController.cursorInfo (textarea), textarea);
-         viController.moveCursor (textarea, lpos);
+         lpos = viController.motion (motions [key] || key, viController.cursorInfo (textarea, lpos), textarea);
       }
       result.cursor = lpos;
       result.pending = '';
@@ -781,15 +765,29 @@ var computeViOverlay = function (textarea, line, col) {
    };
 };
 
-var updateViCursorState = function (x, textarea) {
-   if (! textarea) return;
-   var info = viController.cursorInfo (textarea);
-   B.call (x, 'set', 'viCursor', {line: info.line + 1, col: info.col + 1});
-   var overlay = computeViOverlay (textarea, info.line, info.col);
-   if (overlay) {
-      var isChat = textarea.classList && textarea.classList.contains ('chat-input');
-      B.call (x, 'set', isChat ? 'viOverlayChat' : 'viOverlayEditor', overlay);
+var logViDebug = function (label, payload) {
+   if (! window.__vibeyViDebug) return;
+   try {
+      console.log ('[vi-debug] ' + label + ' ' + JSON.stringify (payload || {}));
    }
+   catch (e) {}
+};
+
+var updateViCursorState = function (x, textarea, cursorPos) {
+   if (! textarea) return;
+   var val = textarea.value || '';
+   var pos = (typeof cursorPos === 'number') ? cursorPos : (textarea.selectionStart || 0);
+   var before = val.slice (0, pos);
+   var line = before.split ('\n').length - 1;
+   var lastNl = before.lastIndexOf ('\n');
+   var col = lastNl === -1 ? pos : (pos - lastNl - 1);
+   var isChat = textarea.classList && textarea.classList.contains ('chat-input');
+   var nextCursor = {line: line + 1, col: col + 1};
+   B.call (x, 'mset', 'viCursor', nextCursor);
+   B.call (x, 'mset', 'viCursorPos', pos);
+
+   var overlay = computeViOverlay (textarea, line, col);
+   if (overlay) B.call (x, 'mset', isChat ? 'viOverlayChat' : 'viOverlayEditor', overlay);
 };
 
 // *** RESPONDERS ***
@@ -819,6 +817,7 @@ B.mrespond ([
          redoStack: []
       });
       B.call (x, 'set', 'viCursor', {line: 1, col: 1});
+      B.call (x, 'set', 'viCursorPos', 0);
       B.call (x, 'set', 'viOverlayEditor', null);
       B.call (x, 'set', 'viOverlayChat', null);
       B.call (x, 'set', 'uploads', []);
@@ -1239,6 +1238,7 @@ B.mrespond ([
             });
             B.call (x, 'set', 'currentUpload', null);
             B.call (x, 'set', 'viCursor', {line: 1, col: 1});
+            B.call (x, 'set', 'viCursorPos', 0);
             if (dialogFile) B.call (x, 'reset', 'chatInput');
             B.call (x, 'write', 'hash');
             // Initialize vi cursor overlay after DOM redraws with the new file
@@ -1341,65 +1341,78 @@ B.mrespond ([
 
       var viState = B.get ('viState') || {};
       var isChat = (textarea.classList || {}).contains && textarea.classList.contains ('chat-input');
+
+      var storedCursorPos = B.get ('viCursorPos');
+      var dataCursorPos = textarea.dataset ? parseInt (textarea.dataset.viCursorPos || '', 10) : NaN;
+      var baseCursorPos = (typeof storedCursorPos === 'number' && ! isNaN (storedCursorPos))
+         ? storedCursorPos
+         : (! isNaN (dataCursorPos) ? dataCursorPos : (textarea.selectionStart || 0));
+
       var options = {
          allowCommand: ! isChat,
          allowSearch: ! isChat,
          allowSend: isChat,
-         light: isChat
+         light: isChat,
+         deferValue: true,
+         cursorPos: baseCursorPos
       };
 
+      var beforePos = baseCursorPos;
       var result = viController.handleKey (ev, textarea, viState, options) || {};
 
-      // Capture desired cursor + scroll before store updates trigger a re-render.
-      var desiredCursor = textarea.selectionStart;
-      var desiredScrollTop = textarea.scrollTop || 0;
-      var desiredScrollLeft = textarea.scrollLeft || 0;
-      if (result.cursor !== undefined) desiredCursor = result.cursor;
+      var desiredCursor = (result.cursor !== undefined) ? result.cursor : baseCursorPos;
 
-      if (result.mode) B.call (x, 'set', ['viState', 'mode'], result.mode);
-      if (result.pending !== undefined) B.call (x, 'set', ['viState', 'pending'], result.pending);
-      if (result.register !== undefined) B.call (x, 'set', ['viState', 'register'], result.register);
-      if (result.message !== undefined) B.call (x, 'set', ['viState', 'message'], result.message);
-      if (result.lastSearch !== undefined) B.call (x, 'set', ['viState', 'lastSearch'], result.lastSearch);
-      if (result.commandPrefix !== undefined) B.call (x, 'set', ['viState', 'commandPrefix'], result.commandPrefix);
-      if (result.undoStack !== undefined) B.call (x, 'set', ['viState', 'undoStack'], result.undoStack);
-      if (result.redoStack !== undefined) B.call (x, 'set', ['viState', 'redoStack'], result.redoStack);
+      var scheduleCursorUpdate = function () {
+         setTimeout (function () {
+            var selector = isChat ? '.chat-input' : '.editor-textarea';
+            var node = document.querySelector (selector);
+            if (! node) return;
+            updateViCursorState (x, node, desiredCursor);
+         }, 0);
+      };
 
-      if (result.value !== undefined) {
-         if (isChat) B.call (x, 'set', 'chatInput', result.value);
-         else B.call (x, 'set', ['currentFile', 'content'], result.value);
-      }
+      logViDebug ('key', {
+         key: ev.key,
+         mode: viState.mode,
+         beforePos: beforePos,
+         desiredCursor: desiredCursor,
+         resultCursor: result.cursor,
+         pending: result.pending,
+         afterPos: desiredCursor,
+         storeCursor: (B.store && B.store.viCursor) ? B.store.viCursor : null,
+         dataLine: textarea.dataset ? textarea.dataset.viCursorLine : null,
+         dataCol: textarea.dataset ? textarea.dataset.viCursorCol : null,
+         dataPos: textarea.dataset ? textarea.dataset.viCursorPos : null
+      });
 
-      // After store changes, gotoB re-renders the textarea which can
-      // reset selectionStart/selectionEnd.  Restore it after the DOM settles.
+      var nextState = null;
+      var setState = function (key, value) {
+         if (value === undefined) return;
+         if (viState && viState [key] === value) return;
+         if (! nextState) nextState = teishi.copy (viState || {});
+         nextState [key] = value;
+      };
 
-      // Always update the cursor overlay after any vi key press.
-      // Motions (h/j/k/l/w/b etc.) move the textarea cursor directly
-      // via viController.moveCursor but don't set result.cursor,
-      // so we must unconditionally sync the overlay position.
-      updateViCursorState (x, textarea);
+      setState ('mode', result.mode);
+      setState ('pending', result.pending);
+      setState ('register', result.register);
+      setState ('message', result.message);
+      setState ('lastSearch', result.lastSearch);
+      setState ('commandPrefix', result.commandPrefix);
+      setState ('undoStack', result.undoStack);
+      setState ('redoStack', result.redoStack);
 
-      // Restore cursor + scroll position after gotoB's synchronous re-render
-      // may have reset it (e.g. entering insert mode via o/O/i).
-      if (result.value !== undefined || result.mode || result.cursor !== undefined) {
-         var restoreCursor = function () {
-            var sel = isChat ? '.chat-input' : '.editor-textarea';
-            var ta = document.querySelector (sel);
-            if (ta) {
-               viController.moveCursor (ta, desiredCursor);
-               ta.scrollTop = desiredScrollTop;
-               ta.scrollLeft = desiredScrollLeft;
-               ta.focus ();
-               updateViCursorState (x, ta);
+      if (nextState || result.value !== undefined) {
+         setTimeout (function () {
+            if (nextState) B.call (x, 'set', 'viState', nextState);
+            if (result.value !== undefined) {
+               if (isChat) B.call (x, 'set', 'chatInput', result.value);
+               else B.call (x, 'set', ['currentFile', 'content'], result.value);
             }
-         };
-         if (window.requestAnimationFrame) {
-            window.requestAnimationFrame (function () {
-               window.requestAnimationFrame (restoreCursor);
-            });
-         }
-         else setTimeout (restoreCursor, 0);
+         }, 0);
       }
+
+      scheduleCursorUpdate ();
 
       if (result.save) B.call (x, 'save', 'file');
       if (result.close) B.call (x, 'close', 'file', !! result.forceClose);
@@ -1411,7 +1424,12 @@ B.mrespond ([
    ['vi', 'cursor', function (x, ev) {
       var textarea = ev.target;
       if (! textarea) return;
-      updateViCursorState (x, textarea);
+      var storedCursorPos = B.get ('viCursorPos');
+      var dataCursorPos = textarea.dataset ? parseInt (textarea.dataset.viCursorPos || '', 10) : NaN;
+      var pos = (typeof storedCursorPos === 'number' && ! isNaN (storedCursorPos))
+         ? storedCursorPos
+         : (! isNaN (dataCursorPos) ? dataCursorPos : (textarea.selectionStart || 0));
+      updateViCursorState (x, textarea, pos);
    }],
 
    ['toggle', 'editorPreview', function (x) {
@@ -1843,7 +1861,7 @@ B.mrespond ([
 var views = {};
 
 views.files = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor'], ['viOverlayEditor'], ['uploads'], ['currentUpload'], ['uploading']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor, viOverlayEditor, uploads, currentUpload, uploading) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor'], ['viCursorPos'], ['viOverlayEditor'], ['uploads'], ['currentUpload'], ['uploading']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor, viCursorPos, viOverlayEditor, uploads, currentUpload, uploading) {
       var docFiles = dale.fil (files || [], undefined, function (name) {
          if (isDocFile (name)) return name;
       });
@@ -1954,14 +1972,19 @@ views.files = function () {
             ]],
             editorPreview
                ? ['div', {class: 'editor-preview', opaque: true}, ['LITERAL', renderMarkdownWithEmbeds (currentFile.content, currentProject)]]
-               : ['div', {style: style ({display: 'flex', 'flex-direction': 'column', flex: 1, 'min-height': 0})}, [
+               : ['div', {style: style ({display: 'flex', 'flex-direction': 'column', flex: 1, 'min-height': 0}), opaque: viMode}, [
                   ['div', {class: 'vi-textarea-wrap'}, [
                      ['textarea', {
                         class: 'editor-textarea' + (viMode ? (' vi-active' + (viState.mode === 'insert' ? ' vi-insert' : '')) : ''),
-                        readonly: viMode && viState.mode !== 'insert',
-                        oninput: viMode
-                           ? B.ev (['set', ['currentFile', 'content']], ['vi', 'cursor', {raw: 'event'}])
-                           : B.ev ('set', ['currentFile', 'content']),
+                        opaque: true,
+                        'data-vi-cursor-pos': (viCursorPos !== undefined && viCursorPos !== null) ? String (viCursorPos) : '',
+                        'data-vi-cursor-line': String ((viCursor && viCursor.line) ? viCursor.line : 1),
+                        'data-vi-cursor-col': String ((viCursor && viCursor.col) ? viCursor.col : 1),
+                        oninput: (viMode && viState.mode !== 'insert')
+                           ? B.ev ('vi', 'cursor', {raw: 'event'})
+                           : (viMode
+                              ? B.ev (['set', ['currentFile', 'content']], ['vi', 'cursor', {raw: 'event'}])
+                              : B.ev ('set', ['currentFile', 'content'])),
                         onkeydown: viMode
                            ? B.ev ('vi', 'key', {raw: 'event'})
                            : B.ev ('keydown', 'editor', {raw: 'event'}),
@@ -2643,8 +2666,9 @@ views.dialogs = function () {
                      rows: 4,
                      value: chatInput || '',
                      placeholder: 'Write your message... (Cmd+Enter to send)',
-                     readonly: viMode && viState.mode !== 'insert',
-                     oninput: B.ev ('set', 'chatInput'),
+                     oninput: (viMode && viState.mode !== 'insert')
+                        ? B.ev ('vi', 'cursor', {raw: 'event'})
+                        : B.ev ('set', 'chatInput'),
                      onkeydown: viMode
                         ? B.ev ('vi', 'key', {raw: 'event'})
                         : B.ev ('keydown', 'chatInput', {raw: 'event'}),
