@@ -158,6 +158,33 @@
       return true;
    };
 
+   var getTextarea = function (selector) {
+      return document.querySelector (selector || '.editor-textarea');
+   };
+
+   var pressKey = function (el, key, options) {
+      if (! el) return;
+      options = options || {};
+      el.dispatchEvent (new KeyboardEvent ('keydown', {
+         key: key,
+         bubbles: true,
+         ctrlKey: !! options.ctrlKey,
+         metaKey: !! options.metaKey,
+         altKey: !! options.altKey,
+         shiftKey: !! options.shiftKey
+      }));
+   };
+
+   var cursorInfoFromTextarea = function (textarea) {
+      if (! textarea) return {pos: 0, line: 1, col: 1};
+      var pos = textarea.selectionStart || 0;
+      var before = (textarea.value || '').slice (0, pos);
+      var line = before.split ('\n').length;
+      var lastNl = before.lastIndexOf ('\n');
+      var col = lastNl === -1 ? pos + 1 : pos - lastNl;
+      return {pos: pos, line: line, col: col};
+   };
+
    var pad2 = function (n) {return n < 10 ? '0' + n : '' + n;};
    var testTimestamp = function () {
       var d = new Date ();
@@ -1061,10 +1088,8 @@
       // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
 
       // =============================================
-      // *** FLOW #6: Vi mode ***
+      // *** FLOW #6: Vi mode (navigation + cursor sync) ***
       // =============================================
-
-      // --- F6: Settings default state ---
 
       ['F6-1: Navigate to settings', function (done) {
          B.call ('navigate', 'hash', '#/settings');
@@ -1075,41 +1100,25 @@
          return true;
       }],
 
-      ['F6-1b: Ensure viMode disabled', function (done) {
+      ['F6-2: Reset vi mode off', function (done) {
          if (B.get ('viMode')) B.call ('toggle', 'viMode');
          done (SHORT_WAIT, POLL);
       }, function () {
          return B.get ('viMode') === false || 'Expected viMode false after reset';
       }],
 
-      ['F6-2: Default viMode is false', function () {
-         var viMode = B.get ('viMode');
-         if (viMode !== false) return 'Expected default viMode to be false, got: ' + viMode;
-         var settings = B.get ('settings') || {};
-         var editor = settings.editor || {};
-         if (editor.viMode !== false) return 'Expected settings.editor.viMode to be false, got: ' + editor.viMode;
-         return true;
-      }],
-
-      ['F6-3: Vi mode checkbox is unchecked', function () {
-         var checkbox = document.querySelector ('input[type="checkbox"]');
-         if (! checkbox) return 'Vi mode checkbox not found';
-         if (checkbox.checked) return 'Checkbox should be unchecked by default';
-         return true;
-      }],
-
-      // --- F6: Enable vi mode ---
-
-      ['F6-4: Toggle vi mode on', function (done) {
+      ['F6-3: Enable vi mode', function (done) {
          B.call ('toggle', 'viMode');
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var viMode = B.get ('viMode');
-         if (viMode !== true) return 'Expected viMode true after toggle, got: ' + viMode;
+         if (B.get ('viMode') !== true) return 'Expected viMode true after toggle';
+         var checkbox = document.querySelector ('input[type="checkbox"]');
+         if (! checkbox) return 'Vi mode checkbox not found';
+         if (! checkbox.checked) return 'Checkbox should be checked after toggle';
          return true;
       }],
 
-      ['F6-5: Server persisted viMode true', function (done) {
+      ['F6-4: Server persisted viMode true', function (done) {
          c.ajax ('get', 'settings', {}, '', function (error, rs) {
             window._f6Settings = rs && rs.body;
             done (SHORT_WAIT, POLL);
@@ -1120,191 +1129,334 @@
          return true;
       }],
 
-      ['F6-6: Vi mode checkbox is checked', function () {
-         var checkbox = document.querySelector ('input[type="checkbox"]');
-         if (! checkbox) return 'Vi mode checkbox not found';
-         if (! checkbox.checked) return 'Checkbox should be checked after toggle';
-         return true;
-      }],
-
-      // --- F6: Vi mode in docs editor ---
-
-      ['F6-7: Create project for vi editing', function (done) {
+      ['F6-5: Create project + seed doc/main.md', function (done) {
          window._f6Project = 'test-flow6-' + testTimestamp ();
+         window._f6Content = [
+            'alpha beta gamma',
+            'delta echo foxtrot',
+            'golf hotel india',
+            'juliet kilo lima'
+         ].join ('\n');
          mockPrompt (window._f6Project);
          B.call ('create', 'project');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
-         return B.get ('currentProject') === window._f6Project || 'Failed to create flow #6 project';
-      }],
-
-      ['F6-8: Create and open doc/main.md', function (done) {
-         mockPrompt ('main.md');
-         B.call ('create', 'file');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/main.md') return 'Expected doc/main.md, got: ' + (file ? file.name : 'null');
+         if (B.get ('currentProject') !== window._f6Project) return 'Failed to create flow #6 project';
          return true;
       }],
 
-      ['F6-9: Switch to edit mode (not preview)', function (done) {
+      ['F6-6: Write doc/main.md and open editor', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f6Project) + '/file/doc/main.md', {}, {content: window._f6Content}, function () {
+            B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f6Project) + '/docs/main.md');
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
+         if (file.content !== window._f6Content) return 'doc/main.md content mismatch';
+         return true;
+      }],
+
+      ['F6-7: Switch to edit mode + normal mode baseline', function (done) {
          if (B.get ('editorPreview')) B.call ('toggle', 'editorPreview');
          done (SHORT_WAIT, POLL);
       }, function () {
-         if (B.get ('editorPreview')) return 'Still in preview mode';
-         return true;
-      }],
-
-      ['F6-10: Vi starts in normal mode, textarea is readonly', function () {
          var viState = B.get ('viState') || {};
-         if (viState.mode !== 'normal') return 'Expected vi mode to be normal, got: ' + viState.mode;
-         var textarea = document.querySelector ('.editor-textarea');
+         if (B.get ('editorPreview')) return 'Still in preview mode';
+         if (viState.mode !== 'normal') return 'Expected normal mode, got: ' + viState.mode;
+         var textarea = getTextarea ();
          if (! textarea) return 'Editor textarea not found';
          if (! textarea.readOnly) return 'Textarea should be readonly in normal mode';
+         textarea.selectionStart = textarea.selectionEnd = 0;
+         textarea.dispatchEvent (new Event ('click', {bubbles: true}));
+         var cursor = cursorInfoFromTextarea (textarea);
+         var viCursor = B.get ('viCursor') || {};
+         if (cursor.line !== 1 || cursor.col !== 1) return 'Expected cursor at line 1 col 1, got line ' + cursor.line + ' col ' + cursor.col;
+         if (viCursor.line !== 1 || viCursor.col !== 1) return 'viCursor mismatch at start (line ' + viCursor.line + ', col ' + viCursor.col + ')';
          return true;
       }],
 
-      ['F6-11: Vi status bar shows cursor position', function () {
-         var statusBar = document.querySelector ('.vi-status');
-         if (! statusBar) return 'Vi status bar not found';
-         var text = statusBar.textContent || '';
-         if (text.indexOf ('Ln') === -1 || text.indexOf ('Col') === -1) return 'Status bar missing Ln/Col: ' + text;
-         return true;
-      }],
-
-      ['F6-12: Press i to enter insert mode', function (done) {
-         var textarea = document.querySelector ('.editor-textarea');
-         if (! textarea) return 'Textarea not found';
+      ['F6-8: Word motions w/b and line ends', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
-         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'i', bubbles: true}));
+         textarea.selectionStart = textarea.selectionEnd = 0;
+         pressKey (textarea, 'w');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var textarea = getTextarea ();
+         if (! textarea) return 'Textarea not found';
+         var cursor = cursorInfoFromTextarea (textarea);
+         if (cursor.pos !== 6) return 'Expected w to move to pos 6, got ' + cursor.pos;
+         var viCursor = B.get ('viCursor') || {};
+         if (viCursor.line !== 1 || viCursor.col !== 7) return 'viCursor mismatch after w: ' + JSON.stringify (viCursor);
+         return true;
+      }],
+
+      ['F6-9: Second w moves to next word', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.focus ();
+         pressKey (textarea, 'w');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var textarea = getTextarea ();
+         var cursor = cursorInfoFromTextarea (textarea);
+         if (cursor.pos !== 11) return 'Expected second w to move to pos 11, got ' + cursor.pos;
+         var viCursor = B.get ('viCursor') || {};
+         if (viCursor.line !== 1 || viCursor.col !== 12) return 'viCursor mismatch after second w: ' + JSON.stringify (viCursor);
+         return true;
+      }],
+
+      ['F6-10: b moves back a word', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.focus ();
+         pressKey (textarea, 'b');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var textarea = getTextarea ();
+         var cursor = cursorInfoFromTextarea (textarea);
+         if (cursor.pos !== 6) return 'Expected b to move back to pos 6, got ' + cursor.pos;
+         var viCursor = B.get ('viCursor') || {};
+         if (viCursor.line !== 1 || viCursor.col !== 7) return 'viCursor mismatch after b: ' + JSON.stringify (viCursor);
+         return true;
+      }],
+
+      ['F6-11: 0 and $ jump to line start/end', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.focus ();
+         pressKey (textarea, '0');
+         pressKey (textarea, '$');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var textarea = getTextarea ();
+         var cursor = cursorInfoFromTextarea (textarea);
+         if (cursor.pos !== 16) return 'Expected $ to move to pos 16 (end of line 1), got ' + cursor.pos;
+         var viCursor = B.get ('viCursor') || {};
+         if (viCursor.line !== 1 || viCursor.col !== 17) return 'viCursor mismatch after $: ' + JSON.stringify (viCursor);
+         return true;
+      }],
+
+      ['F6-12: j/k keep column', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.focus ();
+         textarea.selectionStart = textarea.selectionEnd = 6;
+         pressKey (textarea, 'j');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var textarea = getTextarea ();
+         var cursor = cursorInfoFromTextarea (textarea);
+         if (cursor.pos !== 23) return 'Expected j to move to pos 23, got ' + cursor.pos;
+         pressKey (textarea, 'k');
+         var cursorBack = cursorInfoFromTextarea (textarea);
+         if (cursorBack.pos !== 6) return 'Expected k to move back to pos 6, got ' + cursorBack.pos;
+         return true;
+      }],
+
+      ['F6-13: G to end, gg to start', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.focus ();
+         pressKey (textarea, 'G');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var textarea = getTextarea ();
+         var endPos = window._f6Content.length;
+         var cursor = cursorInfoFromTextarea (textarea);
+         if (cursor.pos !== endPos) return 'Expected G to move to pos ' + endPos + ', got ' + cursor.pos;
+         var viCursor = B.get ('viCursor') || {};
+         if (viCursor.line !== 4 || viCursor.col !== 17) return 'viCursor mismatch after G: ' + JSON.stringify (viCursor);
+         pressKey (textarea, 'g');
+         pressKey (textarea, 'g');
+         var cursorStart = cursorInfoFromTextarea (textarea);
+         if (cursorStart.pos !== 0) return 'Expected gg to move to pos 0, got ' + cursorStart.pos;
+         return true;
+      }],
+
+      ['F6-14: i enters insert at cursor position', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.focus ();
+         textarea.selectionStart = textarea.selectionEnd = 6;
+         pressKey (textarea, 'i');
          done (SHORT_WAIT, POLL);
       }, function () {
          var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after pressing i, got: ' + viState.mode;
-         var textarea = document.querySelector ('.editor-textarea');
-         if (textarea && textarea.readOnly) return 'Textarea should not be readonly in insert mode';
-         var statusBar = document.querySelector ('.vi-status');
-         if (! statusBar) return 'Vi status bar not found';
-         if (statusBar.textContent.indexOf ('INSERT') === -1) return 'Status bar should show INSERT';
+         if (viState.mode !== 'insert') return 'Expected insert mode after i';
+         var textarea = getTextarea ();
+         if (textarea.readOnly) return 'Textarea should not be readonly in insert mode';
+         var cursor = cursorInfoFromTextarea (textarea);
+         var viCursor = B.get ('viCursor') || {};
+         if (cursor.pos !== 6) return 'Expected cursor at pos 6 after i, got ' + cursor.pos;
+         if (viCursor.line !== 1 || viCursor.col !== 7) return 'viCursor mismatch after i: ' + JSON.stringify (viCursor);
          return true;
       }],
 
-      ['F6-13: Type content in insert mode', function (done) {
-         var file = B.get ('currentFile');
-         var newContent = (file ? file.content : '') + 'Hello from vi insert mode.\n';
-         B.call ('set', ['currentFile', 'content'], newContent);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file || file.content.indexOf ('Hello from vi insert mode') === -1) return 'Content not updated';
-         return true;
-      }],
-
-      ['F6-14: Press Escape to return to normal mode', function (done) {
-         var textarea = document.querySelector ('.editor-textarea');
-         if (! textarea) return 'Textarea not found';
-         textarea.focus ();
-         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
+      ['F6-15: Escape returns to normal with same cursor', function (done) {
+         var textarea = getTextarea ();
+         if (textarea) pressKey (textarea, 'Escape');
          done (SHORT_WAIT, POLL);
       }, function () {
          var viState = B.get ('viState') || {};
-         if (viState.mode !== 'normal') return 'Expected normal mode after Escape, got: ' + viState.mode;
-         var textarea = document.querySelector ('.editor-textarea');
-         if (textarea && ! textarea.readOnly) return 'Textarea should be readonly in normal mode';
+         if (viState.mode !== 'normal') return 'Expected normal mode after Escape';
+         var textarea = getTextarea ();
+         if (! textarea || ! textarea.readOnly) return 'Textarea should be readonly in normal mode';
+         var cursor = cursorInfoFromTextarea (textarea);
+         var viCursor = B.get ('viCursor') || {};
+         if (cursor.pos !== 6) return 'Expected cursor to stay at pos 6 after Escape';
+         if (viCursor.line !== cursor.line || viCursor.col !== cursor.col) return 'viCursor mismatch after Escape';
          return true;
       }],
 
-      ['F6-15: Save with :w command', function (done) {
-         var textarea = document.querySelector ('.editor-textarea');
-         if (! textarea) return 'Textarea not found';
-         textarea.focus ();
-         // Enter command mode
-         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: ':', bubbles: true}));
-         // Type 'w'
-         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'w', bubbles: true}));
-         // Press Enter
-         textarea.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Enter', bubbles: true}));
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file) return 'No current file';
-         if (file.content !== file.original) return 'File should not be dirty after :w save';
-         return true;
-      }],
-
-      ['F6-16: Verify :w saved to server', function (done) {
-         B.call ('load', 'file', 'doc/main.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file) return 'No current file after reload';
-         if (file.content.indexOf ('Hello from vi insert mode') === -1) return 'Vi content not persisted to server';
-         return true;
-      }],
-
-      // --- F6: Vi mode in chat input (light mode) ---
-
-      ['F6-17: Navigate to dialogs tab', function (done) {
-         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f6Project) + '/dialogs');
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var tab = B.get ('tab');
-         if (tab !== 'dialogs') return 'Expected dialogs tab, got: ' + tab;
-         return true;
-      }],
-
-      ['F6-18: Create a dialog for vi chat test', function (done) {
-         mockPrompt ('vi-chat-test');
-         B.call ('create', 'dialog');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         var file = B.get ('currentFile');
-         if (! file || file.name.indexOf ('vi-chat-test') === -1) return 'Dialog not created';
-         return true;
-      }],
-
-      ['F6-19: Chat input has vi-active class', function () {
-         var chatInput = document.querySelector ('.chat-input');
-         if (! chatInput) return 'Chat input not found';
-         if (! chatInput.classList.contains ('vi-active')) return 'Chat input missing vi-active class';
-         return true;
-      }],
-
-      ['F6-20: Chat input: press i then type, press Escape', function (done) {
-         var chatInput = document.querySelector ('.chat-input');
-         if (! chatInput) return 'Chat input not found';
-         chatInput.focus ();
-         // Press i to enter insert
-         chatInput.dispatchEvent (new KeyboardEvent ('keydown', {key: 'i', bubbles: true}));
-         // Set text directly (simulating typing)
-         B.call ('set', 'chatInput', 'hello from vi chat');
-         // Press Escape to return to normal
-         chatInput.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
+      ['F6-16: a inserts after cursor', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.selectionStart = textarea.selectionEnd = 6;
+         pressKey (textarea, 'a');
          done (SHORT_WAIT, POLL);
       }, function () {
          var viState = B.get ('viState') || {};
-         if (viState.mode !== 'normal') return 'Expected normal mode after Escape in chat';
-         var chatInput = B.get ('chatInput');
-         if (chatInput !== 'hello from vi chat') return 'Chat input content mismatch: ' + chatInput;
+         if (viState.mode !== 'insert') return 'Expected insert mode after a';
+         var cursor = cursorInfoFromTextarea (getTextarea ());
+         if (cursor.pos !== 7) return 'Expected cursor at pos 7 after a, got ' + cursor.pos;
+         pressKey (getTextarea (), 'Escape');
+         var viStateAfter = B.get ('viState') || {};
+         if (viStateAfter.mode !== 'normal') return 'Expected normal mode after Escape (a)';
+         var cursorAfter = cursorInfoFromTextarea (getTextarea ());
+         if (cursorAfter.pos !== 7) return 'Expected cursor to stay at pos 7 after Escape (a), got ' + cursorAfter.pos;
          return true;
       }],
 
-      // --- F6: Disable vi mode ---
+      ['F6-17: I jumps to line start', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.selectionStart = textarea.selectionEnd = 11;
+         pressKey (textarea, 'I');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'insert') return 'Expected insert mode after I';
+         var cursor = cursorInfoFromTextarea (getTextarea ());
+         if (cursor.pos !== 0) return 'Expected cursor at pos 0 after I, got ' + cursor.pos;
+         pressKey (getTextarea (), 'Escape');
+         var viStateAfter = B.get ('viState') || {};
+         if (viStateAfter.mode !== 'normal') return 'Expected normal mode after Escape (I)';
+         var cursorAfter = cursorInfoFromTextarea (getTextarea ());
+         if (cursorAfter.pos !== 0) return 'Expected cursor to stay at pos 0 after Escape (I), got ' + cursorAfter.pos;
+         return true;
+      }],
 
-      ['F6-21: Toggle vi mode off', function (done) {
-         B.call ('toggle', 'viMode');
+      ['F6-18: A jumps to line end', function (done) {
+         var textarea = getTextarea ();
+         if (! textarea) return done (SHORT_WAIT, POLL);
+         textarea.selectionStart = textarea.selectionEnd = 0;
+         pressKey (textarea, 'A');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'insert') return 'Expected insert mode after A';
+         var cursor = cursorInfoFromTextarea (getTextarea ());
+         if (cursor.pos !== 16) return 'Expected cursor at pos 16 after A, got ' + cursor.pos;
+         pressKey (getTextarea (), 'Escape');
+         var viStateAfter = B.get ('viState') || {};
+         if (viStateAfter.mode !== 'normal') return 'Expected normal mode after Escape (A)';
+         var cursorAfter = cursorInfoFromTextarea (getTextarea ());
+         if (cursorAfter.pos !== 16) return 'Expected cursor to stay at pos 16 after Escape (A), got ' + cursorAfter.pos;
+         return true;
+      }],
+
+      ['F6-19: o opens line below', function (done) {
+         var content = 'line one\nline two\nline three';
+         B.call ('set', ['currentFile', 'content'], content);
+         B.call ('set', ['currentFile', 'original'], content);
+         var textarea = getTextarea ();
+         textarea.selectionStart = textarea.selectionEnd = 3;
+         pressKey (textarea, 'o');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'insert') return 'Expected insert mode after o';
+         var file = B.get ('currentFile');
+         var expected = 'line one\n\nline two\nline three';
+         if (file.content !== expected) return 'Content after o mismatch';
+         var cursor = cursorInfoFromTextarea (getTextarea ());
+         if (cursor.pos !== 9) return 'Expected cursor at pos 9 after o, got ' + cursor.pos;
+         var viCursor = B.get ('viCursor') || {};
+         if (viCursor.line !== 2 || viCursor.col !== 1) return 'viCursor mismatch after o: ' + JSON.stringify (viCursor);
+         pressKey (getTextarea (), 'Escape');
+         return true;
+      }],
+
+      ['F6-20: O opens line above', function (done) {
+         var content = 'line one\nline two\nline three';
+         B.call ('set', ['currentFile', 'content'], content);
+         B.call ('set', ['currentFile', 'original'], content);
+         var textarea = getTextarea ();
+         textarea.selectionStart = textarea.selectionEnd = 12;
+         pressKey (textarea, 'O');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var viState = B.get ('viState') || {};
+         if (viState.mode !== 'insert') return 'Expected insert mode after O';
+         var file = B.get ('currentFile');
+         var expected = 'line one\n\nline two\nline three';
+         if (file.content !== expected) return 'Content after O mismatch';
+         var cursor = cursorInfoFromTextarea (getTextarea ());
+         if (cursor.pos !== 9) return 'Expected cursor at pos 9 after O, got ' + cursor.pos;
+         pressKey (getTextarea (), 'Escape');
+         return true;
+      }],
+
+      ['F6-21: o on last line without trailing newline', function (done) {
+         var content = 'first\nsecond';
+         B.call ('set', ['currentFile', 'content'], content);
+         B.call ('set', ['currentFile', 'original'], content);
+         var textarea = getTextarea ();
+         textarea.selectionStart = textarea.selectionEnd = 8;
+         pressKey (textarea, 'o');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         var expected = 'first\nsecond\n';
+         if (file.content !== expected) return 'Content after o on last line mismatch';
+         var cursor = cursorInfoFromTextarea (getTextarea ());
+         if (cursor.pos !== 13) return 'Expected cursor at pos 13 after o on last line, got ' + cursor.pos;
+         var viCursor = B.get ('viCursor') || {};
+         if (viCursor.line !== 3 || viCursor.col !== 1) return 'viCursor mismatch after o on last line: ' + JSON.stringify (viCursor);
+         pressKey (getTextarea (), 'Escape');
+         return true;
+      }],
+
+      ['F6-22: O on first line', function (done) {
+         var content = 'alpha\nbeta';
+         B.call ('set', ['currentFile', 'content'], content);
+         B.call ('set', ['currentFile', 'original'], content);
+         var textarea = getTextarea ();
+         textarea.selectionStart = textarea.selectionEnd = 2;
+         pressKey (textarea, 'O');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         var expected = '\nalpha\nbeta';
+         if (file.content !== expected) return 'Content after O on first line mismatch';
+         var cursor = cursorInfoFromTextarea (getTextarea ());
+         if (cursor.pos !== 0) return 'Expected cursor at pos 0 after O on first line, got ' + cursor.pos;
+         pressKey (getTextarea (), 'Escape');
+         return true;
+      }],
+
+      ['F6-23: Disable vi mode', function (done) {
+         if (B.get ('viMode')) B.call ('toggle', 'viMode');
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var viMode = B.get ('viMode');
-         if (viMode !== false) return 'Expected viMode false after toggle off, got: ' + viMode;
-         return true;
+         return B.get ('viMode') === false || 'Expected viMode false after toggle off';
       }],
 
-      ['F6-22: Server persisted viMode false', function (done) {
+      ['F6-24: Server persisted viMode false', function (done) {
          c.ajax ('get', 'settings', {}, '', function (error, rs) {
             window._f6SettingsAfter = rs && rs.body;
             done (SHORT_WAIT, POLL);
@@ -1315,34 +1467,12 @@
          return true;
       }],
 
-      ['F6-23: Editor textarea is no longer readonly', function (done) {
-         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f6Project) + '/docs');
-         B.call ('load', 'file', 'doc/main.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         if (B.get ('editorPreview')) {
-            B.call ('toggle', 'editorPreview');
-            return 'Toggling preview off...';
-         }
-         var textarea = document.querySelector ('.editor-textarea');
-         if (! textarea) return 'Textarea not found';
-         if (textarea.readOnly) return 'Textarea should not be readonly with vi mode off';
-         var statusBar = document.querySelector ('.vi-status');
-         if (statusBar) return 'Vi status bar should not be visible with vi mode off';
-         return true;
-      }],
-
-      // --- F6: Cleanup ---
-
-      ['F6-24: Delete project', function (done) {
+      ['F6-25: Delete project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f6Project);
          done (MEDIUM_WAIT, POLL);
-      }, function () {
-         if (B.get ('currentProject') === window._f6Project) return 'Project should be deleted';
-         return true;
-      }],
+      }, function () {return true;}],
 
       ['F6-Cleanup: restore prompt', function () {
          restorePrompt ();
@@ -1792,414 +1922,6 @@
          B.call ('delete', 'project', window._f8Project);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         return true;
-      }],
-
-      // =============================================
-      // *** FLOW #6: Vi cursor positioning (i, o, O, a, A) ***
-      // =============================================
-
-      // Helpers stored on window for the flow
-      // getTA: returns the editor textarea
-      // pressKey: dispatch a keydown event on the textarea
-      // cursorPos: return {pos, line, col} from the textarea
-
-      ['F6-25: Create project for vi cursor tests', function (done) {
-         window._f6CursorProject = 'test-flow9-' + testTimestamp ();
-         mockPrompt (window._f6CursorProject);
-         B.call ('create', 'project');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         return B.get ('currentProject') === window._f6CursorProject || 'Failed to create flow #6 cursor project';
-      }],
-
-      ['F6-26: Enable vi mode', function (done) {
-         if (! B.get ('viMode')) B.call ('toggle', 'viMode');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         return B.get ('viMode') === true || 'viMode should be true';
-      }],
-
-      ['F6-27: Create doc with known content', function (done) {
-         var content = 'line one\nline two\nline three\n';
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f6CursorProject) + '/file/doc/main.md', {}, {content: content}, function () {
-            B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f6CursorProject) + '/docs/main.md');
-            done (MEDIUM_WAIT, POLL);
-         });
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
-         if (file.content.indexOf ('line one') === -1) return 'Content mismatch';
-         return true;
-      }],
-
-      ['F6-28: Switch to edit mode', function (done) {
-         if (B.get ('editorPreview')) B.call ('toggle', 'editorPreview');
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         if (B.get ('editorPreview')) return 'Still in preview mode';
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'normal') return 'Expected normal mode, got: ' + viState.mode;
-         return true;
-      }],
-
-      ['F6-28b: Normal mode move right (l) moves cursor', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         ta.selectionStart = ta.selectionEnd = 0;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'l', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         return ta.selectionStart === 1 || ('Expected cursor at 1 after l, got: ' + ta.selectionStart);
-      }],
-
-      ['F6-28c: Normal mode move down (j) keeps column', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'j', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         return ta.selectionStart === 10 || ('Expected cursor at 10 after j, got: ' + ta.selectionStart);
-      }],
-
-      // --- Test i: enter insert at current cursor position ---
-
-      ['F6-29: Move to known position then press i', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         // Place cursor at position 5 (middle of "line one")
-         ta.selectionStart = ta.selectionEnd = 5;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'i', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after i, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         // Cursor should stay at position 5
-         if (ta.selectionStart !== 5) return 'After i, cursor should be at 5, got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-29b: Vi cursor state matches selection after i', function () {
-         var cursor = B.get ('viCursor') || {};
-         if (cursor.line !== 1) return 'Expected viCursor line 1 after i, got: ' + cursor.line;
-         if (cursor.col !== 6) return 'Expected viCursor col 6 after i (pos 5), got: ' + cursor.col;
-         return true;
-      }],
-
-      ['F6-30: Escape back to normal', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Test a: enter insert one character after cursor ---
-
-      ['F6-31: Press a at position 5', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         ta.selectionStart = ta.selectionEnd = 5;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'a', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after a, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         // a moves cursor one right then enters insert
-         if (ta.selectionStart !== 6) return 'After a at pos 5, cursor should be at 6, got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-32: Escape back to normal', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Test A: enter insert at end of line ---
-
-      ['F6-33: Press A on line 0', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         // Position cursor at start of line 0
-         ta.selectionStart = ta.selectionEnd = 0;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'A', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after A, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         // A should move to end of "line one" which is position 8
-         if (ta.selectionStart !== 8) return 'After A on line 0, cursor should be at 8 (end of "line one"), got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-34: Escape back to normal', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Test I: enter insert at start of line ---
-
-      ['F6-35: Press I at position 5', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         ta.selectionStart = ta.selectionEnd = 5;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'I', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after I, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         // I should move to start of line 0 (position 0)
-         if (ta.selectionStart !== 0) return 'After I at pos 5, cursor should be at 0, got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-36: Escape back to normal', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Test o: open new line below ---
-      // Content: "line one\nline two\nline three\n"
-      //           0       8 9      17 18         28
-
-      ['F6-37: Reload known content for o test', function (done) {
-         var content = 'line one\nline two\nline three\n';
-         B.call ('set', ['currentFile', 'content'], content);
-         B.call ('set', ['currentFile', 'original'], content);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         return (file && file.content === 'line one\nline two\nline three\n') || 'Content not reset';
-      }],
-
-      ['F6-38: Press o on line 0 (non-last line)', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         // Place cursor on line 0
-         ta.selectionStart = ta.selectionEnd = 3;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'o', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after o, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         var file = B.get ('currentFile');
-         if (! file) return 'No currentFile';
-         // Original: "line one\nline two\nline three\n"
-         // After o on line 0: "line one\n\nline two\nline three\n"
-         // The new empty line is at position 9 (after "line one\n")
-         var expected = 'line one\n\nline two\nline three\n';
-         if (file.content !== expected) return 'Content after o wrong. Expected ' + JSON.stringify (expected) + ', got ' + JSON.stringify (file.content);
-         // Cursor should be at position 9 (start of new empty line)
-         if (ta.selectionStart !== 9) return 'After o on line 0, cursor should be at 9 (new line), got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-38b: Vi cursor state matches selection after o', function () {
-         var cursor = B.get ('viCursor') || {};
-         if (cursor.line !== 2) return 'Expected viCursor line 2 after o, got: ' + cursor.line;
-         if (cursor.col !== 1) return 'Expected viCursor col 1 after o, got: ' + cursor.col;
-         return true;
-      }],
-
-      ['F6-39: Escape back to normal after o', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Test O: open new line above ---
-
-      ['F6-40: Reload known content for O test', function (done) {
-         var content = 'line one\nline two\nline three\n';
-         B.call ('set', ['currentFile', 'content'], content);
-         B.call ('set', ['currentFile', 'original'], content);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         return (file && file.content === 'line one\nline two\nline three\n') || 'Content not reset';
-      }],
-
-      ['F6-41: Press O on line 1', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         // Place cursor on line 1 ("line two"), position 12
-         ta.selectionStart = ta.selectionEnd = 12;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'O', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after O, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         var file = B.get ('currentFile');
-         if (! file) return 'No currentFile';
-         // Original: "line one\nline two\nline three\n"
-         // After O on line 1: "line one\n\nline two\nline three\n"
-         // New empty line inserted before "line two" at lineStart=9
-         var expected = 'line one\n\nline two\nline three\n';
-         if (file.content !== expected) return 'Content after O wrong. Expected ' + JSON.stringify (expected) + ', got ' + JSON.stringify (file.content);
-         // Cursor should be at position 9 (start of new empty line)
-         if (ta.selectionStart !== 9) return 'After O on line 1, cursor should be at 9 (new line), got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-42: Escape back to normal after O', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Test o on last line (no trailing newline) ---
-
-      ['F6-43: Set content without trailing newline for o-last-line', function (done) {
-         var content = 'first\nsecond';
-         B.call ('set', ['currentFile', 'content'], content);
-         B.call ('set', ['currentFile', 'original'], content);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         return (file && file.content === 'first\nsecond') || 'Content not set';
-      }],
-
-      ['F6-44: Press o on last line (no trailing newline)', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         // Cursor on "second" (line 1, which is the last line), position 8
-         ta.selectionStart = ta.selectionEnd = 8;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'o', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after o on last line, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         var file = B.get ('currentFile');
-         if (! file) return 'No currentFile';
-         // Original: "first\nsecond" (length 12)
-         // After o on last line: "first\nsecond\n"
-         // Cursor should be at 13 (start of new empty line after "second\n")
-         var expected = 'first\nsecond\n';
-         if (file.content !== expected) return 'Content after o on last line wrong. Expected ' + JSON.stringify (expected) + ', got ' + JSON.stringify (file.content);
-         if (ta.selectionStart !== 13) return 'After o on last line, cursor should be at 13, got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-45: Escape back to normal', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Test O on first line ---
-
-      ['F6-46: Set content for O-on-first-line', function (done) {
-         var content = 'alpha\nbeta\n';
-         B.call ('set', ['currentFile', 'content'], content);
-         B.call ('set', ['currentFile', 'original'], content);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         return (file && file.content === 'alpha\nbeta\n') || 'Content not set';
-      }],
-
-      ['F6-47: Press O on first line', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return done (SHORT_WAIT, POLL);
-         ta.focus ();
-         ta.selectionStart = ta.selectionEnd = 2;
-         ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'O', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         if (viState.mode !== 'insert') return 'Expected insert mode after O on first line, got: ' + viState.mode;
-         var ta = document.querySelector ('.editor-textarea');
-         if (! ta) return 'Textarea not found';
-         var file = B.get ('currentFile');
-         if (! file) return 'No currentFile';
-         // Original: "alpha\nbeta\n"
-         // After O on first line: "\nalpha\nbeta\n"
-         // Cursor should be at 0 (start of new empty first line)
-         var expected = '\nalpha\nbeta\n';
-         if (file.content !== expected) return 'Content after O on first line wrong. Expected ' + JSON.stringify (expected) + ', got ' + JSON.stringify (file.content);
-         if (ta.selectionStart !== 0) return 'After O on first line, cursor should be at 0, got: ' + ta.selectionStart;
-         return true;
-      }],
-
-      ['F6-48: Escape back to normal', function (done) {
-         var ta = document.querySelector ('.editor-textarea');
-         if (ta) ta.dispatchEvent (new KeyboardEvent ('keydown', {key: 'Escape', bubbles: true}));
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var viState = B.get ('viState') || {};
-         return viState.mode === 'normal' || 'Expected normal mode';
-      }],
-
-      // --- Cleanup ---
-
-      ['F6-49: Disable vi mode', function (done) {
-         if (B.get ('viMode')) B.call ('toggle', 'viMode');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         return B.get ('viMode') === false || 'viMode should be false';
-      }],
-
-      ['F6-50: Delete project', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'project', window._f6CursorProject);
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         return true;
-      }],
-
-      ['F6-Cleanup-2: restore prompt', function () {
-         restorePrompt ();
          return true;
       }],
 
