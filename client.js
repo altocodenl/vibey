@@ -2636,27 +2636,13 @@ views.dialogs = function () {
             ]],
             // Input area
             ['div', {class: 'chat-input-area'}, [
-               ['select', {
-                  class: 'provider-select',
-                  onchange: B.ev ('change', 'chatProvider'),
-                  disabled: streaming
-               }, [
-                  ['option', {value: 'openai', selected: (chatProvider || 'openai') === 'openai'}, 'OpenAI'],
-                  ['option', {value: 'claude', selected: chatProvider === 'claude'}, 'Claude']
-               ]],
-               ['select', {
-                  class: 'provider-select',
-                  onchange: B.ev ('set', 'chatModel'),
-                  disabled: streaming
-               }, dale.go (MODEL_OPTIONS [chatProvider || 'openai'] || [], function (option) {
-                  return ['option', {value: option.value, selected: (chatModel || defaultModelForProvider (chatProvider || 'openai')) === option.value}, option.label];
-               })],
+               ['div', {class: 'chat-composer-label'}, 'You'],
                ['div', {class: 'vi-textarea-wrap', style: style ({flex: 1})}, [
                   ['textarea', {
                      class: 'chat-input' + (viMode ? (' vi-active' + (viState.mode === 'insert' ? ' vi-insert' : '')) : ''),
-                     rows: 2,
+                     rows: 4,
                      value: chatInput || '',
-                     placeholder: 'Type a message... (Cmd+Enter to send)',
+                     placeholder: 'Write your message... (Cmd+Enter to send)',
                      readonly: viMode && viState.mode !== 'insert',
                      oninput: B.ev ('set', 'chatInput'),
                      onkeydown: viMode
@@ -2677,28 +2663,45 @@ views.dialogs = function () {
                      })
                   }] : ''
                ]],
-               voiceSupported ? ['button', {
-                  class: 'btn-small',
-                  style: style ({
-                     'background-color': voiceActive ? '#e74c3c' : '#3a3a5f',
-                     color: 'white',
-                     'font-size': '18px',
-                     padding: '0.5rem 0.65rem',
-                     'border-radius': '8px',
-                     transition: 'background-color 0.2s'
-                  }),
-                  onclick: B.ev ('toggle', 'voice'),
-                  disabled: streaming
-               }, voiceActive ? '⏹' : '🎤'] : '',
-               ['button', {
-                  class: 'primary',
-                  onclick: B.ev ('send', 'message'),
-                  disabled: streaming || ! (chatInput && chatInput.trim ())
-               }, streaming ? 'Sending...' : 'Send'],
-               (streaming && isDialog) ? ['button', {
-                  style: style ({'background-color': '#e67e22', color: 'white'}),
-                  onclick: B.ev ('stop', 'dialog')
-               }, 'Stop'] : ''
+               ['div', {class: 'chat-composer-toolbar'}, [
+                  ['select', {
+                     class: 'provider-select',
+                     onchange: B.ev ('change', 'chatProvider'),
+                     disabled: streaming
+                  }, [
+                     ['option', {value: 'openai', selected: (chatProvider || 'openai') === 'openai'}, 'OpenAI'],
+                     ['option', {value: 'claude', selected: chatProvider === 'claude'}, 'Claude']
+                  ]],
+                  ['select', {
+                     class: 'provider-select',
+                     onchange: B.ev ('set', 'chatModel'),
+                     disabled: streaming
+                  }, dale.go (MODEL_OPTIONS [chatProvider || 'openai'] || [], function (option) {
+                     return ['option', {value: option.value, selected: (chatModel || defaultModelForProvider (chatProvider || 'openai')) === option.value}, option.label];
+                  })],
+                  voiceSupported ? ['button', {
+                     class: 'btn-small',
+                     style: style ({
+                        'background-color': voiceActive ? '#e74c3c' : '#3a3a5f',
+                        color: 'white',
+                        'font-size': '18px',
+                        padding: '0.5rem 0.65rem',
+                        'border-radius': '8px',
+                        transition: 'background-color 0.2s'
+                     }),
+                     onclick: B.ev ('toggle', 'voice'),
+                     disabled: streaming
+                  }, voiceActive ? '⏹' : '🎤'] : '',
+                  ['button', {
+                     class: 'primary',
+                     onclick: B.ev ('send', 'message'),
+                     disabled: streaming || ! (chatInput && chatInput.trim ())
+                  }, streaming ? 'Sending...' : 'Send'],
+                  (streaming && isDialog) ? ['button', {
+                     style: style ({'background-color': '#e67e22', color: 'white'}),
+                     onclick: B.ev ('stop', 'dialog')
+                  }, 'Stop'] : ''
+               ]]
             ]]
          ]]
       ]];
