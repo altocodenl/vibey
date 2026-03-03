@@ -1,0 +1,21 @@
+Hi again! Episode 2.
+
+I will focus today on using vibey. gpt5.2 was fixing things late this afternoon. It's remarkable what can be built with a few prompts.
+
+I want to see if I can build a little tool to take civ2 savegames and give me analytics about it. Let me use vibey as much as possible for it.
+
+Yesterday I was a bit burn out on vibey, so I coded it more traditionally (using pi and vi and interacting with agents like I normally do, on the command line).
+
+But today, let's try vibey again and see if it works well.
+
+I'm giving up vi mode for a while. I'm trying to build something that works for a lot of people. Most people will probably never use vi mode. Vibey should still be cool without it. Which reminds me...
+
+OK.
+
+Things that are working well with vibey:
+- Being able to restart it and, if the data volume is there, the data is still there.
+- Being able to see multiple dialogs at the same time in the same screen.
+- Being able to refresh the screen and, if the LLM is still connected with the server, the work is being done. Also if you close the tab.
+- If the server loses contact with the LLM, you can re-trigger by sending another message. All the state is still there in the markdown.
+
+I'm going to stop here. Thanks for watching!

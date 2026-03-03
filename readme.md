@@ -736,7 +736,8 @@ Flow #8 — Uploads (create/list/preview)
 Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
-- No feedback when sending a message. Why don't I get an instant stream response? It's like the page is not autorefreshing on dialogs.
+- Compaction: show the percentage of the window, with yellow after 50% and red after 80%. Allow to compact through a call, opens a new dialog (so there's no magic).
+- Keep all diffs: rather than snapshotting, make all edits and rms go through tool calls, and we deterministically store diffs in a folder in the container/volume. Then, we have a "git like" list of diffs, minus commits. You basically have the history of all that happened in the FS.
 - A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
 
 ## TODO vibey cloud

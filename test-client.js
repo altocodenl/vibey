@@ -1265,7 +1265,7 @@
       // =============================================
       // *** FLOW #6: Vi mode (navigation + cursor sync) ***
       // =============================================
-
+      /*
       ['F6-1: Navigate to settings', function (done) {
          window.__vibeyViDebug = true;
          B.call ('navigate', 'hash', '#/settings');
@@ -1635,6 +1635,7 @@
          restorePrompt ();
          return true;
       }],
+      */
 
       // =============================================
       // *** FLOW #7: Snapshots ***

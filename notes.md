@@ -1,9 +1,32 @@
 ## Vibey development notes
 
+### 2026-03-03
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+
+- The frontend is all over the place. Things get refreshed and I lose state. Let's start by making sure that the backend tests run well. Please start vibey, then run the backend tests. If you need to fix something in vibey, stop and let me know what it is first.
+- Please inspect the dialogs to see what went wrong.
+- Do you think the agent got stuck?
+- Restart vibey and try it again, just that flow.
+- Kill the process and run all the other flows except 4 & 5.
+- Change the prompt in the test for both backend and frontend to tell it to read it once and start working. Also for flow 5.
+- Run 4 again please and poll every 1-2 minutes yourself. BTW, we have continuous polling on our test suite, right?
+
+- An agent finished fixing all the server tests. Can you run the client tests now? Run flow by flow. Please rebuild and rerun vibey if you need to. If you see something broken in vibey (not the test), stop and report. Also, please switch the tests to use openai, not anthropic.
+- Great! Now see the changes done in test-server and see if we can take some of that pixie dust onto the client ones, to make 4 pass.
+- If the test failed, go and inspect the dialog directly, with timestamps, to see why we got stuck at the start/non blocking. Don't assume, verify.
+- Let's eliminate the waiting state completely, it's silly. The LLM is either going or not. We no longer wait for authorizations. Please remove it from the docs, the server, the client and the tests.
+
+### 2026-03-02
+
+- OK, now please make the view in dialogs not redraw completely when we get a fresh dialog. I lose the state of the box where I write.You can just redraw the part of the dialog that shows the history.
+
+### 2026-03-01
 
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
 
 - Can you debug why the client doesn't auto-update the dialog? I have to refresh the page when the agent is working.
+- Please now use the global pupeteer (do not install pupeteer, it's already there) to just run flow 6, vi, and debug why it doesn't work. Focus on simplifying the code.
 
 ### civ2 analytics schema
 

@@ -38,8 +38,8 @@ var parseDialogFilename = function (filename) {
 };
 
 var statusIcon = function (status) {
-   if (status === 'active')  return '🟢';
-   if (status === 'done')    return '⚪';
+   if (status === 'active')  return '🟣';
+   if (status === 'done')    return '🟢';
    return '•';
 };
 
@@ -57,6 +57,7 @@ var MODEL_OPTIONS = {
       {value: 'gpt-4o', label: 'gpt-4o'}
    ],
    claude: [
+      {value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6'},
       {value: 'claude-sonnet-4-20250514', label: 'claude-sonnet-4-20250514'}
    ]
 };
@@ -1948,21 +1949,24 @@ views.files = function () {
                   isDirty ? ['span', {class: 'editor-dirty'}, '(unsaved)'] : ''
                ]],
                ['div', {class: 'editor-actions'}, [
-                  ['button', {
-                     class: 'btn-small' + (editorPreview ? ' primary' : ''),
-                     style: style ({'background-color': editorPreview ? '#4a69bd' : '#3a3a5f', color: editorPreview ? 'white' : '#c9d4ff'}),
-                     onclick: B.ev ('toggle', 'editorPreview')
-                  }, editorPreview ? 'Edit' : 'View'],
+                  ['label', {class: 'view-edit-switch'}, [
+                     ['span', {class: 'switch-mode-label' + (editorPreview ? '' : ' active')}, 'Edit'],
+                     ['span', {class: 'switch-control'}, [
+                        ['input', {
+                           type: 'checkbox',
+                           class: 'switch-input',
+                           checked: editorPreview,
+                           onchange: B.ev ('toggle', 'editorPreview')
+                        }],
+                        ['span', {class: 'switch-slider'}]
+                     ]],
+                     ['span', {class: 'switch-mode-label' + (editorPreview ? ' active' : '')}, 'View']
+                  ]],
                   ['button', {
                      class: 'primary btn-small',
                      onclick: B.ev ('save', 'file'),
                      disabled: savingFile || ! isDirty
-                  }, savingFile ? 'Saving...' : 'Save'],
-                  ['button', {
-                     class: 'btn-small',
-                     style: style ({'background-color': '#444'}),
-                     onclick: B.ev ('close', 'file')
-                  }, 'Close']
+                  }, savingFile ? 'Saving...' : 'Save']
                ]]
             ]],
             editorPreview
@@ -2147,6 +2151,40 @@ var compactToolBlocksForMessage = function (text) {
    return formatToolBlocksForMessage (text, true);
 };
 
+var formatCanonicalToolSection = function (text, compact) {
+   if (type (text) !== 'string') return text;
+
+   var toolMatch = text.match (/^>\s*Tool:\s*(.+)$/m);
+   var statusMatch = text.match (/^>\s*Status:\s*(.+)$/m);
+   var toolName = toolMatch ? toolMatch [1].trim () : 'tool';
+   var status = statusMatch ? statusMatch [1].trim () : '';
+
+   var blockMatch = text.match (/əəə([^\n]+)\n([\s\S]*?)\nəəə/);
+   if (! blockMatch) return text;
+
+   var payloadType = (blockMatch [1] || '').trim ();
+   var payloadText = (blockMatch [2] || '').trim ();
+
+   var parsed = null;
+   try {parsed = JSON.parse (payloadText);} catch (error) {}
+
+   var summary = payloadText;
+   if (parsed !== null) {
+      if (payloadType.indexOf ('tool/result/') === 0) summary = formatToolResultPreview (parsed, compact ? 8 : null) || formatToolInputPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
+      else summary = formatToolInputPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
+   }
+
+   summary = wrapLongLines (summary, 90);
+   if (compact) summary = compactLines (summary, 14).text;
+
+   return [
+      payloadType.indexOf ('tool/result/') === 0 ? ('Result: ' + toolName) : ('Tool request: ' + toolName),
+      status ? ('Status: ' + status) : undefined,
+      '',
+      summary
+   ].filter (Boolean).join ('\n');
+};
+
 var messageToolExpansionKey = function (dialogId, index, content) {
    content = type (content) === 'string' ? content : '';
    var hash = dale.acc (content.split (''), 0, function (h, ch) {
@@ -2158,6 +2196,13 @@ var messageToolExpansionKey = function (dialogId, index, content) {
 var getMessageToolContentView = function (content, expanded) {
    var compact = formatToolBlocksForMessage (content, true);
    var full = formatToolBlocksForMessage (content, false);
+
+   // Canonical tool sections (## Tool Request / ## Tool Result with schwa payloads)
+   if (compact === content && full === content && type (content) === 'string' && content.indexOf ('əəətool/') !== -1) {
+      compact = formatCanonicalToolSection (content, true);
+      full = formatCanonicalToolSection (content, false);
+   }
+
    var compactable = compact !== full;
    return {
       text: expanded ? full : compact,
@@ -2168,7 +2213,7 @@ var getMessageToolContentView = function (content, expanded) {
 var renderChatContent = function (text, project) {
    if (type (text) !== 'string' || ! text) return '';
 
-   var labelRe = /^(\s*)(Tool request:|Decision:|Result:|success:|error:|message:|stdout|stderr)(.*)/;
+   var labelRe = /^(\s*)(Tool request:|Decision:|Result:|Status:|success:|error:|message:|stdout|stderr)(.*)/;
    var result = [];
    var buffer = '';
 
@@ -2255,6 +2300,7 @@ var parseDialogContent = function (content) {
 
    var parseSection = function (role, lines) {
       var time = null, usage = null, usageCumulative = null, resourcesMs = null;
+      var toolName = null, toolStatus = null;
 
       var body = dale.fil (lines, undefined, function (line) {
          var mTime = line.match (/^>\s*Time:\s*(.+)$/);
@@ -2281,11 +2327,30 @@ var parseDialogContent = function (content) {
             return;
          }
 
+         var mTool = line.match (/^>\s*Tool:\s*(.+)$/);
+         if (mTool) {
+            toolName = mTool [1].trim ();
+            return;
+         }
+
+         var mStatus = line.match (/^>\s*Status:\s*(.+)$/);
+         if (mStatus) {
+            toolStatus = mStatus [1].trim ();
+            return;
+         }
+
+         if (/^>\s*(Id|Parent|Started|Provider|Model):/.test (line)) return;
+
          return line;
       });
 
       var cleaned = body.join ('\n').replace (/^\n+/, '').replace (/\s+$/, '');
       if (! cleaned) return null;
+
+      if (role === 'tool') {
+         if (toolName) cleaned = '> Tool: ' + toolName + '\n' + cleaned;
+         if (toolStatus) cleaned = '> Status: ' + toolStatus + '\n' + cleaned;
+      }
 
       return {
          role: role,
@@ -2317,6 +2382,16 @@ var parseDialogContent = function (content) {
       else if (line.startsWith ('## Assistant')) {
          flush ();
          currentRole = 'assistant';
+         currentLines = [];
+      }
+      else if (line.startsWith ('## Tool Request') || line.startsWith ('## Tool Result')) {
+         flush ();
+         currentRole = 'tool';
+         currentLines = [];
+      }
+      else if (line.startsWith ('## ')) {
+         flush ();
+         currentRole = null;
          currentLines = [];
       }
       else if (currentRole) currentLines.push (line);
@@ -2610,12 +2685,7 @@ views.dialogs = function () {
          // Chat area
          ['div', {class: 'chat-container'}, [
             ['div', {class: 'editor-header'}, [
-               ['span', {class: 'editor-filename'}, isDialog ? (statusIcon ((parseDialogFilename (currentFile.name) || {}).status) + ' ' + dialogDisplayLabel (currentFile.name)) : 'New dialog'],
-               isDialog ? ['button', {
-                  class: 'btn-small',
-                  style: style ({'background-color': '#444'}),
-                  onclick: B.ev ('close', 'file')
-               }, 'Close'] : ''
+               ['span', {class: 'editor-filename'}, isDialog ? (statusIcon ((parseDialogFilename (currentFile.name) || {}).status) + ' ' + dialogDisplayLabel (currentFile.name)) : 'New dialog']
             ]],
             ['div', {class: 'chat-messages', onscroll: B.ev ('track', 'chatScroll', {raw: 'event'})}, [
                messages.length ? dale.go (messages, function (msg, msgIndex) {
@@ -2905,17 +2975,17 @@ views.settings = function () {
             renderOAuthProvider ('claude', 'Claude Pro/Max', 'Use your Anthropic Claude subscription (Pro, Max)', claudeOAuth),
 
             // *** EDITOR SECTION ***
-            sectionTitle ('Editor'),
-            ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1rem'})}, [
-               ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', color: '#c9d4ff', 'font-size': '13px'})}, [
-                  ['input', {
-                     type: 'checkbox',
-                     checked: viMode,
-                     onclick: B.ev ('toggle', 'viMode')
-                  }],
-                  'Vi mode'
-               ]]
-            ]]
+            // sectionTitle ('Editor'),
+            // ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1rem'})}, [
+            //    ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', color: '#c9d4ff', 'font-size': '13px'})}, [
+            //       ['input', {
+            //          type: 'checkbox',
+            //          checked: viMode,
+            //          onclick: B.ev ('toggle', 'viMode')
+            //       }],
+            //       'Vi mode'
+            //    ]]
+            // ]]
          ]]
       ]];
    });

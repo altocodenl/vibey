@@ -226,6 +226,64 @@ window.vibeyCSS = [
    ['.editor-actions', {
       display: 'flex',
       gap: '0.5rem',
+      'align-items': 'center',
+   }],
+   ['.view-edit-switch', {
+      display: 'inline-flex',
+      'align-items': 'center',
+      gap: '0.45rem',
+      cursor: 'pointer',
+      'user-select': 'none',
+   }],
+   ['.switch-mode-label', {
+      'font-size': '12px',
+      color: '#9aa4bf',
+   }],
+   ['.switch-mode-label.active', {
+      color: '#c9d4ff',
+      'font-weight': 'bold',
+   }],
+   ['.switch-control', {
+      position: 'relative',
+      width: '40px',
+      height: '22px',
+      display: 'inline-block',
+   }],
+   ['.switch-input', {
+      opacity: 0,
+      width: 0,
+      height: 0,
+      position: 'absolute',
+   }],
+   ['.switch-slider', {
+      position: 'absolute',
+      cursor: 'pointer',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      'background-color': '#3a3a5f',
+      transition: '0.2s',
+      'border-radius': '999px',
+      border: '1px solid #4c5888',
+   }],
+   ['.switch-slider:before', {
+      position: 'absolute',
+      content: '""',
+      height: '16px',
+      width: '16px',
+      left: '2px',
+      top: '2px',
+      'background-color': '#c9d4ff',
+      transition: '0.2s',
+      'border-radius': '50%',
+   }],
+   ['.switch-input:checked + .switch-slider', {
+      'background-color': '#4a69bd',
+      border: '1px solid #4a69bd',
+   }],
+   ['.switch-input:checked + .switch-slider:before', {
+      transform: 'translateX(18px)',
    }],
    ['.editor-textarea', {
       flex: 1,
@@ -366,6 +424,11 @@ window.vibeyCSS = [
    ['.chat-assistant', {
       'background-color': '#1a1f35',
       'border-left-color': '#4a69bd',
+      'max-width': '90%',
+   }],
+   ['.chat-tool', {
+      'background-color': '#121a2c',
+      'border-left-color': '#7a5cff',
       'max-width': '90%',
    }],
    ['.chat-role', {

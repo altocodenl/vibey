@@ -806,7 +806,7 @@ var flow5Sequence = [
 
 var PROJECT6 = 'flow6-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 
-var flow6Sequence = [
+/* var flow6Sequence = [
 
    // *** Settings: default state ***
 
@@ -909,7 +909,9 @@ var flow6Sequence = [
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }]
-];
+]; */
+
+var flow6Sequence = []; // Vi mode server flow temporarily disabled.
 
 // *** FLOW #7: Snapshots ***
 
