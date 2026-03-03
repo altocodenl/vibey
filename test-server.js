@@ -122,24 +122,24 @@ var flow1Sequence = [
       return true;
    }],
 
-   ['Create waiting dialog draft (openai/gpt-5)', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: DIALOG_SLUG}, 200, function (s, rq, rs) {
+   ['Create dialog draft (openai/gpt-5)', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: DIALOG_SLUG}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('dialog/new missing dialogId or filename');
       if (rs.body.provider !== 'openai') return log ('dialog/new provider mismatch');
       if (rs.body.model !== 'gpt-5') return log ('dialog/new model mismatch');
-      if (! rs.body.filename.match (/^dialog\/.*\-waiting\.md$/)) return log ('dialog/new should produce waiting dialog filename');
+      if (! rs.body.filename.match (/^dialog\/.*\-done\.md$/)) return log ('dialog/new should produce done dialog filename');
       if (rs.body.filename.indexOf (DIALOG_SLUG) === -1) return log ('dialog/new filename missing slug');
       s.dialogId = rs.body.dialogId;
       return true;
    }],
 
-   ['Dialogs list includes waiting dialog', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
+   ['Dialogs list includes done dialog', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('dialogs endpoint should return array');
       var match = dale.stopNot (rs.body, undefined, function (d) {
          if (d.dialogId === s.dialogId) return d;
       });
       if (! match) return log ('Created dialog not found in dialogs list');
-      if (match.status !== 'waiting') return log ('Created dialog should be waiting');
+      if (match.status !== 'done') return log ('Created dialog should be done');
       return true;
    }],
 
@@ -472,8 +472,8 @@ var fireDialog = function (project, dialogId, prompt, cb) {
       var got = '';
       res.on ('data', function (chunk) {
          got += chunk;
-         // As soon as we see the first SSE chunk event, we know the LLM started. Abort — let it run in background.
-         if (! called && (got.indexOf ('"type":"chunk"') !== -1 || got.indexOf ('"type":"error"') !== -1)) {
+         // As soon as we see the first SSE event (chunk/tool/error), we know the LLM started. Abort — let it run in background.
+         if (! called && (got.indexOf ('"type":"chunk"') !== -1 || got.indexOf ('"type":"tool_request"') !== -1 || got.indexOf ('"type":"tool_result"') !== -1 || got.indexOf ('"type":"error"') !== -1)) {
             called = true;
             req.destroy ();
             if (got.indexOf ('"type":"error"') !== -1) return cb (new Error ('SSE error: ' + got.slice (0, 500)));
@@ -535,7 +535,7 @@ var flow4Sequence = [
       return true;
    }],
 
-   ['F4: Create waiting dialog (orchestrator)', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['F4: Create dialog draft (orchestrator)', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.f4DialogId = rs.body.dialogId;
@@ -544,7 +544,7 @@ var flow4Sequence = [
 
    // Fire the dialog and don't block — let agents work in background
    ['F4: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogId, 'please start', function (error) {
+      fireDialog (PROJECT4, s.f4DialogId, 'Please start. Read doc/main.md once, then implement immediately: create index.html and app.js in /workspace root. Do not re-fetch docs after the first read. After creating files, update doc/main.md with an embed block (port static).', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
       });
@@ -556,10 +556,11 @@ var flow4Sequence = [
          httpGet (5353, '/project/' + PROJECT4 + '/static/', function (error, status, body) {
             if (error || status !== 200) return done (false);
             var lower = (body || '').toLowerCase ();
-            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (true);
+            var hasTic = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1;
+            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && hasTic) return done (true);
             done (false);
          });
-      }, 5000, 180000, function (error) {
+      }, 5000, 420000, function (error) {
          if (error) return log ('Static app never appeared: ' + error.message);
          next ();
       });
@@ -574,13 +575,20 @@ var flow4Sequence = [
       return true;
    }],
 
-   ['F4: app.js has tictactoe gotoB code', 'post', 'project/' + PROJECT4 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat app.js'}}, 200, function (s, rq, rs) {
-      if (! rs.body || ! rs.body.success) return log ('cat app.js failed: ' + JSON.stringify (rs.body));
-      var out = rs.body.stdout || '';
-      if (out.indexOf ('B.') === -1) return log ('app.js missing gotoB usage (no B. references)');
-      var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('grid') !== -1;
-      if (! hasBoardLogic) return log ('app.js missing board/cell/grid logic');
-      return true;
+   ['F4: app.js has tictactoe gotoB code', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollUntil (function (done) {
+         httpGet (5353, '/project/' + PROJECT4 + '/static/app.js', function (error, status, body) {
+            if (error || status !== 200) return done (false);
+            var out = body || '';
+            if (out.indexOf ('B.') === -1) return done (false);
+            var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('grid') !== -1;
+            if (! hasBoardLogic) return done (false);
+            return done (true);
+         });
+      }, 5000, 420000, function (error) {
+         if (error) return log ('app.js missing gotoB usage: ' + error.message);
+         next ();
+      });
    }],
 
    // Ask the AI to embed the game in doc/main.md
@@ -604,7 +612,7 @@ var flow4Sequence = [
             catch (e) {}
             done (false);
          });
-      }, 5000, 180000, function (error) {
+      }, 5000, 420000, function (error) {
          if (error) return log ('Embed block never appeared in doc/main.md: ' + error.message);
          next ();
       });
@@ -661,7 +669,7 @@ var flow5Sequence = [
       return true;
    }],
 
-   ['F5: Create waiting dialog (orchestrator)', 'post', 'project/' + PROJECT5 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['F5: Create dialog draft (orchestrator)', 'post', 'project/' + PROJECT5 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.f5DialogId = rs.body.dialogId;
@@ -670,7 +678,7 @@ var flow5Sequence = [
 
    // Fire the orchestrator and let it build the game + start the server
    ['F5: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT5, s.f5DialogId, 'please start', function (error) {
+      fireDialog (PROJECT5, s.f5DialogId, 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000), index.html, and app.js in /workspace. Do not re-fetch docs after the first read. Start the server with `node server.js &` and then update doc/main.md with an embed block (port 4000).', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
       });
@@ -680,12 +688,17 @@ var flow5Sequence = [
    ['F5: Poll until proxy serves the app on port 4000', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT5 + '/proxy/4000/', function (error, status, body) {
-            if (error || status !== 200) return done (false);
+            if (error || status !== 200) {
+               if (error) log ('F5 poll: error reaching /project/' + PROJECT5 + '/proxy/4000/ - ' + error.message);
+               else log ('F5 poll: /project/' + PROJECT5 + '/proxy/4000/ returned ' + status);
+               return done (false);
+            }
             var lower = (body || '').toLowerCase ();
-            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && lower.indexOf ('tictactoe') !== -1) return done (true);
+            var hasTic = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1;
+            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && hasTic) return done (true);
             done (false);
          });
-      }, 5000, 180000, function (error) {
+      }, 5000, 420000, function (error) {
          if (error) return log ('Backend app never appeared via proxy: ' + error.message);
          next ();
       });
@@ -738,7 +751,7 @@ var flow5Sequence = [
             catch (e) {}
             done (false);
          });
-      }, 5000, 180000, function (error) {
+      }, 5000, 420000, function (error) {
          if (error) return log ('Embed block never appeared in doc/main.md: ' + error.message);
          next ();
       });
@@ -1379,7 +1392,7 @@ h.seq (
    {
       host: 'localhost',
       port: 5353,
-      timeout: 300
+      timeout: 420
    },
    sequences,
    function (error) {

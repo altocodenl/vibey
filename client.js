@@ -26,20 +26,19 @@ var parseDialogFilename = function (filename) {
    // New format: dialog/<dialogId>-<status>.md
    if (filename.indexOf (DIALOG_DIR) === 0) {
       var short = filename.slice (DIALOG_DIR.length);
-      var match = short.match (/^(.+)\-(active|waiting|done)\.md$/);
+      var match = short.match (/^(.+)\-(active|done)\.md$/);
       if (! match) return null;
       return {dialogId: match [1], status: match [2]};
    }
 
    // Legacy format (backward compatibility): dialog-<dialogId>-<status>.md
-   var legacy = filename.match (/^dialog\-(.+)\-(active|waiting|done)\.md$/);
+   var legacy = filename.match (/^dialog\-(.+)\-(active|done)\.md$/);
    if (! legacy) return null;
    return {dialogId: legacy [1], status: legacy [2]};
 };
 
 var statusIcon = function (status) {
    if (status === 'active')  return '🟢';
-   if (status === 'waiting') return '🟡';
    if (status === 'done')    return '⚪';
    return '•';
 };
@@ -1632,6 +1631,18 @@ B.mrespond ([
                      var current = B.get ('streamingContent') || '';
                      B.call (x, 'set', 'streamingContent', current + data.content);
                   }
+                  else if (data.type === 'tool_request' || data.type === 'tool_result') {
+                     var label = data.type === 'tool_request' ? 'Tool request' : 'Tool result';
+                     var payload = '';
+                     try {
+                        payload = JSON.stringify (data.tool || {}, null, 2);
+                     }
+                     catch (err) {
+                        payload = '' + (data.tool || '');
+                     }
+                     var currentTool = B.get ('streamingContent') || '';
+                     B.call (x, 'set', 'streamingContent', currentTool + '\n\n' + label + ':\n' + payload + '\n');
+                  }
                   else if (data.type === 'done') {
                      if (data.result && data.result.filename) targetFilename = data.result.filename;
                   }
@@ -1674,7 +1685,7 @@ B.mrespond ([
          headers: {'Content-Type': 'application/json'},
          body: JSON.stringify ({
             dialogId: parsed.dialogId,
-            status: 'waiting'
+            status: 'done'
          })
       }).then (function (response) {
          if (! response.ok) return response.text ().then (function (text) {throw new Error (text || ('HTTP ' + response.status));});

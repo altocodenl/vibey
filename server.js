@@ -1474,7 +1474,7 @@ var parseDialogForProvider = function (markdown, provider) {
    return messages;
 };
 
-var DIALOG_STATUSES = ['active', 'waiting', 'done'];
+var DIALOG_STATUSES = ['active', 'done'];
 
 var slugify = function (text) {
    text = (text || 'dialog').toLowerCase ().replace (/[^a-z0-9\-]+/g, '-').replace (/\-+/g, '-').replace (/^\-+|\-+$/g, '');
@@ -1491,13 +1491,13 @@ var parseDialogFilename = function (filename) {
    // New format: dialog/<dialogId>-<status>.md
    if (filename.indexOf (DIALOG_DIR + '/') === 0) {
       filename = filename.slice ((DIALOG_DIR + '/').length);
-      var match = filename.match (/^(.+)\-(active|waiting|done)\.md$/);
+      var match = filename.match (/^(.+)\-(active|done)\.md$/);
       if (! match) return null;
       return {dialogId: match [1], status: match [2]};
    }
 
    // Legacy format (backward compatibility): dialog-<dialogId>-<status>.md
-   var legacy = filename.match (/^dialog\-(.+)\-(active|waiting|done)\.md$/);
+   var legacy = filename.match (/^dialog\-(.+)\-(active|done)\.md$/);
    if (! legacy) return null;
    return {dialogId: legacy [1], status: legacy [2]};
 };
@@ -1754,7 +1754,7 @@ var normalizeMessagesForResponsesApi = function (messages) {
 
 // Implementation function for OpenAI (streaming with tool support)
 var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal) {
-   model = model || 'gpt-5';
+   model = model || 'gpt-5.2';
 
    var systemPrompt = loadSystemPrompt () + getDocMainInjection (projectName);
 
@@ -1970,6 +1970,12 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          var executed = [];
          var toolCalls = result.toolCalls || [];
 
+         if (onChunk && toolCalls.length) {
+            dale.go (toolCalls, function (tc) {
+               onChunk ({type: 'tool_request', tool: {id: tc.id, name: tc.name, input: tc.input}});
+            });
+         }
+
          for (var i = 0; i < toolCalls.length; i++) {
             var tc = toolCalls [i];
             var toolResult = await executeTool (tc.name, tc.input, projectName);
@@ -1979,6 +1985,11 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          if (dale.keys (resultsById).length) writeToolResults (projectName, dialog.filename, resultsById);
          if (executed.length) autoExecutedAll = autoExecutedAll.concat (executed);
+         if (onChunk && executed.length) {
+            dale.go (executed, function (tc) {
+               onChunk ({type: 'tool_result', tool: {id: tc.id, name: tc.name, result: tc.result}});
+            });
+         }
 
          if (! toolCalls.length) {
             return {
@@ -2003,19 +2014,19 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
    throw new Error ('Exceeded maximum auto-tool continuation rounds');
 };
 
-var createWaitingDialog = function (projectName, provider, model, slug) {
+var createDialogDraft = function (projectName, provider, model, slug) {
    if (provider !== 'claude' && provider !== 'openai') {
       throw new Error ('Unknown provider: ' + provider + '. Use "claude" or "openai".');
    }
 
    getExistingProject (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5');
+   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5.2');
    var dialogId = createDialogId (projectName, slug || 'dialog');
-   var filename = buildDialogFilename (dialogId, 'waiting');
+   var filename = buildDialogFilename (dialogId, 'done');
    var dialog = {
       dialogId: dialogId,
       filename: filename,
-      status: 'waiting',
+      status: 'done',
       exists: false,
       markdown: '',
       metadata: {}
@@ -2038,7 +2049,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    }
 
    getExistingProject (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5');
+   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5.2');
    var dialogId = createDialogId (projectName, slug);
    var dialog = {
       dialogId: dialogId,
@@ -2052,10 +2063,17 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    ensureDialogFile (projectName, dialog, provider, defaultModel);
    appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
 
-   var result = await runCompletion (projectName, dialog, provider, defaultModel, onChunk, abortSignal);
-   result.filename = dialog.filename;
-   result.status = dialog.status;
-   return result;
+   try {
+      var result = await runCompletion (projectName, dialog, provider, defaultModel, onChunk, abortSignal);
+      setDialogStatus (projectName, dialog, 'done');
+      result.filename = dialog.filename;
+      result.status = dialog.status;
+      return result;
+   }
+   catch (error) {
+      try {setDialogStatus (projectName, dialog, 'done');} catch (statusError) {}
+      throw error;
+   }
 };
 
 var updateDialogTurn = async function (projectName, dialogId, status, prompt, provider, model, onChunk, abortSignal) {
@@ -2075,17 +2093,22 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
       if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
          throw new Error ('Unable to determine provider for dialog update');
       }
-      var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5');
-      var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal);
+      var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5.2');
 
-      if (status && inc (['waiting', 'done'], status)) setDialogStatus (projectName, dialog, status);
-
-      result.filename = dialog.filename;
-      result.status = dialog.status;
-      return result;
+      try {
+         var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal);
+         setDialogStatus (projectName, dialog, 'done');
+         result.filename = dialog.filename;
+         result.status = dialog.status;
+         return result;
+      }
+      catch (error) {
+         try {setDialogStatus (projectName, dialog, 'done');} catch (statusError) {}
+         throw error;
+      }
    }
 
-   if (status && inc (['waiting', 'done'], status)) setDialogStatus (projectName, dialog, status);
+   if (status && status === 'done') setDialogStatus (projectName, dialog, status);
 
    return {
       dialogId: dialog.dialogId,
@@ -2699,7 +2722,7 @@ var routes = [
 
    // *** LLM ***
 
-   // Create a waiting dialog draft
+   // Create a dialog draft (idle, status=done)
    ['post', 'project/:project/dialog/new', function (rq, rs) {
       if (stop (rs, [
          ['provider', rq.body.provider, 'string', {oneOf: ['claude', 'openai']}],
@@ -2709,7 +2732,7 @@ var routes = [
       if (rq.body.slug !== undefined && type (rq.body.slug) !== 'string') return reply (rs, 400, {error: 'slug must be a string'});
 
       try {
-         var created = createWaitingDialog (rq.data.params.project, rq.body.provider, rq.body.model, rq.body.slug || 'dialog');
+         var created = createDialogDraft (rq.data.params.project, rq.body.provider, rq.body.model, rq.body.slug || 'dialog');
          reply (rs, 200, created);
       }
       catch (error) {
@@ -2737,6 +2760,8 @@ var routes = [
       if (rs.flushHeaders) rs.flushHeaders ();
       // Kickstart the stream so intermediaries flush headers immediately.
       rs.write (':ok\n\n');
+      var streamStart = Date.now ();
+      var firstChunkSent = false;
 
       try {
          var result = await startDialogTurn (
@@ -2746,7 +2771,16 @@ var routes = [
             rq.body.model,
             rq.body.slug,
             function (chunk) {
-               rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
+               if (! firstChunkSent) {
+                  firstChunkSent = true;
+                  clog ('SSE first chunk (POST /dialog) after ' + (Date.now () - streamStart) + 'ms for project ' + rq.data.params.project);
+               }
+               if (chunk && type (chunk) === 'object' && chunk.type) {
+                  rs.write ('data: ' + JSON.stringify (chunk) + '\n\n');
+               }
+               else {
+                  rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
+               }
                if (rs.flush) rs.flush ();
             }
          );
@@ -2767,7 +2801,7 @@ var routes = [
          ['dialogId', rq.body.dialogId, 'string'],
       ])) return;
 
-      if (rq.body.status !== undefined && ! inc (['waiting', 'done'], rq.body.status)) return reply (rs, 400, {error: 'status must be waiting or done'});
+      if (rq.body.status !== undefined && rq.body.status !== 'done') return reply (rs, 400, {error: 'status must be done'});
       if (rq.body.prompt !== undefined && type (rq.body.prompt) !== 'string') return reply (rs, 400, {error: 'prompt must be a string'});
       if (rq.body.provider !== undefined && (type (rq.body.provider) !== 'string' || ! inc (['claude', 'openai'], rq.body.provider))) return reply (rs, 400, {error: 'provider must be claude or openai'});
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
@@ -2776,7 +2810,7 @@ var routes = [
 
       if (! continues) {
          var active = getActiveStream (rq.body.dialogId);
-         if (active && rq.body.status && inc (['waiting', 'done'], rq.body.status)) {
+         if (active && rq.body.status === 'done') {
             active.requestedStatus = rq.body.status;
             active.controller.abort ();
             return reply (rs, 200, {ok: true, dialogId: rq.body.dialogId, interrupted: true, status: rq.body.status});
@@ -2801,6 +2835,8 @@ var routes = [
       if (rs.flushHeaders) rs.flushHeaders ();
       // Kickstart the stream so intermediaries flush headers immediately.
       rs.write (':ok\n\n');
+      var streamStart = Date.now ();
+      var firstChunkSent = false;
 
       var controller = beginActiveStream (rq.body.dialogId);
 
@@ -2813,7 +2849,16 @@ var routes = [
             rq.body.provider,
             rq.body.model,
             function (chunk) {
-               rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
+               if (! firstChunkSent) {
+                  firstChunkSent = true;
+                  clog ('SSE first chunk (PUT /dialog) after ' + (Date.now () - streamStart) + 'ms for dialog ' + rq.body.dialogId);
+               }
+               if (chunk && type (chunk) === 'object' && chunk.type) {
+                  rs.write ('data: ' + JSON.stringify (chunk) + '\n\n');
+               }
+               else {
+                  rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
+               }
                if (rs.flush) rs.flush ();
             },
             controller.signal
@@ -2826,7 +2871,7 @@ var routes = [
          if (error && error.name === 'AbortError') {
             try {
                var activeAfterAbort = getActiveStream (rq.body.dialogId);
-               var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'waiting';
+               var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
                var dialogAfterAbort = loadDialog (rq.data.params.project, rq.body.dialogId);
                if (dialogAfterAbort.exists) setDialogStatus (rq.data.params.project, dialogAfterAbort, requestedStatus);
                rs.write ('data: ' + JSON.stringify ({type: 'done', result: {dialogId: rq.body.dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}}) + '\n\n');

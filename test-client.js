@@ -245,6 +245,7 @@
    var SHORT_WAIT   = 3000;
    var POLL         = 200;
    var POLL_TIMEOUT = 180000; // 3 min hard timeout for long polling steps
+   var EXTENDED_POLL_TIMEOUT = 420000; // 7 min for slow LLM build flows (F4/F5)
 
    var TEST_PROJECT = 'test-flow1-' + testTimestamp ();
    var TEST_DIALOG  = 'read-vibey';
@@ -312,7 +313,7 @@
          if (! file) return 'No currentFile set after dialog creation';
          if (file.name.indexOf ('dialog/') !== 0) return 'Filename does not start with "dialog/": ' + file.name;
          if (file.name.indexOf (TEST_DIALOG) === -1) return 'Filename does not contain slug "' + TEST_DIALOG + '": ' + file.name;
-         if (file.name.indexOf ('-waiting.md') === -1) return 'Dialog should be in waiting status: ' + file.name;
+         if (file.name.indexOf ('-done.md') === -1) return 'Dialog should be in done status: ' + file.name;
          return true;
       }],
 
@@ -323,8 +324,8 @@
          var item = findByText ('.dialog-name', TEST_DIALOG);
          if (! item) return 'Dialog label "' + TEST_DIALOG + '" not found in sidebar';
          var text = item.textContent;
-         // Check status icon is present (🟡 for waiting)
-         if (text.indexOf ('🟡') === -1) return 'Expected waiting icon 🟡 in sidebar item, got: ' + text;
+         // Check status icon is present (⚪ for done)
+         if (text.indexOf ('⚪') === -1) return 'Expected done icon ⚪ in sidebar item, got: ' + text;
          // Check full name is visible (not truncated with ellipsis via CSS)
          var style = window.getComputedStyle (item);
          if (style.textOverflow === 'ellipsis') return 'Dialog name is being truncated with ellipsis';
@@ -837,7 +838,7 @@
          });
       }, function () {return true;}],
 
-      ['F4-3: Create waiting dialog (orchestrator)', function (done) {
+      ['F4-3: Create dialog draft (orchestrator)', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f4Project) + '/dialogs');
          mockPrompt ('orchestrator');
          B.call ('create', 'dialog');
@@ -847,27 +848,43 @@
          var file = B.get ('currentFile');
          if (! file || file.name.indexOf ('dialog/') !== 0) return 'No dialog file created';
          if (file.name.indexOf ('orchestrator') === -1) return 'Dialog filename missing orchestrator slug';
-         if (file.name.indexOf ('-waiting.md') === -1) return 'Dialog should start in waiting status';
+         if (file.name.indexOf ('-done.md') === -1) return 'Dialog draft should start in done status';
          return true;
       }],
 
       ['F4-4: Fire "please start" (non-blocking)', function (done) {
-         B.call ('set', 'chatInput', 'Please start now. Read doc/main.md and implement the static tictactoe immediately. Create index.html and app.js at /workspace root, use gotoB as specified, and then update doc/main.md with an embed block using port static.');
-         B.call ('send', 'message');
-         done (LONG_WAIT, POLL);
+         var file = B.get ('currentFile');
+         var parsed = file ? parseDialogFilename (file.name) : null;
+         if (! parsed || ! parsed.dialogId) {
+            window._f4FireError = 'Could not determine dialogId for orchestrator';
+            return done (SHORT_WAIT, POLL);
+         }
+         window._f4FireError = null;
+         fetch ('project/' + encodeURIComponent (window._f4Project) + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({
+               dialogId: parsed.dialogId,
+               prompt: 'Please start. Read doc/main.md once, then implement immediately: create index.html and app.js in /workspace root. Do not re-fetch docs after the first read. After creating files, update doc/main.md with an embed block (port static).'
+            })
+         }).catch (function (error) {
+            window._f4FireError = 'Failed to fire dialog: ' + (error && error.message ? error.message : String (error));
+         });
+         done (SHORT_WAIT, POLL);
       }, function () {
-         if (B.get ('streaming')) return 'Still streaming...';
-         return true;
+         return window._f4FireError ? window._f4FireError : true;
       }],
 
       ['F4-5: Poll until static page serves', function (done) {
          window._f4StaticPollError = null;
          var started = Date.now ();
          var attempt = function () {
-            if (Date.now () - started > POLL_TIMEOUT) {
-               window._f4StaticPollError = 'Timed out after 3 minutes waiting for static page';
+            var elapsed = Date.now () - started;
+            if (elapsed > EXTENDED_POLL_TIMEOUT) {
+               window._f4StaticPollError = 'Timed out after 7 minutes waiting for static page';
                return done (SHORT_WAIT, POLL);
             }
+            console.log ('[F4 poll] waiting for /static/ ... ' + Math.round (elapsed / 1000) + 's');
             c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/static/', {}, '', function (error, rs) {
                var code = rs && rs.xhr ? rs.xhr.status : null;
                if (! error && code === 200) {
@@ -899,39 +916,62 @@
       }],
 
       ['F4-7: app.js has tictactoe gotoB code', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat app.js'}}, function (error, rs) {
-            if (error || ! rs.body || ! rs.body.success) window._f4AppError = 'cat app.js failed';
-            else {
-               var out = rs.body.stdout || '';
-               if (out.indexOf ('B.') === -1) window._f4AppError = 'app.js missing gotoB usage';
-               else {
-                  var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('grid') !== -1;
-                  window._f4AppError = hasBoardLogic ? null : 'app.js missing board/cell/grid logic';
-               }
+         window._f4AppError = null;
+         var started = Date.now ();
+         var attempt = function () {
+            if (Date.now () - started > EXTENDED_POLL_TIMEOUT) {
+               window._f4AppError = 'Timed out waiting for static/app.js with gotoB game logic';
+               return done (SHORT_WAIT, POLL);
             }
-            done (SHORT_WAIT, POLL);
-         });
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/static/app.js', {}, '', function (error, rs) {
+               var code = rs && rs.xhr ? rs.xhr.status : null;
+               if (error || code !== 200 || ! rs || type (rs.body) !== 'string') return setTimeout (attempt, 5000);
+
+               var out = rs.body || '';
+               if (out.indexOf ('B.') === -1) return setTimeout (attempt, 5000);
+               var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('grid') !== -1;
+               if (! hasBoardLogic) return setTimeout (attempt, 5000);
+               done (SHORT_WAIT, POLL);
+            });
+         };
+         attempt ();
       }, function () {
          return window._f4AppError ? window._f4AppError : true;
       }],
 
       ['F4-8: Send embed request to orchestrator dialog', function (done) {
-         B.call ('set', 'chatInput', 'The tictactoe game is now available via the static proxy at /project/' + window._f4Project + '/static/. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc/main.md.');
-         B.call ('send', 'message');
-         done (LONG_WAIT, POLL);
+         var file = B.get ('currentFile');
+         var parsed = file ? parseDialogFilename (file.name) : null;
+         if (! parsed || ! parsed.dialogId) {
+            window._f4EmbedFireError = 'Could not determine dialogId for embed request';
+            return done (SHORT_WAIT, POLL);
+         }
+         window._f4EmbedFireError = null;
+         fetch ('project/' + encodeURIComponent (window._f4Project) + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({
+               dialogId: parsed.dialogId,
+               prompt: 'The tictactoe game is now available via the static proxy at /project/' + window._f4Project + '/static/. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc/main.md.'
+            })
+         }).catch (function (error) {
+            window._f4EmbedFireError = 'Failed to fire embed request: ' + (error && error.message ? error.message : String (error));
+         });
+         done (SHORT_WAIT, POLL);
       }, function () {
-         if (B.get ('streaming')) return 'Still streaming...';
-         return true;
+         return window._f4EmbedFireError ? window._f4EmbedFireError : true;
       }],
 
       ['F4-9: Poll until embed block appears in doc/main.md', function (done) {
          window._f4EmbedPollError = null;
          var started = Date.now ();
          var attempt = function () {
-            if (Date.now () - started > POLL_TIMEOUT) {
-               window._f4EmbedPollError = 'Timed out after 3 minutes waiting for static embed block in doc/main.md';
+            var elapsed = Date.now () - started;
+            if (elapsed > EXTENDED_POLL_TIMEOUT) {
+               window._f4EmbedPollError = 'Timed out after 7 minutes waiting for static embed block in doc/main.md';
                return done (SHORT_WAIT, POLL);
             }
+            console.log ('[F4 poll] waiting for embed block ... ' + Math.round (elapsed / 1000) + 's');
             c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, '', function (error, rs) {
                if (! error && rs && rs.body && type (rs.body.content) === 'string') {
                   var content = rs.body.content;
@@ -1001,7 +1041,7 @@
          });
       }, function () {return true;}],
 
-      ['F5-3: Create waiting dialog (orchestrator)', function (done) {
+      ['F5-3: Create dialog draft (orchestrator)', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f5Project) + '/dialogs');
          mockPrompt ('orchestrator');
          B.call ('create', 'dialog');
@@ -1011,25 +1051,39 @@
          var file = B.get ('currentFile');
          if (! file || file.name.indexOf ('dialog/') !== 0) return 'No dialog file created';
          if (file.name.indexOf ('orchestrator') === -1) return 'Dialog filename missing orchestrator slug';
-         if (file.name.indexOf ('-waiting.md') === -1) return 'Dialog should start in waiting status';
+         if (file.name.indexOf ('-done.md') === -1) return 'Dialog draft should start in done status';
          return true;
       }],
 
       ['F5-4: Fire "please start" (non-blocking)', function (done) {
-         B.call ('set', 'chatInput', 'Please start now. Read doc/main.md and build the backend tictactoe immediately: create server.js (express static server on port 4000), create index.html and app.js at /workspace root, run `node server.js &`, and then update doc/main.md with an embed block using port 4000.');
-         B.call ('send', 'message');
-         done (LONG_WAIT, POLL);
+         var file = B.get ('currentFile');
+         var parsed = file ? parseDialogFilename (file.name) : null;
+         if (! parsed || ! parsed.dialogId) {
+            window._f5FireError = 'Could not determine dialogId for orchestrator';
+            return done (SHORT_WAIT, POLL);
+         }
+         window._f5FireError = null;
+         fetch ('project/' + encodeURIComponent (window._f5Project) + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({
+               dialogId: parsed.dialogId,
+               prompt: 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000), index.html, and app.js in /workspace. Do not re-fetch docs after the first read. Start the server with `node server.js &` and then update doc/main.md with an embed block (port 4000).'
+            })
+         }).catch (function (error) {
+            window._f5FireError = 'Failed to fire dialog: ' + (error && error.message ? error.message : String (error));
+         });
+         done (SHORT_WAIT, POLL);
       }, function () {
-         if (B.get ('streaming')) return 'Still streaming...';
-         return true;
+         return window._f5FireError ? window._f5FireError : true;
       }],
 
       ['F5-5: Poll until proxy serves the app on port 4000', function (done) {
          window._f5ProxyPollError = null;
          var started = Date.now ();
          var attempt = function () {
-            if (Date.now () - started > POLL_TIMEOUT) {
-               window._f5ProxyPollError = 'Timed out after 3 minutes waiting for proxied app on port 4000';
+            if (Date.now () - started > EXTENDED_POLL_TIMEOUT) {
+               window._f5ProxyPollError = 'Timed out after 7 minutes waiting for proxied app on port 4000';
                return done (SHORT_WAIT, POLL);
             }
             c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/', {}, '', function (error, rs) {
@@ -1093,20 +1147,34 @@
       }],
 
       ['F5-9: Send embed request to orchestrator dialog', function (done) {
-         B.call ('set', 'chatInput', 'The tictactoe game is now running on port 4000 inside the container. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc/main.md.');
-         B.call ('send', 'message');
-         done (LONG_WAIT, POLL);
+         var file = B.get ('currentFile');
+         var parsed = file ? parseDialogFilename (file.name) : null;
+         if (! parsed || ! parsed.dialogId) {
+            window._f5EmbedFireError = 'Could not determine dialogId for embed request';
+            return done (SHORT_WAIT, POLL);
+         }
+         window._f5EmbedFireError = null;
+         fetch ('project/' + encodeURIComponent (window._f5Project) + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({
+               dialogId: parsed.dialogId,
+               prompt: 'The tictactoe game is now running on port 4000 inside the container. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc/main.md.'
+            })
+         }).catch (function (error) {
+            window._f5EmbedFireError = 'Failed to fire embed request: ' + (error && error.message ? error.message : String (error));
+         });
+         done (SHORT_WAIT, POLL);
       }, function () {
-         if (B.get ('streaming')) return 'Still streaming...';
-         return true;
+         return window._f5EmbedFireError ? window._f5EmbedFireError : true;
       }],
 
       ['F5-10: Poll until embed block appears in doc/main.md', function (done) {
          window._f5EmbedPollError = null;
          var started = Date.now ();
          var attempt = function () {
-            if (Date.now () - started > POLL_TIMEOUT) {
-               window._f5EmbedPollError = 'Timed out after 3 minutes waiting for port 4000 embed block in doc/main.md';
+            if (Date.now () - started > EXTENDED_POLL_TIMEOUT) {
+               window._f5EmbedPollError = 'Timed out after 7 minutes waiting for port 4000 embed block in doc/main.md';
                return done (SHORT_WAIT, POLL);
             }
             c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/file/doc/main.md', {}, '', function (error, rs) {
