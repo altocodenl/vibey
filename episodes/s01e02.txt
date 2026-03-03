@@ -18,4 +18,8 @@ Things that are working well with vibey:
 - Being able to refresh the screen and, if the LLM is still connected with the server, the work is being done. Also if you close the tab.
 - If the server loses contact with the LLM, you can re-trigger by sending another message. All the state is still there in the markdown.
 
+Next time:
+- Get some data out of the savegames.
+- Be able to see analytics as graphs/tables inside a text document that describes interesting things about the campaign.
+
 I'm going to stop here. Thanks for watching!
