@@ -71,7 +71,7 @@ Think of a text-based agentic system as three things:
 
 1. **Deed**: whatever final result you want to achieve. If it's code, the codebase, plus all of the data. If you're selling something, an interface to your CRM. If you're writing a game, your game.
 2. **Docs**: a set of markdown pages that contain the specification of the deed: purpose, main entities, endpoints, constraints, core flows, coding standards. It also contains the list of things that need to be worked upon (ie: pending tasks).
-3. **Dialogs**: the stream of consciousness of each agent. Most dialogs are complete, a few are ongoing for those agents that are working/alive *now*. A human can inspect at any time this stream of text, code changes and commands; a human can also enter the dialog. Some dialogs can be waiting for human input. When an agent completes its work, the dialog is no longer alive but it still is accessible.
+3. **Dialogs**: the stream of consciousness of each agent. Most dialogs are complete, a few are ongoing for those agents that are working/alive *now*. A human can inspect at any time this stream of text, code changes and commands; a human can also enter the dialog. Dialogs are either active (running) or done (idle/completed). When an agent completes its work, the dialog is no longer alive but it still is accessible.
 
 The first two are stocks: things that accumulate with time. The last one is a flow: changes to the deed and the docs.
 
@@ -199,7 +199,7 @@ Docs sidebar shows an Uploads section at the bottom (always visible when uploads
 
 ### Server: dialogs
 
-- `POST /project/:project/dialog/new` — create a waiting dialog draft. Body: `{provider, model?, slug?}`.
+- `POST /project/:project/dialog/new` — create a done dialog draft (idle). Body: `{provider, model?, slug?}`.
 - `POST /project/:project/dialog` — create a new dialog and run first turn. Body: `{provider, model?, prompt, slug?}`. Response: SSE.
   - Creates a file named `dialog/<YYYYMMDD-HHmmss>-<slug>-<status>.md`.
   - Stable `dialogId` is `<YYYYMMDD-HHmmss>-<slug>` (status is not part of the id).
@@ -208,7 +208,7 @@ Docs sidebar shows an Uploads section at the bottom (always visible when uploads
 
 - `PUT /project/:project/dialog` — mutate or continue an existing dialog.
   - Canonical body: `{dialogId, status?, prompt?}`.
-  - `status` can be `waiting` or `done`.
+  - `status` can only be `done`.
   - If `status` is set without `prompt`, it is a pure status change (interrupt/mark done).
   - If `prompt` is present, append as `## User` and continue generation.
   - Whenever generation is kicked off on an existing dialog, server first sets status to `active`.
@@ -224,7 +224,7 @@ Dialogs are files named:
 
 `dialog/<YYYYMMDD-HHmmss>-<slug>-<status>.md`
 
-Where `<status>` is one of: `active`, `waiting`, `done`.
+Where `<status>` is one of: `active`, `done`.
 
 Canonical section shape (for `User`, `Assistant`, `Tool Request`, `Tool Result`):
 
@@ -252,7 +252,7 @@ Canonical dialog header:
 > DialogId: 20260216-201100-read-vibey
 > Provider: openai
 > Model: gpt-5
-> Status: waiting
+> Status: done
 > Started: 2026-02-16T20:11:00Z
 ```
 
@@ -352,7 +352,7 @@ Status values: `requested | executed | error`.
 1. LLM emits tool calls. Server writes `Tool Request` sections.
 2. Server executes each tool immediately.
 3. Results are written as `Tool Result` sections and fed back to the LLM.
-4. Stream continues; there are no tool approvals or waiting states for tool calls.
+4. Stream continues; there are no tool approvals or pause states for tool calls.
 
 No separate tool-execution endpoint is needed in normal flow.
 
@@ -619,8 +619,8 @@ Flow #1 — Dialog + tool-use happy path
 
 - Open Vibey (`GET /`) and confirm the HTML shell loads `client.js`.
 - Create a project with `POST /projects`.
-- Start by creating a **waiting** dialog draft with `POST /project/:project/dialog/new` (provider `openai`, model `gpt-5`, custom slug).
-- Check `GET /project/:project/dialogs`: the new dialog is present and status is `waiting`.
+- Start by creating a **done (idle)** dialog draft with `POST /project/:project/dialog/new` (provider `openai`, model `gpt-5`, custom slug).
+- Check `GET /project/:project/dialogs`: the new dialog is present and status is `done`.
 - Seed an input file for the agent (`test-sample.txt`) using `POST /project/:project/tool/execute` with `write_file`.
 - Continue that dialog via `PUT /project/:project/dialog` with a prompt that explicitly asks for `run_command`.
   - Response should stream as SSE and finish with a `done` event.
@@ -648,7 +648,7 @@ Flow #2 — Docs CRUD + filename guards
 Flow #3 — Deleting a project aborts active agents
 
 - Create a project and seed `doc/main.md` so it behaves like a real workspace.
-- Create two waiting dialogs (`agent-a`, `agent-b`) with `POST /project/:project/dialog/new`.
+- Create two done dialog drafts (`agent-a`, `agent-b`) with `POST /project/:project/dialog/new`.
 - Trigger both dialogs with long prompts (non-blocking `PUT /project/:project/dialog`) and poll `GET /project/:project/dialogs` until both are `active`.
 - While they are still running, delete the project with `DELETE /projects/:name`.
 - Verify hard-stop semantics:
