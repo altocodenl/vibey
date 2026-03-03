@@ -523,6 +523,24 @@ var pollUntil = function (checkFn, intervalMs, maxMs, cb) {
    tick ();
 };
 
+var pollDialogDone = function (project, dialogId, intervalMs, maxMs, cb) {
+   pollUntil (function (done) {
+      httpGet (5353, '/project/' + project + '/dialogs', function (error, status, body) {
+         if (error || status !== 200) return done (false);
+         try {
+            var dialogs = JSON.parse (body);
+            var entry = dale.stopNot (dialogs, undefined, function (d) {
+               if (d && d.dialogId === dialogId) return d;
+            });
+            if (! entry) return done (false);
+            if (entry.status === 'done' && type (entry.filename) === 'string' && entry.filename.indexOf ('-done.md') !== -1) return done (true);
+         }
+         catch (e) {}
+         done (false);
+      });
+   }, intervalMs, maxMs, cb);
+};
+
 var flow4Sequence = [
 
    ['F4: Create project', 'post', 'projects', {}, {name: PROJECT4}, 200, function (s, rq, rs) {
@@ -761,6 +779,23 @@ var flow5Sequence = [
       var content = rs.body.content || '';
       if (content.indexOf ('əəəembed') === -1) return log ('doc/main.md missing əəəembed block');
       if (content.indexOf ('port 4000') === -1) return log ('doc/main.md embed missing port 4000');
+      return true;
+   }],
+
+   ['F5: Poll until orchestrator dialog is done in /dialogs', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollDialogDone (PROJECT5, s.f5DialogId, 3000, 420000, function (error) {
+         if (error) return log ('Orchestrator dialog never reached done status: ' + error.message);
+         next ();
+      });
+   }],
+
+   ['F5: Verify orchestrator dialog status + filename suffix', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs) {
+      var entry = dale.stopNot (rs.body, undefined, function (d) {
+         if (d && d.dialogId === s.f5DialogId) return d;
+      });
+      if (! entry) return log ('Orchestrator dialog not found in /dialogs');
+      if (entry.status !== 'done') return log ('Orchestrator dialog status should be done, got ' + entry.status);
+      if (type (entry.filename) !== 'string' || entry.filename.indexOf ('-done.md') === -1) return log ('Orchestrator dialog filename should end in -done.md, got ' + entry.filename);
       return true;
    }]
 

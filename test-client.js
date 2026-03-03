@@ -1052,22 +1052,30 @@
          if (! file || file.name.indexOf ('dialog/') !== 0) return 'No dialog file created';
          if (file.name.indexOf ('orchestrator') === -1) return 'Dialog filename missing orchestrator slug';
          if (file.name.indexOf ('-done.md') === -1) return 'Dialog draft should start in done status';
+         var parsed = parseDialogFilename (file.name);
+         if (! parsed || ! parsed.dialogId) return 'Could not parse orchestrator dialogId';
+         window._f5DialogId = parsed.dialogId;
          return true;
       }],
 
       ['F5-4: Fire "please start" (non-blocking)', function (done) {
-         var file = B.get ('currentFile');
-         var parsed = file ? parseDialogFilename (file.name) : null;
-         if (! parsed || ! parsed.dialogId) {
+         var dialogId = window._f5DialogId;
+         if (! dialogId) {
+            var file = B.get ('currentFile');
+            var parsed = file ? parseDialogFilename (file.name) : null;
+            if (parsed && parsed.dialogId) dialogId = parsed.dialogId;
+         }
+         if (! dialogId) {
             window._f5FireError = 'Could not determine dialogId for orchestrator';
             return done (SHORT_WAIT, POLL);
          }
+         window._f5DialogId = dialogId;
          window._f5FireError = null;
          fetch ('project/' + encodeURIComponent (window._f5Project) + '/dialog', {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify ({
-               dialogId: parsed.dialogId,
+               dialogId: dialogId,
                prompt: 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000), index.html, and app.js in /workspace. Do not re-fetch docs after the first read. Start the server with `node server.js &` and then update doc/main.md with an embed block (port 4000).'
             })
          }).catch (function (error) {
@@ -1147,18 +1155,23 @@
       }],
 
       ['F5-9: Send embed request to orchestrator dialog', function (done) {
-         var file = B.get ('currentFile');
-         var parsed = file ? parseDialogFilename (file.name) : null;
-         if (! parsed || ! parsed.dialogId) {
+         var dialogId = window._f5DialogId;
+         if (! dialogId) {
+            var file = B.get ('currentFile');
+            var parsed = file ? parseDialogFilename (file.name) : null;
+            if (parsed && parsed.dialogId) dialogId = parsed.dialogId;
+         }
+         if (! dialogId) {
             window._f5EmbedFireError = 'Could not determine dialogId for embed request';
             return done (SHORT_WAIT, POLL);
          }
+         window._f5DialogId = dialogId;
          window._f5EmbedFireError = null;
          fetch ('project/' + encodeURIComponent (window._f5Project) + '/dialog', {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify ({
-               dialogId: parsed.dialogId,
+               dialogId: dialogId,
                prompt: 'The tictactoe game is now running on port 4000 inside the container. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc/main.md.'
             })
          }).catch (function (error) {
@@ -1200,6 +1213,51 @@
          if (content.indexOf ('əəəembed') === -1) return 'doc/main.md missing əəəembed block';
          if (content.indexOf ('port 4000') === -1) return 'doc/main.md embed missing port 4000';
          return true;
+      }],
+
+      ['F5-12: Poll until orchestrator dialog status is done in /dialogs', function (done) {
+         window._f5DialogStatusError = null;
+         var started = Date.now ();
+         var attempt = function () {
+            if (Date.now () - started > EXTENDED_POLL_TIMEOUT) {
+               window._f5DialogStatusError = 'Timed out after 7 minutes waiting for orchestrator dialog status done';
+               return done (SHORT_WAIT, POLL);
+            }
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/dialogs', {}, '', function (error, rs) {
+               if (! error && rs && type (rs.body) === 'array') {
+                  var entry = dale.stopNot (rs.body, undefined, function (d) {
+                     if (d && d.dialogId === window._f5DialogId) return d;
+                  });
+                  if (entry && entry.status === 'done' && entry.filename && entry.filename.indexOf ('-done.md') !== -1) {
+                     window._f5DialogListEntry = entry;
+                     return done (SHORT_WAIT, POLL);
+                  }
+               }
+               setTimeout (attempt, 3000);
+            });
+         };
+         attempt ();
+      }, function () {
+         return window._f5DialogStatusError ? window._f5DialogStatusError : true;
+      }],
+
+      ['F5-13: Verify done status in /dialogs matches filename suffix', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/dialogs', {}, '', function (error, rs) {
+            if (error || ! rs || type (rs.body) !== 'array') {
+               window._f5DialogDoneMismatch = 'Failed to read dialogs list';
+               return done (SHORT_WAIT, POLL);
+            }
+            var entry = dale.stopNot (rs.body, undefined, function (d) {
+               if (d && d.dialogId === window._f5DialogId) return d;
+            });
+            if (! entry) window._f5DialogDoneMismatch = 'Orchestrator dialog missing from /dialogs';
+            else if (entry.status !== 'done') window._f5DialogDoneMismatch = 'Expected status done, got ' + entry.status;
+            else if ((entry.filename || '').indexOf ('-done.md') === -1) window._f5DialogDoneMismatch = 'Expected filename suffix -done.md, got ' + (entry.filename || '');
+            else window._f5DialogDoneMismatch = null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         return window._f5DialogDoneMismatch ? window._f5DialogDoneMismatch : true;
       }],
 
       // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable

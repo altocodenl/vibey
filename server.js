@@ -1548,16 +1548,49 @@ var loadDialog = function (projectName, dialogId) {
    };
 };
 
-var setDialogStatus = function (projectName, dialog, status) {
+var setDialogStatus = function (projectName, dialog, status, context) {
+   context = context || 'unknown';
+
    if (! inc (DIALOG_STATUSES, status)) throw new Error ('Invalid status: ' + status);
-   if (! dialog.exists) throw new Error ('Dialog not found: ' + dialog.dialogId);
-   if (dialog.status === status) return dialog;
+   if (! dialog || ! dialog.dialogId) throw new Error ('Dialog not found');
+
+   var currentFilename = findDialogFilename (projectName, dialog.dialogId);
+   if (! currentFilename) throw new Error ('Dialog not found: ' + dialog.dialogId);
+
+   var parsed = parseDialogFilename (currentFilename);
+   var currentStatus = parsed ? parsed.status : dialog.status;
+
+   clog ('[dialog-status] request project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=' + context + ' from=' + currentStatus + ' to=' + status + ' file=' + currentFilename);
+
+   dialog.exists = true;
+   dialog.filename = currentFilename;
+   dialog.status = currentStatus;
+
+   if (currentStatus === status) {
+      clog ('[dialog-status] noop project=' + projectName + ' dialogId=' + dialog.dialogId + ' status=' + status + ' file=' + currentFilename);
+      return dialog;
+   }
 
    var newFilename = buildDialogFilename (dialog.dialogId, status);
-   pfs.rename (projectName, dialog.filename, newFilename);
-   dialog.filename = newFilename;
-   dialog.status = status;
-   return dialog;
+
+   try {
+      pfs.rename (projectName, currentFilename, newFilename);
+
+      var oldExists = pfs.exists (projectName, currentFilename);
+      var newExists = pfs.exists (projectName, newFilename);
+
+      clog ('[dialog-status] renamed project=' + projectName + ' dialogId=' + dialog.dialogId + ' old=' + currentFilename + ' new=' + newFilename + ' oldExists=' + oldExists + ' newExists=' + newExists);
+
+      if (! newExists) throw new Error ('Dialog rename verification failed: missing ' + newFilename);
+
+      dialog.filename = newFilename;
+      dialog.status = status;
+      return dialog;
+   }
+   catch (error) {
+      clog ('[dialog-status] error project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=' + context + ' from=' + currentStatus + ' to=' + status + ' file=' + currentFilename + ' error=' + error.message);
+      throw error;
+   }
 };
 
 var ensureDialogFile = function (projectName, dialog, provider, model) {
@@ -2065,13 +2098,18 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
 
    try {
       var result = await runCompletion (projectName, dialog, provider, defaultModel, onChunk, abortSignal);
-      setDialogStatus (projectName, dialog, 'done');
+      setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/success');
       result.filename = dialog.filename;
       result.status = dialog.status;
       return result;
    }
    catch (error) {
-      try {setDialogStatus (projectName, dialog, 'done');} catch (statusError) {}
+      try {
+         setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/error');
+      }
+      catch (statusError) {
+         clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=startDialogTurn/error error=' + statusError.message);
+      }
       throw error;
    }
 };
@@ -2083,7 +2121,7 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
    var shouldContinue = (type (prompt) === 'string' && prompt.trim ());
 
    if (shouldContinue) {
-      setDialogStatus (projectName, dialog, 'active');
+      setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
       if (type (prompt) === 'string' && prompt.trim ()) {
          appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt.trim () + '\n\n');
       }
@@ -2097,18 +2135,23 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
 
       try {
          var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal);
-         setDialogStatus (projectName, dialog, 'done');
+         setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/success');
          result.filename = dialog.filename;
          result.status = dialog.status;
          return result;
       }
       catch (error) {
-         try {setDialogStatus (projectName, dialog, 'done');} catch (statusError) {}
+         try {
+            setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/error');
+         }
+         catch (statusError) {
+            clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=updateDialogTurn/error error=' + statusError.message);
+         }
          throw error;
       }
    }
 
-   if (status && status === 'done') setDialogStatus (projectName, dialog, status);
+   if (status && status === 'done') setDialogStatus (projectName, dialog, status, 'updateDialogTurn/status-only');
 
    return {
       dialogId: dialog.dialogId,
@@ -2785,6 +2828,17 @@ var routes = [
             }
          );
 
+         try {
+            var persisted = loadDialog (rq.data.params.project, result.dialogId);
+            if (persisted.exists) {
+               result.filename = persisted.filename;
+               result.status = persisted.status;
+            }
+         }
+         catch (statusReadError) {
+            clog ('[dialog-status] verify-failed project=' + rq.data.params.project + ' dialogId=' + result.dialogId + ' context=route/post-dialog/done error=' + statusReadError.message);
+         }
+
          rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
          rs.end ();
       }
@@ -2864,6 +2918,17 @@ var routes = [
             controller.signal
          );
 
+         try {
+            var persisted = loadDialog (rq.data.params.project, result.dialogId);
+            if (persisted.exists) {
+               result.filename = persisted.filename;
+               result.status = persisted.status;
+            }
+         }
+         catch (statusReadError) {
+            clog ('[dialog-status] verify-failed project=' + rq.data.params.project + ' dialogId=' + result.dialogId + ' context=route/put-dialog/done error=' + statusReadError.message);
+         }
+
          rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
          rs.end ();
       }
@@ -2873,7 +2938,7 @@ var routes = [
                var activeAfterAbort = getActiveStream (rq.body.dialogId);
                var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
                var dialogAfterAbort = loadDialog (rq.data.params.project, rq.body.dialogId);
-               if (dialogAfterAbort.exists) setDialogStatus (rq.data.params.project, dialogAfterAbort, requestedStatus);
+               if (dialogAfterAbort.exists) setDialogStatus (rq.data.params.project, dialogAfterAbort, requestedStatus, 'route/put-dialog/abort');
                rs.write ('data: ' + JSON.stringify ({type: 'done', result: {dialogId: rq.body.dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}}) + '\n\n');
                rs.end ();
             }
@@ -2883,6 +2948,14 @@ var routes = [
             }
          }
          else {
+            try {
+               var dialogAfterError = loadDialog (rq.data.params.project, rq.body.dialogId);
+               if (dialogAfterError.exists) setDialogStatus (rq.data.params.project, dialogAfterError, 'done', 'route/put-dialog/error');
+            }
+            catch (statusError) {
+               clog ('[dialog-status] finalize-failed project=' + rq.data.params.project + ' dialogId=' + rq.body.dialogId + ' context=route/put-dialog/error error=' + statusError.message);
+            }
+
             clog ('Dialog update error:', error.message);
             rs.write ('data: ' + JSON.stringify ({type: 'error', error: error.message}) + '\n\n');
             rs.end ();
