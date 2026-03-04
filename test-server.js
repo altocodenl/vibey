@@ -11,6 +11,7 @@ var inc  = teishi.inc;
 // Run:   node test-server.js              (all flows)
 //        node test-server.js --flow=1     (just flow 1)
 //        node test-server.js --flow=3     (just flow 3)
+//        node test-server.js --flow=9     (auto-commit flow)
 // Assumes server is already running on localhost:5353
 
 // *** TIMESTAMP ***
@@ -103,6 +104,31 @@ var httpGet = function (port, path, cb) {
    req.end ();
 };
 
+var httpJson = function (method, path, payload, cb) {
+   var body = payload === undefined ? '' : JSON.stringify (payload);
+   var req = http.request ({
+      hostname: 'localhost',
+      port: 5353,
+      path: path,
+      method: method,
+      headers: {
+         'Content-Type': 'application/json',
+         'Content-Length': Buffer.byteLength (body)
+      }
+   }, function (res) {
+      var text = '';
+      res.on ('data', function (chunk) {text += chunk;});
+      res.on ('end', function () {
+         var parsed = null;
+         try {parsed = text ? JSON.parse (text) : null;} catch (error) {}
+         cb (null, res.statusCode, parsed, text);
+      });
+   });
+   req.on ('error', cb);
+   if (body) req.write (body);
+   req.end ();
+};
+
 // *** FLOW #1: Dialog with tool calls (read + write) ***
 
 var PROJECT = 'flow1-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
@@ -122,11 +148,11 @@ var flow1Sequence = [
       return true;
    }],
 
-   ['Create dialog draft (openai/gpt-5)', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: DIALOG_SLUG}, 200, function (s, rq, rs) {
+   ['Create dialog draft (openai/gpt-5.2-codex)', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: DIALOG_SLUG}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('dialog/new missing dialogId or filename');
       if (rs.body.provider !== 'openai') return log ('dialog/new provider mismatch');
-      if (rs.body.model !== 'gpt-5') return log ('dialog/new model mismatch');
+      if (rs.body.model !== 'gpt-5.2-codex') return log ('dialog/new model mismatch');
       if (! rs.body.filename.match (/^dialog\/.*\-done\.md$/)) return log ('dialog/new should produce done dialog filename');
       if (rs.body.filename.indexOf (DIALOG_SLUG) === -1) return log ('dialog/new filename missing slug');
       s.dialogId = rs.body.dialogId;
@@ -162,14 +188,23 @@ var flow1Sequence = [
          var eventTypes = dale.go (events, function (event) {return event && event.type ? event.type : 'unknown'}).join (', ');
          return log ('Expected done event (tools auto-execute). Events: ' + eventTypes);
       }
+      // Verify context window usage SSE event is present
+      var contextEvents = getEventsByType (events, 'context');
+      if (! contextEvents.length) return log ('Expected at least one context SSE event with usage percentage');
+      var ctx = contextEvents [0].context;
+      if (! ctx || (type (ctx.percent) !== 'integer' && type (ctx.percent) !== 'float')) return log ('Context event missing numeric percent field');
+      if (ctx.percent < 0 || ctx.percent > 100) return log ('Context percent out of range: ' + ctx.percent);
+      if (type (ctx.used) !== 'integer' || ctx.used < 0) return log ('Context used should be a non-negative integer');
+      if (type (ctx.limit) !== 'integer' || ctx.limit < 1) return log ('Context limit should be a positive integer');
       return true;
    }],
 
    // Fetch dialog markdown via API and verify content
-   ['Verify dialog via API: time + run_command', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['Verify dialog via API: time + run_command + context', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       fetchDialogMarkdown (PROJECT, s.dialogId, function (error, md) {
          if (error) return log ('Could not fetch dialog: ' + error.message);
          if (md.indexOf ('> Time:') === -1) return log ('Dialog markdown missing > Time metadata');
+         if (md.indexOf ('> Context:') === -1) return log ('Dialog markdown missing > Context metadata');
          if (! hasToolMention (md, 'run_command')) return log ('Missing run_command evidence in dialog markdown');
          if (! hasResultMarker (md)) return log ('run_command block missing Result section');
          next ();
@@ -339,13 +374,13 @@ var flow3Sequence = [
    }],
 
    // Create two dialogs and fire them with slow prompts so they stay active
-   ['F3: Create dialog A', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, 200, function (s, rq, rs) {
+   ['F3: Create dialog A', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.f3DialogA = rs.body.dialogId;
       return true;
    }],
 
-   ['F3: Create dialog B', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, 200, function (s, rq, rs) {
+   ['F3: Create dialog B', 'post', 'project/' + PROJECT3 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.f3DialogB = rs.body.dialogId;
       return true;
@@ -553,7 +588,7 @@ var flow4Sequence = [
       return true;
    }],
 
-   ['F4: Create dialog draft (orchestrator)', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['F4: Create dialog draft (orchestrator)', 'post', 'project/' + PROJECT4 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.f4DialogId = rs.body.dialogId;
@@ -687,7 +722,7 @@ var flow5Sequence = [
       return true;
    }],
 
-   ['F5: Create dialog draft (orchestrator)', 'post', 'project/' + PROJECT5 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['F5: Create dialog draft (orchestrator)', 'post', 'project/' + PROJECT5 + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.f5DialogId = rs.body.dialogId;
@@ -1410,9 +1445,151 @@ var flow8Sequence = [
    }]
 ];
 
+// *** FLOW #9: Auto-commit strictness + per-project commit safety ***
+
+var PROJECT9 = 'flow9-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
+
+var flow9Sequence = [
+
+   ['F9: Create project', 'post', 'projects', {}, {name: PROJECT9}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
+      return true;
+   }],
+
+   ['F9: .git repository exists in workspace', 'post', 'project/' + PROJECT9 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'test -d .git && echo yes || echo no'}}, 200, function (s, rq, rs) {
+      if (! rs.body || ! rs.body.success) return log ('run_command failed: ' + JSON.stringify (rs.body));
+      if ((rs.body.stdout || '').trim () !== 'yes') return log ('Expected .git directory to exist');
+      return true;
+   }],
+
+   ['F9: Capture initial commit count', 'post', 'project/' + PROJECT9 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'git rev-list --count HEAD'}}, 200, function (s, rq, rs) {
+      if (! rs.body || ! rs.body.success) return log ('Failed to read commit count');
+      var n = Number ((rs.body.stdout || '').trim ());
+      if (! isFinite (n) || n < 1) return log ('Initial commit count should be >= 1, got: ' + rs.body.stdout);
+      s.f9Count0 = n;
+      return true;
+   }],
+
+   ['F9: GET files does not create a commit', 'get', 'project/' + PROJECT9 + '/files', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'git rev-list --count HEAD'}}, function (error, code, body) {
+         if (error) return log ('Failed to read commit count after GET: ' + error.message);
+         if (code !== 200 || ! body || ! body.success) return log ('Unexpected response reading commit count after GET');
+         var n = Number ((body.stdout || '').trim ());
+         if (n !== s.f9Count0) return log ('GET /files changed commit count from ' + s.f9Count0 + ' to ' + n);
+         s.f9Count1 = n;
+         next ();
+      });
+   }],
+
+   ['F9: Write doc/notes.md increments commit count', 'post', 'project/' + PROJECT9 + '/file/doc/notes.md', {}, {content: '# Notes\n\nFirst version\n'}, 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'git rev-list --count HEAD'}}, function (error, code, body) {
+         if (error) return log ('Failed to read commit count after write: ' + error.message);
+         if (code !== 200 || ! body || ! body.success) return log ('Unexpected response reading commit count after write');
+         var n = Number ((body.stdout || '').trim ());
+         if (n !== s.f9Count1 + 1) return log ('Expected commit count ' + (s.f9Count1 + 1) + ' after write, got ' + n);
+         s.f9Count2 = n;
+         next ();
+      });
+   }],
+
+   ['F9: Rewriting same content does not create a commit', 'post', 'project/' + PROJECT9 + '/file/doc/notes.md', {}, {content: '# Notes\n\nFirst version\n'}, 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'git rev-list --count HEAD'}}, function (error, code, body) {
+         if (error) return log ('Failed to read commit count after same-content write: ' + error.message);
+         if (code !== 200 || ! body || ! body.success) return log ('Unexpected response reading commit count after same-content write');
+         var n = Number ((body.stdout || '').trim ());
+         if (n !== s.f9Count2) return log ('Same-content write changed commit count from ' + s.f9Count2 + ' to ' + n);
+         s.f9Count3 = n;
+         next ();
+      });
+   }],
+
+   ['F9: run_command with FS mutation increments commit count', 'post', 'project/' + PROJECT9 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'echo from-flow9 > touched-by-tool.txt'}}, 200, function (s, rq, rs, next) {
+      if (! rs.body || ! rs.body.success) return log ('Mutating run_command failed');
+      httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'git rev-list --count HEAD'}}, function (error, code, body) {
+         if (error) return log ('Failed to read commit count after mutating run_command: ' + error.message);
+         if (code !== 200 || ! body || ! body.success) return log ('Unexpected response reading commit count after mutating run_command');
+         var n = Number ((body.stdout || '').trim ());
+         if (n !== s.f9Count3 + 1) return log ('Expected commit count ' + (s.f9Count3 + 1) + ' after mutating run_command, got ' + n);
+         s.f9Count4 = n;
+         next ();
+      });
+   }],
+
+   ['F9: run_command without FS mutation does not create a commit', 'post', 'project/' + PROJECT9 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'echo noop'}}, 200, function (s, rq, rs, next) {
+      if (! rs.body || ! rs.body.success) return log ('Non-mutating run_command failed');
+      httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'git rev-list --count HEAD'}}, function (error, code, body) {
+         if (error) return log ('Failed to read commit count after non-mutating run_command: ' + error.message);
+         if (code !== 200 || ! body || ! body.success) return log ('Unexpected response reading commit count after non-mutating run_command');
+         var n = Number ((body.stdout || '').trim ());
+         if (n !== s.f9Count4) return log ('Non-mutating run_command changed commit count from ' + s.f9Count4 + ' to ' + n);
+         s.f9Count5 = n;
+         next ();
+      });
+   }],
+
+   ['F9: Two concurrent writes keep git healthy and create two commits', 'get', 'project/' + PROJECT9 + '/files', {}, '', 200, function (s, rq, rs, next) {
+      var done = 0;
+      var failed = false;
+
+      var finishOne = function (error) {
+         if (failed) return;
+         if (error) {
+            failed = true;
+            return log ('Concurrent write failed: ' + error);
+         }
+         done++;
+         if (done < 2) return;
+
+         httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'git rev-list --count HEAD'}}, function (errCount, codeCount, bodyCount) {
+            if (errCount) return log ('Failed to read commit count after concurrent writes: ' + errCount.message);
+            if (codeCount !== 200 || ! bodyCount || ! bodyCount.success) return log ('Unexpected response reading commit count after concurrent writes');
+
+            var n = Number ((bodyCount.stdout || '').trim ());
+            if (n !== s.f9Count5 + 2) return log ('Expected two additional commits after concurrent writes. Expected ' + (s.f9Count5 + 2) + ', got ' + n);
+
+            httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'git fsck --no-progress'}}, function (errFsck, codeFsck, bodyFsck) {
+               if (errFsck) return log ('git fsck request failed: ' + errFsck.message);
+               if (codeFsck !== 200 || ! bodyFsck || ! bodyFsck.success) return log ('git fsck command failed: ' + JSON.stringify (bodyFsck));
+
+               httpJson ('POST', '/project/' + PROJECT9 + '/tool/execute', {toolName: 'run_command', toolInput: {command: 'test ! -e .git/index.lock && echo clean'}}, function (errLock, codeLock, bodyLock) {
+                  if (errLock) return log ('index.lock check failed: ' + errLock.message);
+                  if (codeLock !== 200 || ! bodyLock || ! bodyLock.success) return log ('index.lock check command failed');
+                  if ((bodyLock.stdout || '').trim () !== 'clean') return log ('Expected no .git/index.lock after concurrent writes');
+                  next ();
+               });
+            });
+         });
+      };
+
+      httpJson ('POST', '/project/' + PROJECT9 + '/file/doc/concurrent-a.md', {content: '# A\n\n' + Date.now () + '\n'}, function (errorA, codeA, bodyA) {
+         if (errorA) return finishOne (errorA.message);
+         if (codeA !== 200 || ! bodyA || bodyA.ok !== true) return finishOne ('write A status/body mismatch');
+         finishOne ();
+      });
+
+      httpJson ('POST', '/project/' + PROJECT9 + '/file/doc/concurrent-b.md', {content: '# B\n\n' + Date.now () + '\n'}, function (errorB, codeB, bodyB) {
+         if (errorB) return finishOne (errorB.message);
+         if (codeB !== 200 || ! bodyB || bodyB.ok !== true) return finishOne ('write B status/body mismatch');
+         finishOne ();
+      });
+   }],
+
+   ['F9: Delete project', 'delete', 'projects/' + PROJECT9, {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
+      return true;
+   }],
+
+   ['F9: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'array') return log ('Expected array');
+      if (projectListHasSlug (rs.body, PROJECT9)) return log ('Project still exists after deletion');
+      return true;
+   }],
+
+];
+
 // *** RUNNER ***
 
-var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence, 5: flow5Sequence, 6: flow6Sequence, 7: flow7Sequence, 8: flow8Sequence};
+var allFlows = {1: flow1Sequence, 2: flow2Sequence, 3: flow3Sequence, 4: flow4Sequence, 5: flow5Sequence, 6: flow6Sequence, 7: flow7Sequence, 8: flow8Sequence, 9: flow9Sequence};
 
 var requestedFlows = [];
 dale.go (process.argv.slice (2), function (arg) {
@@ -1420,7 +1597,7 @@ dale.go (process.argv.slice (2), function (arg) {
    if (match) requestedFlows.push (Number (match [1]));
 });
 
-if (! requestedFlows.length) requestedFlows = [1, 2, 3, 4, 5, 6, 7, 8];
+if (! requestedFlows.length) requestedFlows = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 var sequences = dale.go (requestedFlows, function (n) {return allFlows [n];});
 var label = 'Flow #' + requestedFlows.join (' + Flow #');

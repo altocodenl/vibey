@@ -332,18 +332,18 @@
          return true;
       }],
 
-      // --- Step 6: Check gpt5.3 is selected ---
-      ['Step 6: gpt5.3 model is selected', function () {
+      // --- Step 6: Check gpt-5.3-codex is selected ---
+      ['Step 6: gpt-5.3-codex model is selected', function () {
          var provider = B.get ('chatProvider');
          if (provider !== 'openai') return 'Expected provider to be "openai" but got "' + provider + '"';
          var model = B.get ('chatModel');
-         if (model !== 'gpt-5') return 'Expected model to be "gpt-5" but got "' + model + '"';
-         // Check the second select (model select) shows gpt5.3
+         if (model !== 'gpt-5.3-codex') return 'Expected model to be "gpt-5.3-codex" but got "' + model + '"';
+         // Check the unified provider+model select shows the right label
          var selects = document.querySelectorAll ('.provider-select');
-         if (selects.length < 2) return 'Expected at least 2 provider selects, found ' + selects.length;
-         var modelSelect = selects [1];
+         if (selects.length < 1) return 'Expected at least 1 provider select, found ' + selects.length;
+         var modelSelect = selects [0];
          var selectedOption = modelSelect.options [modelSelect.selectedIndex];
-         if (! selectedOption || selectedOption.textContent !== 'gpt5.3') return 'Model dropdown does not show gpt5.3, shows: ' + (selectedOption ? selectedOption.textContent : 'nothing');
+         if (! selectedOption || selectedOption.textContent !== 'OpenAI · gpt-5.3') return 'Model dropdown does not show "OpenAI · gpt-5.3", shows: ' + (selectedOption ? selectedOption.textContent : 'nothing');
          return true;
       }],
 
@@ -381,14 +381,15 @@
          return true;
       }],
 
-      // --- Step 9: Verify response shows gauges (time + duration + compact cumulative tokens) ---
-      ['Step 9: Response shows gauges with local time and compact in/out tokens', function () {
+      // --- Step 9: Verify response shows gauges (time + duration + compact cumulative tokens + context %) ---
+      ['Step 9: Response shows gauges with local time, compact in/out tokens, and context %', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No current file';
          var content = file.content;
 
          // Check metadata exists in markdown source
          if (content.indexOf ('> Time:') === -1) return 'No "> Time:" metadata found in dialog';
+         if (content.indexOf ('> Context:') === -1) return 'No "> Context:" metadata found in dialog';
 
          var metaElements = document.querySelectorAll ('.chat-meta');
          if (metaElements.length === 0) return 'No .chat-meta elements found in chat view';
@@ -406,10 +407,14 @@
          var hasCompactTokens = dale.stopNot (texts, undefined, function (text) {
             if (/\b\d+\.\dkti\s+\+\s+\d+\.\dkto\b/.test (text)) return true;
          });
+         var hasContext = dale.stopNot (texts, undefined, function (text) {
+            if (/\d+%\s*context/.test (text)) return true;
+         });
 
          if (! hasTime) return 'No local time shown in gauges';
          if (! hasDuration) return 'No rounded seconds duration shown in gauges';
          if (! hasCompactTokens) return 'No compact cumulative token gauge shown (expected like 3.3kti + 1.8kto)';
+         if (! hasContext) return 'No context % gauge shown in chat meta (expected like "12% context")';
 
          return true;
       }],
@@ -483,6 +488,38 @@
          if (! file || ! file.content) return 'No current file';
          var hasWriteSuccess = file.content.indexOf ('File written') !== -1 || file.content.indexOf ('"success":true') !== -1 || file.content.indexOf ('"success": true') !== -1;
          if (! hasWriteSuccess) return 'dummy.js write success not confirmed in dialog';
+         return true;
+      }],
+
+      // --- Step 14: Verify context bar is visible above chat input ---
+      ['Step 14: Context bar shows percentage above chat input', function () {
+         var contextWindow = B.get ('contextWindow');
+         if (! contextWindow) return 'contextWindow state not set after LLM response';
+         if (type (contextWindow.percent) !== 'integer' && type (contextWindow.percent) !== 'float') return 'contextWindow.percent missing or not a number';
+         if (contextWindow.percent < 0 || contextWindow.percent > 100) return 'contextWindow.percent out of range: ' + contextWindow.percent;
+
+         // Verify the context bar text is rendered somewhere in the chat input area
+         var inputArea = document.querySelector ('.chat-input-area');
+         if (! inputArea) return 'Chat input area not found';
+         var parent = inputArea.parentElement;
+         if (! parent) return 'Chat input area parent not found';
+         var parentText = parent.textContent || '';
+         if (! /\d+%\s*context/.test (parentText)) return 'Context bar text (N% context) not found near chat input area';
+         return true;
+      }],
+
+      // --- Step 15: Verify hasAnyProvider guard ---
+      ['Step 15: hasAnyProvider returns true when keys are configured', function () {
+         var settings = B.get ('settings') || {};
+         // The test environment should have at least one provider configured
+         var hasProvider = (settings.openaiKey || settings.openaiOAuthToken || settings.claudeKey || settings.claudeOAuthToken) ? true : false;
+         if (! hasProvider) return 'No provider keys found in settings — test environment should have at least one configured';
+         // Verify UI elements are enabled (not disabled)
+         var textarea = document.querySelector ('.chat-input');
+         if (! textarea) return 'Chat input textarea not found';
+         if (textarea.disabled) return 'Chat input should be enabled when a provider is configured';
+         var sendBtn = findByText ('button', 'Send');
+         if (sendBtn && sendBtn.disabled) return 'Send button should be enabled when a provider is configured';
          return true;
       }],
 
@@ -699,11 +736,11 @@
       ['F3-3: Create dialogs A and B', function (done) {
          var pending = 2;
          var finish = function () {if (--pending === 0) done (MEDIUM_WAIT, POLL);};
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-a'}, function (error, rs) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, function (error, rs) {
             window._f3DialogA = rs && rs.body && rs.body.dialogId;
             finish ();
          });
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5', slug: 'agent-b'}, function (error, rs) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
             window._f3DialogB = rs && rs.body && rs.body.dialogId;
             finish ();
          });

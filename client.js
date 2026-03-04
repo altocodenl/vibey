@@ -830,7 +830,7 @@ B.mrespond ([
       B.call (x, 'set', [], {
          tab: 'projects',
          chatProvider: 'openai',
-         chatModel: 'gpt-5',
+         chatModel: 'gpt-5.3-codex',
          chatInput: '',
          chatAutoStick: true,
          editorPreview: true,

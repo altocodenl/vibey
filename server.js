@@ -724,6 +724,92 @@ var pfs = {
    }
 };
 
+// *** AUTO COMMIT ***
+
+var PROJECT_COMMIT_QUEUES = {};
+
+var withProjectCommitLock = function (projectName, fn) {
+   var previous = PROJECT_COMMIT_QUEUES [projectName] || Promise.resolve ();
+
+   var next = previous.then (function () {
+      return fn ();
+   });
+
+   var settled = next.catch (function () {});
+   PROJECT_COMMIT_QUEUES [projectName] = settled;
+
+   return next.finally (function () {
+      if (PROJECT_COMMIT_QUEUES [projectName] === settled) delete PROJECT_COMMIT_QUEUES [projectName];
+   });
+};
+
+var gitExec = function (projectName, command, options) {
+   options = options || {};
+   var name = containerName (projectName);
+   var cmd = 'docker exec ' + name + ' sh -lc ' + shQuote (command);
+   return execSync (cmd, {
+      encoding: options.encoding || 'utf8',
+      stdio: options.stdio || ['pipe', 'pipe', 'pipe']
+   });
+};
+
+var gitExecQuiet = function (projectName, command) {
+   try {
+      return gitExec (projectName, command).trim ();
+   }
+   catch (error) {
+      return '';
+   }
+};
+
+var ensureProjectGitRepo = function (projectName) {
+   var name = containerName (projectName);
+   var hasGit = true;
+
+   try {
+      execSync ('docker exec ' + name + ' test -d /workspace/.git', {encoding: 'utf8'});
+   }
+   catch (error) {
+      hasGit = false;
+   }
+
+   if (! hasGit) gitExec (projectName, 'git -C /workspace init');
+
+   if (! gitExecQuiet (projectName, 'git -C /workspace config --get user.name')) {
+      gitExec (projectName, 'git -C /workspace config user.name ' + shQuote ('vibey'));
+   }
+   if (! gitExecQuiet (projectName, 'git -C /workspace config --get user.email')) {
+      gitExec (projectName, 'git -C /workspace config user.email ' + shQuote ('vibey@local'));
+   }
+};
+
+var autoCommitMessage = function (meta) {
+   meta = meta || {};
+   if (meta.kind === 'tool') return 'vibey:auto tool ' + (meta.tool || 'unknown');
+   if (meta.kind === 'api') {
+      var method = (meta.method || 'MUTATE').toUpperCase ();
+      return 'vibey:auto api ' + method + ' ' + (meta.path || '/');
+   }
+   return 'vibey:auto commit';
+};
+
+var maybeAutoCommit = function (projectName, meta) {
+   return withProjectCommitLock (projectName, function () {
+      ensureProjectGitRepo (projectName);
+
+      var status = gitExec (projectName, 'git -C /workspace status --porcelain').trim ();
+      if (! status) return {committed: false};
+
+      gitExec (projectName, 'git -C /workspace add -A');
+
+      var message = autoCommitMessage (meta);
+      gitExec (projectName, 'git -C /workspace commit -m ' + shQuote (message));
+
+      var hash = gitExec (projectName, 'git -C /workspace rev-parse HEAD').trim ();
+      return {committed: true, hash: hash, message: message};
+   });
+};
+
 // *** SNAPSHOTS ***
 
 var pad2 = function (n) {return n < 10 ? '0' + n : '' + n;};
@@ -1192,10 +1278,21 @@ var executeTool = function (toolName, toolInput, projectName) {
          return resolve ({success: false, error: error.message});
       }
 
+      var finalizeTool = function (result) {
+         maybeAutoCommit (projectName, {kind: 'tool', tool: toolName})
+            .then (function (commit) {
+               if (commit && commit.committed) result.autoCommit = {hash: commit.hash, message: commit.message};
+               resolve (result);
+            })
+            .catch (function (error) {
+               resolve ({success: false, error: 'Auto-commit failed after tool ' + toolName + ': ' + error.message});
+            });
+      };
+
       if (toolName === 'run_command') {
          dockerExec (projectName, toolInput.command, function (error, stdout, stderr) {
-            if (error) resolve ({success: false, error: error.message, stderr: stderr});
-            else       resolve ({success: true, stdout: stdout, stderr: stderr});
+            if (error) finalizeTool ({success: false, error: error.message, stderr: stderr});
+            else       finalizeTool ({success: true, stdout: stdout, stderr: stderr});
          });
       }
 
@@ -1203,10 +1300,10 @@ var executeTool = function (toolName, toolInput, projectName) {
          try {
             var writePath = sanitizeToolPath (toolInput.path);
             pfs.writeFileAt (projectName, writePath, toolInput.content);
-            resolve ({success: true, message: 'File written: ' + toolInput.path});
+            finalizeTool ({success: true, message: 'File written: ' + toolInput.path});
          }
          catch (error) {
-            resolve ({success: false, error: error.message});
+            finalizeTool ({success: false, error: error.message});
          }
       }
 
@@ -1218,33 +1315,33 @@ var executeTool = function (toolName, toolInput, projectName) {
             var count = content.split (toolInput.old_string).length - 1;
 
             if (count === 0) {
-               resolve ({success: false, error: 'old_string not found in file'});
+               finalizeTool ({success: false, error: 'old_string not found in file'});
             }
             else if (count > 1) {
-               resolve ({success: false, error: 'old_string found ' + count + ' times — must be unique. Add more surrounding context.'});
+               finalizeTool ({success: false, error: 'old_string found ' + count + ' times — must be unique. Add more surrounding context.'});
             }
             else {
                var updated = content.replace (toolInput.old_string, toolInput.new_string);
                pfs.writeFileAt (projectName, editPath, updated);
-               resolve ({success: true, message: 'Edit applied to ' + toolInput.path});
+               finalizeTool ({success: true, message: 'Edit applied to ' + toolInput.path});
             }
          }
          catch (error) {
-            resolve ({success: false, error: error.message});
+            finalizeTool ({success: false, error: error.message});
          }
       }
 
       else if (toolName === 'launch_agent') {
          if (toolInput.provider !== 'claude' && toolInput.provider !== 'openai') {
-            return resolve ({success: false, error: 'launch_agent: provider must be claude or openai'});
+            return finalizeTool ({success: false, error: 'launch_agent: provider must be claude or openai'});
          }
          if (type (toolInput.prompt) !== 'string' || ! toolInput.prompt.trim ()) {
-            return resolve ({success: false, error: 'launch_agent: prompt is required'});
+            return finalizeTool ({success: false, error: 'launch_agent: prompt is required'});
          }
 
          startDialogTurn (projectName, toolInput.provider, toolInput.prompt.trim (), toolInput.model, toolInput.slug, null)
             .then (function (result) {
-               resolve ({
+               finalizeTool ({
                   success: true,
                   launched: {
                      dialogId: result.dialogId,
@@ -1256,12 +1353,12 @@ var executeTool = function (toolName, toolInput, projectName) {
                });
             })
             .catch (function (error) {
-               resolve ({success: false, error: 'launch_agent failed: ' + error.message});
+               finalizeTool ({success: false, error: 'launch_agent failed: ' + error.message});
             });
       }
 
       else {
-         resolve ({success: false, error: 'Unknown tool: ' + toolName});
+         finalizeTool ({success: false, error: 'Unknown tool: ' + toolName});
       }
    });
 };
@@ -2262,6 +2359,10 @@ var resolveProject = function (rs, projectName) {
    }
 };
 
+var autoCommitApi = async function (projectName, method, path) {
+   return maybeAutoCommit (projectName, {kind: 'api', method: method, path: path});
+};
+
 // *** ROUTES ***
 
 var buildSettingsResponse = function (config) {
@@ -2502,7 +2603,7 @@ var routes = [
       }
    }],
 
-   ['post', 'projects', function (rq, rs) {
+   ['post', 'projects', async function (rq, rs) {
       if (stop (rs, [['name', rq.body.name, 'string']])) return;
       try {
          var displayName = rq.body.name.trim ();
@@ -2512,6 +2613,7 @@ var routes = [
          if (! pfs.exists (slug, DOC_MAIN_FILE)) {
             pfs.writeFile (slug, DOC_MAIN_FILE, '# ' + displayName + '\n');
          }
+         await autoCommitApi (slug, 'POST', '/projects');
          reply (rs, 200, {ok: true, slug: slug, name: displayName});
       }
       catch (error) {
@@ -2665,7 +2767,7 @@ var routes = [
       }
    }],
 
-   ['post', /^\/project\/([^/]+)\/file\/(.+)$/, function (rq, rs) {
+   ['post', /^\/project\/([^/]+)\/file\/(.+)$/, async function (rq, rs) {
       var projectSlug = decodeURIComponent (rq.data.params [0]);
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
@@ -2679,14 +2781,15 @@ var routes = [
 
       try {
          pfs.writeFile (projectName, name, rq.body.content);
+         await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/file/' + name);
          reply (rs, 200, {ok: true, name: name});
       }
       catch (error) {
-         reply (rs, 500, {error: 'Failed to write file'});
+         reply (rs, 500, {error: error.message || 'Failed to write file'});
       }
    }],
 
-   ['delete', /^\/project\/([^/]+)\/file\/(.+)$/, function (rq, rs) {
+   ['delete', /^\/project\/([^/]+)\/file\/(.+)$/, async function (rq, rs) {
       var projectSlug = decodeURIComponent (rq.data.params [0]);
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
@@ -2697,10 +2800,11 @@ var routes = [
       try {
          if (! pfs.exists (projectName, name)) return reply (rs, 404, {error: 'File not found'});
          pfs.unlink (projectName, name);
+         await autoCommitApi (projectName, 'DELETE', '/project/' + projectName + '/file/' + name);
          reply (rs, 200, {ok: true});
       }
       catch (error) {
-         reply (rs, 500, {error: 'Failed to delete file'});
+         reply (rs, 500, {error: error.message || 'Failed to delete file'});
       }
    }],
 
@@ -2722,7 +2826,7 @@ var routes = [
       }
    }],
 
-   ['post', 'project/:project/upload', function (rq, rs) {
+   ['post', 'project/:project/upload', async function (rq, rs) {
       if (stop (rs, [
          ['name', rq.body.name, 'string'],
          ['content', rq.body.content, 'string']
@@ -2750,6 +2854,7 @@ var routes = [
          var buffer = Buffer.from (base64, 'base64');
          var filepath = UPLOAD_DIR + '/' + name;
          pfs.writeFileBinaryAt (projectName, filepath, buffer);
+         await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/upload');
 
          var stat = pfs.statDetailed (projectName, filepath);
          reply (rs, 200, {
@@ -2762,7 +2867,7 @@ var routes = [
          });
       }
       catch (error) {
-         reply (rs, 500, {error: 'Failed to save upload'});
+         reply (rs, 500, {error: error.message || 'Failed to save upload'});
       }
    }],
 
@@ -2793,7 +2898,7 @@ var routes = [
    // *** LLM ***
 
    // Create a dialog draft (idle, status=done)
-   ['post', 'project/:project/dialog/new', function (rq, rs) {
+   ['post', 'project/:project/dialog/new', async function (rq, rs) {
       if (stop (rs, [
          ['provider', rq.body.provider, 'string', {oneOf: ['claude', 'openai']}],
       ])) return;
@@ -2803,6 +2908,7 @@ var routes = [
 
       try {
          var created = createDialogDraft (rq.data.params.project, rq.body.provider, rq.body.model, rq.body.slug || 'dialog');
+         await autoCommitApi (rq.data.params.project, 'POST', '/project/' + rq.data.params.project + '/dialog/new');
          reply (rs, 200, created);
       }
       catch (error) {
@@ -2866,6 +2972,8 @@ var routes = [
             clog ('[dialog-status] verify-failed project=' + rq.data.params.project + ' dialogId=' + result.dialogId + ' context=route/post-dialog/done error=' + statusReadError.message);
          }
 
+         await autoCommitApi (rq.data.params.project, 'POST', '/project/' + rq.data.params.project + '/dialog');
+
          rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
          rs.end ();
       }
@@ -2899,6 +3007,7 @@ var routes = [
 
          try {
             var result = await updateDialogTurn (rq.data.params.project, rq.body.dialogId, rq.body.status, null, rq.body.provider, rq.body.model, null);
+            await autoCommitApi (rq.data.params.project, 'PUT', '/project/' + rq.data.params.project + '/dialog');
             return reply (rs, 200, result);
          }
          catch (error) {
@@ -2956,6 +3065,8 @@ var routes = [
             clog ('[dialog-status] verify-failed project=' + rq.data.params.project + ' dialogId=' + result.dialogId + ' context=route/put-dialog/done error=' + statusReadError.message);
          }
 
+         await autoCommitApi (rq.data.params.project, 'PUT', '/project/' + rq.data.params.project + '/dialog');
+
          rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
          rs.end ();
       }
@@ -2966,6 +3077,7 @@ var routes = [
                var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
                var dialogAfterAbort = loadDialog (rq.data.params.project, rq.body.dialogId);
                if (dialogAfterAbort.exists) setDialogStatus (rq.data.params.project, dialogAfterAbort, requestedStatus, 'route/put-dialog/abort');
+               await autoCommitApi (rq.data.params.project, 'PUT', '/project/' + rq.data.params.project + '/dialog');
                rs.write ('data: ' + JSON.stringify ({type: 'done', result: {dialogId: rq.body.dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}}) + '\n\n');
                rs.end ();
             }
