@@ -52,11 +52,22 @@ var dialogDisplayLabel = function (filename) {
 };
 
 var MODEL_OPTIONS = [
-   {provider: 'openai', model: 'gpt-5',                       label: 'OpenAI · gpt5.3'},
-   {provider: 'openai', model: 'gpt-4o',                      label: 'OpenAI · gpt-4o'},
-   {provider: 'claude', model: 'claude-sonnet-4-6',            label: 'Claude · sonnet-4-6'},
-   {provider: 'claude', model: 'claude-sonnet-4-20250514',     label: 'Claude · sonnet-4-20250514'}
+   {provider: 'openai', model: 'gpt-5.3-codex',               label: 'OpenAI · gpt-5.3'},
+   {provider: 'openai', model: 'gpt-5.2-codex',               label: 'OpenAI · gpt-5.2'},
+   {provider: 'claude', model: 'claude-opus-4-6',              label: 'Claude · opus-4-6'},
+   {provider: 'claude', model: 'claude-sonnet-4-6',            label: 'Claude · sonnet-4-6'}
 ];
+
+var CONTEXT_WINDOWS = {
+   'gpt-5.3-codex': 272000,
+   'gpt-5.2-codex': 272000,
+   'claude-opus-4-6': 200000,
+   'claude-sonnet-4-6': 200000
+};
+
+var getContextWindowSize = function (model) {
+   return CONTEXT_WINDOWS [model] || 200000;
+};
 
 var modelOptionKey = function (opt) {
    return opt.provider + ':' + opt.model;
@@ -1244,6 +1255,9 @@ B.mrespond ([
       var project = B.get ('currentProject');
       if (! project) return;
 
+      // Clear stale streaming context when switching files
+      B.call (x, 'set', 'contextWindow', null);
+
       // This is now an explicit file-load intent; clear any stale hash target
       // so delayed file-list refreshes don't bounce back to an older target.
       B.call (x, 'set', 'hashTarget', null);
@@ -1583,6 +1597,7 @@ B.mrespond ([
       B.call (x, 'set', 'streaming', true);
       B.call (x, 'set', 'streamingContent', '');
       B.call (x, 'set', 'optimisticUserMessage', originalInput);
+      B.call (x, 'set', 'contextWindow', null);
       B.call (x, 'set', 'chatInput', '');
       var inputNode = document.querySelector ('.chat-input');
       if (inputNode) inputNode.value = '';
@@ -1666,6 +1681,9 @@ B.mrespond ([
                   if (data.type === 'chunk') {
                      var current = B.get ('streamingContent') || '';
                      B.call (x, 'set', 'streamingContent', current + data.content);
+                  }
+                  else if (data.type === 'context') {
+                     B.call (x, 'set', 'contextWindow', data.context);
                   }
                   else if (data.type === 'tool_request' || data.type === 'tool_result') {
                      var label = data.type === 'tool_request' ? 'Tool request' : 'Tool result';
@@ -2380,7 +2398,7 @@ var parseDialogContent = function (content) {
    if (! content) return [];
 
    var parseSection = function (role, lines) {
-      var time = null, usage = null, usageCumulative = null, resourcesMs = null;
+      var time = null, usage = null, usageCumulative = null, resourcesMs = null, context = null;
       var toolName = null, toolStatus = null;
 
       var body = dale.fil (lines, undefined, function (line) {
@@ -2399,6 +2417,12 @@ var parseDialogContent = function (content) {
          var mUsageCum = line.match (/^>\s*Usage cumulative:\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s*$/);
          if (mUsageCum) {
             usageCumulative = {input: Number (mUsageCum [1]), output: Number (mUsageCum [2]), total: Number (mUsageCum [3])};
+            return;
+         }
+
+         var mContext = line.match (/^>\s*Context:\s*used=(\d+)\s+limit=(\d+)\s+percent=(\d+)%\s*$/);
+         if (mContext) {
+            context = {used: Number (mContext [1]), limit: Number (mContext [2]), percent: Number (mContext [3])};
             return;
          }
 
@@ -2440,6 +2464,7 @@ var parseDialogContent = function (content) {
          usage: usage,
          usageCumulative: usageCumulative,
          resourcesMs: resourcesMs,
+         context: context,
          toolName: toolName || null
       };
    };
@@ -2579,16 +2604,31 @@ var formatMessageGauges = function (msg) {
       if ((elapsedMs === null || elapsedMs < 0) && inc (['integer', 'float'], type (msg.resourcesMs)) && isFinite (msg.resourcesMs)) elapsedMs = msg.resourcesMs;
    }
 
-   return dale.fil ([
+   var parts = dale.fil ([
       hasEnd ? formatLocalDateTimeNoMs (timeRange.end) : undefined,
       elapsedMs !== null ? formatSecondsRounded (elapsedMs) : undefined,
       msg.usageCumulative ? formatKTokens (msg.usageCumulative.input) + 'ti + ' + formatKTokens (msg.usageCumulative.output) + 'to' : undefined
-   ], undefined, function (v) { return v; }).join (' · ');
+   ], undefined, function (v) { return v; });
+
+   if (msg.context) {
+      var pct = msg.context.percent;
+      var contextColor = pct >= 80 ? '#e74c3c' : (pct >= 50 ? '#e6a817' : '#999');
+      parts.push (['span', {style: style ({color: contextColor, 'font-weight': pct >= 50 ? '600' : 'normal'})}, pct + '% context']);
+   }
+
+   if (! parts.length) return '';
+
+   var result = [];
+   dale.go (parts, function (part, k) {
+      if (k > 0) result.push (' · ');
+      result.push (part);
+   });
+   return result;
 };
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat, settings) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat, settings, contextWindow) {
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (isDialogFile (f)) return f;
@@ -2668,6 +2708,29 @@ views.dialogs = function () {
                   ['div', {class: 'chat-content'}, (streamingContent || '') + '▊']
                ]] : ''
             ]],
+            // Context window indicator
+            (function () {
+               // Use live streaming context or last assistant message's context from loaded dialog
+               var ctx = contextWindow;
+               if (! ctx && messages.length) {
+                  for (var ci = messages.length - 1; ci >= 0; ci--) {
+                     if (messages [ci].context) {ctx = messages [ci].context; break;}
+                  }
+               }
+               if (! ctx) return '';
+               // Recalculate % against the currently selected model
+               var selectedModel = chatModel || defaultModelForProvider (chatProvider || 'openai');
+               var currentLimit = getContextWindowSize (selectedModel);
+               var pct = Math.round (ctx.used / currentLimit * 100);
+               var barColor = pct >= 80 ? '#e74c3c' : (pct >= 50 ? '#e6a817' : '#4ec970');
+               var textColor = pct >= 80 ? '#e74c3c' : (pct >= 50 ? '#e6a817' : '#999');
+               return ['div', {style: style ({padding: '4px 12px', display: 'flex', 'align-items': 'center', gap: '8px', 'font-size': '12px', color: textColor})}, [
+                  ['div', {style: style ({flex: 1, height: '4px', 'background-color': '#2a2a2a', 'border-radius': '2px', overflow: 'hidden'})}, [
+                     ['div', {style: style ({width: Math.min (pct, 100) + '%', height: '100%', 'background-color': barColor, 'border-radius': '2px', transition: 'width 0.3s'})}]
+                  ]],
+                  ['span', {style: style ({'font-weight': pct >= 50 ? '600' : 'normal', 'white-space': 'nowrap'})}, pct + '% context']
+               ]];
+            }) (),
             // Input area
             ['div', {class: 'chat-input-area'}, [
                ['select', {

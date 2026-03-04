@@ -1057,6 +1057,21 @@ var upsertDocMainContextBlock = function (projectName, filename) {
 
 // *** MCP TOOLS ***
 
+// Context window sizes (tokens) per model
+// Sources:
+//   OpenAI: chatgpt.com/backend-api/codex/models endpoint (2026-03-04)
+//   Claude: docs.anthropic.com/en/docs/about-claude/models (200K standard)
+var CONTEXT_WINDOWS = {
+   'gpt-5.3-codex':              272000,
+   'gpt-5.2-codex':              272000,
+   'claude-opus-4-6':            200000,
+   'claude-sonnet-4-6':          200000,
+};
+
+var getContextWindowSize = function (model) {
+   return CONTEXT_WINDOWS [model] || 200000;
+};
+
 // Tool definitions (written once, converted to both provider formats below)
 var TOOLS = [
    {
@@ -1643,7 +1658,7 @@ var writeToolResults = function (projectName, filename, resultsById) {
 
 // Implementation function for Claude (streaming with tool support)
 var chatWithClaude = async function (projectName, messages, model, onChunk, abortSignal) {
-   model = model || 'claude-sonnet-4-20250514';
+   model = model || 'claude-sonnet-4-6';
 
    var systemPrompt = loadSystemPrompt () + getDocMainInjection (projectName);
 
@@ -1661,6 +1676,7 @@ var chatWithClaude = async function (projectName, messages, model, onChunk, abor
 
    if (auth.type === 'oauth') {
       headers ['Authorization'] = 'Bearer ' + auth.key;
+      headers ['anthropic-version'] = '2023-06-01';
       headers ['anthropic-beta'] = 'oauth-2025-04-20';
       headers ['anthropic-dangerous-direct-browser-access'] = 'true';
    }
@@ -1787,7 +1803,7 @@ var normalizeMessagesForResponsesApi = function (messages) {
 
 // Implementation function for OpenAI (streaming with tool support)
 var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal) {
-   model = model || 'gpt-5.2';
+   model = model || 'gpt-5.2-codex';
 
    var systemPrompt = loadSystemPrompt () + getDocMainInjection (projectName);
 
@@ -1997,6 +2013,17 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          appendToDialog (projectName, dialog.filename, '\n\n');
          appendUsageToAssistantSection (projectName, dialog.filename, result.usage);
+
+         // Compute and emit context window usage
+         // result.usage.input already includes the full conversation history for this turn,
+         // so the next turn's context ≈ this turn's input + this turn's output
+         var contextLimit = getContextWindowSize (model);
+         var normalized = parseUsageNumbers (result.usage);
+         var contextUsed = normalized ? normalized.input + normalized.output : 0;
+         var contextPercent = contextUsed ? Math.round (contextUsed / contextLimit * 100) : 0;
+         appendToDialog (projectName, dialog.filename, '> Context: used=' + contextUsed + ' limit=' + contextLimit + ' percent=' + contextPercent + '%\n');
+         if (onChunk) onChunk ({type: 'context', context: {used: contextUsed, limit: contextLimit, percent: contextPercent}});
+
          appendToolCallsToAssistantSection (projectName, dialog.filename, result.toolCalls);
 
          var resultsById = {};
@@ -2053,7 +2080,7 @@ var createDialogDraft = function (projectName, provider, model, slug) {
    }
 
    getExistingProject (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5.2');
+   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
    var dialogId = createDialogId (projectName, slug || 'dialog');
    var filename = buildDialogFilename (dialogId, 'done');
    var dialog = {
@@ -2082,7 +2109,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    }
 
    getExistingProject (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5.2');
+   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
    var dialogId = createDialogId (projectName, slug);
    var dialog = {
       dialogId: dialogId,
@@ -2131,7 +2158,7 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
       if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
          throw new Error ('Unable to determine provider for dialog update');
       }
-      var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-20250514' : 'gpt-5.2');
+      var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
 
       try {
          var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal);

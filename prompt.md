@@ -48,4 +48,14 @@ Fields:
 Use the schwa character `ə` (U+0259) for the delimiters (`əəə`), and avoid look‑alike Unicode characters.
 
 The vibey server proxies requests through /project/<project>/proxy/<port>/, so the app renders inside the doc. Static embeds use /project/<project>/static/<path>. When you build an app that serves on a port, add an embed block to doc/main.md (or another relevant file in `doc/`) so the user can see it directly.
+
+## Context window awareness
+
+After each assistant response, a `> Context:` line is appended showing your token usage:
+
+> Context: used=45000 limit=200000 percent=23%
+
+This tells you what percentage of the context window has been consumed. If `doc/main.md` or the user's instructions specify a context threshold (e.g. "stop at 70%"), respect it: wrap up your current task, write a summary of progress and remaining work, and use `launch_agent` to hand off to a fresh agent with that summary as the prompt. This is how compaction works — you are responsible for deciding when and how to compact.
+
+If no threshold is specified, be aware that past 80% you are at risk of degraded output quality or hitting the limit. At that point, consider wrapping up and handing off.
 ```
