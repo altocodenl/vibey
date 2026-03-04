@@ -51,21 +51,29 @@ var dialogDisplayLabel = function (filename) {
    return match ? match [1] : parsed.dialogId;
 };
 
-var MODEL_OPTIONS = {
-   openai: [
-      {value: 'gpt-5', label: 'gpt5.3'},
-      {value: 'gpt-4o', label: 'gpt-4o'}
-   ],
-   claude: [
-      {value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6'},
-      {value: 'claude-sonnet-4-20250514', label: 'claude-sonnet-4-20250514'}
-   ]
+var MODEL_OPTIONS = [
+   {provider: 'openai', model: 'gpt-5',                       label: 'OpenAI · gpt5.3'},
+   {provider: 'openai', model: 'gpt-4o',                      label: 'OpenAI · gpt-4o'},
+   {provider: 'claude', model: 'claude-sonnet-4-6',            label: 'Claude · sonnet-4-6'},
+   {provider: 'claude', model: 'claude-sonnet-4-20250514',     label: 'Claude · sonnet-4-20250514'}
+];
+
+var modelOptionKey = function (opt) {
+   return opt.provider + ':' + opt.model;
+};
+
+var parseModelOptionKey = function (key) {
+   var i = key.indexOf (':');
+   if (i === -1) return {provider: 'openai', model: key};
+   return {provider: key.slice (0, i), model: key.slice (i + 1)};
 };
 
 var defaultModelForProvider = function (provider) {
    provider = provider || 'openai';
-   var options = MODEL_OPTIONS [provider] || [];
-   return options [0] ? options [0].value : '';
+   var found = dale.stopNot (MODEL_OPTIONS, undefined, function (opt) {
+      if (opt.provider === provider) return opt.model;
+   });
+   return found || MODEL_OPTIONS [0].model;
 };
 
 var normalizeDocFilename = function (name) {
@@ -1525,13 +1533,10 @@ B.mrespond ([
       });
    }],
 
-   ['change', 'chatProvider', function (x, provider) {
-      B.call (x, 'set', 'chatProvider', provider);
-      var model = B.get ('chatModel');
-      var allowed = dale.stopNot ((MODEL_OPTIONS [provider] || []), undefined, function (option) {
-         if (option.value === model) return true;
-      });
-      if (! allowed) B.call (x, 'set', 'chatModel', defaultModelForProvider (provider));
+   ['change', 'chatProviderModel', function (x, key) {
+      var parsed = parseModelOptionKey (key);
+      B.call (x, 'set', 'chatProvider', parsed.provider);
+      B.call (x, 'set', 'chatModel', parsed.model);
    }],
 
    ['send', 'message', function (x) {
@@ -2085,32 +2090,65 @@ var previewValueText = function (value) {
    catch (error) {return '' + value;}
 };
 
-var compactStdStream = function (label, text, maxLines) {
-   text = type (text) === 'string' ? text.replace (/\r/g, '') : '';
-   var header = label + ' (' + text.length + ' chars)';
-   if (! text) return header + '\n  (empty)';
-
-   var shown = (maxLines !== null && maxLines !== undefined) ? compactLines (text, maxLines).text : text;
-   return header + '\n  ' + shown.split ('\n').join ('\n  ');
-};
-
 var formatToolResultPreview = function (obj, maxStreamLines) {
    if (type (obj) !== 'object' || ! obj) return null;
-   if (obj.stdout === undefined && obj.stderr === undefined) return null;
+   if (obj.stdout === undefined && obj.stderr === undefined && obj.success === undefined && obj.message === undefined && obj.error === undefined) return null;
 
-   return dale.fil ([
-      obj.success !== undefined ? 'success: ' + (obj.success ? 'true' : 'false') : undefined,
-      obj.error   !== undefined ? 'error: '   + previewValueText (obj.error)      : undefined,
-      obj.message !== undefined ? 'message: ' + previewValueText (obj.message)    : undefined,
-      compactStdStream ('stdout', type (obj.stdout) === 'string' ? obj.stdout : '', maxStreamLines),
-      compactStdStream ('stderr', type (obj.stderr) === 'string' ? obj.stderr : '', maxStreamLines)
-   ], undefined, function (v) { return v; }).join ('\n\n');
+   var parts = [];
+
+   // Error or message (these are the main feedback lines)
+   if (obj.error !== undefined) parts.push ('error: ' + previewValueText (obj.error));
+   if (obj.message !== undefined) parts.push (previewValueText (obj.message));
+
+   // stdout — show content directly, skip if empty
+   var stdout = type (obj.stdout) === 'string' ? obj.stdout.replace (/\r/g, '') : '';
+   if (stdout) {
+      var shown = (maxStreamLines !== null && maxStreamLines !== undefined) ? compactLines (stdout, maxStreamLines).text : stdout;
+      parts.push (shown);
+   }
+
+   // stderr — only show if non-empty
+   var stderr = type (obj.stderr) === 'string' ? obj.stderr.replace (/\r/g, '') : '';
+   if (stderr) {
+      var stderrShown = (maxStreamLines !== null && maxStreamLines !== undefined) ? compactLines (stderr, maxStreamLines).text : stderr;
+      parts.push ('stderr:\n' + stderrShown);
+   }
+
+   return parts.join ('\n') || (obj.success ? '(ok)' : '(empty)');
 };
 
 var formatToolInputPreview = function (obj) {
    if (type (obj) !== 'object' || ! obj) return null;
    var keys = dale.keys (obj);
    if (keys.length === 0) return null;
+
+   // run_command: just show the command
+   if (obj.command !== undefined && keys.length === 1) return '$ ' + obj.command;
+
+   // write_file: show path + content preview
+   if (obj.path !== undefined && obj.content !== undefined) {
+      var content = type (obj.content) === 'string' ? obj.content : '';
+      var header = '→ ' + obj.path + ' (' + content.length + ' chars)';
+      if (! content) return header;
+      return header + '\n' + content;
+   }
+
+   // edit_file: show path + old/new preview
+   if (obj.path !== undefined && obj.old_string !== undefined) {
+      var oldStr = type (obj.old_string) === 'string' ? obj.old_string : '';
+      var newStr = type (obj.new_string) === 'string' ? obj.new_string : '';
+      var editHeader = '✎ ' + obj.path;
+      var diffLines = [];
+      if (oldStr) dale.go (oldStr.split ('\n'), function (l) { diffLines.push ('- ' + l); });
+      if (newStr) dale.go (newStr.split ('\n'), function (l) { diffLines.push ('+ ' + l); });
+      return editHeader + '\n' + diffLines.join ('\n');
+   }
+
+   // launch_agent: show provider/model and prompt summary
+   if (obj.provider !== undefined && obj.prompt !== undefined) {
+      var promptPreview = obj.prompt.length > 120 ? obj.prompt.slice (0, 120) + '…' : obj.prompt;
+      return '⚡ ' + obj.provider + (obj.model ? '/' + obj.model : '') + (obj.slug ? ' [' + obj.slug + ']' : '') + '\n' + promptPreview;
+   }
 
    return dale.go (keys, function (key) {
       var val = obj [key];
@@ -2147,10 +2185,6 @@ var formatToolBlocksForMessage = function (text, compact) {
    });
 };
 
-var compactToolBlocksForMessage = function (text) {
-   return formatToolBlocksForMessage (text, true);
-};
-
 var formatCanonicalToolSection = function (text, compact) {
    if (type (text) !== 'string') return text;
 
@@ -2165,24 +2199,25 @@ var formatCanonicalToolSection = function (text, compact) {
    var payloadType = (blockMatch [1] || '').trim ();
    var payloadText = (blockMatch [2] || '').trim ();
 
+   var isResult = payloadType.indexOf ('tool/result/') === 0;
+
    var parsed = null;
    try {parsed = JSON.parse (payloadText);} catch (error) {}
 
    var summary = payloadText;
    if (parsed !== null) {
-      if (payloadType.indexOf ('tool/result/') === 0) summary = formatToolResultPreview (parsed, compact ? 8 : null) || formatToolInputPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
+      if (isResult) summary = formatToolResultPreview (parsed, compact ? 8 : null) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
       else summary = formatToolInputPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
    }
 
    summary = wrapLongLines (summary, 90);
    if (compact) summary = compactLines (summary, 14).text;
 
-   return [
-      payloadType.indexOf ('tool/result/') === 0 ? ('Result: ' + toolName) : ('Tool request: ' + toolName),
-      status ? ('Status: ' + status) : undefined,
-      '',
-      summary
-   ].filter (Boolean).join ('\n');
+   // Build header: "⚙ tool_name" for requests, "↩ tool_name" for results
+   var icon = isResult ? (status === 'error' ? '✗' : '↩') : '⚙';
+   var header = icon + ' ' + toolName;
+
+   return header + '\n' + summary;
 };
 
 var messageToolExpansionKey = function (dialogId, index, content) {
@@ -2210,10 +2245,10 @@ var getMessageToolContentView = function (content, expanded) {
    };
 };
 
-var renderChatContent = function (text, project) {
+var renderChatContent = function (text, project, isDiff) {
    if (type (text) !== 'string' || ! text) return '';
 
-   var labelRe = /^(\s*)(Tool request:|Decision:|Result:|Status:|success:|error:|message:|stdout|stderr)(.*)/;
+   var labelRe = /^(\s*)(Tool request:|Decision:|Result:|Status:|success:|error:|message:|stderr:)(.*)/;
    var result = [];
    var buffer = '';
 
@@ -2288,6 +2323,22 @@ var renderChatContent = function (text, project) {
          return;
       }
 
+      // Diff lines: - removed (red), + added (green) — only in tool/diff context
+      if (isDiff) {
+         if (line.length >= 2 && line [0] === '-' && line [1] === ' ') {
+            flushBuffer ();
+            if (prefix) result.push (['span', prefix]);
+            result.push (['span', {style: style ({color: '#ff8b94'})}, line]);
+            return;
+         }
+         if (line.length >= 2 && line [0] === '+' && line [1] === ' ') {
+            flushBuffer ();
+            if (prefix) result.push (['span', prefix]);
+            result.push (['span', {style: style ({color: '#6ad48a'})}, line]);
+            return;
+         }
+      }
+
       buffer += prefix + line;
    });
 
@@ -2358,7 +2409,8 @@ var parseDialogContent = function (content) {
          time: time,
          usage: usage,
          usageCumulative: usageCumulative,
-         resourcesMs: resourcesMs
+         resourcesMs: resourcesMs,
+         toolName: toolName || null
       };
    };
 
@@ -2504,146 +2556,6 @@ var formatMessageGauges = function (msg) {
    ], undefined, function (v) { return v; }).join (' · ');
 };
 
-var summarizeToolInput = function (tool, expanded) {
-   var input = teishi.copy (tool.input || {});
-
-   if (tool.name === 'write_file' && type (input.content) === 'string') {
-      input.content = '[hidden file content: ' + input.content.length + ' chars]';
-   }
-   if (tool.name === 'edit_file') {
-      if (type (input.old_string) === 'string') input.old_string = '[hidden old_string: ' + input.old_string.length + ' chars]';
-      if (type (input.new_string) === 'string') input.new_string = '[hidden new_string: ' + input.new_string.length + ' chars]';
-   }
-
-   var full = JSON.stringify (input, null, 2);
-
-   var maxChars = 180;
-   var maxLines = 6;
-   var lines = full.split ('\n');
-   var isLong = full.length > maxChars || lines.length > maxLines;
-
-   if (expanded || ! isLong) return {text: full, isLong: isLong};
-
-   var shortLines = lines.slice (0, maxLines).join ('\n');
-   if (shortLines.length > maxChars) shortLines = shortLines.slice (0, maxChars);
-   shortLines = shortLines.replace (/\s+$/, '') + '\n...';
-
-   return {text: shortLines, isLong: true};
-};
-
-var buildEditDiff = function (oldText, newText) {
-   oldText = type (oldText) === 'string' ? oldText : '';
-   newText = type (newText) === 'string' ? newText : '';
-
-   var a = oldText.split ('\n');
-   var b = newText.split ('\n');
-
-   var n = a.length, m = b.length;
-   var dp = [];
-   for (var i = 0; i <= n; i++) {
-      dp [i] = [];
-      for (var j = 0; j <= m; j++) dp [i][j] = 0;
-   }
-
-   for (i = n - 1; i >= 0; i--) {
-      for (j = m - 1; j >= 0; j--) {
-         if (a [i] === b [j]) dp [i][j] = dp [i + 1][j + 1] + 1;
-         else dp [i][j] = Math.max (dp [i + 1][j], dp [i][j + 1]);
-      }
-   }
-
-   var lines = [];
-   i = 0; j = 0;
-   while (i < n && j < m) {
-      if (a [i] === b [j]) {
-         lines.push ({type: 'context', text: '  ' + a [i]});
-         i++; j++;
-      }
-      else if (dp [i + 1][j] >= dp [i][j + 1]) {
-         lines.push ({type: 'del', text: '- ' + a [i]});
-         i++;
-      }
-      else {
-         lines.push ({type: 'add', text: '+ ' + b [j]});
-         j++;
-      }
-   }
-   while (i < n) lines.push ({type: 'del', text: '- ' + a [i++]});
-   while (j < m) lines.push ({type: 'add', text: '+ ' + b [j++]});
-
-   return lines;
-};
-
-var compactDiffLines = function (lines, full, contextLines) {
-   contextLines = contextLines || 3;
-   if (full) return {lines: lines, compacted: false};
-
-   var include = [];
-   for (var i = 0; i < lines.length; i++) include [i] = false;
-
-   var changed = false;
-   for (i = 0; i < lines.length; i++) {
-      if (lines [i].type === 'add' || lines [i].type === 'del') {
-         changed = true;
-         var start = Math.max (0, i - contextLines);
-         var end = Math.min (lines.length - 1, i + contextLines);
-         for (var k = start; k <= end; k++) include [k] = true;
-      }
-   }
-
-   if (! changed) return {lines: lines.slice (0, Math.min (lines.length, 2 * contextLines + 1)), compacted: lines.length > (2 * contextLines + 1)};
-
-   var out = [];
-   var compacted = false;
-   i = 0;
-   while (i < lines.length) {
-      if (include [i]) {
-         out.push (lines [i]);
-         i++;
-         continue;
-      }
-
-      var startGap = i;
-      while (i < lines.length && ! include [i]) i++;
-      var gap = i - startGap;
-      if (gap > 0) {
-         compacted = true;
-         out.push ({type: 'skip', text: '… ' + gap + ' unchanged line' + (gap === 1 ? '' : 's') + ' hidden'});
-      }
-   }
-
-   return {lines: out, compacted: compacted};
-};
-
-var renderEditDiff = function (tool, index) {
-   var input = tool.input || {};
-   var oldText = type (input.old_string) === 'string' ? input.old_string : '';
-   var newText = type (input.new_string) === 'string' ? input.new_string : '';
-
-   var rawLines = buildEditDiff (oldText, newText);
-   var compactView = compactDiffLines (rawLines, false, 3);
-   var display = tool.diffExpanded === true ? compactDiffLines (rawLines, true, 3) : compactView;
-
-   return ['div', [
-      ['div', {class: 'tool-input'}, JSON.stringify ({path: input.path || ''}, null, 2)],
-      ['div', {class: 'tool-diff'}, dale.go (display.lines, function (line) {
-         var cls = 'tool-diff-line';
-         if (line.type === 'add') cls += ' tool-diff-add';
-         else if (line.type === 'del') cls += ' tool-diff-del';
-         else if (line.type === 'skip') cls += ' tool-diff-skip';
-         return ['div', {class: cls}, line.text];
-      })],
-      compactView.compacted ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '0.4rem'})}, [
-         ['button', {
-            class: 'btn-small',
-            style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
-            onclick: B.ev ('toggle', 'toolDiffExpanded', index),
-            disabled: false
-         }, tool.diffExpanded === true ? 'Show compact diff' : 'Show full diff']
-      ]] : ''
-   ]];
-};
-
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
    return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat) {
@@ -2695,17 +2607,19 @@ views.dialogs = function () {
                   var expanded = !! ((toolMessageExpanded || {}) [expandKey]);
                   var toolContentView = getMessageToolContentView (msg.content, expanded);
 
+                  var isTool = msg.role === 'tool';
+
                   return ['div', {class: 'chat-message chat-' + msg.role}, [
-                     ['div', {class: 'chat-role'}, ['span', msg.role]],
-                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject)],
+                     isTool ? '' : ['div', {class: 'chat-role'}, ['span', msg.role]],
+                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject, msg.toolName === 'edit_file')],
                      toolContentView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
                         ['button', {
                            class: 'btn-small',
                            style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
                            onclick: B.ev ('toggle', 'messageToolContent', expandKey)
-                        }, expanded ? 'Compress tool output' : 'Expand tool output']
+                        }, expanded ? 'Less' : 'More']
                      ]] : '',
-                     gauges ? ['div', {class: 'chat-meta'}, gauges] : ''
+                     ! isTool && gauges ? ['div', {class: 'chat-meta'}, gauges] : ''
                   ]];
                }) : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, loadingFile ? 'Loading...' : 'Start typing below to begin a new dialog'],
                optimisticUserMessage ? ['div', {class: 'chat-message chat-user'}, [
@@ -2721,18 +2635,12 @@ views.dialogs = function () {
             ['div', {class: 'chat-input-area'}, [
                ['select', {
                   class: 'provider-select',
-                  onchange: B.ev ('change', 'chatProvider'),
+                  onchange: B.ev ('change', 'chatProviderModel'),
                   disabled: streaming
-               }, [
-                  ['option', {value: 'openai', selected: (chatProvider || 'openai') === 'openai'}, 'OpenAI'],
-                  ['option', {value: 'claude', selected: chatProvider === 'claude'}, 'Claude']
-               ]],
-               ['select', {
-                  class: 'provider-select',
-                  onchange: B.ev ('set', 'chatModel'),
-                  disabled: streaming
-               }, dale.go (MODEL_OPTIONS [chatProvider || 'openai'] || [], function (option) {
-                  return ['option', {value: option.value, selected: (chatModel || defaultModelForProvider (chatProvider || 'openai')) === option.value}, option.label];
+               }, dale.go (MODEL_OPTIONS, function (opt) {
+                  var key = modelOptionKey (opt);
+                  var currentKey = (chatProvider || 'openai') + ':' + (chatModel || defaultModelForProvider (chatProvider || 'openai'));
+                  return ['option', {value: key, selected: key === currentKey}, opt.label];
                })],
                ['div', {class: 'vi-textarea-wrap', style: style ({flex: 1})}, [
                   ['textarea', {
@@ -2818,7 +2726,7 @@ views.projects = function () {
 };
 
 views.settings = function () {
-   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauthLoading'], ['oauthStep'], ['oauthCode'], ['viMode']], function (settingsData, edits, saving, showKeys, oauthLoading, oauthStep, oauthCode, viMode) {
+   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauthLoading'], ['oauthStep'], ['oauthCode'], ['viMode'], ['settingsShowMore']], function (settingsData, edits, saving, showKeys, oauthLoading, oauthStep, oauthCode, viMode) {
       settingsData = settingsData || {};
       edits = edits || {};
       var openai = settingsData.openai || {};
@@ -2943,6 +2851,7 @@ views.settings = function () {
       };
 
       var hasEdits = edits.openaiKey !== undefined || edits.claudeKey !== undefined;
+      var showMore = B.get ('settingsShowMore');
 
       return ['div', {class: 'editor-empty'}, [
          ['div', {style: style ({width: '100%', 'max-width': '640px', 'overflow-y': 'auto', 'max-height': 'calc(100vh - 120px)'})}, [
@@ -2950,42 +2859,55 @@ views.settings = function () {
                ['span', {class: 'editor-filename'}, 'Settings']
             ]],
 
-            // *** API KEYS SECTION ***
-            sectionTitle ('API Keys'),
-            ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Pay-per-use API access. Keys are stored in secret.json.'],
-            ['div', {style: style ({display: 'flex', gap: '0.5rem', 'margin-bottom': '1rem'})}, [
-               ['button', {
-                  class: 'btn-small',
-                  style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
-                  onclick: B.ev ('set', 'showApiKeys', ! showKeys)
-               }, showKeys ? 'Hide keys' : 'Show keys'],
-               ['button', {
-                  class: 'primary btn-small',
-                  onclick: B.ev ('save', 'settings'),
-                  disabled: saving || ! hasEdits
-               }, saving ? 'Saving...' : 'Save']
-            ]],
-            renderApiKeyProvider ('openai', 'OpenAI', openai, 'openaiKey'),
-            renderApiKeyProvider ('claude', 'Anthropic (Claude)', claude, 'claudeKey'),
-
-            // *** SUBSCRIPTIONS SECTION ***
+            // *** SUBSCRIPTIONS SECTION (main) ***
             sectionTitle ('Subscriptions'),
             ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Use your existing ChatGPT or Claude subscription. Logs in via OAuth — no API key needed.'],
             renderOAuthProvider ('openai', 'ChatGPT Plus/Pro', 'Use your ChatGPT subscription (Plus, Pro, Team)', openaiOAuth),
             renderOAuthProvider ('claude', 'Claude Pro/Max', 'Use your Anthropic Claude subscription (Pro, Max)', claudeOAuth),
 
-            // *** EDITOR SECTION ***
-            // sectionTitle ('Editor'),
-            // ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1rem'})}, [
-            //    ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', color: '#c9d4ff', 'font-size': '13px'})}, [
-            //       ['input', {
-            //          type: 'checkbox',
-            //          checked: viMode,
-            //          onclick: B.ev ('toggle', 'viMode')
-            //       }],
-            //       'Vi mode'
-            //    ]]
-            // ]]
+            // *** MORE BUTTON ***
+            ['div', {style: style ({'margin-top': '1.5rem', 'text-align': 'center'})}, [
+               ['button', {
+                  class: 'btn-small',
+                  style: style ({'background-color': '#3a3a5f', color: '#c9d4ff', padding: '0.5rem 1.5rem'}),
+                  onclick: B.ev ('set', 'settingsShowMore', ! showMore)
+               }, showMore ? '▲ Less' : '▼ More']
+            ]],
+
+            // *** MORE SECTION (API keys + Editor) ***
+            showMore ? ['div', [
+
+               // *** API KEYS ***
+               sectionTitle ('API Keys'),
+               ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Pay-per-use API access. Keys are stored in secret.json.'],
+               ['div', {style: style ({display: 'flex', gap: '0.5rem', 'margin-bottom': '1rem'})}, [
+                  ['button', {
+                     class: 'btn-small',
+                     style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
+                     onclick: B.ev ('set', 'showApiKeys', ! showKeys)
+                  }, showKeys ? 'Hide keys' : 'Show keys'],
+                  ['button', {
+                     class: 'primary btn-small',
+                     onclick: B.ev ('save', 'settings'),
+                     disabled: saving || ! hasEdits
+                  }, saving ? 'Saving...' : 'Save']
+               ]],
+               renderApiKeyProvider ('openai', 'OpenAI', openai, 'openaiKey'),
+               renderApiKeyProvider ('claude', 'Anthropic (Claude)', claude, 'claudeKey'),
+
+               // *** EDITOR ***
+               sectionTitle ('Editor'),
+               ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1rem'})}, [
+                  ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', color: '#c9d4ff', 'font-size': '13px'})}, [
+                     ['input', {
+                        type: 'checkbox',
+                        checked: viMode,
+                        onclick: B.ev ('toggle', 'viMode')
+                     }],
+                     'Vi mode'
+                  ]]
+               ]]
+            ]] : ''
          ]]
       ]];
    });

@@ -427,9 +427,19 @@ window.vibeyCSS = [
       'max-width': '90%',
    }],
    ['.chat-tool', {
-      'background-color': '#121a2c',
+      'background-color': '#0f1520',
       'border-left-color': '#7a5cff',
       'max-width': '90%',
+      padding: '0.4rem 0.75rem',
+      'margin-bottom': '0.15rem',
+      opacity: '0.85',
+   }],
+   ['.chat-tool + .chat-tool', {
+      'margin-top': '0',
+   }],
+   ['.chat-tool .chat-content', {
+      'font-size': '12px',
+      'line-height': 1.5,
    }],
    ['.chat-role', {
       'font-size': '11px',
@@ -507,76 +517,7 @@ window.vibeyCSS = [
       'background-color': '#1a1a2e',
       color: '#eee',
    }],
-   // Tool calls
 
-   ['.tool-name', {
-      'font-weight': 'bold',
-      color: '#94b8ff',
-   }],
-   ['.tool-input', {
-      'font-family': 'Monaco, Consolas, monospace',
-      'font-size': '12px',
-      'background-color': '#0d0d1a',
-      padding: '0.5rem',
-      'border-radius': '4px',
-      'white-space': 'pre-wrap',
-      'word-break': 'break-all',
-      'max-height': '150px',
-      'overflow-y': 'auto',
-      'margin-bottom': '0.5rem',
-   }],
-   ['.tool-input-expanded', {
-      'max-height': 'none',
-   }],
-   ['.tool-diff', {
-      'font-family': 'Monaco, Consolas, monospace',
-      'font-size': '12px',
-      'background-color': '#0d0d1a',
-      padding: '0.5rem',
-      'border-radius': '4px',
-      'white-space': 'pre-wrap',
-      'word-break': 'break-word',
-      'margin-bottom': '0.5rem',
-      border: '1px solid #2f2f4a'
-   }],
-   ['.tool-diff-line', {
-      color: '#a0aec0'
-   }],
-   ['.tool-diff-add', {
-      color: '#6ad48a'
-   }],
-   ['.tool-diff-del', {
-      color: '#ff8b94'
-   }],
-   ['.tool-diff-skip', {
-      color: '#8d93ab',
-      'font-style': 'italic'
-   }],
-   ['.tool-actions', {
-      display: 'flex',
-      gap: '0.5rem',
-   }],
-
-   ['.tool-status', {
-      'font-size': '12px',
-      color: '#888',
-      'font-style': 'italic',
-   }],
-   ['.tool-result', {
-      'font-family': 'Monaco, Consolas, monospace',
-      'font-size': '11px',
-      'background-color': '#0d0d1a',
-      padding: '0.5rem',
-      'border-radius': '4px',
-      'white-space': 'pre-wrap',
-      'word-break': 'break-all',
-      'max-height': '100px',
-      'overflow-y': 'auto',
-      color: '#7fba00',
-   }],
-   ['.tool-result-error', {
-      color: '#e74c3c',
-   }],
    // Embed
    ['.embed-container', {
       border: '1px solid #333',
