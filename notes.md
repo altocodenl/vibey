@@ -2,7 +2,7 @@
 
 ### 2026-03-04
 
-Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). When you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry.
 
 - Can you make the settings so that they have a main section that only has the openai/anthropic subs and then a More button that shows the api keys and the vi mode?
 - Great! Now please improve how the output of tools look. It looks very messy right now, with stdout, stderr. It used to look nicer too, maybe there's some dead code.
@@ -14,11 +14,7 @@ Hi! I'm building vibey. See please readme.md, then server.js and client.js, then
 - That didn't work. The expensive thing is building the view, I think.
 - WHen switching views between files and dialogs, sometimes the interface toggles back on its own. Why?
 
-
-
-Auto git
-Orchestration as doc, condense to three.
-
+- When there's no LLM connections, don't allow to start new dialogs and put a warning that you must configure it.
 
 ### 2026-03-03
 

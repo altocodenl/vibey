@@ -158,6 +158,75 @@ Snapshot entry shape:
 
 Snapshots view lists all snapshots with restore, download, and delete actions. Creating a snapshot is available from the project header. Restoring a snapshot creates a new project and navigates to it.
 
+### Server: auto commits
+
+In addition to manual snapshots, each project workspace will be a Git repository so changes are versioned continuously.
+
+#### Goal
+
+After each tool call and each mutating API call, the server attempts an automatic commit **only if `/workspace` changed**. If there is no filesystem diff, no commit is created.
+
+This gives agents first-class history they can use directly from tools (`git log`, `git show`, `git checkout <sha> -- <path>`), without a dedicated restore endpoint for every case.
+
+#### Repository lifecycle
+
+Auto-commit uses one repo per project at `/workspace/.git` inside the project container.
+
+- On first auto-commit attempt, if `.git` does not exist:
+  - initialize repo (`git init`)
+  - set local identity if missing:
+    - `user.name = vibey`
+    - `user.email = vibey@local`
+- Server checks for changes with `git status --porcelain`.
+- If dirty:
+  - `git add -A`
+  - `git commit -m <auto message>`
+- If clean: no-op.
+
+#### Commit trigger points
+
+Auto-commit runs at operation boundaries (not per low-level file append/write), to keep history readable and avoid commit spam. For consistency, each operation performs its own commit attempt before the operation is considered complete.
+
+1. **Tool calls**
+   - `run_command` (because shell commands may mutate files)
+   - `write_file`
+   - `edit_file`
+   - `launch_agent` (creates/updates dialog files)
+2. **Mutating project APIs**
+   - `POST /projects`
+   - `POST /project/:project/file/:name`
+   - `DELETE /project/:project/file/:name`
+   - `POST /project/:project/upload`
+   - `POST /project/:project/dialog/new`
+   - `POST /project/:project/dialog`
+   - `PUT /project/:project/dialog` (when status/prompt causes writes)
+   - `POST /project/:project/tool/execute`
+
+Read-only routes (`GET ...`) do not trigger auto-commit.
+
+#### Commit messages
+
+Commit messages include the source of the mutation for traceability, for example:
+
+- `vibey:auto api POST /project/:project/file/doc/main.md`
+- `vibey:auto tool write_file`
+
+Metadata such as dialog id may be appended when available.
+
+#### Concurrency and failure behavior
+
+- Auto-commit is serialized **per project** to avoid overlapping Git operations (`status/add/commit` runs in a per-project critical section).
+- This lock is currently in-process memory, so strict ordering assumes a **single vibey server process** (no cluster/multi-instance).
+- If vibey runs in cluster mode or multiple instances, per-project locking must move to a shared coordinator (for example Redis lock, DB advisory lock, or filesystem lock) to preserve ordering guarantees.
+- Commit mode is **consistent/strict**: each mutating tool/API operation performs its own commit attempt in sequence, so commit history preserves operation order.
+- Target granularity is one operation → one commit attempt (or a no-op when no diff exists).
+- Because strict mode waits for commit completion, mutating requests may be slightly slower than non-committing flows.
+- If auto-commit itself fails, the operation is treated as failed and returns an error (consistency over availability).
+
+### Client: auto commits
+
+No dedicated UI is required for MVP. Agents can inspect and restore history through existing tool execution (`run_command`). A future UX may add commit browsing in the project header/sidebar.
+
 ### Server: files
 
 All files live inside `/workspace/` in the project container. All file I/O goes through the `projectFS` abstraction. Managed files are under `doc/` and `dialog/`; no `..`.
@@ -720,13 +789,27 @@ Flow #8 — Uploads (create/list/preview)
 - In the client, confirm the uploads section appears in the Docs sidebar, clicking the image shows a preview, and clicking the text file shows metadata + link.
 - Cleanup: delete the project.
 
+Flow #9 — Auto-commit strictness + per-project commit safety
+
+- Create a project and verify `/workspace/.git` exists immediately after creation.
+- Read baseline commit count with `git rev-list --count HEAD` via `POST /project/:project/tool/execute` + `run_command`.
+- Verify read-only API calls (for example `GET /project/:project/files`) do **not** change commit count.
+- Perform one mutating API write (`POST /project/:project/file/doc/notes.md`) and verify commit count increments by exactly 1.
+- Repeat the same write with identical content and verify commit count does not increment (no diff => no commit).
+- Execute a mutating tool command (`run_command: echo ... > file`) and verify commit count increments by exactly 1.
+- Execute a non-mutating tool command (`run_command: echo noop`) and verify commit count does not increment.
+- Fire two mutating API writes concurrently to different files in the same project.
+  - Verify both requests succeed.
+  - Verify commit count increases by exactly 2.
+  - Verify git integrity with `git fsck --no-progress`.
+  - Verify no stale lock file exists (`test ! -e .git/index.lock`).
+- Cleanup: delete the project and verify it no longer appears in `GET /projects`.
+
 ## TODO
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- When there's no LLM connections, don't allow to start new dialogs and put a warning that you must configure it.
-- Auto commit: rather than snapshotting, after each tool call or API call make the server do a commit if there was a change on the FS, so we version control automatically. The agents can leverage this to restore something old if they need to.
-- On every message or tool response, send the length of the context window to the agent so it can choose to stop after a certain % if that's on the instructions. Also show the percentage of the window, with yellow after 50% and red after 80%. Compaction works by the agent doing the compaction and then sending it to a new agent.
+- Remove snapshots, instead allow to download the latest or a previous version of a project.
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
 ## Vibey cloud in a nutshell

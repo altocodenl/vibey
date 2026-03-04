@@ -10,3 +10,30 @@ Have lots of ideas for vibey!
 Also, I realize that vibey is three, not four things. Let's fix that now.
 
 OK, docs updated.
+
+OK, let's do the boring stuff first: warn if no keys.
+
+An interesting personal challenge: build things with vibey and (temporarily) leave behind both vim and pi. That would be a big shift for me.
+
+I'm oscillating between building with vibey and building vibey itself. I'm just going with how the spirit moves me. It's been challenging to swim with all these changes.
+
+Let's give 5.3 a chance. It's been lazy with me today, but sometimes it works.
+
+I think claude is not aware of the humor value in some of its choices for variable names.
+
+```
+ +2616    return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'],
+ ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'],
+ ['settings'], ['contextWindow']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent,
+ optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat, settings, contextWindow) {
+```
+
+That's a function signature from hell.
+
+Boy, this thing is smart.
+
+All of those afternoons defragmenting my disk, and now I can compact LLM dialogs manually too.
+
+Well, I feel like a manager.
+
+I don't want to stop, but I will. Thanks for watching.
