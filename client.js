@@ -807,31 +807,33 @@ B.mrespond ([
    // *** SETUP ***
 
    ['initialize', [], function (x) {
-      B.call (x, 'set', 'tab', 'projects');
-      B.call (x, 'set', 'chatProvider', 'openai');
-      B.call (x, 'set', 'chatModel', 'gpt-5');
-      B.call (x, 'set', 'chatInput', '');
-      B.call (x, 'set', 'chatAutoStick', true);
-      B.call (x, 'set', 'editorPreview', true);
-      B.call (x, 'set', 'voiceActive', false);
-      B.call (x, 'set', 'voiceSupported', !! (window.SpeechRecognition || window.webkitSpeechRecognition));
-      B.call (x, 'set', 'viMode', false);
-      B.call (x, 'set', 'viState', {
-         mode: 'insert',
-         pending: '',
-         register: '',
-         lastSearch: '',
-         message: '',
-         commandPrefix: '',
-         undoStack: [],
-         redoStack: []
+      B.call (x, 'set', [], {
+         tab: 'projects',
+         chatProvider: 'openai',
+         chatModel: 'gpt-5',
+         chatInput: '',
+         chatAutoStick: true,
+         editorPreview: true,
+         voiceActive: false,
+         voiceSupported: !! (window.SpeechRecognition || window.webkitSpeechRecognition),
+         viMode: false,
+         viState: {
+            mode: 'insert',
+            pending: '',
+            register: '',
+            lastSearch: '',
+            message: '',
+            commandPrefix: '',
+            undoStack: [],
+            redoStack: []
+         },
+         viCursor: {line: 1, col: 1},
+         viOverlayEditor: null,
+         viOverlayChat: null,
+         uploads: [],
+         currentUpload: null,
+         uploading: false
       });
-      B.call (x, 'set', 'viCursor', {line: 1, col: 1});
-      B.call (x, 'set', 'viOverlayEditor', null);
-      B.call (x, 'set', 'viOverlayChat', null);
-      B.call (x, 'set', 'uploads', []);
-      B.call (x, 'set', 'currentUpload', null);
-      B.call (x, 'set', 'uploading', false);
       B.call (x, 'load', 'projects');
       B.call (x, 'load', 'settings');
       B.call (x, 'read', 'hash');
@@ -864,7 +866,21 @@ B.mrespond ([
          if (parsed.tab === 'snapshots') B.call (x, 'load', 'snapshots');
          B.call (x, 'set', 'currentProject', parsed.project);
          B.call (x, 'set', 'hashTarget', parsed);
-         if (! parsed.project || ! parsed.target) B.call (x, 'set', 'currentFile', null);
+         // Clear currentFile if no target, or if switching tabs within same project
+         // and the current file doesn't belong to the new tab
+         var existingFile = B.get ('currentFile');
+         if (! parsed.project || ! parsed.target) {
+            // Also clear if the file doesn't match the tab we're switching to
+            if (existingFile && parsed.project) {
+               var fileIsDialog = isDialogFile (existingFile.name);
+               if ((parsed.tab === 'docs' && fileIsDialog) || (parsed.tab === 'dialogs' && ! fileIsDialog)) {
+                  B.call (x, 'set', 'currentFile', null);
+               }
+            }
+            else {
+               B.call (x, 'set', 'currentFile', null);
+            }
+         }
          if (parsed.project) B.call (x, 'load', 'files', parsed.project);
          B.call (x, 'apply', 'hashTarget');
       };
@@ -1227,6 +1243,7 @@ B.mrespond ([
       if (isDirtyDoc (currentFile) && currentFile.name === name) return;
 
       var proceed = function () {
+         var tabAtRequest = B.get ('tab');
          B.call (x, 'set', 'loadingFile', true);
          B.call (x, 'get', projectPath (project, 'file/' + encodeURIComponent (name)), {}, '', function (x, error, rs) {
             B.call (x, 'set', 'loadingFile', false);
@@ -1240,8 +1257,12 @@ B.mrespond ([
             if (isDirtyDoc (latest) && latest.name === rs.body.name) return;
 
             var dialogFile = isDialogFile (rs.body.name);
-            var nextTab = dialogFile ? 'dialogs' : 'docs';
-            if (B.get ('tab') !== nextTab) B.call (x, 'set', 'tab', nextTab);
+            var currentTab = B.get ('tab');
+            // Only switch tabs if the user hasn't navigated away since the request
+            if (currentTab === tabAtRequest) {
+               var nextTab = dialogFile ? 'dialogs' : 'docs';
+               if (currentTab !== nextTab) B.call (x, 'set', 'tab', nextTab);
+            }
             B.call (x, 'set', 'currentFile', {
                name: rs.body.name,
                content: rs.body.content,

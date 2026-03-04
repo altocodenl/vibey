@@ -1,0 +1,12 @@
+Hello!
+
+Lots of background noise, so I'm just doing a silent one today.
+
+Have lots of ideas for vibey!
+
+- Auto git snapshotting by the server, so you can always go back by asking the agent.
+- Show the % of the window used to the agent, so the agent can stop or compact as per your instructions.
+
+Also, I realize that vibey is three, not four things. Let's fix that now.
+
+OK, docs updated.

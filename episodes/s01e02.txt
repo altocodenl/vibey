@@ -1,3 +1,5 @@
+https://buildwithvibey.com
+
 Hi again! Episode 2.
 
 I will focus today on using vibey. gpt5.2 was fixing things late this afternoon. It's remarkable what can be built with a few prompts.

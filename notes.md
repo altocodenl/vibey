@@ -1,5 +1,25 @@
 ## Vibey development notes
 
+### 2026-03-04
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).
+
+- Can you make the settings so that they have a main section that only has the openai/anthropic subs and then a More button that shows the api keys and the vi mode?
+- Great! Now please improve how the output of tools look. It looks very messy right now, with stdout, stderr. It used to look nicer too, maybe there's some dead code.
+- Looks great! For the write file, do we store what we write in the md or not?
+- Can you show a bit of it then with the chance to expand more?
+- Looks great. Can you make it so that the red applies only to lines starting with "-" *only in diffs* and not in normal text?
+- Please make the provider/model dropdown to be unified into one with four options instead of two with two.
+- Can you refactor the views so that we always have the dialogs and the docs drawn in the background, and we just show/hide it? It's just for performance.
+- That didn't work. The expensive thing is building the view, I think.
+- WHen switching views between files and dialogs, sometimes the interface toggles back on its own. Why?
+
+
+
+Auto git
+Orchestration as doc, condense to three.
+
+
 ### 2026-03-03
 
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries).

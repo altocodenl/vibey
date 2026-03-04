@@ -314,19 +314,15 @@ var page = ['html', {lang: 'en'}, [
          // *** PILLARS ***
          ['div', {class: 'pillars'}, [
             pillar (1, 'Everything is a document',
-               'Your description of what you\'re building. The dialogs with AI while building it. Views of your app or images, embedded. A document as the gateway to everything. <strong>There is no database.</strong>'),
+               'Your description of what you\'re building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. <strong>There is no database.</strong>'),
 
             pillar (2, 'Everything in your browser',
-               'See not just text, but images, audio, and even embed small apps in your documents. No terminal or dedicated native app required.'),
+               'Your documents are not only text: use images, audio, and even embed small apps in your documents. No terminal or dedicated native app required.'),
 
             pillar (3, 'Safe YOLO',
-               'The agents don\'t ask for permission — they just run their commands and work at full speed. <strong>But</strong> each project is fully isolated in its own container and volume. A rogue agent\'s blast radius is limited to its own project — it cannot touch other projects or your computer.'),
+               'The agents don\'t ask for permission, they just run the commands that they deem useful for the task you give them, so they work at full speed. <strong>But</strong> each project is fully isolated in its own container and volume. A rogue agent\'s blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.'),
 
-            pillar (4, 'Orchestration as prose',
-               'There\'s no agent graph, no task queue, no state machine. You write a small doc describing what you want (including how many agents to use), start one dialog, and that agent reads the doc and decides what to do — including spawning other sibling agents. The "agentic mesh" is just text instructions that you can edit.'),
 
-            pillar (5, 'Bring your own inference',
-               'Run locally and connect with your OpenAI or Claude subscription or API key. No vendor lock-in, no intermediary.')
          ]],
 
          // *** HUMANITY ***

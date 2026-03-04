@@ -47,23 +47,11 @@ docker compose down -v
 
 ## Vibey in a nutshell
 
-1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. Views of your app or images are embedded. A document as the gateway to everything. There is no database.
-2. **Everything in your browser**: allows to see not just text, but images, audio, and even embed small apps in your documents. No terminal or dedicated native app required.
-3. **Safe(r) YOLO**: the agents don't ask for permission, they just run the commands that they deem useful for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
-4. **Orchestration as prose**: there's no agent graph, no task queue, no state machine. You write a small doc describing what you want (including how many agents to use), start one dialog, and that agent reads the doc and decides what to do, including spawning other sibling agents. The "agentic mesh" is just text instructions that you can edit. Agents can read each other's dialogs to coordinate.
-5. **Run locally and bring your own inference**: connect with your openai or claude subscription or API key.
+1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. There is no database.
+2. **Everything in your browser**: your documents are not only text: use images, audio, and even embed small apps in your documents. No terminal or dedicated native app required.
+3. **Safe YOLO**: the agents don't ask for permission, they just run the commands that they deem useful for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
 
 For the students of humanities stranded in the digital age: this is your chance to build a world with your words. Not cryptic commands, without the tens of hours of practice that are required to figure out misplaced semicolons. Describe your world and see it come to life.
-
-## Vibey cloud in a nutshell
-
-*WARNING: vaporware, will only build if Vibey itself makes sense*
-
-1. **Automatic infra**: accessible anywhere with a browser; put projects (containers) onto servers, proxy traffic from/to your apps, HTTPS (bring your DNS record), receive emails, vibey session cookies.
-2. **Aligned pricing**: An annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
-3. **Zero lock-in**: the whole thing being open source, so you can always run the same thing yourself elsewhere, also in the cloud.
-
-All you need is an AI provider, no need to install anything.
 
 ## The concept
 
@@ -84,7 +72,7 @@ The core of all this is one doc, `doc/main.md.` This file contains:
    - How many agents to spin at one time.
    - Standards of work and workflows.
 
-Rather than hardcoding or customizing an agentic mesh, just describe it.
+Rather than hardcoding or customizing an agentic mesh, just describe it in your docs. Orchestration can just be prose.
 
 Vibey is not experimental. It is an experiment.
 
@@ -109,7 +97,7 @@ Yes. Each project runs in its own Docker container with its own volume. No share
 ## How does it look?
 
 - Two tabs only:
-   - Docs: lush markdown editing
+   - Docs: lush markdown editing, with embedded apps.
    - Dialogs: lush visual of each dialog, with the possibility to interrupt it and converse with it.
 
 Docs and dialogs are markdown files under dedicated folders in each project:
@@ -128,7 +116,7 @@ Note that the deed is missing; if it's code, go use your IDE, or just open your 
 
 Each project is a container (`vibey-proj-<name>`) with its own named volume (`vibey-vol-<name>`).
 
-- `GET /projects` - list project names. Includes projects backed by containers and volume-only projects (for example after rebuilds).
+- `GET /projects` - list project names. Enumerates both running containers and labeled volumes (`vibey=project`), so volume-only projects (whose containers were removed on shutdown/rebuild) appear in the list and can be opened normally — their container is recreated on first access.
 - `POST /projects` - create project. Body: `{name}`. Creates the project container and volume.
 - `DELETE /projects/:name` - delete a project.
   - If any dialog streams are active for dialogs in that project, they are aborted before deletion.
@@ -521,7 +509,7 @@ When rendering markdown (doc preview or dialog view), the client detects `əəə
 - **Hot reload**: iframe is static; user refreshes or a reload button is added to the embed chrome.
 - **Absolute path rewriting**: deferred; agents can be told to use relative paths.
 
-## Dockerization [TO IMPLEMENT]
+## Dockerization
 
 ### Architecture: full container isolation
 
@@ -575,8 +563,9 @@ Latency per `docker exec` call is ~20-50ms. For human-speed UI operations (loadi
 | Project created | Spin up container with fresh named volume, main process `/bin/sh` |
 | First dialog turn / tool execution | Container already running (created at project creation) |
 | Project deleted | Abort active dialog streams → `docker rm -f vibey-proj-<name>` → `docker volume rm vibey-vol-<name>` |
-| Vibey shutdown | Stop all project containers (`docker stop` with label `vibey=project`) |
-| Vibey startup | Clean up orphaned project containers from previous runs; restart containers for existing projects on demand |
+| Vibey shutdown | Remove all project containers (`docker rm -f` with label `vibey=project`). Volumes are kept. |
+| Vibey startup | Remove any leftover project containers from previous runs. Volumes survive — projects whose volumes still exist appear in `GET /projects` as usual. |
+| Project accessed (any API call) | If the volume exists but the container is gone (normal state after a restart/rebuild), a fresh container is created and attached to the existing volume. This happens lazily on first access, not eagerly at startup. All project data (code, docs, dialogs, uploads) is intact because it lives on the volume. |
 
 ### Embed proxy (updated for isolation)
 
@@ -735,10 +724,20 @@ Flow #8 — Uploads (create/list/preview)
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
+- When there's no LLM connections, don't allow to start new dialogs and put a warning that you must configure it.
+- Auto commit: rather than snapshotting, after each tool call or API call make the server do a commit if there was a change on the FS, so we version control automatically. The agents can leverage this to restore something old if they need to.
+- On every message or tool response, send the length of the context window to the agent so it can choose to stop after a certain % if that's on the instructions. Also show the percentage of the window, with yellow after 50% and red after 80%. Compaction works by the agent doing the compaction and then sending it to a new agent.
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
-- Compaction: show the percentage of the window, with yellow after 50% and red after 80%. Allow to compact through a call, opens a new dialog (so there's no magic).
-- Keep all diffs: rather than snapshotting, make all edits and rms go through tool calls, and we deterministically store diffs in a folder in the container/volume. Then, we have a "git like" list of diffs, minus commits. You basically have the history of all that happened in the FS.
-- A fifth tool that is that the server stops agents after a certain size of the token window, after a message is responded. The server auto-calls that tool. I want this to be specified in main.md or one of the files referenced in it. Or an agent can call it?
+
+## Vibey cloud in a nutshell
+
+*WARNING: vaporware, will only build if Vibey itself makes sense*
+
+1. **Automatic infra**: accessible anywhere with a browser; put projects (containers) onto servers, proxy traffic from/to your apps, HTTPS (bring your DNS record), receive emails, vibey session cookies.
+2. **Aligned pricing**: An annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
+3. **Zero lock-in**: the whole thing being open source, so you can always run the same thing yourself elsewhere, also in the cloud.
+
+All you need is an AI provider, no need to install anything.
 
 ## TODO vibey cloud
 
