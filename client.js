@@ -76,6 +76,15 @@ var defaultModelForProvider = function (provider) {
    return found || MODEL_OPTIONS [0].model;
 };
 
+var hasAnyProvider = function (settings) {
+   if (! settings) return false;
+   var openai = settings.openai || {};
+   var claude = settings.claude || {};
+   var openaiOAuth = settings.openaiOAuth || {};
+   var claudeOAuth = settings.claudeOAuth || {};
+   return openai.hasKey || claude.hasKey || (openaiOAuth.loggedIn && ! openaiOAuth.expired) || (claudeOAuth.loggedIn && ! claudeOAuth.expired);
+};
+
 var normalizeDocFilename = function (name) {
    name = (name || '').trim ();
    if (! name) return '';
@@ -2579,7 +2588,7 @@ var formatMessageGauges = function (msg) {
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat, settings) {
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (isDialogFile (f)) return f;
@@ -2589,13 +2598,14 @@ views.dialogs = function () {
       var messages = isDialog ? parseDialogContent (currentFile.content) : [];
       viMode = !! viMode;
       viState = viState || {};
+      var noProvider = ! hasAnyProvider (settings);
 
       return ['div', {class: 'files-container'}, [
          // Dialog list sidebar
          ['div', {class: 'file-list'}, [
             ['div', {class: 'file-list-header'}, [
                ['span', {class: 'file-list-title'}, 'Dialogs'],
-               ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'dialog')}, '+ New']
+               ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'dialog'), disabled: noProvider}, '+ New']
             ]],
             dialogFiles && dialogFiles.length > 0
                ? dale.go (dialogFiles, function (name) {
@@ -2642,7 +2652,13 @@ views.dialogs = function () {
                      ]] : '',
                      ! isTool && gauges ? ['div', {class: 'chat-meta'}, gauges] : ''
                   ]];
-               }) : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, loadingFile ? 'Loading...' : 'Start typing below to begin a new dialog'],
+               }) : noProvider
+                  ? ['div', {style: style ({color: '#e67e22', 'font-size': '13px', padding: '1rem'})}, [
+                     ['span', '⚠ No LLM provider configured. '],
+                     ['a', {href: '#/settings', style: style ({color: '#b07aff', 'text-decoration': 'underline', cursor: 'pointer'})}, 'Go to Settings'],
+                     ['span', ' to add an API key or log in with OAuth.']
+                  ]]
+                  : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, loadingFile ? 'Loading...' : 'Start typing below to begin a new dialog'],
                optimisticUserMessage ? ['div', {class: 'chat-message chat-user'}, [
                   ['div', {class: 'chat-role'}, 'user'],
                   ['div', {class: 'chat-content'}, optimisticUserMessage]
@@ -2657,7 +2673,7 @@ views.dialogs = function () {
                ['select', {
                   class: 'provider-select',
                   onchange: B.ev ('change', 'chatProviderModel'),
-                  disabled: streaming
+                  disabled: noProvider || streaming
                }, dale.go (MODEL_OPTIONS, function (opt) {
                   var key = modelOptionKey (opt);
                   var currentKey = (chatProvider || 'openai') + ':' + (chatModel || defaultModelForProvider (chatProvider || 'openai'));
@@ -2668,7 +2684,7 @@ views.dialogs = function () {
                      class: 'chat-input' + (viMode ? (' vi-active' + (viState.mode === 'insert' ? ' vi-insert' : '')) : ''),
                      rows: 2,
                      value: chatInput || '',
-                     placeholder: 'Type a message... (Cmd+Enter to send)',
+                     placeholder: noProvider ? 'Configure an LLM provider in Settings to start' : 'Type a message... (Cmd+Enter to send)',
                      readonly: viMode && viState.mode !== 'insert',
                      oninput: B.ev ('set', 'chatInput'),
                      onkeydown: viMode
@@ -2677,7 +2693,7 @@ views.dialogs = function () {
                      onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                      onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                      onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
-                     disabled: streaming
+                     disabled: noProvider || streaming
                   }],
                   (viMode && viState.mode !== 'insert' && viOverlayChat && viOverlayChat.visible) ? ['div', {
                      class: 'vi-cursor-overlay',
@@ -2700,12 +2716,12 @@ views.dialogs = function () {
                      transition: 'background-color 0.2s'
                   }),
                   onclick: B.ev ('toggle', 'voice'),
-                  disabled: streaming
+                  disabled: noProvider || streaming
                }, voiceActive ? '⏹' : '🎤'] : '',
                ['button', {
                   class: 'primary',
                   onclick: B.ev ('send', 'message'),
-                  disabled: streaming || ! (chatInput && chatInput.trim ())
+                  disabled: noProvider || streaming || ! (chatInput && chatInput.trim ())
                }, streaming ? 'Sending...' : 'Send'],
                (streaming && isDialog) ? ['button', {
                   style: style ({'background-color': '#e67e22', color: 'white'}),
