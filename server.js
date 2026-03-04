@@ -549,6 +549,8 @@ var removeProjectContainer = function (projectName) {
       clog ('Removed project volume: ' + vol);
    }
    catch (e) {}
+   // Clear cached git-repo-ready flag so resurrection re-initializes
+   if (GIT_REPO_READY) delete GIT_REPO_READY [projectName];
 };
 
 var getContainerIP = function (projectName) {
@@ -743,44 +745,39 @@ var withProjectCommitLock = function (projectName, fn) {
    });
 };
 
-var gitExec = function (projectName, command, options) {
-   options = options || {};
+var gitExecAsync = function (projectName, command) {
    var name = containerName (projectName);
    var cmd = 'docker exec ' + name + ' sh -lc ' + shQuote (command);
-   return execSync (cmd, {
-      encoding: options.encoding || 'utf8',
-      stdio: options.stdio || ['pipe', 'pipe', 'pipe']
+   return new Promise (function (resolve, reject) {
+      exec (cmd, {encoding: 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+         if (error) reject (error);
+         else resolve ((stdout || '').trim ());
+      });
    });
 };
 
-var gitExecQuiet = function (projectName, command) {
-   try {
-      return gitExec (projectName, command).trim ();
-   }
-   catch (error) {
-      return '';
-   }
+var gitExecQuietAsync = function (projectName, command) {
+   return gitExecAsync (projectName, command).catch (function () {return '';});
 };
 
+var GIT_REPO_READY = {};
+
 var ensureProjectGitRepo = function (projectName) {
-   var name = containerName (projectName);
-   var hasGit = true;
+   if (GIT_REPO_READY [projectName]) return Promise.resolve ();
 
-   try {
-      execSync ('docker exec ' + name + ' test -d /workspace/.git', {encoding: 'utf8'});
-   }
-   catch (error) {
-      hasGit = false;
-   }
-
-   if (! hasGit) gitExec (projectName, 'git -C /workspace init');
-
-   if (! gitExecQuiet (projectName, 'git -C /workspace config --get user.name')) {
-      gitExec (projectName, 'git -C /workspace config user.name ' + shQuote ('vibey'));
-   }
-   if (! gitExecQuiet (projectName, 'git -C /workspace config --get user.email')) {
-      gitExec (projectName, 'git -C /workspace config user.email ' + shQuote ('vibey@local'));
-   }
+   return gitExecAsync (projectName, 'test -d /workspace/.git && echo ok || echo no').then (function (out) {
+      if (out !== 'ok') return gitExecAsync (projectName, 'git -C /workspace init');
+   }).then (function () {
+      return gitExecQuietAsync (projectName, 'git -C /workspace config --get user.name');
+   }).then (function (userName) {
+      if (! userName) return gitExecAsync (projectName, 'git -C /workspace config user.name ' + shQuote ('vibey'));
+   }).then (function () {
+      return gitExecQuietAsync (projectName, 'git -C /workspace config --get user.email');
+   }).then (function (userEmail) {
+      if (! userEmail) return gitExecAsync (projectName, 'git -C /workspace config user.email ' + shQuote ('vibey@local'));
+   }).then (function () {
+      GIT_REPO_READY [projectName] = true;
+   });
 };
 
 var autoCommitMessage = function (meta) {
@@ -795,18 +792,20 @@ var autoCommitMessage = function (meta) {
 
 var maybeAutoCommit = function (projectName, meta) {
    return withProjectCommitLock (projectName, function () {
-      ensureProjectGitRepo (projectName);
+      return ensureProjectGitRepo (projectName).then (function () {
+         return gitExecAsync (projectName, 'git -C /workspace status --porcelain');
+      }).then (function (status) {
+         if (! status) return {committed: false};
 
-      var status = gitExec (projectName, 'git -C /workspace status --porcelain').trim ();
-      if (! status) return {committed: false};
-
-      gitExec (projectName, 'git -C /workspace add -A');
-
-      var message = autoCommitMessage (meta);
-      gitExec (projectName, 'git -C /workspace commit -m ' + shQuote (message));
-
-      var hash = gitExec (projectName, 'git -C /workspace rev-parse HEAD').trim ();
-      return {committed: true, hash: hash, message: message};
+         var message = autoCommitMessage (meta);
+         return gitExecAsync (projectName, 'git -C /workspace add -A').then (function () {
+            return gitExecAsync (projectName, 'git -C /workspace commit -m ' + shQuote (message));
+         }).then (function () {
+            return gitExecAsync (projectName, 'git -C /workspace rev-parse HEAD');
+         }).then (function (hash) {
+            return {committed: true, hash: hash, message: message};
+         });
+      });
    });
 };
 
@@ -1285,6 +1284,7 @@ var executeTool = function (toolName, toolInput, projectName) {
                resolve (result);
             })
             .catch (function (error) {
+               clog ('Auto-commit failed after tool ' + toolName + ' in ' + projectName + ': ' + error.message);
                resolve ({success: false, error: 'Auto-commit failed after tool ' + toolName + ': ' + error.message});
             });
       };
@@ -2359,8 +2359,11 @@ var resolveProject = function (rs, projectName) {
    }
 };
 
-var autoCommitApi = async function (projectName, method, path) {
-   return maybeAutoCommit (projectName, {kind: 'api', method: method, path: path});
+var autoCommitApi = function (projectName, method, path) {
+   return maybeAutoCommit (projectName, {kind: 'api', method: method, path: path}).catch (function (error) {
+      clog ('Auto-commit failed for ' + method + ' ' + path + ' in ' + projectName + ': ' + error.message);
+      throw error;
+   });
 };
 
 // *** ROUTES ***

@@ -1896,7 +1896,7 @@ B.mrespond ([
    }],
 
    ['run', 'tests', function (x) {
-      var choice = prompt ('Which flow to run?\n1 = Dialog + tools\n2 = Docs CRUD\n3 = Delete project aborts agents\n4 = Static tictactoe\n5 = Backend tictactoe\n6 = Vi mode\n7 = Snapshots\n8 = Uploads\nALL = run everything', 'ALL');
+      var choice = prompt ('Which flow to run?\n1 = Dialog + tools\n2 = Docs CRUD\n3 = Delete project aborts agents\n4 = Static tictactoe\n5 = Backend tictactoe\n6 = Vi mode\n7 = Snapshots\n8 = Uploads\n9 = Auto-commit\nALL = run everything', 'ALL');
       if (choice === null) return;
       window._vibeyTestFlow = (choice || 'ALL').trim ().toUpperCase ();
       c.loadScript ('test-client.js', function (error) {
