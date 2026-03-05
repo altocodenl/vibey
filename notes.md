@@ -1,5 +1,36 @@
 ## Vibey development notes
 
+### 2026-03-05
+
+https://acko.net/blog/the-l-in-llm-stands-for-lying/
+"The solution to the LLM conundrum is then as obvious as it is elusive: the only way to separate the gold from the slop is for LLMs to perform correct source attribution along with inference.
+
+This wouldn't just help with the artistic side of things. It would also reveal how much vibe code is merely just copy/pasted from an existing codebase, while conveniently omitting the original author, license and link."
+
+Prompts:
+
+Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). When you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry.
+
+- Remove git from dialog, why is it a tool?
+- Break newlines in output of tools: hide id, nice name of command, also input, then output should be separated in lines, that auto hidden and can be shown. From the client.
+- Store which model responded, to be able to remember it on the dropdown after page refresh, and also if you switch, you know which was the previous one. Also display it at the bottom after getting the answer.
+- When deleting project, tells you can't delete project but it still deletes it.
+- Can you add red/green to the - + lines of the edit tool, on the dialog?
+- I don't see the dialog turning purple when it's working.
+- Please comment out flows 4 and 5 and try (without restarting vibey) to write a flow 4 that does the same but uses a static react to see if this will make the test much faster while testing essentially the same thing.
+- No, that's not the point! The point is to have an agent build the static app! You're gaming it. Make the agent build the app.
+- Please remove the 20 round limit on tool calls.
+- I cannot name files with spaces in them (or other special characters, I presume). And when I do that on a dialog, I get dashes instead of spaces. Why do we have restrictions on characters? The only thing we cannot allow (I think) is two dots next to each other, or perhaps slashes too.
+- Refreshing the page on an active dialog stops the agent?
+- Instead of just something purple, could we make it "spinny" so we obviously see that the agent is at work? Sometimes there are pauses.
+- I notice the agents inside vibey don't use rg, they use grep. Is it missing from the docker sandbox image?
+- I notice an agent inside vibey taking a long time to complete a simple task. Why is this? Is perhaps the system prompt for vibey not as powerful enough sa what we have here in pi?
+
+
+A historical prompt-in-vibey:
+- Let's swing for the fences. Can you run the analysis on the savegame we have and put the output in a doc?
+
+
 ### 2026-03-04
 
 Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). When you start a task, first read agents-now.md if it exists (if it doesn't, you'll create it in a moment). Then pick a name for yourself (a whimsical noun), then update agents-now.md and put your name, what you're doing and what files are you touching, so that no other agent touches them. If an agent is already working on those files, ask me on how to proceed. If you have no conflict, push on but note what you're changing. When you're done editing the files, remove your entry.

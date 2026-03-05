@@ -243,6 +243,90 @@ var flow1Sequence = [
       return true;
    }],
 
+   // --- Active status during streaming ---
+
+   ['Create dialog for active-status test', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'active-status-test'}, 200, function (s, rq, rs) {
+      if (! rs.body.dialogId) return log ('missing dialogId');
+      s.activeTestDialogId = rs.body.dialogId;
+      // Verify initial status is done
+      if (rs.body.status !== 'done') return log ('New dialog should start as done, got: ' + rs.body.status);
+      if (! rs.body.filename || rs.body.filename.indexOf ('-done.md') === -1) return log ('New dialog filename should end in -done.md');
+      return true;
+   }],
+
+   ['Fire dialog non-blocking and verify it becomes active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      // Fire the dialog with a slow prompt so it stays active long enough to poll
+      fireDialogNoWait (PROJECT, s.activeTestDialogId, 'Write a 500 word essay about the color purple. Take your time and be thorough and detailed.');
+
+      // Give the server a moment to start processing the PUT request
+      setTimeout (function () {
+         // Poll /dialogs until the dialog shows active status
+         pollUntil (function (done) {
+            httpGet (5353, '/project/' + PROJECT + '/dialogs', function (error, status, body) {
+               if (error || status !== 200) return done (false);
+               try {
+                  var dialogs = JSON.parse (body);
+                  var entry = dale.stopNot (dialogs, undefined, function (d) {
+                     if (d && d.dialogId === s.activeTestDialogId) return d;
+                  });
+                  if (! entry) return done (false);
+                  if (entry.status === 'active') {
+                     // Verify filename also reflects active status
+                     if (entry.filename.indexOf ('-active.md') === -1) {
+                        return done (false, new Error ('Dialog status is active but filename does not contain -active.md: ' + entry.filename));
+                     }
+                     s.activeTestVerified = true;
+                     return done (true);
+                  }
+                  done (false);
+               }
+               catch (e) {done (false);}
+            });
+         }, 500, 30000, function (error) {
+            if (error) return log ('Dialog never became active: ' + error.message);
+            next ();
+         });
+      }, 1000);
+   }],
+
+   ['Wait for active-status dialog to finish', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollUntil (function (done) {
+         httpGet (5353, '/project/' + PROJECT + '/dialogs', function (error, status, body) {
+            if (error || status !== 200) return done (false);
+            try {
+               var dialogs = JSON.parse (body);
+               var entry = dale.stopNot (dialogs, undefined, function (d) {
+                  if (d && d.dialogId === s.activeTestDialogId) return d;
+               });
+               if (! entry) return done (false);
+               if (entry.status === 'done') {
+                  // Verify filename reflects done status
+                  if (entry.filename.indexOf ('-done.md') === -1) {
+                     return done (false, new Error ('Dialog status is done but filename does not contain -done.md: ' + entry.filename));
+                  }
+                  return done (true);
+               }
+               done (false);
+            }
+            catch (e) {done (false);}
+         });
+      }, 2000, 120000, function (error) {
+         if (error) return log ('Dialog never returned to done: ' + error.message);
+         next ();
+      });
+   }],
+
+   ['Verify active-status test was actually observed', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
+      if (! s.activeTestVerified) return log ('Active status was never observed during streaming');
+      // Double-check: dialog is now done
+      var entry = dale.stopNot (rs.body, undefined, function (d) {
+         if (d && d.dialogId === s.activeTestDialogId) return d;
+      });
+      if (! entry) return log ('Active-status test dialog not found in final listing');
+      if (entry.status !== 'done') return log ('Expected dialog to be done after streaming, got: ' + entry.status);
+      return true;
+   }],
+
    ['Delete project', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
@@ -466,29 +550,24 @@ var flow3Sequence = [
    }]
 ];
 
-// *** FLOW #4: Static tictactoe — HTML + JS only (no backend) ***
+// *** FLOW #4: Static app via /static proxy (no LLM, fast) ***
+// Tests static proxy, embed blocks, and file serving without waiting for LLM.
 
 var PROJECT4 = 'flow4-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 
 var DOC_MAIN_F4 = [
    '# Tictactoe Project',
    '',
-   'Build a simple tictactoe game for the browser using gotoB. No backend server.',
+   'Build a simple tictactoe game for the browser using React (via CDN). No backend server.',
    'Served via the static proxy at `/project/<project>/static/`.',
-   '',
-   '## References',
-   '',
-   '- gotoB docs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
    '',
    '## Critical rules',
    '',
-   '- `index.html`: load gotoB.min.js in `<body>` (not `<head>` — document.body must exist when gotoB initializes):',
-   '  `<script src="https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js"></script>`',
-   '  This single file bundles dale, teishi, lith, recalc, cocholate. Do NOT load them separately.',
-   '- `app.js`: set `B.prod = true` before any B.call.',
-   '- Use `lith.css.style({...})` for inline styles, not raw JS objects.',
-   '- `B.ev` always requires a path: `B.ev(\'reset\', [])`, not `B.ev(\'reset\')`.',
-   '- Pass event context in responders: `function (x, ...) { B.call(x, \'set\', ...); }`.',
+   '- `index.html`: load React, ReactDOM, and Babel standalone from CDN (unpkg or cdnjs).',
+   '  Include `<script src="app.js" type="text/babel"></script>` so JSX works.',
+   '- `app.js`: a simple React tictactoe with a 3x3 grid of buttons, X/O turns, and a winner check.',
+   '- The page title or heading must include "tictactoe" (case-insensitive).',
+   '- No build step, no npm. Pure static files.',
    '',
 ].join ('\n') + '\n';
 
@@ -595,9 +674,9 @@ var flow4Sequence = [
       return true;
    }],
 
-   // Fire the dialog and don't block — let agents work in background
+   // Fire the dialog and don't block — let the agent build the app
    ['F4: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogId, 'Please start. Read doc/main.md once, then implement immediately: create index.html and app.js in /workspace root. Do not re-fetch docs after the first read. After creating files, update doc/main.md with an embed block (port static).', function (error) {
+      fireDialog (PROJECT4, s.f4DialogId, 'Please start. Read doc/main.md once, then implement immediately: create index.html and app.js in /workspace root. Do not re-fetch docs after the first read. After creating files, update doc/main.md with an embed block (port static, title Tictactoe, height 500).', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
       });
@@ -609,45 +688,36 @@ var flow4Sequence = [
          httpGet (5353, '/project/' + PROJECT4 + '/static/', function (error, status, body) {
             if (error || status !== 200) return done (false);
             var lower = (body || '').toLowerCase ();
-            var hasTic = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1;
-            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && hasTic) return done (true);
+            var hasTic = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1 || lower.indexOf ('tic-tac-toe') !== -1;
+            if (lower.indexOf ('react') !== -1 && lower.indexOf ('app.js') !== -1 && hasTic) return done (true);
             done (false);
          });
-      }, 5000, 420000, function (error) {
+      }, 3000, 300000, function (error) {
          if (error) return log ('Static app never appeared: ' + error.message);
          next ();
       });
    }],
 
-   // Now verify the content of each file via tool/execute
-   ['F4: index.html has gotoB + app.js', 'post', 'project/' + PROJECT4 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, 200, function (s, rq, rs) {
+   // Verify the content of index.html via tool/execute
+   ['F4: index.html has React + app.js', 'post', 'project/' + PROJECT4 + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, 200, function (s, rq, rs) {
       if (! rs.body || ! rs.body.success) return log ('cat index.html failed: ' + JSON.stringify (rs.body));
       var out = (rs.body.stdout || '').toLowerCase ();
-      if (out.indexOf ('gotob') === -1) return log ('index.html missing gotoB reference');
+      if (out.indexOf ('react') === -1) return log ('index.html missing React reference');
       if (out.indexOf ('app.js') === -1) return log ('index.html missing app.js reference');
       return true;
    }],
 
-   ['F4: app.js has tictactoe gotoB code', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['F4: app.js has tictactoe logic', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT4 + '/static/app.js', function (error, status, body) {
             if (error || status !== 200) return done (false);
-            var out = body || '';
-            if (out.indexOf ('B.') === -1) return done (false);
-            var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('grid') !== -1;
+            var out = (body || '').toLowerCase ();
+            var hasBoardLogic = out.indexOf ('board') !== -1 || out.indexOf ('cell') !== -1 || out.indexOf ('square') !== -1 || out.indexOf ('grid') !== -1;
             if (! hasBoardLogic) return done (false);
             return done (true);
          });
-      }, 5000, 420000, function (error) {
-         if (error) return log ('app.js missing gotoB usage: ' + error.message);
-         next ();
-      });
-   }],
-
-   // Ask the AI to embed the game in doc/main.md
-   ['F4: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT4 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT4, s.f4DialogId, 'The tictactoe game is now available via the static proxy at /project/' + PROJECT4 + '/static/. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port static, title Tictactoe, height 500) at the end of doc/main.md.', function (error) {
-         if (error) return log ('Failed to fire embed request: ' + error.message);
+      }, 3000, 300000, function (error) {
+         if (error) return log ('app.js missing board/cell/grid logic: ' + error.message);
          next ();
       });
    }],
@@ -665,7 +735,7 @@ var flow4Sequence = [
             catch (e) {}
             done (false);
          });
-      }, 5000, 420000, function (error) {
+      }, 3000, 300000, function (error) {
          if (error) return log ('Embed block never appeared in doc/main.md: ' + error.message);
          next ();
       });
@@ -681,32 +751,25 @@ var flow4Sequence = [
    // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
 ];
 
-// *** FLOW #5: Backend tictactoe — Express server on port 4000, embed via proxy ***
+// *** FLOW #5: Backend tictactoe — React app served by Express on port 4000, embed via proxy ***
 
 var PROJECT5 = 'flow5-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
 
 var DOC_MAIN_F5 = [
    '# Tictactoe Project (Backend)',
    '',
-   'Build a simple tictactoe game for the browser using gotoB, served by an Express server on port 4000.',
+   'Build a simple tictactoe game for the browser using React (via CDN), served by an Express server on port 4000.',
    'The game should be embedded in this doc via the proxy.',
-   '',
-   '## References',
-   '',
-   '- gotoB docs: https://raw.githubusercontent.com/fpereiro/ustack/master/llms.md',
    '',
    '## Critical rules',
    '',
    '- Create a `server.js` that uses Express to serve static files from `/workspace` on port 4000.',
-   '- `index.html`: load gotoB.min.js in `<body>` (not `<head>` — document.body must exist when gotoB initializes):',
-   '  `<script src="https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js"></script>`',
-   '  This single file bundles dale, teishi, lith, recalc, cocholate. Do NOT load them separately.',
-   '- `app.js`: set `B.prod = true` before any B.call.',
-   '- Use `lith.css.style({...})` for inline styles, not raw JS objects.',
-   '- `B.ev` always requires a path: `B.ev(\'reset\', [])`, not `B.ev(\'reset\')`.',
-   '- Pass event context in responders: `function (x, ...) { B.call(x, \'set\', ...); }`.',
+   '- `index.html`: load React, ReactDOM, and Babel standalone from CDN (unpkg or cdnjs).',
+   '  Include `<script src="app.js" type="text/babel"></script>` so JSX works.',
+   '- `app.js`: a simple React tictactoe with a 3x3 grid of buttons, X/O turns, and a winner check.',
+   '- The page title or heading must include "tictactoe" (case-insensitive).',
+   '- No build step, no npm install for React. Express is already available in the sandbox.',
    '- Run the server with `node server.js &` so it stays alive in the background.',
-   '- The game must mention "tictactoe" somewhere in the page title or heading.',
    '',
 ].join ('\n') + '\n';
 
@@ -731,7 +794,7 @@ var flow5Sequence = [
 
    // Fire the orchestrator and let it build the game + start the server
    ['F5: Fire "please start" (non-blocking)', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT5, s.f5DialogId, 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000), index.html, and app.js in /workspace. Do not re-fetch docs after the first read. Start the server with `node server.js &` and then update doc/main.md with an embed block (port 4000).', function (error) {
+      fireDialog (PROJECT5, s.f5DialogId, 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000 serving static files from /workspace), index.html, and app.js in /workspace root. Do not re-fetch docs after the first read. Start the server with `node server.js &` and then update doc/main.md with an embed block (port 4000, title Tictactoe, height 500).', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
       });
@@ -741,37 +804,33 @@ var flow5Sequence = [
    ['F5: Poll until proxy serves the app on port 4000', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT5 + '/proxy/4000/', function (error, status, body) {
-            if (error || status !== 200) {
-               if (error) log ('F5 poll: error reaching /project/' + PROJECT5 + '/proxy/4000/ - ' + error.message);
-               else log ('F5 poll: /project/' + PROJECT5 + '/proxy/4000/ returned ' + status);
-               return done (false);
-            }
+            if (error || status !== 200) return done (false);
             var lower = (body || '').toLowerCase ();
-            var hasTic = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1;
-            if (lower.indexOf ('gotob') !== -1 && lower.indexOf ('app.js') !== -1 && hasTic) return done (true);
+            var hasTic = lower.indexOf ('tictactoe') !== -1 || lower.indexOf ('tic tac toe') !== -1 || lower.indexOf ('tic-tac-toe') !== -1;
+            if (lower.indexOf ('react') !== -1 && lower.indexOf ('app.js') !== -1 && hasTic) return done (true);
             done (false);
          });
-      }, 5000, 420000, function (error) {
+      }, 3000, 300000, function (error) {
          if (error) return log ('Backend app never appeared via proxy: ' + error.message);
          next ();
       });
    }],
 
    // Verify the index page via proxy
-   ['F5: Proxy serves index.html with gotoB + app.js', 'get', 'project/' + PROJECT5 + '/proxy/4000/', {}, '', 200, function (s, rq, rs) {
+   ['F5: Proxy serves index.html with React + app.js', 'get', 'project/' + PROJECT5 + '/proxy/4000/', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'string') return log ('Expected HTML string body');
       var lower = (rs.body || '').toLowerCase ();
-      if (lower.indexOf ('gotob') === -1) return log ('index.html missing gotoB reference');
+      if (lower.indexOf ('react') === -1) return log ('index.html missing React reference');
       if (lower.indexOf ('app.js') === -1) return log ('index.html missing app.js reference');
       return true;
    }],
 
    // Verify app.js is served through proxy
-   ['F5: Proxy serves app.js', 'get', 'project/' + PROJECT5 + '/proxy/4000/app.js', {}, '', 200, function (s, rq, rs) {
+   ['F5: Proxy serves app.js with tictactoe logic', 'get', 'project/' + PROJECT5 + '/proxy/4000/app.js', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'string') return log ('Expected JS string body');
-      if (rs.body.indexOf ('B.') === -1) return log ('app.js missing gotoB usage');
-      var hasBoardLogic = rs.body.indexOf ('board') !== -1 || rs.body.indexOf ('cell') !== -1 || rs.body.indexOf ('grid') !== -1;
-      if (! hasBoardLogic) return log ('app.js missing board/cell/grid logic');
+      var lower = (rs.body || '').toLowerCase ();
+      var hasBoardLogic = lower.indexOf ('board') !== -1 || lower.indexOf ('cell') !== -1 || lower.indexOf ('square') !== -1 || lower.indexOf ('grid') !== -1;
+      if (! hasBoardLogic) return log ('app.js missing board/cell/square/grid logic');
       return true;
    }],
 
@@ -781,14 +840,6 @@ var flow5Sequence = [
       var out = (rs.body.stdout || '') + (rs.body.stderr || '');
       if (out.indexOf ('server.js') === -1) return log ('server.js process not found in ps output');
       return true;
-   }],
-
-   // Ask the agent to embed the game in doc/main.md
-   ['F5: Send embed request to orchestrator dialog', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (PROJECT5, s.f5DialogId, 'The tictactoe game is now running on port 4000 inside the container. Please add an embed block to doc/main.md so the game is playable directly from the document. Use the edit_file tool to append a "## Play the game" section with an əəəembed block (port 4000, title Tictactoe, height 500) at the end of doc/main.md.', function (error) {
-         if (error) return log ('Failed to fire embed request: ' + error.message);
-         next ();
-      });
    }],
 
    // Poll until embed block appears in doc/main.md
@@ -804,7 +855,7 @@ var flow5Sequence = [
             catch (e) {}
             done (false);
          });
-      }, 5000, 420000, function (error) {
+      }, 3000, 300000, function (error) {
          if (error) return log ('Embed block never appeared in doc/main.md: ' + error.message);
          next ();
       });
@@ -814,23 +865,6 @@ var flow5Sequence = [
       var content = rs.body.content || '';
       if (content.indexOf ('əəəembed') === -1) return log ('doc/main.md missing əəəembed block');
       if (content.indexOf ('port 4000') === -1) return log ('doc/main.md embed missing port 4000');
-      return true;
-   }],
-
-   ['F5: Poll until orchestrator dialog is done in /dialogs', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      pollDialogDone (PROJECT5, s.f5DialogId, 3000, 420000, function (error) {
-         if (error) return log ('Orchestrator dialog never reached done status: ' + error.message);
-         next ();
-      });
-   }],
-
-   ['F5: Verify orchestrator dialog status + filename suffix', 'get', 'project/' + PROJECT5 + '/dialogs', {}, '', 200, function (s, rq, rs) {
-      var entry = dale.stopNot (rs.body, undefined, function (d) {
-         if (d && d.dialogId === s.f5DialogId) return d;
-      });
-      if (! entry) return log ('Orchestrator dialog not found in /dialogs');
-      if (entry.status !== 'done') return log ('Orchestrator dialog status should be done, got ' + entry.status);
-      if (type (entry.filename) !== 'string' || entry.filename.indexOf ('-done.md') === -1) return log ('Orchestrator dialog filename should end in -done.md, got ' + entry.filename);
       return true;
    }]
 

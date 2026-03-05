@@ -809,8 +809,10 @@ Flow #9 — Auto-commit strictness + per-project commit safety
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- Remove snapshots, instead allow to download the latest or a previous version of a project.
+- Run all tests again.
+- Refreshing the page on an active dialog makes it able for you to talk to it, which shouldn't be the case. Or opening a new tab on an active dialog, same thing. Is the dialog going on safely? The client should look up the status statelessly.
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
+
 
 ## Vibey cloud in a nutshell
 

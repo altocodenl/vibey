@@ -1492,9 +1492,12 @@ var appendUsageToAssistantSection = function (projectName, filename, usage) {
    if (! normalized) return;
 
    var cumulative = getLastCumulativeUsage (projectName, filename);
-   cumulative.input += normalized.input;
+   // Input tokens already include the full conversation history each turn,
+   // so cumulative input = this turn's input (not a running sum).
+   // Output tokens are genuinely new each turn, so those accumulate.
+   cumulative.input = normalized.input;
    cumulative.output += normalized.output;
-   cumulative.total += normalized.total;
+   cumulative.total = normalized.input + cumulative.output;
 
    appendToDialog (projectName, filename,
       '> Usage: input=' + normalized.input + ' output=' + normalized.output + ' total=' + normalized.total + '\n' +
@@ -1587,8 +1590,12 @@ var parseDialogForProvider = function (markdown, provider) {
 
 var DIALOG_STATUSES = ['active', 'done'];
 
-var slugify = function (text) {
-   text = (text || 'dialog').toLowerCase ().replace (/[^a-z0-9\-]+/g, '-').replace (/\-+/g, '-').replace (/^\-+|\-+$/g, '');
+var sanitizeForFilename = function (text) {
+   text = (text || 'dialog').trim ();
+   // Remove characters unsafe for filenames: / \ null and control chars
+   text = text.replace (/[\/\\\u0000-\u001f]/g, '');
+   // Prevent path traversal
+   text = text.replace (/\.\./g, '');
    return text || 'dialog';
 };
 
@@ -1623,7 +1630,7 @@ var findDialogFilename = function (projectName, dialogId) {
 };
 
 var createDialogId = function (projectName, slug) {
-   var base = formatDialogTimestamp () + '-' + slugify (slug || 'dialog');
+   var base = formatDialogTimestamp () + '-' + sanitizeForFilename (slug || 'dialog');
    var candidate = base;
    var counter = 2;
    while (findDialogFilename (projectName, candidate)) {
@@ -2087,7 +2094,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
    var autoExecutedAll = [];
    var lastContent = '';
 
-   for (var round = 0; round < 20; round++) {
+   while (true) {
       upsertDocMainContextBlock (projectName, dialog.filename);
       var markdown = pfs.readFile (projectName, dialog.filename);
       var messages = parseDialogForProvider (markdown, provider);
@@ -2167,7 +2174,6 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       }
    }
 
-   throw new Error ('Exceeded maximum auto-tool continuation rounds');
 };
 
 var createDialogDraft = function (projectName, provider, model, slug) {
@@ -2290,7 +2296,7 @@ var validFilename = function (name) {
    if (! name.trim ()) return false;
    if (name.includes ('..')) return false;
    if (name [0] === '/' || name.includes ('\\')) return false;
-   if (! /^[a-zA-Z0-9_\-\.\/]+$/.test (name)) return false;
+   if (/[\u0000\r\n]/.test (name)) return false;
    if (! managedFilePath (name)) return false;
    return true;
 }

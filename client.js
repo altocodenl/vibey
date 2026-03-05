@@ -1223,6 +1223,23 @@ B.mrespond ([
       B.call (x, 'get', projectPath (project, 'files'), {}, '', function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to load files');
          B.call (x, 'set', 'files', rs.body);
+
+         // Sync currentFile.name with the authoritative filename from the server
+         // (dialog files get renamed when status changes, e.g. done→active)
+         var cf = B.get ('currentFile');
+         if (cf && isDialogFile (cf.name)) {
+            var cfParsed = parseDialogFilename (cf.name);
+            if (cfParsed) {
+               var match = dale.stopNot (rs.body || [], undefined, function (f) {
+                  var fp = parseDialogFilename (f);
+                  if (fp && fp.dialogId === cfParsed.dialogId) return f;
+               });
+               if (match && match !== cf.name) {
+                  B.call (x, 'set', ['currentFile', 'name'], match);
+               }
+            }
+         }
+
          B.call (x, 'apply', 'hashTarget');
          B.call (x, 'load', 'uploads', project);
 
@@ -1634,6 +1651,18 @@ B.mrespond ([
       if (inputNode) inputNode.value = '';
 
       var parsed = file && parseDialogFilename (file.name);
+
+      // Optimistically update filename to active status so the UI shows 🟣 immediately
+      if (parsed && parsed.status === 'done') {
+         var activeFilename = DIALOG_DIR + parsed.dialogId + '-active.md';
+         B.call (x, 'set', ['currentFile', 'name'], activeFilename);
+         // Update file in the sidebar list too
+         var files = B.get ('files') || [];
+         var updatedFiles = dale.go (files, function (f) {
+            return f === file.name ? activeFilename : f;
+         });
+         B.call (x, 'set', 'files', updatedFiles);
+      }
       var method = parsed ? 'PUT' : 'POST';
       var payload = parsed
          ? {
@@ -1648,12 +1677,15 @@ B.mrespond ([
             model: model || undefined
          };
 
+      // Use the (possibly updated) filename for stream processing
+      var streamFilename = B.get ('currentFile') ? B.get ('currentFile').name : null;
+
       fetch (projectPath (project, 'dialog'), {
          method: method,
          headers: {'Content-Type': 'application/json'},
          body: JSON.stringify (payload)
       }).then (function (response) {
-         B.call (x, 'process', 'stream', response, file ? file.name : null, originalInput);
+         B.call (x, 'process', 'stream', response, streamFilename, originalInput);
       }).catch (function (err) {
          B.call (x, 'report', 'error', 'Failed to send: ' + err.message);
          B.call (x, 'set', 'streaming', false);
@@ -2266,7 +2298,7 @@ var formatIndentedToolPayload = function (payload, compact) {
    return '    ' + shown.split ('\n').join ('\n    ') + '\n';
 };
 
-var formatToolBlocksForMessage = function (text, compact) {
+var formatToolBlocksForMessage = function (text, compact, meta) {
    if (type (text) !== 'string' || text.indexOf ('Tool request:') === -1) return text;
 
    return text.replace (/---\nTool request:[\s\S]*?\n---/g, function (block) {
@@ -2274,6 +2306,7 @@ var formatToolBlocksForMessage = function (text, compact) {
       var nameMatch = block.match (/^---\nTool request:\s+(\S+)/m);
       var rawName = nameMatch ? nameMatch [1] : 'tool';
       var friendly = toolFriendlyName (rawName);
+      if (meta && rawName === 'edit_file') meta.hasEditFile = true;
 
       // Extract input and result payloads
       var sections = block.replace (/^---\n/, '').replace (/\n---$/, '');
@@ -2408,8 +2441,9 @@ var messageToolExpansionKey = function (dialogId, index, content) {
 };
 
 var getMessageToolContentView = function (content, expanded) {
-   var compact = formatToolBlocksForMessage (content, true);
-   var full = formatToolBlocksForMessage (content, false);
+   var meta = {hasEditFile: false};
+   var compact = formatToolBlocksForMessage (content, true, meta);
+   var full = formatToolBlocksForMessage (content, false, meta);
 
    // Canonical tool sections (## Tool Request / ## Tool Result with schwa payloads)
    if (compact === content && full === content && type (content) === 'string' && content.indexOf ('əəətool/') !== -1) {
@@ -2420,7 +2454,8 @@ var getMessageToolContentView = function (content, expanded) {
    var compactable = compact !== full;
    return {
       text: expanded ? full : compact,
-      compactable: compactable
+      compactable: compactable,
+      hasEditFile: meta.hasEditFile
    };
 };
 
@@ -2539,13 +2574,13 @@ var renderChatContent = function (text, project, isDiff) {
          if (line.length >= 2 && line [0] === '-' && line [1] === ' ') {
             flushBuffer ();
             if (prefix) result.push (['span', prefix]);
-            result.push (['span', {style: style ({color: '#ff8b94'})}, line]);
+            result.push (['span', {style: style ({color: '#ff8b94', 'background-color': 'rgba(255,70,70,0.12)', display: 'inline-block', width: 1, 'border-radius': '2px', padding: '0 4px', 'margin-left': '-4px'})}, line]);
             return;
          }
          if (line.length >= 2 && line [0] === '+' && line [1] === ' ') {
             flushBuffer ();
             if (prefix) result.push (['span', prefix]);
-            result.push (['span', {style: style ({color: '#6ad48a'})}, line]);
+            result.push (['span', {style: style ({color: '#6ad48a', 'background-color': 'rgba(70,255,70,0.12)', display: 'inline-block', width: 1, 'border-radius': '2px', padding: '0 4px', 'margin-left': '-4px'})}, line]);
             return;
          }
       }
@@ -2619,7 +2654,13 @@ var parseDialogContent = function (content) {
       });
 
       var cleaned = body.join ('\n').replace (/^\n+/, '').replace (/\s+$/, '');
-      if (! cleaned) return null;
+      var hasMetadata = !! (time || usage || usageCumulative || context || model || resourcesMs !== null);
+      if (! cleaned) {
+         // Keep metadata-only assistant sections (common when the assistant only emits
+         // tool calls) so time/token/context gauges still render in the dialog UI.
+         if (role === 'assistant' && hasMetadata) cleaned = ' ';
+         else return null;
+      }
 
       if (role === 'tool') {
          if (toolName) cleaned = '> Tool: ' + toolName + '\n' + cleaned;
@@ -2862,7 +2903,7 @@ views.dialogs = function () {
 
                   return ['div', {class: 'chat-message chat-' + msg.role}, [
                      isTool ? '' : ['div', {class: 'chat-role'}, ['span', msg.role]],
-                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject, msg.toolName === 'edit_file')],
+                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject, msg.toolName === 'edit_file' || toolContentView.hasEditFile)],
                      toolContentView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
                         ['button', {
                            class: 'btn-small',
