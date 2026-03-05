@@ -474,6 +474,11 @@ window.vibeyCSS = [
       'border-top': '1px solid #333',
       margin: '0.5rem 0',
    }],
+   ['.tool-header', {
+      display: 'inline',
+      'font-size': '12px',
+      'letter-spacing': '0.02em',
+   }],
    ['.chat-input-area', {
       display: 'flex',
       'flex-direction': 'column',

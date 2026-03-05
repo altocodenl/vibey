@@ -1293,7 +1293,38 @@ B.mrespond ([
             });
             B.call (x, 'set', 'currentUpload', null);
             B.call (x, 'set', 'viCursor', {line: 1, col: 1});
-            if (dialogFile) B.call (x, 'reset', 'chatInput');
+            if (dialogFile) {
+               B.call (x, 'reset', 'chatInput');
+               // Restore provider/model dropdown from dialog header or last assistant turn
+               var dialogContent = rs.body.content || '';
+               var headerModelMatch = dialogContent.match (/^>\s*Provider:\s*(\S+)\s*\|\s*Model:\s*(.+)$/m);
+               var lastModel = null;
+               // Walk assistant sections backward to find the most recent model
+               var assistantModelRe = /## Assistant\n>\s*Model:\s*(.+)/g;
+               var amMatch;
+               while ((amMatch = assistantModelRe.exec (dialogContent)) !== null) lastModel = amMatch [1].trim ();
+               if (lastModel) {
+                  // Find matching MODEL_OPTIONS entry
+                  var found = dale.stopNot (MODEL_OPTIONS, undefined, function (opt) {
+                     if (opt.model === lastModel) return opt;
+                  });
+                  if (found) {
+                     B.call (x, 'set', 'chatProvider', found.provider);
+                     B.call (x, 'set', 'chatModel', found.model);
+                  }
+               }
+               else if (headerModelMatch) {
+                  var hProvider = headerModelMatch [1].trim ();
+                  var hModel = headerModelMatch [2].trim ();
+                  var hFound = dale.stopNot (MODEL_OPTIONS, undefined, function (opt) {
+                     if (opt.model === hModel) return opt;
+                  });
+                  if (hFound) {
+                     B.call (x, 'set', 'chatProvider', hFound.provider);
+                     B.call (x, 'set', 'chatModel', hFound.model);
+                  }
+               }
+            }
             B.call (x, 'write', 'hash');
             // Initialize vi cursor overlay after DOM redraws with the new file
             if (B.get ('viMode') && ! dialogFile) setTimeout (function () {
@@ -1685,17 +1716,21 @@ B.mrespond ([
                   else if (data.type === 'context') {
                      B.call (x, 'set', 'contextWindow', data.context);
                   }
-                  else if (data.type === 'tool_request' || data.type === 'tool_result') {
-                     var label = data.type === 'tool_request' ? 'Tool request' : 'Tool result';
-                     var payload = '';
-                     try {
-                        payload = JSON.stringify (data.tool || {}, null, 2);
-                     }
-                     catch (err) {
-                        payload = '' + (data.tool || '');
-                     }
-                     var currentTool = B.get ('streamingContent') || '';
-                     B.call (x, 'set', 'streamingContent', currentTool + '\n\n' + label + ':\n' + payload + '\n');
+                  else if (data.type === 'tool_request') {
+                     var tool = data.tool || {};
+                     var friendly = toolFriendlyName (tool.name || 'tool');
+                     var inputSummary = formatToolInputPreview (tool.input || {}) || '';
+                     var currentReq = B.get ('streamingContent') || '';
+                     B.call (x, 'set', 'streamingContent', currentReq + '\n\n⏳ ' + friendly + '\n' + inputSummary + '\n');
+                  }
+                  else if (data.type === 'tool_result') {
+                     var tool = data.tool || {};
+                     var friendly = toolFriendlyName (tool.name || 'tool');
+                     var resultObj = tool.result || {};
+                     var icon = (resultObj.success === false || resultObj.error) ? '✗' : '✓';
+                     var resultPreview = formatToolResultPreview (resultObj, 3) || '(ok)';
+                     var currentRes = B.get ('streamingContent') || '';
+                     B.call (x, 'set', 'streamingContent', currentRes + icon + ' ' + friendly + '\n' + resultPreview + '\n');
                   }
                   else if (data.type === 'done') {
                      if (data.result && data.result.filename) targetFilename = data.result.filename;
@@ -2138,6 +2173,16 @@ var previewValueText = function (value) {
    catch (error) {return '' + value;}
 };
 
+var toolFriendlyName = function (name) {
+   var map = {
+      'run_command': 'Run command',
+      'write_file': 'Write file',
+      'edit_file': 'Edit file',
+      'launch_agent': 'Launch agent'
+   };
+   return map [name] || name;
+};
+
 var formatToolResultPreview = function (obj, maxStreamLines) {
    if (type (obj) !== 'object' || ! obj) return null;
    if (obj.stdout === undefined && obj.stderr === undefined && obj.success === undefined && obj.message === undefined && obj.error === undefined) return null;
@@ -2225,11 +2270,76 @@ var formatToolBlocksForMessage = function (text, compact) {
    if (type (text) !== 'string' || text.indexOf ('Tool request:') === -1) return text;
 
    return text.replace (/---\nTool request:[\s\S]*?\n---/g, function (block) {
-      // Strip ugly IDs like [call_zBqRl2oG7ycoRzE4jLG244Of]
-      block = block.replace (/^(---\nTool request:\s+\S+)\s+\[[^\]]+\]/m, '$1');
-      return block.replace (/\n\n((?: {4}.*(?:\n|$))+)/g, function (full, payload) {
-         return '\n\n' + formatIndentedToolPayload (payload, compact !== false);
-      });
+      // Extract tool name (strip ID)
+      var nameMatch = block.match (/^---\nTool request:\s+(\S+)/m);
+      var rawName = nameMatch ? nameMatch [1] : 'tool';
+      var friendly = toolFriendlyName (rawName);
+
+      // Extract input and result payloads
+      var sections = block.replace (/^---\n/, '').replace (/\n---$/, '');
+      var resultSplit = sections.split (/\nResult:\n/);
+      var inputSection = resultSplit [0] || '';
+      var resultSection = resultSplit [1] || '';
+
+      // Parse input JSON
+      var inputText = inputSection.replace (/^Tool request:.*\n\n?/, '').replace (/^ {4}/gm, '').trim ();
+      var inputParsed = null;
+      try {inputParsed = JSON.parse (inputText);} catch (e) {}
+
+      // Build input summary line
+      var inputSummary = '';
+      if (inputParsed) {
+         inputSummary = formatToolInputPreview (inputParsed) || '';
+      }
+
+      // Parse result JSON
+      var resultText = (resultSection || '').replace (/^ {4}/gm, '').trim ();
+      var resultParsed = null;
+      try {resultParsed = JSON.parse (resultText);} catch (e) {}
+
+      // Build result output
+      var resultOutput = '';
+      if (resultParsed) {
+         resultOutput = formatToolResultPreview (resultParsed) || JSON.stringify (normalizeToolPreviewValue (resultParsed), null, 2);
+      }
+      else if (resultText) {
+         resultOutput = resultText;
+      }
+
+      // Icon based on result status
+      var icon = '⚙';
+      if (resultParsed) {
+         if (resultParsed.success === false || resultParsed.error) icon = '✗';
+         else if (resultParsed.success === true || resultParsed.message) icon = '✓';
+      }
+      else if (! resultSection) {
+         icon = '⏳';
+      }
+
+      // Header line
+      var header = icon + ' ' + friendly;
+
+      // Build the output
+      var parts = [header];
+      if (inputSummary) parts.push (inputSummary);
+
+      if (resultOutput && ! compact) {
+         parts.push ('───output───');
+         parts.push (resultOutput);
+      }
+      else if (resultOutput && compact) {
+         // Show just the first few lines of output in compact mode
+         var resultLines = resultOutput.split ('\n');
+         if (resultLines.length > 3) {
+            parts.push (resultLines.slice (0, 3).join ('\n'));
+            parts.push ('... [' + (resultLines.length - 3) + ' more lines]');
+         }
+         else {
+            parts.push (resultOutput);
+         }
+      }
+
+      return parts.join ('\n');
    });
 };
 
@@ -2238,7 +2348,8 @@ var formatCanonicalToolSection = function (text, compact) {
 
    var toolMatch = text.match (/^>\s*Tool:\s*(.+)$/m);
    var statusMatch = text.match (/^>\s*Status:\s*(.+)$/m);
-   var toolName = toolMatch ? toolMatch [1].trim () : 'tool';
+   var rawName = toolMatch ? toolMatch [1].trim () : 'tool';
+   var friendly = toolFriendlyName (rawName);
    var status = statusMatch ? statusMatch [1].trim () : '';
 
    var blockMatch = text.match (/əəə([^\n]+)\n([\s\S]*?)\nəəə/);
@@ -2252,20 +2363,40 @@ var formatCanonicalToolSection = function (text, compact) {
    var parsed = null;
    try {parsed = JSON.parse (payloadText);} catch (error) {}
 
-   var summary = payloadText;
-   if (parsed !== null) {
-      if (isResult) summary = formatToolResultPreview (parsed, compact ? 8 : null) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
-      else summary = formatToolInputPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
+   var icon = '⚙';
+   if (isResult) {
+      if (status === 'error' || (parsed && parsed.error)) icon = '✗';
+      else if (parsed && parsed.success === true) icon = '✓';
+      else icon = '↩';
    }
 
-   summary = wrapLongLines (summary, 90);
-   if (compact) summary = compactLines (summary, 14).text;
+   var header = icon + ' ' + friendly;
+   var summary = '';
+   if (parsed !== null) {
+      if (isResult) summary = formatToolResultPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
+      else summary = formatToolInputPreview (parsed) || JSON.stringify (normalizeToolPreviewValue (parsed), null, 2);
+   }
+   else {
+      summary = payloadText;
+   }
 
-   // Build header: "⚙ tool_name" for requests, "↩ tool_name" for results
-   var icon = isResult ? (status === 'error' ? '✗' : '↩') : '⚙';
-   var header = icon + ' ' + toolName;
+   var parts = [header];
+   if (summary) {
+      if (isResult && compact) {
+         var lines = summary.split ('\n');
+         if (lines.length > 3) {
+            parts.push (lines.slice (0, 3).join ('\n'));
+            parts.push ('... [' + (lines.length - 3) + ' more lines]');
+         }
+         else parts.push (summary);
+      }
+      else {
+         if (isResult) parts.push ('───output───');
+         parts.push (summary);
+      }
+   }
 
-   return header + '\n' + summary;
+   return parts.join ('\n');
 };
 
 var messageToolExpansionKey = function (dialogId, index, content) {
@@ -2297,6 +2428,9 @@ var renderChatContent = function (text, project, isDiff) {
    if (type (text) !== 'string' || ! text) return '';
 
    var labelRe = /^(\s*)(Tool request:|Decision:|Result:|Status:|success:|error:|message:|stderr:)(.*)/;
+   // Match tool header lines: ⚙/✓/✗/⏳/↩ followed by tool friendly name
+   var toolHeaderRe = /^([⚙✓✗⏳↩]) (.+)$/;
+   var toolOutputSepRe = /^───output───$/;
    var result = [];
    var buffer = '';
 
@@ -2361,6 +2495,35 @@ var renderChatContent = function (text, project, isDiff) {
          return;
       }
 
+      // Tool header: ⚙ Run command, ✓ Write file, etc.
+      var th = trimmed.match (toolHeaderRe);
+      if (th) {
+         flushBuffer ();
+         if (prefix) result.push (['span', prefix]);
+         var iconColor = th [1] === '✓' ? '#6ad48a' : (th [1] === '✗' ? '#ff8b94' : (th [1] === '⏳' ? '#e6a817' : '#b07aff'));
+         result.push (['span', {class: 'tool-header'}, [
+            ['span', {style: style ({color: iconColor, 'margin-right': '0.35em'})}, th [1]],
+            ['span', {style: style ({color: '#c9d4ff', 'font-weight': '600'})}, th [2]]
+         ]]);
+         return;
+      }
+
+      // Tool output separator
+      if (toolOutputSepRe.test (trimmed)) {
+         flushBuffer ();
+         if (prefix) result.push (['span', prefix]);
+         result.push (['span', {style: style ({color: '#555', 'font-size': '11px'})}, '───']);
+         return;
+      }
+
+      // "... [N more lines]" hidden-lines hint
+      if (/^\.\.\. \[\d+ more lines?\]$/.test (trimmed)) {
+         flushBuffer ();
+         if (prefix) result.push (['span', prefix]);
+         result.push (['span', {style: style ({color: '#666', 'font-style': 'italic', 'font-size': '11px'})}, trimmed]);
+         return;
+      }
+
       var m = line.match (labelRe);
       if (m) {
          flushBuffer ();
@@ -2399,7 +2562,7 @@ var parseDialogContent = function (content) {
 
    var parseSection = function (role, lines) {
       var time = null, usage = null, usageCumulative = null, resourcesMs = null, context = null;
-      var toolName = null, toolStatus = null;
+      var toolName = null, toolStatus = null, model = null;
 
       var body = dale.fil (lines, undefined, function (line) {
          var mTime = line.match (/^>\s*Time:\s*(.+)$/);
@@ -2444,7 +2607,13 @@ var parseDialogContent = function (content) {
             return;
          }
 
-         if (/^>\s*(Id|Parent|Started|Provider|Model):/.test (line)) return;
+         var mModel = line.match (/^>\s*Model:\s*(.+)$/);
+         if (mModel) {
+            model = mModel [1].trim ();
+            return;
+         }
+
+         if (/^>\s*(Id|Parent|Started|Provider):/.test (line)) return;
 
          return line;
       });
@@ -2465,7 +2634,8 @@ var parseDialogContent = function (content) {
          usageCumulative: usageCumulative,
          resourcesMs: resourcesMs,
          context: context,
-         toolName: toolName || null
+         toolName: toolName || null,
+         model: model || null
       };
    };
 
@@ -2604,7 +2774,17 @@ var formatMessageGauges = function (msg) {
       if ((elapsedMs === null || elapsedMs < 0) && inc (['integer', 'float'], type (msg.resourcesMs)) && isFinite (msg.resourcesMs)) elapsedMs = msg.resourcesMs;
    }
 
+   // Find short model label
+   var modelLabel = undefined;
+   if (msg.model) {
+      var modelOpt = dale.stopNot (MODEL_OPTIONS, undefined, function (opt) {
+         if (opt.model === msg.model) return opt;
+      });
+      modelLabel = modelOpt ? modelOpt.label : msg.model;
+   }
+
    var parts = dale.fil ([
+      modelLabel,
       hasEnd ? formatLocalDateTimeNoMs (timeRange.end) : undefined,
       elapsedMs !== null ? formatSecondsRounded (elapsedMs) : undefined,
       msg.usageCumulative ? formatKTokens (msg.usageCumulative.input) + 'ti + ' + formatKTokens (msg.usageCumulative.output) + 'to' : undefined

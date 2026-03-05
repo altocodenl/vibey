@@ -1279,8 +1279,7 @@ var executeTool = function (toolName, toolInput, projectName) {
 
       var finalizeTool = function (result) {
          maybeAutoCommit (projectName, {kind: 'tool', tool: toolName})
-            .then (function (commit) {
-               if (commit && commit.committed) result.autoCommit = {hash: commit.hash, message: commit.message};
+            .then (function () {
                resolve (result);
             })
             .catch (function (error) {
@@ -2094,7 +2093,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       var messages = parseDialogForProvider (markdown, provider);
 
       var assistantStart = new Date ().toISOString ();
-      appendToDialog (projectName, dialog.filename, '## Assistant\n> Time: ' + assistantStart + ' - ...\n\n');
+      appendToDialog (projectName, dialog.filename, '## Assistant\n> Model: ' + model + '\n> Time: ' + assistantStart + ' - ...\n\n');
 
       var writeChunk = function (chunk) {
          appendToDialog (projectName, dialog.filename, chunk);
