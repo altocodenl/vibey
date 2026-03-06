@@ -111,6 +111,8 @@ var completeAnthropicLogin = async function (authCode) {
    var code = splits [0];
    var state = splits [1];
 
+   if (state && state !== verifier) throw new Error ('Anthropic OAuth state mismatch');
+
    var response = await fetch (ANTHROPIC_TOKEN_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -311,12 +313,17 @@ var completeOpenAILogin = async function (manualCode) {
       server.close ();
       var parts = manualCode.trim ().split ('#');
       code = parts [0];
+      if (parts [1] && parts [1] !== state) throw new Error ('OpenAI OAuth state mismatch');
       // Check for URL format
       try {
          var url = new URL (manualCode.trim ());
+         var urlState = url.searchParams.get ('state');
+         if (urlState && urlState !== state) throw new Error ('OpenAI OAuth state mismatch');
          code = url.searchParams.get ('code') || code;
       }
-      catch (e) {}
+      catch (e) {
+         if (e && /state mismatch/.test (e.message)) throw e;
+      }
    }
    else {
       // Wait for browser callback
@@ -602,12 +609,26 @@ var pfs = {
 
    writeFile: function (projectName, filename, content) {
       var name = containerName (projectName);
+      var dir = filename.replace (/\/[^/]+$/, '');
+      if (dir && dir !== filename) {
+         try {
+            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
+         }
+         catch (e) {}
+      }
       var command = 'cat > ' + shQuote ('/workspace/' + filename);
       execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
    },
 
    appendFile: function (projectName, filename, content) {
       var name = containerName (projectName);
+      var dir = filename.replace (/\/[^/]+$/, '');
+      if (dir && dir !== filename) {
+         try {
+            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
+         }
+         catch (e) {}
+      }
       var command = 'cat >> ' + shQuote ('/workspace/' + filename);
       execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
    },
