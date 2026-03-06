@@ -682,7 +682,7 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 3. `GET /projects` — verify the new project appears with matching slug and display name.
    - Client: Projects list shows the new project entry with the display name.
 4. `POST /projects` same name again — verify it succeeds idempotently (no error, same slug returned).
-   - Client: n/a (server-only idempotency behavior).
+   - Client: try creating a project with the same name.
 5. `DELETE /projects/:slug` — verify response is `{ok: true}`.
    - Client: Deleting via UI confirms and clears `currentProject`, navigates to `#/projects`.
 6. `GET /projects` — verify the project no longer appears.
@@ -690,7 +690,6 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 7. `GET /project/:slug/files` — **404**. `GET /project/:slug/dialogs` — **404**.
    - Client: Navigating to a deleted project returns to Projects (no file/dialog view).
 8. `DELETE /projects/nonexistent` — **404**.
-   - Client: n/a (server-only error case).
 9. `POST /projects` with empty name `""` — **400**.
    - Client: UI ignores empty prompt (no request sent).
 10. `POST /projects` with whitespace-only name `"   "` — **400**.
@@ -732,9 +731,9 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 13. `GET /project/:p/file/doc/notes.md` — **404** (deleted file).
    - Client: Navigating to deleted file clears selection.
 14. `POST /project/:p/file/bad..name.md` — **400** (invalid name).
-   - Client: n/a (server-only validation).
+   - Client: upload a file with two dots in its name, get an error.
 15. `POST /project/:p/file/bad.txt` — **400** (outside managed folders).
-   - Client: n/a (server-only validation).
+   - Client: upload a file with a colon in its name, get an error.
 16. For each of the following filenames, verify write → read (exact round-trip) → listed in `GET /files` → delete → gone from list:
     - `doc/my notes.md` (spaces).
     - `doc/café.md` (accented characters).
@@ -797,30 +796,52 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 **Snapshot:**
 
 1. `POST /projects` — create project.
+   - Client: Create project via prompt.
 2. `POST /project/:project/file/doc/main.md` — write snapshot content.
+   - Client: Seed `doc/main.md` content (currently via API in client flow).
 3. `POST /project/:project/file/doc/notes.md` — write extra file.
+   - Client: Seed `doc/notes.md` content (currently via API in client flow).
 4. `POST /project/:project/snapshot` with label `"before refactor"` — verify entry has `id`, `project`, `label`, `.tar.gz` filename, `created`, and `fileCount >= 2`.
+   - Client: Create snapshot from project header, entering label `before refactor`.
 5. `GET /snapshots` — list includes the labeled snapshot with correct label.
+   - Client: Load snapshots list and verify labeled entry appears.
 6. `POST /project/:project/snapshot` (no label) — create second snapshot.
+   - Client: Create second snapshot with empty label.
 7. `GET /snapshots` — list contains both snapshots and is ordered newest-first.
+   - Client: Snapshots view/list shows at least two entries for the project.
 8. `GET /snapshots/placeholder/download` — **404** with error payload.
 9. `GET /snapshots/:id/download` (first snapshot) — returns non-empty tar.gz content.
+   - Client: Snapshot entry shows a Download action/button.
 10. `POST /snapshots/:id/restore` with name `"Restored Flow7 Test"` — returns `{slug, name, snapshotId}`.
+   - Client: Restore snapshot from snapshots view; prompt for new project name; app navigates to restored project.
 11. `GET /projects` — restored project appears in list.
+   - Client: `currentProject` switches to restored project after restore.
 12. `GET /project/:restored/files` — includes `doc/main.md` and `doc/notes.md`.
+   - Client: Restored project contains both files (verified in client flow via API).
 13. `GET /project/:restored/file/doc/main.md` — content matches original.
+   - Client: Restored `doc/main.md` content matches original snapshot.
 14. `GET /project/:restored/file/doc/notes.md` — content matches original.
+   - Client: Restored `doc/notes.md` content matches original snapshot.
 15. `POST /project/:project/file/doc/main.md` — modify original project after snapshot.
+   - Client: Modify original project doc content (currently via API in client flow).
 16. `GET /project/:restored/file/doc/main.md` — still matches original (restore isolation).
+   - Client: Restored project remains unchanged after original is modified.
 17. `DELETE /snapshots/:id2` — delete second snapshot.
+   - Client: Delete one snapshot from snapshots view (with confirm).
 18. `GET /snapshots` — second snapshot gone, first still present.
+   - Client: Reload snapshots and verify only the expected snapshot remains.
 19. `DELETE /projects/:project` — delete original project.
+   - Client: Delete original project from Projects UI.
 20. `GET /snapshots` — first snapshot still listed (snapshot storage independent).
+   - Client: Snapshot remains listed after original project deletion.
 21. `DELETE /snapshots/nonexistent-id-12345` — **400** with error payload.
 22. `GET /snapshots/nonexistent-id-12345/download` — **404** with error payload.
 23. `DELETE /projects/:restored` — delete restored project.
+   - Client: Delete restored project during cleanup.
 24. `DELETE /snapshots/:id` — delete first snapshot.
+   - Client: Delete remaining snapshot from snapshots view.
 25. `GET /snapshots` — no leftover entries for this flow.
+   - Client: Reload snapshots and verify none remain for this flow.
 
 **Autogit:**
 
@@ -848,52 +869,70 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 8. `PUT /project/:p/dialog` (same dialogId, prompt: "create dummy.js with write_file") — SSE finishes with `done`.
 9. `GET /project/:p/dialog/:id` — markdown has `write_file` tool request + result.
 10. `POST /project/:p/tool/execute` (run_command `cat dummy.js`) — stdout contains `console.log`.
-11. `POST /project/:p/tool/execute` (run_command `sed -i '/^> Provider:/d' dialog/<dialogId>-done.md`) — remove provider header line.
-12. `PUT /project/:p/dialog` (same dialogId, prompt: "try without provider", no provider field) — SSE returns `error` event.
-13. `GET /project/:p/dialogs` — dialog still `done`, filename `-done.md`.
-14. `POST /project/:p/dialog/new` (slug `agent-a`) — save dialogId. Status `done`, filename `-done.md`.
-15. `POST /project/:p/dialog/new` (slug `agent-b`) — save dialogId. Status `done`, filename `-done.md`.
-16. Fire agent-a with slow prompt (fire-and-forget, `sleep 12` + 200 word essay). Fire agent-b with slow prompt. Wait ~2s.
-17. Poll `GET /project/:p/dialogs` until agent-a is `active` with filename `-active.md`. Record observed.
-18. `PUT /project/:p/dialog` (agent-a dialogId + new prompt) — **409** rejected.
-19. `PUT /project/:p/dialog` (agent-a dialogId, `status: "done"`) — **200**, stopped.
-20. Poll `GET /project/:p/dialogs` — agent-a is `done`, filename `-done.md`. Confirm active was observed before done.
-21. `DELETE /projects/:p` — delete while agent-b still active. 200.
-22. `GET /projects` — project gone.
-23. `GET /project/:p/dialogs` — **404**.
-24. `GET /project/:p/files` — **404**.
-25. `POST /projects` (same name) — fresh project.
-26. `GET /project/:p/dialogs` — empty array.
-27. `GET /project/:p/files` — only `doc/main.md`.
-28. `DELETE /projects/:p` — cleanup.
-29. `GET /projects` — confirm gone.
+11. `PUT /project/:p/dialog` (same dialogId, prompt: "continue without provider", no provider field) — SSE returns `done` event (provider/model resolved from multi-line header).
+12. `PUT /project/:p/dialog` (prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it.") — verify SSE output **does not** contain `> Provider:`, `> Model:`, or `> Context:`.
+13. `POST /project/:p/dialog/new` (slug `agent-a`) — save dialogId. Status `done`, filename `-done.md`.
+14. `POST /project/:p/dialog/new` (slug `agent-b`) — save dialogId. Status `done`, filename `-done.md`.
+15. Fire agent-a with slow prompt (fire-and-forget, `sleep 12` + 200 word essay). Fire agent-b with slow prompt. Wait ~2s.
+16. Poll `GET /project/:p/dialogs` until agent-a is `active` with filename `-active.md`. Record observed.
+17. `PUT /project/:p/dialog` (agent-a dialogId + new prompt) — **409** rejected.
+18. `PUT /project/:p/dialog` (agent-a dialogId, `status: "done"`) — **200**, stopped.
+19. Poll `GET /project/:p/dialogs` — agent-a is `done`, filename `-done.md`. Confirm active was observed before done.
+20. `DELETE /projects/:p` — delete while agent-b still active. 200.
+21. `GET /projects` — project gone.
+22. `GET /project/:p/dialogs` — **404**.
+23. `GET /project/:p/files` — **404**.
+24. `POST /projects` (same name) — fresh project.
+25. `GET /project/:p/dialogs` — empty array.
+26. `GET /project/:p/files` — only `doc/main.md`.
+27. `DELETE /projects/:p` — cleanup.
+28. `GET /projects` — confirm gone.
 
 **Static app:**
 
 1. `POST /projects` — create project.
+   - Client: Create project via prompt.
 2. `POST /project/:project/file/doc/main.md` — write constraints for a static-only React tictactoe (no backend process).
+   - Client: Seed static-app constraints into `doc/main.md` (current client flow seeds via API).
 3. `POST /project/:project/dialog/new` — create orchestrator draft.
+   - Client: Create a new dialog draft in the Dialogs tab.
 4. Fire `"please start"` (non-blocking).
+   - Client: Send `please start` from chat input and continue without waiting for completion.
 5. Poll `GET /project/:project/static/` until HTML includes React, `app.js`, and `tictactoe` markers.
+   - Client: Verify static app is reachable via the static route and contains expected markers.
 6. `POST /project/:project/tool/execute` (`run_command: cat index.html`) — verify React and `app.js` references.
+   - Client: Trigger `run_command` from dialog/tool flow and validate `index.html` references.
 7. `GET /project/:project/static/app.js` — verify board/cell/square/grid logic exists.
+   - Client: Verify static `app.js` is served and contains game logic markers.
 8. Poll `GET /project/:project/file/doc/main.md` until an `əəəembed` block appears with `port static`.
+   - Client: Wait for `doc/main.md` to include an embed block for static mode.
 9. `GET /project/:project/file/doc/main.md` — verify embed block contains `port static`.
+   - Client: Open `doc/main.md` and confirm `port static` embed syntax.
 
 This project is intentionally kept alive so the embedded game remains available.
 
 **App with backend:**
 
 1. `POST /projects` — create project.
+   - Client: Create project via prompt.
 2. `POST /project/:project/file/doc/main.md` — write backend tictactoe constraints (Express on port 4000).
+   - Client: Seed backend-app constraints into `doc/main.md` (current client flow seeds via API).
 3. `POST /project/:project/dialog/new` — create orchestrator draft.
+   - Client: Create a new dialog draft in the Dialogs tab.
 4. Fire `"please start"` (non-blocking).
+   - Client: Send `please start` from chat input and continue without waiting for completion.
 5. Poll `GET /project/:project/proxy/4000/` until HTML includes React, `app.js`, and `tictactoe` markers.
+   - Client: Verify proxied app route is reachable and contains expected markers.
 6. `GET /project/:project/proxy/4000/` — verify index HTML includes React + `app.js`.
+   - Client: Confirm proxied index HTML contains React + `app.js` references.
 7. `GET /project/:project/proxy/4000/app.js` — verify board/cell/square/grid logic exists.
+   - Client: Confirm proxied `app.js` contains game logic markers.
 8. `POST /project/:project/tool/execute` (`run_command: ps aux | grep node || true`) — verify `server.js` process is running.
+   - Client: Trigger `run_command` from dialog/tool flow and verify Node backend process is present.
 9. Poll `GET /project/:project/file/doc/main.md` until `əəəembed` block appears with `port 4000`.
+   - Client: Wait for `doc/main.md` to include an embed block targeting port 4000.
 10. `GET /project/:project/file/doc/main.md` — verify embed block includes `port 4000`.
+   - Client: Open `doc/main.md` and confirm `port 4000` embed syntax.
 
 Keep this project running intentionally so the embedded backend app stays playable.
 
@@ -917,7 +956,8 @@ Keep this project running intentionally so the embedded backend app stays playab
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- Finish refactoring backend tests. Then frontend tests. Make sure everything except for vi passes.
+- Have an endpoint that gives you SSE streaming of the dialog that's independent of the POST. Be able to tap into dialog streams instead of just getting the files, so we can refresh the page. Change the spec, the tests in readme.md, then the actual tests.
+- Fully align frontend tests with the spec and test-server. Make sure everything except for vi passes.
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
 

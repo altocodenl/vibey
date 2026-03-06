@@ -26,6 +26,8 @@
 
 - Please review the backend for bugs. If you find something, don't fix it. Spot it, then see if we have a test for it. Then report back.
 
+- Now take the description of the snapshot tests and add the - client entries, taking inspiration from what we already test in test-client. We already did this for previous suites.
+
 Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
 ### 2026-03-05

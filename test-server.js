@@ -473,36 +473,31 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 11: Remove Provider header line', 'post', 'project/' + PROJECT + '/tool/execute', {}, function (s) {
-      return {toolName: 'run_command', toolInput: {command: "sed -i '/^> Provider:/d' dialog/" + s.dialogId + "-done.md"}};
-   }, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'object' || ! rs.body.success) return log ('Failed to remove Provider header: ' + JSON.stringify (rs.body));
-      return true;
-   }],
-
-   ['Dialog 12: Continue without provider returns SSE error', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
+   ['Dialog 11: Continue without provider resolves from header', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
       return {dialogId: s.dialogId, prompt: 'Continue without provider metadata.'};
    }, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'string') return log ('Expected SSE text body');
       var events = parseSSE (rs.body);
-      var errorEvents = getEventsByType (events, 'error');
-      if (! errorEvents.length) return log ('Expected SSE error event');
-      log ('Dialog 12 SSE error payload:', JSON.stringify (errorEvents [0]));
+      if (! getEventsByType (events, 'done').length) return log ('Expected done event');
       return true;
    }],
 
-   ['Dialog 13: Dialog remains done after provider error', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'array') return log ('Expected array');
-      var entry = dale.stopNot (rs.body, undefined, function (d) {
-         if (d && d.dialogId === s.dialogId) return d;
-      });
-      if (! entry) return log ('Dialog not found after provider error');
-      if (entry.status !== 'done') return log ('Dialog status should remain done, got: ' + entry.status);
-      if (entry.filename.indexOf ('-done.md') === -1) return log ('Dialog filename should remain -done.md, got: ' + entry.filename);
+   ['Dialog 12: Metadata stripped from LLM input', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
+      return {dialogId: s.dialogId, prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it."};
+   }, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'string') return log ('Expected SSE text body');
+      var events = parseSSE (rs.body);
+      if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+      var combined = dale.go (events, function (event) {
+         if (event && event.type === 'chunk' && type (event.content) === 'string') return event.content;
+      }).join ('');
+      if (combined.indexOf ('> Provider:') !== -1) return log ('Output contains > Provider: metadata');
+      if (combined.indexOf ('> Model:') !== -1) return log ('Output contains > Model: metadata');
+      if (combined.indexOf ('> Context:') !== -1) return log ('Output contains > Context: metadata');
       return true;
    }],
 
-   ['Dialog 14: Create agent-a draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, 200, function (s, rq, rs) {
+   ['Dialog 13: Create agent-a draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.dialogA = rs.body.dialogId;
       if (rs.body.status !== 'done') return log ('agent-a should start as done, got: ' + rs.body.status);
@@ -510,7 +505,7 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 15: Create agent-b draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, 200, function (s, rq, rs) {
+   ['Dialog 14: Create agent-b draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.dialogB = rs.body.dialogId;
       if (rs.body.status !== 'done') return log ('agent-b should start as done, got: ' + rs.body.status);
@@ -518,13 +513,13 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 16: Fire both agents (non-blocking)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['Dialog 15: Fire both agents (non-blocking)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       fireDialogNoWait (PROJECT, s.dialogA, 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of computing.');
       fireDialogNoWait (PROJECT, s.dialogB, 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of mathematics.');
       setTimeout (next, 2000);
    }],
 
-   ['Dialog 17: Poll until agent-a is active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['Dialog 16: Poll until agent-a is active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT + '/dialogs', function (error, status, body) {
             if (error || status !== 200) return done (false);
@@ -549,7 +544,7 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 18: Continuing active agent-a rejected (409)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['Dialog 17: Continuing active agent-a rejected (409)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {dialogId: s.dialogA, prompt: 'This must be rejected while agent-a is active.'}, function (error, code, body) {
          if (error) return log ('PUT /dialog rejection request failed: ' + error.message);
          if (code !== 409) return log ('Expected 409, got ' + code);
@@ -558,7 +553,7 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 19: Stop agent-a (200)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['Dialog 18: Stop agent-a (200)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {dialogId: s.dialogA, status: 'done'}, function (error, code, body) {
          if (error) return log ('PUT /dialog stop failed: ' + error.message);
          if (code !== 200) return log ('Expected 200 when stopping, got ' + code);
@@ -568,7 +563,7 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 20: Agent-a is done, active was observed', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   ['Dialog 19: Agent-a is done, active was observed', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT + '/dialogs', function (error, status, body) {
             if (error || status !== 200) return done (false);
@@ -590,33 +585,33 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 21: Delete project while agent-b active', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Dialog 20: Delete project while agent-b active', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
 
-   ['Dialog 22: Project gone from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 21: Project gone from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, PROJECT)) return log ('Project still exists after deletion');
       return true;
    }],
 
-   ['Dialog 23: Dialogs endpoint 404', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 404],
+   ['Dialog 22: Dialogs endpoint 404', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 404],
 
-   ['Dialog 24: Files endpoint 404', 'get', 'project/' + PROJECT + '/files', {}, '', 404],
+   ['Dialog 23: Files endpoint 404', 'get', 'project/' + PROJECT + '/files', {}, '', 404],
 
-   ['Dialog 25: Re-create project', 'post', 'projects', {}, {name: PROJECT}, 200, function (s, rq, rs) {
+   ['Dialog 24: Re-create project', 'post', 'projects', {}, {name: PROJECT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Re-creation failed');
       return true;
    }],
 
-   ['Dialog 26: No dialogs in fresh project', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 25: No dialogs in fresh project', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (rs.body.length !== 0) return log ('Expected 0 dialogs, got ' + rs.body.length);
       return true;
    }],
 
-   ['Dialog 27: Only doc/main.md in fresh project', 'get', 'project/' + PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 26: Only doc/main.md in fresh project', 'get', 'project/' + PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var unexpected = dale.fil (rs.body, undefined, function (name) {
          if (name !== 'doc/main.md') return name;
@@ -625,12 +620,12 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 28: Cleanup delete', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Dialog 27: Cleanup delete', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Cleanup deletion failed');
       return true;
    }],
 
-   ['Dialog 29: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 28: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, PROJECT)) return log ('Project still exists after final deletion');
       return true;

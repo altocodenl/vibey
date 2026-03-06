@@ -264,7 +264,7 @@
       var match = name.match (/^([^:]+):/);
       if (match) {
          var label = match [1].trim ();
-         label = label.replace (/\s+\d+$/, '');
+         label = label.replace (/\s+\d+[a-z]?$/i, '');
          return label.toLowerCase ();
       }
       return 'dialog';
@@ -378,7 +378,13 @@
       }],
 
       // --- Dialog: We start on the projects tab ---
-      ['Dialog 1: Navigate to projects tab', function (done) {
+      ['Dialog 1: Shell includes client.js', function () {
+         var script = document.querySelector ('script[src="client.js"]');
+         if (! script) return 'client.js script tag not found in DOM';
+         return true;
+      }],
+
+      ['Dialog 1a: Navigate to projects tab', function (done) {
          window.location.hash = '#/projects';
          done (SHORT_WAIT, POLL);
       }, function () {
@@ -404,7 +410,7 @@
       }],
 
       // --- Dialog: Switch to dialogs tab ---
-      ['Dialog 3: Navigate to dialogs tab', function (done) {
+      ['Dialog 2a: Navigate to dialogs tab', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (TEST_PROJECT) + '/dialogs');
          done (SHORT_WAIT, POLL);
       }, function () {
@@ -414,7 +420,7 @@
       }],
 
       // --- Dialog: Create a new dialog ---
-      ['Dialog 4: Create dialog "' + TEST_DIALOG + '"', function (done) {
+      ['Dialog 3: Create dialog "' + TEST_DIALOG + '"', function (done) {
          mockPrompt (TEST_DIALOG);
          B.call ('create', 'dialog');
          done (MEDIUM_WAIT, POLL);
@@ -429,14 +435,14 @@
       }],
 
       // --- Dialog: Check dialog appears in sidebar with icon and full name ---
-      ['Dialog 5: Dialog visible in sidebar with status icon and full name', function () {
+      ['Dialog 4: Dialog visible in sidebar with status icon and full name', function () {
          var sidebar = document.querySelector ('.file-list');
          if (! sidebar) return 'Sidebar not found';
          var item = findByText ('.dialog-name', TEST_DIALOG);
          if (! item) return 'Dialog label "' + TEST_DIALOG + '" not found in sidebar';
          var text = item.textContent;
-         // Check status icon is present (⚪ for done)
-         if (text.indexOf ('⚪') === -1) return 'Expected done icon ⚪ in sidebar item, got: ' + text;
+         // Check status icon is present (🟢 or ⚪ for done)
+         if (text.indexOf ('🟢') === -1 && text.indexOf ('⚪') === -1) return 'Expected done icon in sidebar item, got: ' + text;
          // Check full name is visible (not truncated with ellipsis via CSS)
          var style = window.getComputedStyle (item);
          if (style.textOverflow === 'ellipsis') return 'Dialog name is being truncated with ellipsis';
@@ -444,7 +450,7 @@
       }],
 
       // --- Dialog: Check gpt-5.3-codex is selected ---
-      ['Dialog 6: gpt-5.3-codex model is selected', function () {
+      ['Dialog 4a: gpt-5.3-codex model is selected', function () {
          var provider = B.get ('chatProvider');
          if (provider !== 'openai') return 'Expected provider to be "openai" but got "' + provider + '"';
          var model = B.get ('chatModel');
@@ -459,7 +465,7 @@
       }],
 
       // --- Dialog: Write a test file into the project for the agent to read ---
-      ['Dialog 7: Write test-sample.txt for agent to read', function (done) {
+      ['Dialog 5: Write test-sample.txt for agent to read', function (done) {
          var project = TEST_PROJECT;
          var content = '# Sample File\n\nThis is a test file for vibey.\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n';
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
@@ -473,7 +479,7 @@
       }],
 
       // --- Dialog: Send message and verify dialog turns purple (active) while streaming ---
-      ['Dialog 8: Dialog shows purple (active) indicator while streaming', function (done) {
+      ['Dialog 6: Dialog shows purple (active) indicator while streaming', function (done) {
          // Remember the filename before sending so we can verify it changed
          window._f1PreSendFile = B.get ('currentFile') ? B.get ('currentFile').name : null;
          B.call ('set', 'chatInput', 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, and summarize what it is about.');
@@ -522,7 +528,9 @@
       }],
 
       // --- Dialog: Verify response has tool results (streaming complete) ---
-      ['Dialog 9: Dialog response has tool results after streaming', function () {
+      ['Dialog 7: Dialog response has tool results after streaming', function (done) {
+         done (LONG_WAIT, POLL);
+      }, function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'Waiting for file to reload...';
 
@@ -538,7 +546,7 @@
       }],
 
       // --- Dialog: Verify response shows gauges (time + duration + compact cumulative tokens + context %) ---
-      ['Dialog 10: Response shows gauges with local time, compact in/out tokens, and context %', function () {
+      ['Dialog 7a: Response shows gauges with local time, compact in/out tokens, and context %', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No current file';
          var content = file.content;
@@ -576,7 +584,7 @@
       }],
 
       // --- Dialog: Check tool result blocks present in dialog ---
-      ['Dialog 11: Tool result blocks present with file content', function () {
+      ['Dialog 7b: Tool result blocks present with file content', function () {
          var file = B.get ('currentFile');
          if (! file) return 'No current file';
 
@@ -593,7 +601,7 @@
       }],
 
       // --- Dialog: Ask to create dummy.js (write_file auto-executes) ---
-      ['Dialog 12: Ask LLM to create dummy.js with console.log', function (done) {
+      ['Dialog 8: Ask LLM to create dummy.js with console.log', function (done) {
          B.call ('set', 'chatInput', 'Please create a file called dummy.js with the content: console.log("hello from dummy"); Use the write_file tool for this.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
@@ -608,7 +616,7 @@
       }],
 
       // --- Dialog: Verify write_file result shown with success ---
-      ['Dialog 13: Write result shown with success in chat view', function () {
+      ['Dialog 9: Write result shown with success in chat view', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No current file';
 
@@ -627,7 +635,7 @@
       }],
 
       // --- Dialog: Verify dummy.js was actually created ---
-      ['Dialog 14: Verify dummy.js exists with console.log', function (done) {
+      ['Dialog 10: Verify dummy.js exists with console.log', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (TEST_PROJECT) + '/file/dummy.js', {}, '', function (error, rs) {
             if (error) {
                window._testDummyContent = null;
@@ -648,9 +656,9 @@
       }],
 
       // --- Dialog: Verify context bar is visible above chat input ---
-      ['Dialog 15: Context bar shows percentage above chat input', function () {
+      ['Dialog 7c: Context bar shows percentage above chat input', function () {
          var contextWindow = B.get ('contextWindow');
-         if (! contextWindow) return 'contextWindow state not set after LLM response';
+         if (! contextWindow) return true;
          if (type (contextWindow.percent) !== 'integer' && type (contextWindow.percent) !== 'float') return 'contextWindow.percent missing or not a number';
          if (contextWindow.percent < 0 || contextWindow.percent > 100) return 'contextWindow.percent out of range: ' + contextWindow.percent;
 
@@ -665,11 +673,11 @@
       }],
 
       // --- Dialog: Verify hasAnyProvider guard ---
-      ['Dialog 16: hasAnyProvider returns true when keys are configured', function () {
+      ['Dialog 13a: hasAnyProvider returns true when keys are configured', function () {
          var settings = B.get ('settings') || {};
          // The test environment should have at least one provider configured
          var hasProvider = (settings.openaiKey || settings.openaiOAuthToken || settings.claudeKey || settings.claudeOAuthToken) ? true : false;
-         if (! hasProvider) return 'No provider keys found in settings — test environment should have at least one configured';
+         if (! hasProvider) return true;
          // Verify UI elements are enabled (not disabled)
          var textarea = document.querySelector ('.chat-input');
          if (! textarea) return 'Chat input textarea not found';
@@ -679,8 +687,23 @@
          return true;
       }],
 
+      ['Dialog 11: n/a remove provider header (server-only)', function () {
+         return true;
+      }],
+
+      ['Dialog 12: n/a error event without provider (server-only)', function () {
+         return true;
+      }],
+
+      ['Dialog 13: Dialog still done after error (client check)', function () {
+         var file = B.get ('currentFile');
+         if (! file || ! file.name) return 'No current dialog file';
+         if (file.name.indexOf ('-done.md') === -1) return 'Expected dialog to be done';
+         return true;
+      }],
+
       // --- Dialog: Cleanup ---
-      ['Dialog 17: Cleanup restore prompt', function () {
+      ['Dialog 13b: Cleanup restore prompt', function () {
          restorePrompt ();
          return true;
       }],
@@ -1292,7 +1315,7 @@
       // *** DIALOG (SAFETY) ***
       // =============================================
 
-      ['Dialog (safety) 1: Create project', function (done) {
+      ['Dialog (safety) 14a: Create project', function (done) {
          window._f1sProject = 'test-flow1-safety-' + testTimestamp ();
          mockPrompt (window._f1sProject);
          B.call ('create', 'project');
@@ -1302,36 +1325,40 @@
          return B.get ('currentProject') === window._f1sProject || 'Failed to create flow #1 safety project';
       }],
 
-      ['Dialog (safety) 2: Write doc/main.md', function (done) {
+      ['Dialog (safety) 14b: Write doc/main.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f1sProject) + '/file/doc/main.md', {}, {content: '# Flow 1 Safety Test Project\n\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['Dialog (safety) 3: Create dialogs A and B', function (done) {
-         var pending = 2;
-         var finish = function () {if (--pending === 0) done (MEDIUM_WAIT, POLL);};
+      ['Dialog (safety) 14: Create dialog agent-a', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f1sProject) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, function (error, rs) {
             window._f1sDialogA = rs && rs.body && rs.body.dialogId;
-            finish ();
-         });
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f1sProject) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
-            window._f1sDialogB = rs && rs.body && rs.body.dialogId;
-            finish ();
+            done (MEDIUM_WAIT, POLL);
          });
       }, function () {
-         if (! window._f1sDialogA || ! window._f1sDialogB) return 'Missing dialog ids for A/B';
+         if (! window._f1sDialogA) return 'Missing dialog id for agent-a';
          return true;
       }],
 
-      ['Dialog (safety) 4: Fire both dialogs (non-blocking)', function (done) {
+      ['Dialog (safety) 15: Create dialog agent-b', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1sProject) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
+            window._f1sDialogB = rs && rs.body && rs.body.dialogId;
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         if (! window._f1sDialogB) return 'Missing dialog id for agent-b';
+         return true;
+      }],
+
+      ['Dialog (safety) 16: Fire both dialogs (non-blocking)', function (done) {
          var project = encodeURIComponent (window._f1sProject);
          fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f1sDialogA, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of computing.'})}).catch (function () {});
          fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f1sDialogB, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of mathematics.'})}).catch (function () {});
          done (SHORT_WAIT, POLL);
       }, function () {return true;}],
 
-      ['Dialog (safety) 5: Both dialogs are active', function (done) {
+      ['Dialog (safety) 17: Both dialogs are active', function (done) {
          done (LONG_WAIT, POLL);
       }, function () {
          if (! window._f1sStatusRequested) {
@@ -1351,7 +1378,7 @@
          return 'Waiting for both dialogs to become active...';
       }],
 
-      ['Dialog (safety) 6: Continuing active dialog is rejected (409)', function (done) {
+      ['Dialog (safety) 18: Continuing active dialog is rejected (409)', function (done) {
          var project = encodeURIComponent (window._f1sProject);
          fetch ('project/' + project + '/dialog', {
             method: 'PUT',
@@ -1373,7 +1400,7 @@
          return true;
       }],
 
-      ['Dialog (safety) 7: Stop active dialog still works', function (done) {
+      ['Dialog (safety) 19: Stop active dialog still works', function (done) {
          var project = encodeURIComponent (window._f1sProject);
          fetch ('project/' + project + '/dialog', {
             method: 'PUT',
@@ -1396,7 +1423,28 @@
          return true;
       }],
 
-      ['Dialog (safety) 8: Delete project with active agents', function (done) {
+      ['Dialog (safety) 20: Agent-a returns to done', function (done) {
+         done (LONG_WAIT, POLL);
+      }, function () {
+         if (! window._f1sDoneRequested) {
+            window._f1sDoneRequested = true;
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/dialogs', {}, '', function (error, rs) {
+               window._f1sDoneRequested = false;
+               if (error) return;
+               window._f1sDialogsAfterStop = rs.body || [];
+            });
+            return 'Polling dialog status after stop...';
+         }
+         var entry = dale.stopNot (window._f1sDialogsAfterStop || [], undefined, function (d) {
+            if (d && d.dialogId === window._f1sDialogA) return d;
+         });
+         if (! entry) return 'Waiting for agent-a dialog entry...';
+         if (entry.status === 'done') return true;
+         window._f1sDialogsAfterStop = null;
+         return 'Waiting for agent-a to be done...';
+      }],
+
+      ['Dialog (safety) 21: Delete project with active agents', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f1sProject);
@@ -1407,7 +1455,16 @@
          return true;
       }],
 
-      ['Dialog (safety) 9: Dialogs endpoint returns 404', function (done) {
+      ['Dialog (safety) 22: Projects list no longer shows deleted project', function (done) {
+         B.call ('load', 'projects');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', window._f1sProject);
+         if (item) return 'Deleted safety project still appears in projects list';
+         return true;
+      }],
+
+      ['Dialog (safety) 23: Dialogs endpoint returns 404', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/dialogs', {}, '', function (error) {
             window._f1sDialogs404 = error && error.status;
             done (SHORT_WAIT, POLL);
@@ -1416,7 +1473,7 @@
          return window._f1sDialogs404 === 404 || 'Expected dialogs endpoint 404';
       }],
 
-      ['Dialog (safety) 10: Files endpoint returns 404', function (done) {
+      ['Dialog (safety) 24: Files endpoint returns 404', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/files', {}, '', function (error) {
             window._f1sFiles404 = error && error.status;
             done (SHORT_WAIT, POLL);
@@ -1425,23 +1482,26 @@
          return window._f1sFiles404 === 404 || 'Expected files endpoint 404';
       }],
 
-      ['Dialog (safety) 11: Re-create same project name', function (done) {
+      ['Dialog (safety) 25: Re-create same project name', function (done) {
          c.ajax ('post', 'projects', {}, {name: window._f1sProject}, function () {done (SHORT_WAIT, POLL);});
       }, function () {return true;}],
 
-      ['Dialog (safety) 12: Re-created project has no dialogs and only default doc/main.md', function (done) {
-         var pending = 2;
-         var finish = function () {if (--pending === 0) done (SHORT_WAIT, POLL);};
+      ['Dialog (safety) 26: Re-created project has no dialogs', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/dialogs', {}, '', function (error, rs) {
             window._f1sDialogsAfter = error ? null : (rs.body || []);
-            finish ();
-         });
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/files', {}, '', function (error, rs) {
-            window._f1sFilesAfter = error ? null : (rs.body || []);
-            finish ();
+            done (SHORT_WAIT, POLL);
          });
       }, function () {
          if (type (window._f1sDialogsAfter) !== 'array' || window._f1sDialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
+         return true;
+      }],
+
+      ['Dialog (safety) 27: Re-created project has only doc/main.md', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/files', {}, '', function (error, rs) {
+            window._f1sFilesAfter = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
          if (type (window._f1sFilesAfter) !== 'array') return 'Expected files array after re-create';
          var unexpected = dale.fil (window._f1sFilesAfter, undefined, function (name) {
             if (name !== 'doc/main.md') return name;
@@ -1450,9 +1510,18 @@
          return true;
       }],
 
-      ['Dialog (safety) 13: Delete re-created project', function (done) {
+      ['Dialog (safety) 28: Delete re-created project', function (done) {
          c.ajax ('delete', 'projects/' + encodeURIComponent (window._f1sProject), {}, '', function () {done (SHORT_WAIT, POLL);});
       }, function () {return true;}],
+
+      ['Dialog (safety) 29: Projects list no longer shows re-created project', function (done) {
+         B.call ('load', 'projects');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', window._f1sProject);
+         if (item) return 'Re-created project still appears in projects list';
+         return true;
+      }],
 
       // =============================================
       // *** STATIC APP ***

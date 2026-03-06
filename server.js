@@ -1416,11 +1416,12 @@ var safeJsonParse = function (text, fallback) {
 };
 
 var parseMetadata = function (markdown) {
-   var metaMatch = markdown.match (/> Provider:\s*([^|]+)\|\s*Model:\s*([^\n]+)/);
-   if (! metaMatch) return {};
+   var providerMatch = markdown.match (/^> Provider:\s*([^\n]+)\s*$/m);
+   var modelMatch = markdown.match (/^> Model:\s*([^\n]+)\s*$/m);
+   if (! providerMatch || ! modelMatch) return {};
    return {
-      provider: metaMatch [1].trim (),
-      model: metaMatch [2].trim ()
+      provider: providerMatch [1].trim (),
+      model: modelMatch [1].trim ()
    };
 };
 
@@ -1485,9 +1486,9 @@ var parseSections = function (markdown) {
 };
 
 var stripSectionMetadata = function (text) {
+   var metaRe = /^>\s*(Id|Time|Resources(?: cumulative)?|Usage(?: cumulative)?|Context|Provider|Model|Started|Status)\s*:/;
    return dale.fil ((text || '').split ('\n'), undefined, function (line) {
-      if (/^>\s*Time:/.test (line)) return;
-      if (/^>\s*Usage(?: cumulative)?:/.test (line)) return;
+      if (metaRe.test (line)) return;
       return line;
    }).join ('\n').trim ();
 };
@@ -1760,7 +1761,7 @@ var ensureDialogFile = function (projectName, dialog, provider, model) {
          return;
       }
       var content = pfs.readFile (projectName, dialog.filename);
-      var headerLine = '> Provider: ' + provider + ' | Model: ' + model + '\n';
+      var headerLine = '> Provider: ' + provider + '\n' + '> Model: ' + model + '\n';
       if (! /\n> Started:/.test (content)) headerLine += '> Started: ' + new Date ().toISOString () + '\n';
       headerLine += '\n';
       if (content.startsWith ('# Dialog\n\n')) content = '# Dialog\n\n' + headerLine + content.slice (10);
@@ -1773,7 +1774,7 @@ var ensureDialogFile = function (projectName, dialog, provider, model) {
    }
 
    var header = '# Dialog\n\n';
-   header += '> Provider: ' + provider + ' | Model: ' + model + '\n';
+   header += '> Provider: ' + provider + '\n' + '> Model: ' + model + '\n';
    header += '> Started: ' + new Date ().toISOString () + '\n\n';
    pfs.writeFile (projectName, dialog.filename, header);
    upsertDocMainContextBlock (projectName, dialog.filename);
