@@ -602,13 +602,13 @@ var pfs = {
 
    writeFile: function (projectName, filename, content) {
       var name = containerName (projectName);
-      var command = 'cat > /workspace/' + filename;
+      var command = 'cat > ' + shQuote ('/workspace/' + filename);
       execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
    },
 
    appendFile: function (projectName, filename, content) {
       var name = containerName (projectName);
-      var command = 'cat >> /workspace/' + filename;
+      var command = 'cat >> ' + shQuote ('/workspace/' + filename);
       execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
    },
 
@@ -742,6 +742,23 @@ var withProjectCommitLock = function (projectName, fn) {
 
    return next.finally (function () {
       if (PROJECT_COMMIT_QUEUES [projectName] === settled) delete PROJECT_COMMIT_QUEUES [projectName];
+   });
+};
+
+var PROJECT_MUTATION_QUEUES = {};
+
+var withProjectMutationLock = function (projectName, fn) {
+   var previous = PROJECT_MUTATION_QUEUES [projectName] || Promise.resolve ();
+
+   var next = previous.then (function () {
+      return fn ();
+   });
+
+   var settled = next.catch (function () {});
+   PROJECT_MUTATION_QUEUES [projectName] = settled;
+
+   return next.finally (function () {
+      if (PROJECT_MUTATION_QUEUES [projectName] === settled) delete PROJECT_MUTATION_QUEUES [projectName];
    });
 };
 
@@ -2791,14 +2808,16 @@ var routes = [
       var projectName = resolveProject (rs, projectSlug);
       if (! projectName) return;
 
-      try {
-         pfs.writeFile (projectName, name, rq.body.content);
-         await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/file/' + name);
-         reply (rs, 200, {ok: true, name: name});
-      }
-      catch (error) {
-         reply (rs, 500, {error: error.message || 'Failed to write file'});
-      }
+      return withProjectMutationLock (projectName, async function () {
+         try {
+            pfs.writeFile (projectName, name, rq.body.content);
+            await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/file/' + name);
+            reply (rs, 200, {ok: true, name: name});
+         }
+         catch (error) {
+            reply (rs, 500, {error: error.message || 'Failed to write file'});
+         }
+      });
    }],
 
    ['delete', /^\/project\/([^/]+)\/file\/(.+)$/, async function (rq, rs) {

@@ -1221,7 +1221,19 @@ B.mrespond ([
       if (! project) return B.call (x, 'set', 'files', []);
 
       B.call (x, 'get', projectPath (project, 'files'), {}, '', function (x, error, rs) {
-         if (error) return B.call (x, 'report', 'error', 'Failed to load files');
+         if (error) {
+            if (error.status === 404) {
+               B.call (x, 'set', 'currentProject', null);
+               B.call (x, 'set', 'files', []);
+               B.call (x, 'set', 'currentFile', null);
+               B.call (x, 'set', 'streaming', false);
+               B.call (x, 'set', 'streamingContent', '');
+               B.call (x, 'set', 'optimisticUserMessage', null);
+               B.call (x, 'reset', 'chatInput');
+               return B.call (x, 'navigate', 'hash', '#/projects');
+            }
+            return B.call (x, 'report', 'error', 'Failed to load files');
+         }
          B.call (x, 'set', 'files', rs.body);
 
          // Sync currentFile.name with the authoritative filename from the server
@@ -1994,7 +2006,7 @@ B.mrespond ([
    }],
 
    ['run', 'tests', function (x) {
-      var choice = prompt ('Which flow to run?\n1 = Dialog + tools\n2 = Docs CRUD\n3 = Delete project aborts agents\n4 = Static tictactoe\n5 = Backend tictactoe\n6 = Vi mode\n7 = Snapshots\n8 = Uploads\n9 = Auto-commit\nALL = run everything', 'ALL');
+      var choice = prompt ('Which suite to run?\nproject\ndialog\ndocs\nuploads\ndialog (safety)\nstatic\nbackend\nvi\nsnapshots\nALL = run everything', 'ALL');
       if (choice === null) return;
       window._vibeyTestFlow = (choice || 'ALL').trim ().toUpperCase ();
       c.loadScript ('test-client.js', function (error) {
