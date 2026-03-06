@@ -1038,18 +1038,22 @@ var listProjects = function () {
 
 var ACTIVE_STREAMS = {};
 
-var beginActiveStream = function (dialogId) {
+var activeStreamKey = function (projectName, dialogId) {
+   return projectName + '::' + dialogId;
+};
+
+var beginActiveStream = function (projectName, dialogId) {
    var controller = new AbortController ();
-   ACTIVE_STREAMS [dialogId] = {controller: controller, requestedStatus: null};
+   ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)] = {controller: controller, requestedStatus: null};
    return controller;
 };
 
-var getActiveStream = function (dialogId) {
-   return ACTIVE_STREAMS [dialogId] || null;
+var getActiveStream = function (projectName, dialogId) {
+   return ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)] || null;
 };
 
-var endActiveStream = function (dialogId) {
-   delete ACTIVE_STREAMS [dialogId];
+var endActiveStream = function (projectName, dialogId) {
+   delete ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)];
 };
 
 var DOC_DIR = 'doc';
@@ -2647,11 +2651,11 @@ var routes = [
          dale.go (files, function (file) {
             var parsed = parseDialogFilename (file);
             if (! parsed) return;
-            var active = getActiveStream (parsed.dialogId);
+            var active = getActiveStream (projectName, parsed.dialogId);
             if (! active) return;
             active.requestedStatus = 'done';
             active.controller.abort ();
-            endActiveStream (parsed.dialogId);
+            endActiveStream (projectName, parsed.dialogId);
          });
       }
       catch (error) {}
@@ -3003,10 +3007,11 @@ var routes = [
       if (rq.body.provider !== undefined && (type (rq.body.provider) !== 'string' || ! inc (['claude', 'openai'], rq.body.provider))) return reply (rs, 400, {error: 'provider must be claude or openai'});
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
 
+      var projectName = rq.data.params.project;
       var continues = type (rq.body.prompt) === 'string' && !! rq.body.prompt.trim ();
 
       if (! continues) {
-         var active = getActiveStream (rq.body.dialogId);
+         var active = getActiveStream (projectName, rq.body.dialogId);
          if (active && rq.body.status === 'done') {
             active.requestedStatus = rq.body.status;
             active.controller.abort ();
@@ -3014,13 +3019,29 @@ var routes = [
          }
 
          try {
-            var result = await updateDialogTurn (rq.data.params.project, rq.body.dialogId, rq.body.status, null, rq.body.provider, rq.body.model, null);
-            await autoCommitApi (rq.data.params.project, 'PUT', '/project/' + rq.data.params.project + '/dialog');
+            var result = await updateDialogTurn (projectName, rq.body.dialogId, rq.body.status, null, rq.body.provider, rq.body.model, null);
+            await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
             return reply (rs, 200, result);
          }
          catch (error) {
             return reply (rs, 400, {error: error.message});
          }
+      }
+
+      var alreadyActive = getActiveStream (projectName, rq.body.dialogId);
+      if (alreadyActive) {
+         return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: rq.body.dialogId, status: 'active'});
+      }
+
+      try {
+         var liveDialog = loadDialog (projectName, rq.body.dialogId);
+         if (! liveDialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
+         if (liveDialog.status === 'active') {
+            return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: rq.body.dialogId, status: 'active'});
+         }
+      }
+      catch (dialogStateError) {
+         return reply (rs, 400, {error: dialogStateError.message});
       }
 
       rs.writeHead (200, {
@@ -3036,11 +3057,11 @@ var routes = [
       var streamStart = Date.now ();
       var firstChunkSent = false;
 
-      var controller = beginActiveStream (rq.body.dialogId);
+      var controller = beginActiveStream (projectName, rq.body.dialogId);
 
       try {
          var result = await updateDialogTurn (
-            rq.data.params.project,
+            projectName,
             rq.body.dialogId,
             rq.body.status,
             rq.body.prompt,
@@ -3063,17 +3084,17 @@ var routes = [
          );
 
          try {
-            var persisted = loadDialog (rq.data.params.project, result.dialogId);
+            var persisted = loadDialog (projectName, result.dialogId);
             if (persisted.exists) {
                result.filename = persisted.filename;
                result.status = persisted.status;
             }
          }
          catch (statusReadError) {
-            clog ('[dialog-status] verify-failed project=' + rq.data.params.project + ' dialogId=' + result.dialogId + ' context=route/put-dialog/done error=' + statusReadError.message);
+            clog ('[dialog-status] verify-failed project=' + projectName + ' dialogId=' + result.dialogId + ' context=route/put-dialog/done error=' + statusReadError.message);
          }
 
-         await autoCommitApi (rq.data.params.project, 'PUT', '/project/' + rq.data.params.project + '/dialog');
+         await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
 
          rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
          rs.end ();
@@ -3081,11 +3102,11 @@ var routes = [
       catch (error) {
          if (error && error.name === 'AbortError') {
             try {
-               var activeAfterAbort = getActiveStream (rq.body.dialogId);
+               var activeAfterAbort = getActiveStream (projectName, rq.body.dialogId);
                var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
-               var dialogAfterAbort = loadDialog (rq.data.params.project, rq.body.dialogId);
-               if (dialogAfterAbort.exists) setDialogStatus (rq.data.params.project, dialogAfterAbort, requestedStatus, 'route/put-dialog/abort');
-               await autoCommitApi (rq.data.params.project, 'PUT', '/project/' + rq.data.params.project + '/dialog');
+               var dialogAfterAbort = loadDialog (projectName, rq.body.dialogId);
+               if (dialogAfterAbort.exists) setDialogStatus (projectName, dialogAfterAbort, requestedStatus, 'route/put-dialog/abort');
+               await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
                rs.write ('data: ' + JSON.stringify ({type: 'done', result: {dialogId: rq.body.dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}}) + '\n\n');
                rs.end ();
             }
@@ -3096,11 +3117,11 @@ var routes = [
          }
          else {
             try {
-               var dialogAfterError = loadDialog (rq.data.params.project, rq.body.dialogId);
-               if (dialogAfterError.exists) setDialogStatus (rq.data.params.project, dialogAfterError, 'done', 'route/put-dialog/error');
+               var dialogAfterError = loadDialog (projectName, rq.body.dialogId);
+               if (dialogAfterError.exists) setDialogStatus (projectName, dialogAfterError, 'done', 'route/put-dialog/error');
             }
             catch (statusError) {
-               clog ('[dialog-status] finalize-failed project=' + rq.data.params.project + ' dialogId=' + rq.body.dialogId + ' context=route/put-dialog/error error=' + statusError.message);
+               clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + rq.body.dialogId + ' context=route/put-dialog/error error=' + statusError.message);
             }
 
             clog ('Dialog update error:', error.message);
@@ -3109,7 +3130,7 @@ var routes = [
          }
       }
       finally {
-         endActiveStream (rq.body.dialogId);
+         endActiveStream (projectName, rq.body.dialogId);
       }
    }],
 

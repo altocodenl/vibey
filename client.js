@@ -1636,62 +1636,93 @@ B.mrespond ([
       var input = B.get ('chatInput');
       var project = B.get ('currentProject');
       if (! project) return;
+      if (B.get ('streaming')) return;
+
       var provider = B.get ('chatProvider') || 'openai';
       var model = B.get ('chatModel') || defaultModelForProvider (provider);
       if (! input || ! input.trim ()) return;
 
+      var parsed = file && parseDialogFilename (file.name);
       var originalInput = input.trim ();
 
-      B.call (x, 'set', 'streaming', true);
-      B.call (x, 'set', 'streamingContent', '');
-      B.call (x, 'set', 'optimisticUserMessage', originalInput);
-      B.call (x, 'set', 'contextWindow', null);
-      B.call (x, 'set', 'chatInput', '');
-      var inputNode = document.querySelector ('.chat-input');
-      if (inputNode) inputNode.value = '';
+      var runSend = function () {
+         B.call (x, 'set', 'streaming', true);
+         B.call (x, 'set', 'streamingContent', '');
+         B.call (x, 'set', 'optimisticUserMessage', originalInput);
+         B.call (x, 'set', 'contextWindow', null);
+         B.call (x, 'set', 'chatInput', '');
+         var inputNode = document.querySelector ('.chat-input');
+         if (inputNode) inputNode.value = '';
 
-      var parsed = file && parseDialogFilename (file.name);
-
-      // Optimistically update filename to active status so the UI shows 🟣 immediately
-      if (parsed && parsed.status === 'done') {
-         var activeFilename = DIALOG_DIR + parsed.dialogId + '-active.md';
-         B.call (x, 'set', ['currentFile', 'name'], activeFilename);
-         // Update file in the sidebar list too
-         var files = B.get ('files') || [];
-         var updatedFiles = dale.go (files, function (f) {
-            return f === file.name ? activeFilename : f;
-         });
-         B.call (x, 'set', 'files', updatedFiles);
-      }
-      var method = parsed ? 'PUT' : 'POST';
-      var payload = parsed
-         ? {
-            dialogId: parsed.dialogId,
-            provider: provider,
-            prompt: originalInput,
-            model: model || undefined
+         // Optimistically update filename to active status so the UI shows 🟣 immediately
+         if (parsed && parsed.status === 'done') {
+            var activeFilename = DIALOG_DIR + parsed.dialogId + '-active.md';
+            B.call (x, 'set', ['currentFile', 'name'], activeFilename);
+            // Update file in the sidebar list too
+            var files = B.get ('files') || [];
+            var updatedFiles = dale.go (files, function (f) {
+               return f === file.name ? activeFilename : f;
+            });
+            B.call (x, 'set', 'files', updatedFiles);
          }
-         : {
-            provider: provider,
-            prompt: originalInput,
-            model: model || undefined
-         };
 
-      // Use the (possibly updated) filename for stream processing
-      var streamFilename = B.get ('currentFile') ? B.get ('currentFile').name : null;
+         var method = parsed ? 'PUT' : 'POST';
+         var payload = parsed
+            ? {
+               dialogId: parsed.dialogId,
+               provider: provider,
+               prompt: originalInput,
+               model: model || undefined
+            }
+            : {
+               provider: provider,
+               prompt: originalInput,
+               model: model || undefined
+            };
 
-      fetch (projectPath (project, 'dialog'), {
-         method: method,
-         headers: {'Content-Type': 'application/json'},
-         body: JSON.stringify (payload)
-      }).then (function (response) {
-         B.call (x, 'process', 'stream', response, streamFilename, originalInput);
-      }).catch (function (err) {
-         B.call (x, 'report', 'error', 'Failed to send: ' + err.message);
-         B.call (x, 'set', 'streaming', false);
-         B.call (x, 'set', 'optimisticUserMessage', null);
-         B.call (x, 'set', 'chatInput', originalInput);
-      });
+         // Use the (possibly updated) filename for stream processing
+         var streamFilename = B.get ('currentFile') ? B.get ('currentFile').name : null;
+
+         fetch (projectPath (project, 'dialog'), {
+            method: method,
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify (payload)
+         }).then (function (response) {
+            B.call (x, 'process', 'stream', response, streamFilename, originalInput);
+         }).catch (function (err) {
+            B.call (x, 'report', 'error', 'Failed to send: ' + err.message);
+            B.call (x, 'set', 'streaming', false);
+            B.call (x, 'set', 'optimisticUserMessage', null);
+            B.call (x, 'set', 'chatInput', originalInput);
+         });
+      };
+
+      // Stateless safety check: before continuing an existing dialog, read server status.
+      if (parsed) {
+         return fetch (projectPath (project, 'dialogs')).then (function (rs) {
+            if (! rs.ok) throw new Error ('Failed to check dialog status');
+            return rs.json ();
+         }).then (function (dialogs) {
+            var found = dale.stopNot (dialogs || [], undefined, function (item) {
+               if (item.dialogId === parsed.dialogId) return item;
+            });
+
+            if (found && found.status === 'active') {
+               if (found.filename) {
+                  B.call (x, 'set', ['currentFile', 'name'], found.filename);
+                  B.call (x, 'load', 'file', found.filename);
+               }
+               B.call (x, 'load', 'files');
+               return B.call (x, 'report', 'error', 'This dialog is currently active. Stop it before sending a new message.');
+            }
+
+            runSend ();
+         }).catch (function (err) {
+            B.call (x, 'report', 'error', 'Failed to check dialog status: ' + err.message);
+         });
+      }
+
+      runSend ();
    }],
 
    // Process stream response (SSE or JSON fallback)
@@ -2856,6 +2887,8 @@ views.dialogs = function () {
       });
 
       var isDialog = currentFile && isDialogFile (currentFile.name);
+      var currentDialogParsed = isDialog ? (parseDialogFilename (currentFile.name) || {}) : {};
+      var dialogIsActive = isDialog && currentDialogParsed.status === 'active';
       var messages = isDialog ? parseDialogContent (currentFile.content) : [];
       viMode = !! viMode;
       viState = viState || {};
@@ -2957,7 +2990,7 @@ views.dialogs = function () {
                ['select', {
                   class: 'provider-select',
                   onchange: B.ev ('change', 'chatProviderModel'),
-                  disabled: noProvider || streaming
+                  disabled: noProvider || streaming || dialogIsActive
                }, dale.go (MODEL_OPTIONS, function (opt) {
                   var key = modelOptionKey (opt);
                   var currentKey = (chatProvider || 'openai') + ':' + (chatModel || defaultModelForProvider (chatProvider || 'openai'));
@@ -2977,7 +3010,7 @@ views.dialogs = function () {
                      onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                      onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                      onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
-                     disabled: noProvider || streaming
+                     disabled: noProvider || streaming || dialogIsActive
                   }],
                   (viMode && viState.mode !== 'insert' && viOverlayChat && viOverlayChat.visible) ? ['div', {
                      class: 'vi-cursor-overlay',
@@ -3000,14 +3033,14 @@ views.dialogs = function () {
                      transition: 'background-color 0.2s'
                   }),
                   onclick: B.ev ('toggle', 'voice'),
-                  disabled: noProvider || streaming
+                  disabled: noProvider || streaming || dialogIsActive
                }, voiceActive ? '⏹' : '🎤'] : '',
                ['button', {
                   class: 'primary',
                   onclick: B.ev ('send', 'message'),
-                  disabled: noProvider || streaming || ! (chatInput && chatInput.trim ())
+                  disabled: noProvider || streaming || dialogIsActive || ! (chatInput && chatInput.trim ())
                }, streaming ? 'Sending...' : 'Send'],
-               (streaming && isDialog) ? ['button', {
+               ((streaming || dialogIsActive) && isDialog) ? ['button', {
                   style: style ({'background-color': '#e67e22', color: 'white'}),
                   onclick: B.ev ('stop', 'dialog')
                }, 'Stop'] : ''

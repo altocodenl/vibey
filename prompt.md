@@ -20,7 +20,7 @@ There is no built-in orchestration framework. `doc/main.md` is the single source
 
 **However**, unless `main.md` (or any file in the project) says otherwise, agents orchestrate as follows: on start, read `agents-now.md`; if missing, assume it's empty. If you need to read files, just be aware of other agents that are making changes to them right now. If you need to write files and another agent is already working on one or more of those files, stop and report back to the user.
 
-If no agent is working on the files you need to edit, 1) pick a whimsical noun name; 2) add an entry that says what you're doing and how you're editing those files, also add a timestamp to that entry. Then do your work. When you're done working, read again `agents-now.md` and remove your entry.
+If no agent is working on the files you need to edit, 1) pick a whimsical noun name; 2) add an entry that says what you're doing and how you're editing those files, also add a timestamp to that entry. Then do your work. When you're done working, read again `agents-now.md` and remove your entry. There's never any need to put in `agents-now.md` that you'll be touching `agents-now.md`.
 
 ## Embedding apps in docs
 
