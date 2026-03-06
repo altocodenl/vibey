@@ -21,6 +21,7 @@
 
          var browser = await puppeteer.launch (launchOptions);
          var page = await browser.newPage ();
+         await page.setCacheEnabled (false);
 
          var gotDialog = false;
 
@@ -247,27 +248,35 @@
    var POLL_TIMEOUT = 180000; // 3 min hard timeout for long polling steps
    var EXTENDED_POLL_TIMEOUT = 300000; // 5 min for LLM build flows (F4/F5)
 
+   var PROJECT_FLOW = 'test-projects-' + testTimestamp ();
    var TEST_PROJECT = 'test-flow1-' + testTimestamp ();
    var TEST_DIALOG  = 'read-vibey';
 
    // *** TESTS ***
 
-   // Flow filter: set by client.js prompt or puppeteer CLI arg.
-   // 'ALL' runs everything, '1'-'8' runs only that flow.
+   // Suite filter: set by client.js prompt or puppeteer CLI arg.
+   // 'ALL' runs everything; use suite name (dialog, docs, uploads, snapshots, static, backend, vi).
+   // Suite order matches readme.md test suites section.
    var flowFilter = (window._vibeyTestFlow || 'ALL').toUpperCase ();
 
-   // Tag helper: prefix test name with flow number for filtering.
-   // Tests named "Step N:" or "Cleanup:" belong to flow 1.
-   // Tests named "F<n>-..." belong to flow <n>.
+   // Extract suite name from test tag: "Dialog: ..." → "dialog", "Docs: ..." → "docs", etc.
    var testFlow = function (name) {
-      if (/^F(\d+)/.test (name)) return RegExp.$1;
-      return '1';
+      var match = name.match (/^([^:]+):/);
+      if (match) {
+         var label = match [1].trim ();
+         label = label.replace (/\s+\d+$/, '');
+         return label.toLowerCase ();
+      }
+      return 'dialog';
    };
 
    var allTests = [
 
-      // --- Step 1: We start on the projects tab ---
-      ['Step 1: Navigate to projects tab', function (done) {
+      // =============================================
+      // *** PROJECTS ***
+      // =============================================
+
+      ['Project 1: Navigate to projects tab', function (done) {
          window.location.hash = '#/projects';
          done (SHORT_WAIT, POLL);
       }, function () {
@@ -278,8 +287,110 @@
          return true;
       }],
 
-      // --- Step 2: Create a new project ---
-      ['Step 2: Create project "' + TEST_PROJECT + '"', function (done) {
+      ['Project 2: Create project "' + PROJECT_FLOW + '" via prompt', function (done) {
+         mockPrompt (PROJECT_FLOW);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var tab = B.get ('tab');
+         if (tab !== 'docs') return 'Expected to land on "docs" tab after project creation, got "' + tab + '"';
+         var project = B.get ('currentProject');
+         if (project !== PROJECT_FLOW) return 'Expected currentProject to be "' + PROJECT_FLOW + '" but got "' + project + '"';
+         return true;
+      }],
+
+      ['Project 3: Projects list shows new project entry', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'projects') return 'Expected tab to be "projects" but got "' + tab + '"';
+         var item = findByText ('.file-name', PROJECT_FLOW);
+         if (! item) return 'Project entry not found in list for "' + PROJECT_FLOW + '"';
+         return true;
+      }],
+
+      ['Project 4: Idempotent create is server-only (client n/a)', function () {
+         return true;
+      }],
+
+      ['Project 5: Delete project via UI clears state', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', PROJECT_FLOW);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         if (B.get ('currentProject')) return 'Expected currentProject to be null after deletion';
+         if (B.get ('tab') !== 'projects') return 'Expected to return to projects tab after deletion';
+         return true;
+      }],
+
+      ['Project 6: Projects list no longer shows deleted project', function (done) {
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', PROJECT_FLOW);
+         if (item) return 'Deleted project still appears in list';
+         return true;
+      }],
+
+      ['Project 7: Navigating to deleted project returns to Projects', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (PROJECT_FLOW) + '/docs');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         if (B.get ('currentProject')) return 'Expected currentProject to remain null after navigating to deleted project';
+         if (B.get ('tab') !== 'projects') return 'Expected to remain on projects tab after navigating to deleted project';
+         return true;
+      }],
+
+      ['Project 8: Delete nonexistent project is server-only (client n/a)', function () {
+         return true;
+      }],
+
+      ['Project 9: Empty project name prompt is ignored', function (done) {
+         window._projListCount = (B.get ('projects') || []).length;
+         mockPrompt ('');
+         B.call ('create', 'project');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var count = (B.get ('projects') || []).length;
+         if (count !== window._projListCount) return 'Projects list length changed after empty prompt';
+         if (B.get ('currentProject')) return 'currentProject should remain null after empty prompt';
+         return true;
+      }],
+
+      ['Project 10: Whitespace-only project name prompt is ignored', function (done) {
+         window._projListCount = (B.get ('projects') || []).length;
+         mockPrompt ('   ');
+         B.call ('create', 'project');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var count = (B.get ('projects') || []).length;
+         if (count !== window._projListCount) return 'Projects list length changed after whitespace prompt';
+         if (B.get ('currentProject')) return 'currentProject should remain null after whitespace prompt';
+         return true;
+      }],
+
+      ['Project 11: Special name slug cases are server-only (client n/a)', function () {
+         return true;
+      }],
+
+      // --- Dialog: We start on the projects tab ---
+      ['Dialog 1: Navigate to projects tab', function (done) {
+         window.location.hash = '#/projects';
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'projects') return 'Expected tab to be "projects" but got "' + tab + '"';
+         var heading = findByText ('.editor-filename', 'Projects');
+         if (! heading) return 'Projects heading not found in DOM';
+         return true;
+      }],
+
+      // --- Dialog: Create a new project ---
+      ['Dialog 2: Create project "' + TEST_PROJECT + '"', function (done) {
          mockPrompt (TEST_PROJECT);
          B.call ('create', 'project');
          done (MEDIUM_WAIT, POLL);
@@ -292,8 +403,8 @@
          return true;
       }],
 
-      // --- Step 3: Switch to dialogs tab ---
-      ['Step 3: Navigate to dialogs tab', function (done) {
+      // --- Dialog: Switch to dialogs tab ---
+      ['Dialog 3: Navigate to dialogs tab', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (TEST_PROJECT) + '/dialogs');
          done (SHORT_WAIT, POLL);
       }, function () {
@@ -302,8 +413,8 @@
          return true;
       }],
 
-      // --- Step 4: Create a new dialog ---
-      ['Step 4: Create dialog "' + TEST_DIALOG + '"', function (done) {
+      // --- Dialog: Create a new dialog ---
+      ['Dialog 4: Create dialog "' + TEST_DIALOG + '"', function (done) {
          mockPrompt (TEST_DIALOG);
          B.call ('create', 'dialog');
          done (MEDIUM_WAIT, POLL);
@@ -317,8 +428,8 @@
          return true;
       }],
 
-      // --- Step 5: Check dialog appears in sidebar with icon and full name ---
-      ['Step 5: Dialog visible in sidebar with status icon and full name', function () {
+      // --- Dialog: Check dialog appears in sidebar with icon and full name ---
+      ['Dialog 5: Dialog visible in sidebar with status icon and full name', function () {
          var sidebar = document.querySelector ('.file-list');
          if (! sidebar) return 'Sidebar not found';
          var item = findByText ('.dialog-name', TEST_DIALOG);
@@ -332,8 +443,8 @@
          return true;
       }],
 
-      // --- Step 6: Check gpt-5.3-codex is selected ---
-      ['Step 6: gpt-5.3-codex model is selected', function () {
+      // --- Dialog: Check gpt-5.3-codex is selected ---
+      ['Dialog 6: gpt-5.3-codex model is selected', function () {
          var provider = B.get ('chatProvider');
          if (provider !== 'openai') return 'Expected provider to be "openai" but got "' + provider + '"';
          var model = B.get ('chatModel');
@@ -347,8 +458,8 @@
          return true;
       }],
 
-      // --- Step 7: Write a test file into the project for the agent to read ---
-      ['Step 7: Write test-sample.txt for agent to read', function (done) {
+      // --- Dialog: Write a test file into the project for the agent to read ---
+      ['Dialog 7: Write test-sample.txt for agent to read', function (done) {
          var project = TEST_PROJECT;
          var content = '# Sample File\n\nThis is a test file for vibey.\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n';
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
@@ -361,8 +472,8 @@
          return true;
       }],
 
-      // --- Step 8a: Send message and verify dialog turns purple (active) while streaming ---
-      ['Step 8a: Dialog shows purple (active) indicator while streaming', function (done) {
+      // --- Dialog: Send message and verify dialog turns purple (active) while streaming ---
+      ['Dialog 8: Dialog shows purple (active) indicator while streaming', function (done) {
          // Remember the filename before sending so we can verify it changed
          window._f1PreSendFile = B.get ('currentFile') ? B.get ('currentFile').name : null;
          B.call ('set', 'chatInput', 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, and summarize what it is about.');
@@ -410,8 +521,8 @@
          return 'Unexpected state';
       }],
 
-      // --- Step 8b: Verify response has tool results (streaming complete) ---
-      ['Step 8b: Dialog response has tool results after streaming', function () {
+      // --- Dialog: Verify response has tool results (streaming complete) ---
+      ['Dialog 9: Dialog response has tool results after streaming', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'Waiting for file to reload...';
 
@@ -426,8 +537,8 @@
          return true;
       }],
 
-      // --- Step 9: Verify response shows gauges (time + duration + compact cumulative tokens + context %) ---
-      ['Step 9: Response shows gauges with local time, compact in/out tokens, and context %', function () {
+      // --- Dialog: Verify response shows gauges (time + duration + compact cumulative tokens + context %) ---
+      ['Dialog 10: Response shows gauges with local time, compact in/out tokens, and context %', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No current file';
          var content = file.content;
@@ -464,8 +575,8 @@
          return true;
       }],
 
-      // --- Step 10: Check tool result blocks present in dialog ---
-      ['Step 10: Tool result blocks present with file content', function () {
+      // --- Dialog: Check tool result blocks present in dialog ---
+      ['Dialog 11: Tool result blocks present with file content', function () {
          var file = B.get ('currentFile');
          if (! file) return 'No current file';
 
@@ -481,8 +592,8 @@
          return true;
       }],
 
-      // --- Step 11: Ask to create dummy.js (write_file auto-executes) ---
-      ['Step 11: Ask LLM to create dummy.js with console.log', function (done) {
+      // --- Dialog: Ask to create dummy.js (write_file auto-executes) ---
+      ['Dialog 12: Ask LLM to create dummy.js with console.log', function (done) {
          B.call ('set', 'chatInput', 'Please create a file called dummy.js with the content: console.log("hello from dummy"); Use the write_file tool for this.');
          B.call ('send', 'message');
          done (LONG_WAIT, POLL);
@@ -496,8 +607,8 @@
          return true;
       }],
 
-      // --- Step 12: Verify write_file result shown with success ---
-      ['Step 12: Write result shown with success in chat view', function () {
+      // --- Dialog: Verify write_file result shown with success ---
+      ['Dialog 13: Write result shown with success in chat view', function () {
          var file = B.get ('currentFile');
          if (! file || ! file.content) return 'No current file';
 
@@ -515,8 +626,8 @@
          return true;
       }],
 
-      // --- Step 13: Verify dummy.js was actually created ---
-      ['Step 13: Verify dummy.js exists with console.log', function (done) {
+      // --- Dialog: Verify dummy.js was actually created ---
+      ['Dialog 14: Verify dummy.js exists with console.log', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (TEST_PROJECT) + '/file/dummy.js', {}, '', function (error, rs) {
             if (error) {
                window._testDummyContent = null;
@@ -536,8 +647,8 @@
          return true;
       }],
 
-      // --- Step 14: Verify context bar is visible above chat input ---
-      ['Step 14: Context bar shows percentage above chat input', function () {
+      // --- Dialog: Verify context bar is visible above chat input ---
+      ['Dialog 15: Context bar shows percentage above chat input', function () {
          var contextWindow = B.get ('contextWindow');
          if (! contextWindow) return 'contextWindow state not set after LLM response';
          if (type (contextWindow.percent) !== 'integer' && type (contextWindow.percent) !== 'float') return 'contextWindow.percent missing or not a number';
@@ -553,8 +664,8 @@
          return true;
       }],
 
-      // --- Step 15: Verify hasAnyProvider guard ---
-      ['Step 15: hasAnyProvider returns true when keys are configured', function () {
+      // --- Dialog: Verify hasAnyProvider guard ---
+      ['Dialog 16: hasAnyProvider returns true when keys are configured', function () {
          var settings = B.get ('settings') || {};
          // The test environment should have at least one provider configured
          var hasProvider = (settings.openaiKey || settings.openaiOAuthToken || settings.claudeKey || settings.claudeOAuthToken) ? true : false;
@@ -568,18 +679,18 @@
          return true;
       }],
 
-      // --- Cleanup Flow #1 ---
-      ['Cleanup: restore prompt', function () {
+      // --- Dialog: Cleanup ---
+      ['Dialog 17: Cleanup restore prompt', function () {
          restorePrompt ();
          return true;
       }],
 
       // =============================================
-      // *** FLOW #2: Docs editing ***
+      // *** DOCS ***
       // =============================================
 
-      // --- F2 Step 1: Create a new project for Flow #2 ---
-      ['F2-1: Create project for docs editing', function (done) {
+      // --- Docs: Create a new project for Flow #2 ---
+      ['Docs 1: Create project for docs editing', function (done) {
          window._f2Project = 'test-flow2-' + testTimestamp ();
          mockPrompt (window._f2Project);
          B.call ('create', 'project');
@@ -593,8 +704,8 @@
          return true;
       }],
 
-      // --- F2 Step 2: Create doc/main.md (shown as main.md) ---
-      ['F2-2: Create main.md', function (done) {
+      // --- Docs: Create doc/main.md (shown as main.md) ---
+      ['Docs 2: Create main.md', function (done) {
          mockPrompt ('main.md');
          B.call ('create', 'file');
          done (MEDIUM_WAIT, POLL);
@@ -606,8 +717,8 @@
          return true;
       }],
 
-      // --- F2 Step 3: main.md appears in sidebar as "main.md" ---
-      ['F2-3: main.md visible in sidebar', function () {
+      // --- Docs: main.md appears in sidebar as "main.md" ---
+      ['Docs 3: main.md visible in sidebar', function () {
          var sidebar = document.querySelector ('.file-list');
          if (! sidebar) return 'Sidebar not found';
          var item = findByText ('.file-name', 'main.md');
@@ -615,8 +726,8 @@
          return true;
       }],
 
-      // --- F2 Step 4: Click main.md, editor opens with content ---
-      ['F2-4: Click main.md, editor shows content', function () {
+      // --- Docs: Click main.md, editor opens with content ---
+      ['Docs 4: Click main.md, editor shows content', function () {
          var file = B.get ('currentFile');
          if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
          var preview = document.querySelector ('.editor-preview');
@@ -625,8 +736,8 @@
          return true;
       }],
 
-      // --- F2 Step 5: Edit content, verify dirty state ---
-      ['F2-5: Edit content and verify dirty indicator', function (done) {
+      // --- Docs: Edit content, verify dirty state ---
+      ['Docs 5: Edit content and verify dirty indicator', function (done) {
          var newContent = '# Main\n\nUpdated content for testing.\n';
          B.call ('set', ['currentFile', 'content'], newContent);
          done (SHORT_WAIT, POLL);
@@ -640,8 +751,8 @@
          return true;
       }],
 
-      // --- F2 Step 6: Save changes ---
-      ['F2-6: Save changes', function (done) {
+      // --- Docs: Save changes ---
+      ['Docs 6: Save changes', function (done) {
          B.call ('save', 'file');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -653,8 +764,8 @@
          return true;
       }],
 
-      // --- F2 Step 7: Verify saved content persisted on server ---
-      ['F2-7: Reload file and verify persisted content', function (done) {
+      // --- Docs: Verify saved content persisted on server ---
+      ['Docs 7: Reload file and verify persisted content', function (done) {
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -665,8 +776,8 @@
          return true;
       }],
 
-      // --- F2 Step 8: Create a second doc so we can test navigating away ---
-      ['F2-8: Create second doc', function (done) {
+      // --- Docs: Create a second doc so we can test navigating away ---
+      ['Docs 8: Create second doc', function (done) {
          mockPrompt ('doc/notes.md');
          B.call ('create', 'file');
          done (MEDIUM_WAIT, POLL);
@@ -677,21 +788,33 @@
          return true;
       }],
 
-      // --- F2 Step 9: Go back to main.md and make it dirty ---
-      ['F2-9: Edit main.md and mark it dirty', function (done) {
+      ['Docs 9: Sidebar lists main.md and notes.md', function () {
+         var mainItem = findByText ('.file-name', 'main.md');
+         if (! mainItem) return 'main.md not found in sidebar';
+         var notesItem = findByText ('.file-name', 'notes.md');
+         if (! notesItem) return 'notes.md not found in sidebar';
+         return true;
+      }],
+
+      // --- Docs: Go back to main.md and make it dirty ---
+      ['Docs 10: Edit main.md and mark it dirty', function (done) {
+         window._f2DirtySet = false;
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
-         B.call ('set', ['currentFile', 'content'], file.original + '\nExtra unsaved line.\n');
+         if (! file || file.name !== 'doc/main.md') return 'Waiting for doc/main.md...';
+         if (! window._f2DirtySet) {
+            B.call ('set', ['currentFile', 'content'], file.original + '\nExtra unsaved line.\n');
+            window._f2DirtySet = true;
+         }
          var dirtyFile = B.get ('currentFile');
-         if (dirtyFile.content === dirtyFile.original) return 'File should be dirty';
+         if (dirtyFile.content === dirtyFile.original) return 'Waiting for dirty state...';
          return true;
       }],
 
-      // --- F2 Step 10: Try to leave dirty doc and choose save ---
-      ['F2-10: Navigate away from dirty doc triggers save via confirm', function (done) {
+      // --- Docs: Try to leave dirty doc and choose save ---
+      ['Docs 11: Navigate away from dirty doc triggers save via confirm', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {
             window.confirm = originalConfirm;
@@ -706,8 +829,8 @@
          return true;
       }],
 
-      // --- F2 Step 11: Verify save persisted ---
-      ['F2-11: Verify main.md has the extra line saved', function (done) {
+      // --- Docs: Verify save persisted ---
+      ['Docs 12: Verify main.md has the extra line saved', function (done) {
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -717,8 +840,8 @@
          return true;
       }],
 
-      // --- F2 Step 12: Edit again and discard changes ---
-      ['F2-12: Edit main.md, then discard changes', function (done) {
+      // --- Docs: Edit again and discard changes ---
+      ['Docs 13: Edit main.md, then discard changes', function (done) {
          var file = B.get ('currentFile');
          B.call ('set', ['currentFile', 'content'], file.original + '\nThis will be discarded.\n');
          var callCount = 0;
@@ -737,13 +860,13 @@
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
-         if (! file) return 'No currentFile';
-         if (file.name !== 'doc/notes.md') return 'Expected doc/notes.md after discard, got ' + file.name;
+         if (! file) return 'Waiting for currentFile...';
+         if (file.name !== 'doc/notes.md') return 'Waiting for notes.md...';
          return true;
       }],
 
-      // --- F2 Step 13: Verify discarded changes were not persisted ---
-      ['F2-13: Verify discarded changes not persisted', function (done) {
+      // --- Docs: Verify discarded changes were not persisted ---
+      ['Docs 14: Verify discarded changes not persisted', function (done) {
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -753,78 +876,530 @@
          return true;
       }],
 
-      ['F2-Cleanup: restore prompt', function () {
+      ['Docs 15: Delete notes.md via UI', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'file', 'doc/notes.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var notesItem = findByText ('.file-name', 'notes.md');
+         if (notesItem) return 'notes.md still in sidebar after deletion';
+         var mainItem = findByText ('.file-name', 'main.md');
+         if (! mainItem) return 'main.md missing from sidebar after notes deletion';
+         return true;
+      }],
+
+      ['Docs 16: Loading deleted notes.md clears selection', function (done) {
+         B.call ('load', 'file', 'doc/notes.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (file) return 'Expected no currentFile after loading deleted notes.md';
+         return true;
+      }],
+
+      ['Docs 17: Create file with spaces in name', function (done) {
+         mockPrompt ('my notes.md');
+         B.call ('create', 'file');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/my notes.md') return 'Expected doc/my notes.md as current file';
+         if (file.content.indexOf ('# my notes') === -1 && file.content.indexOf ('# My notes') === -1) return 'Expected initial title for my notes.md';
+         var item = findByText ('.file-name', 'my notes.md');
+         if (! item) return 'my notes.md not found in sidebar';
+         return true;
+      }],
+
+      ['Docs 18: Delete file with spaces in name', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'file', 'doc/my notes.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'my notes.md');
+         if (item) return 'my notes.md still in sidebar after deletion';
+         return true;
+      }],
+
+      ['Docs 19: Create file with accented name', function (done) {
+         mockPrompt ('café.md');
+         B.call ('create', 'file');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/café.md') return 'Expected doc/café.md as current file';
+         if (file.content.indexOf ('# café') === -1 && file.content.indexOf ('# Café') === -1) return 'Expected initial title for café.md';
+         var item = findByText ('.file-name', 'café.md');
+         if (! item) return 'café.md not found in sidebar';
+         return true;
+      }],
+
+      ['Docs 20: Delete file with accented name', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'file', 'doc/café.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'café.md');
+         if (item) return 'café.md still in sidebar after deletion';
+         return true;
+      }],
+
+      ['Docs 21: Create file with non-Latin name', function (done) {
+         mockPrompt ('日本語.md');
+         B.call ('create', 'file');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/日本語.md') return 'Expected doc/日本語.md as current file';
+         if (file.content.indexOf ('# 日本語') === -1) return 'Expected initial title for 日本語.md';
+         var item = findByText ('.file-name', '日本語.md');
+         if (! item) return '日本語.md not found in sidebar';
+         return true;
+      }],
+
+      ['Docs 22: Delete file with non-Latin name', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'file', 'doc/日本語.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', '日本語.md');
+         if (item) return '日本語.md still in sidebar after deletion';
+         return true;
+      }],
+
+      ['Docs 23: Create nested doc (doc/nested/plan.md)', function (done) {
+         mockPrompt ('nested/plan.md');
+         B.call ('create', 'file');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/nested/plan.md') return 'Expected doc/nested/plan.md as current file';
+         var item = findByText ('.file-name', 'nested/plan.md');
+         if (! item) return 'nested/plan.md not found in sidebar';
+         return true;
+      }],
+
+      ['Docs 24: Read nested doc round-trip', function (done) {
+         B.call ('load', 'file', 'doc/nested/plan.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/nested/plan.md') return 'doc/nested/plan.md not loaded';
+         if (file.content.indexOf ('# plan') === -1 && file.content.indexOf ('# Plan') === -1) return 'Unexpected content in nested/plan.md';
+         return true;
+      }],
+
+      ['Docs 25: Nested doc listed in files', function () {
+         var item = findByText ('.file-name', 'nested/plan.md');
+         if (! item) return 'nested/plan.md not found in sidebar list';
+         return true;
+      }],
+
+      ['Docs 26: Delete nested doc', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'file', 'doc/nested/plan.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'nested/plan.md');
+         if (item) return 'nested/plan.md still in sidebar after deletion';
+         return true;
+      }],
+
+      ['Docs 27: Nested doc gone from list', function () {
+         var item = findByText ('.file-name', 'nested/plan.md');
+         if (item) return 'nested/plan.md still listed after deletion';
+         return true;
+      }],
+
+      ['Docs 28: Delete docs project via UI', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f2Project);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         if (B.get ('currentProject')) return 'Expected currentProject to be null after docs project deletion';
+         if (B.get ('tab') !== 'projects') return 'Expected to return to projects tab after deletion';
+         return true;
+      }],
+
+      ['Docs 29: Projects list no longer shows deleted docs project', function (done) {
+         B.call ('load', 'projects');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', window._f2Project);
+         if (item) return 'Deleted docs project still appears in projects list';
+         return true;
+      }],
+
+      ['Docs 30: Cleanup restore prompt', function () {
          restorePrompt ();
          return true;
       }],
 
       // =============================================
-      // *** FLOW #3: Delete project stops agents and removes folder ***
+      // *** UPLOADS ***
       // =============================================
 
-      ['F3-1: Create project', function (done) {
-         window._f3Project = 'test-flow3-' + testTimestamp ();
-         mockPrompt (window._f3Project);
+      ['Uploads 1: Create project for uploads', function (done) {
+         window._f3uProject = 'test-flow3-' + testTimestamp ();
+         mockPrompt (window._f3uProject);
          B.call ('create', 'project');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
-         return B.get ('currentProject') === window._f3Project || 'Failed to create flow #3 project';
+         return B.get ('currentProject') === window._f3uProject || 'Failed to create flow #3 project';
       }],
 
-      ['F3-2: Write doc/main.md', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/file/doc/main.md', {}, {content: '# Flow 3 Test Project\n\n'}, function () {
+      ['Uploads 2: Upload image via API', function (done) {
+         var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'pixel.png',
+            content: dataUrl,
+            contentType: 'image/png'
+         }, function (error, rs) {
+            window._f3uUploadImage = rs && rs.body;
+            window._f3uUploadImageError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3uUploadImageError) return 'Image upload failed: ' + window._f3uUploadImageError;
+         var entry = window._f3uUploadImage || {};
+         if (entry.name !== 'pixel.png') return 'Upload response missing pixel.png';
+         if (! entry.url) return 'Upload response missing url';
+         return true;
+      }],
+
+      ['Uploads 3: Uploads list includes image metadata', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/uploads', {}, '', function (error, rs) {
+            window._f3uUploads = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var uploads = window._f3uUploads;
+         if (type (uploads) !== 'array') return 'Uploads list missing or not array';
+         var image = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'pixel.png') return item; });
+         if (! image) return 'pixel.png not found in uploads list';
+         if (! image.size || image.size <= 0) return 'pixel.png size invalid';
+         if (! image.contentType || image.contentType.indexOf ('image/') !== 0) return 'pixel.png contentType invalid: ' + image.contentType;
+         window._f3uUploadImage = image;
+         return true;
+      }],
+
+      ['Uploads 4: Fetch image upload', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/pixel.png', {}, '', function (error, rs) {
+            window._f3uUploadFetch = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f3uUploadFetch || {};
+         if (result.error) return 'Upload fetch failed';
+         var rs = result.rs || {};
+         var status = rs.xhr ? rs.xhr.status : null;
+         if (status !== 200) return 'Expected status 200 for pixel.png, got ' + status;
+         var body = rs.body || '';
+         if (! body || body.length === 0) return 'Upload fetch returned empty body';
+         var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
+         if (contentType && contentType.indexOf ('image/png') === -1) return 'Expected image/png content-type, got ' + contentType;
+         return true;
+      }],
+
+      ['Uploads 5: Upload text file via API', function (done) {
+         var text = 'Hello uploads.';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'notes.txt',
+            content: btoa (text),
+            contentType: 'text/plain'
+         }, function (error, rs) {
+            window._f3uUploadText = rs && rs.body;
+            window._f3uUploadTextError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3uUploadTextError) return 'Text upload failed: ' + window._f3uUploadTextError;
+         var entry = window._f3uUploadText || {};
+         if (entry.name !== 'notes.txt') return 'Upload response missing notes.txt';
+         return true;
+      }],
+
+      ['Uploads 6: Upload file with space in name', function (done) {
+         var text = 'Hello spaced uploads.';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'space name.txt',
+            content: btoa (text),
+            contentType: 'text/plain'
+         }, function (error, rs) {
+            window._f3uUploadSpace = rs && rs.body;
+            window._f3uUploadSpaceError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3uUploadSpaceError) return 'Space-name upload failed: ' + window._f3uUploadSpaceError;
+         var entry = window._f3uUploadSpace || {};
+         if (entry.name !== 'space name.txt') return 'Upload response missing space name.txt';
+         return true;
+      }],
+
+      ['Uploads 7: Upload nested/evil.txt (subdir)', function (done) {
+         var text = 'Hello nested upload.';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'nested/evil.txt',
+            content: btoa (text),
+            contentType: 'text/plain'
+         }, function (error, rs) {
+            window._f3uUploadNested = rs && rs.body;
+            window._f3uUploadNestedError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3uUploadNestedError) return 'Nested upload failed: ' + window._f3uUploadNestedError;
+         var entry = window._f3uUploadNested || {};
+         if (entry.name !== 'nested/evil.txt') return 'Upload response missing nested/evil.txt';
+         return true;
+      }],
+
+      ['Uploads 8: Uploads list contains all files', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/uploads', {}, '', function (error, rs) {
+            window._f3uUploads = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var uploads = window._f3uUploads;
+         if (type (uploads) !== 'array' || uploads.length < 3) return 'Expected at least 3 uploads';
+         var text = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'notes.txt') return item; });
+         if (! text) return 'notes.txt not found in uploads list';
+         if (! text.contentType || text.contentType.indexOf ('text/plain') === -1) return 'notes.txt contentType invalid';
+         var spaced = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'space name.txt') return item; });
+         if (! spaced) return 'space name.txt not found in uploads list';
+         var nested = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'nested/evil.txt') return item; });
+         if (! nested) return 'nested/evil.txt not found in uploads list';
+         window._f3uUploadText = text;
+         window._f3uUploadSpace = spaced;
+         window._f3uUploadNested = nested;
+         return true;
+      }],
+
+      ['Uploads 9: Fetch notes.txt upload', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/notes.txt', {}, '', function (error, rs) {
+            window._f3uNotesFetch = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f3uNotesFetch || {};
+         if (result.error) return 'notes.txt fetch failed';
+         var rs = result.rs || {};
+         var status = rs.xhr ? rs.xhr.status : null;
+         if (status !== 200) return 'Expected status 200 for notes.txt, got ' + status;
+         var body = rs.body || '';
+         if (body.indexOf ('Hello uploads.') === -1) return 'notes.txt content mismatch';
+         var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
+         if (contentType && contentType.indexOf ('text/plain') === -1) return 'Expected text/plain content-type, got ' + contentType;
+         return true;
+      }],
+
+      ['Uploads 10: Fetch spaced filename upload', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/' + encodeURIComponent ('space name.txt'), {}, '', function (error, rs) {
+            window._f3uSpaceFetch = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f3uSpaceFetch || {};
+         if (result.error) return 'space name.txt fetch failed';
+         var rs = result.rs || {};
+         var status = rs.xhr ? rs.xhr.status : null;
+         if (status !== 200) return 'Expected status 200 for space name.txt, got ' + status;
+         var body = rs.body || '';
+         if (body.indexOf ('Hello spaced uploads.') === -1) return 'space name.txt content mismatch';
+         var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
+         if (contentType && contentType.indexOf ('text/plain') === -1) return 'Expected text/plain content-type, got ' + contentType;
+         return true;
+      }],
+
+      ['Uploads 11: Navigate to docs view', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f3uProject) + '/docs');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'docs') return 'Expected docs tab for uploads';
+         return true;
+      }],
+
+      ['Uploads 12: Uploads section visible with items', function () {
+         var section = document.querySelector ('.upload-section');
+         if (! section) return 'Uploads section not found in sidebar';
+         var item = findByText ('.upload-item', 'pixel.png');
+         if (! item) return 'pixel.png not listed in uploads sidebar';
+         return true;
+      }],
+
+      ['Uploads 13: Select image upload shows preview', function (done) {
+         B.call ('select', 'upload', window._f3uUploadImage);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var preview = document.querySelector ('.upload-preview img');
+         if (! preview) return 'Image preview not shown';
+         return true;
+      }],
+
+      ['Uploads 14: Select text upload shows metadata', function (done) {
+         B.call ('select', 'upload', window._f3uUploadText);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var meta = document.querySelector ('.upload-meta');
+         if (! meta) return 'Upload metadata panel not shown for text file';
+         if (meta.textContent.indexOf ('Type:') === -1) return 'Metadata panel missing Type line';
+         return true;
+      }],
+
+      ['Uploads 15: Select spaced upload shows metadata', function (done) {
+         B.call ('select', 'upload', window._f3uUploadSpace);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var meta = document.querySelector ('.upload-meta');
+         if (! meta) return 'Upload metadata panel not shown for spaced file';
+         if (meta.textContent.indexOf ('space name.txt') === -1) return 'Metadata panel missing spaced filename';
+         return true;
+      }],
+
+      ['Uploads 16: Delete uploads project', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f3uProject);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         if (B.get ('currentProject')) return 'Expected currentProject to be null after uploads project deletion';
+         if (B.get ('tab') !== 'projects') return 'Expected to return to projects tab after deletion';
+         return true;
+      }],
+
+      ['Uploads 17: Projects list no longer shows deleted project', function (done) {
+         B.call ('load', 'projects');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', window._f3uProject);
+         if (item) return 'Deleted uploads project still appears in projects list';
+         return true;
+      }],
+
+      // =============================================
+      // *** DIALOG (SAFETY) ***
+      // =============================================
+
+      ['Dialog (safety) 1: Create project', function (done) {
+         window._f1sProject = 'test-flow1-safety-' + testTimestamp ();
+         mockPrompt (window._f1sProject);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         return B.get ('currentProject') === window._f1sProject || 'Failed to create flow #1 safety project';
+      }],
+
+      ['Dialog (safety) 2: Write doc/main.md', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1sProject) + '/file/doc/main.md', {}, {content: '# Flow 1 Safety Test Project\n\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['F3-3: Create dialogs A and B', function (done) {
+      ['Dialog (safety) 3: Create dialogs A and B', function (done) {
          var pending = 2;
          var finish = function () {if (--pending === 0) done (MEDIUM_WAIT, POLL);};
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, function (error, rs) {
-            window._f3DialogA = rs && rs.body && rs.body.dialogId;
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1sProject) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, function (error, rs) {
+            window._f1sDialogA = rs && rs.body && rs.body.dialogId;
             finish ();
          });
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3Project) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
-            window._f3DialogB = rs && rs.body && rs.body.dialogId;
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1sProject) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
+            window._f1sDialogB = rs && rs.body && rs.body.dialogId;
             finish ();
          });
       }, function () {
-         if (! window._f3DialogA || ! window._f3DialogB) return 'Missing dialog ids for A/B';
+         if (! window._f1sDialogA || ! window._f1sDialogB) return 'Missing dialog ids for A/B';
          return true;
       }],
 
-      ['F3-4: Fire both dialogs (non-blocking)', function (done) {
-         var project = encodeURIComponent (window._f3Project);
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f3DialogA, prompt: 'Write a 2000 word essay about the history of computing. Take your time and be thorough.'})}).catch (function () {});
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f3DialogB, prompt: 'Write a 2000 word essay about the history of mathematics. Take your time and be thorough.'})}).catch (function () {});
+      ['Dialog (safety) 4: Fire both dialogs (non-blocking)', function (done) {
+         var project = encodeURIComponent (window._f1sProject);
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f1sDialogA, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of computing.'})}).catch (function () {});
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f1sDialogB, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of mathematics.'})}).catch (function () {});
          done (SHORT_WAIT, POLL);
       }, function () {return true;}],
 
-      ['F3-5: Both dialogs are active', function (done) {
+      ['Dialog (safety) 5: Both dialogs are active', function (done) {
          done (LONG_WAIT, POLL);
       }, function () {
-         if (! window._f3StatusRequested) {
-            window._f3StatusRequested = true;
-            c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
-               window._f3StatusRequested = false;
+         if (! window._f1sStatusRequested) {
+            window._f1sStatusRequested = true;
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/dialogs', {}, '', function (error, rs) {
+               window._f1sStatusRequested = false;
                if (error) return;
-               window._f3Dialogs = rs.body || [];
+               window._f1sDialogs = rs.body || [];
             });
             return 'Polling dialog statuses...';
          }
-         var activeCount = dale.fil (window._f3Dialogs || [], undefined, function (d) {
+         var activeCount = dale.fil (window._f1sDialogs || [], undefined, function (d) {
             if (d.status === 'active') return d;
          }).length;
          if (activeCount >= 2) return true;
-         window._f3Dialogs = null;
+         window._f1sDialogs = null;
          return 'Waiting for both dialogs to become active...';
       }],
 
-      ['F3-6: Delete project with active agents', function (done) {
+      ['Dialog (safety) 6: Continuing active dialog is rejected (409)', function (done) {
+         var project = encodeURIComponent (window._f1sProject);
+         fetch ('project/' + project + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({dialogId: window._f1sDialogA, prompt: 'This should be rejected while active'})
+         }).then (function (res) {
+            window._f1sRejectStatus = res.status;
+            return res.text ();
+         }).then (function (text) {
+            window._f1sRejectBody = text;
+            done (SHORT_WAIT, POLL);
+         }).catch (function (e) {
+            window._f1sRejectStatus = -1;
+            window._f1sRejectBody = '' + e;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f1sRejectStatus !== 409) return 'Expected 409 when continuing active dialog, got ' + window._f1sRejectStatus;
+         return true;
+      }],
+
+      ['Dialog (safety) 7: Stop active dialog still works', function (done) {
+         var project = encodeURIComponent (window._f1sProject);
+         fetch ('project/' + project + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({dialogId: window._f1sDialogA, status: 'done'})
+         }).then (function (res) {
+            window._f1sStopStatus = res.status;
+            return res.text ();
+         }).then (function (text) {
+            try {window._f1sStopBody = JSON.parse (text);} catch (e) {window._f1sStopBody = null;}
+            done (SHORT_WAIT, POLL);
+         }).catch (function () {
+            window._f1sStopStatus = -1;
+            window._f1sStopBody = null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f1sStopStatus !== 200) return 'Expected 200 when stopping active dialog, got ' + window._f1sStopStatus;
+         if (! window._f1sStopBody || window._f1sStopBody.status !== 'done') return 'Expected stop response with status=done';
+         return true;
+      }],
+
+      ['Dialog (safety) 8: Delete project with active agents', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'project', window._f3Project);
+         B.call ('delete', 'project', window._f1sProject);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          if (B.get ('currentProject')) return 'Expected currentProject to be null after deletion';
@@ -832,58 +1407,58 @@
          return true;
       }],
 
-      ['F3-7: Dialogs endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error) {
-            window._f3Dialogs404 = error && error.status;
+      ['Dialog (safety) 9: Dialogs endpoint returns 404', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/dialogs', {}, '', function (error) {
+            window._f1sDialogs404 = error && error.status;
             done (SHORT_WAIT, POLL);
          });
       }, function () {
-         return window._f3Dialogs404 === 404 || 'Expected dialogs endpoint 404';
+         return window._f1sDialogs404 === 404 || 'Expected dialogs endpoint 404';
       }],
 
-      ['F3-8: Files endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/files', {}, '', function (error) {
-            window._f3Files404 = error && error.status;
+      ['Dialog (safety) 10: Files endpoint returns 404', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/files', {}, '', function (error) {
+            window._f1sFiles404 = error && error.status;
             done (SHORT_WAIT, POLL);
          });
       }, function () {
-         return window._f3Files404 === 404 || 'Expected files endpoint 404';
+         return window._f1sFiles404 === 404 || 'Expected files endpoint 404';
       }],
 
-      ['F3-9: Re-create same project name', function (done) {
-         c.ajax ('post', 'projects', {}, {name: window._f3Project}, function () {done (SHORT_WAIT, POLL);});
+      ['Dialog (safety) 11: Re-create same project name', function (done) {
+         c.ajax ('post', 'projects', {}, {name: window._f1sProject}, function () {done (SHORT_WAIT, POLL);});
       }, function () {return true;}],
 
-      ['F3-10: Re-created project has no dialogs and only default doc/main.md', function (done) {
+      ['Dialog (safety) 12: Re-created project has no dialogs and only default doc/main.md', function (done) {
          var pending = 2;
          var finish = function () {if (--pending === 0) done (SHORT_WAIT, POLL);};
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/dialogs', {}, '', function (error, rs) {
-            window._f3DialogsAfter = error ? null : (rs.body || []);
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/dialogs', {}, '', function (error, rs) {
+            window._f1sDialogsAfter = error ? null : (rs.body || []);
             finish ();
          });
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3Project) + '/files', {}, '', function (error, rs) {
-            window._f3FilesAfter = error ? null : (rs.body || []);
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1sProject) + '/files', {}, '', function (error, rs) {
+            window._f1sFilesAfter = error ? null : (rs.body || []);
             finish ();
          });
       }, function () {
-         if (type (window._f3DialogsAfter) !== 'array' || window._f3DialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
-         if (type (window._f3FilesAfter) !== 'array') return 'Expected files array after re-create';
-         var unexpected = dale.fil (window._f3FilesAfter, undefined, function (name) {
+         if (type (window._f1sDialogsAfter) !== 'array' || window._f1sDialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
+         if (type (window._f1sFilesAfter) !== 'array') return 'Expected files array after re-create';
+         var unexpected = dale.fil (window._f1sFilesAfter, undefined, function (name) {
             if (name !== 'doc/main.md') return name;
          });
          if (unexpected.length) return 'Unexpected files after re-create: ' + unexpected.join (', ');
          return true;
       }],
 
-      ['F3-11: Delete re-created project', function (done) {
-         c.ajax ('delete', 'projects/' + encodeURIComponent (window._f3Project), {}, '', function () {done (SHORT_WAIT, POLL);});
+      ['Dialog (safety) 13: Delete re-created project', function (done) {
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._f1sProject), {}, '', function () {done (SHORT_WAIT, POLL);});
       }, function () {return true;}],
 
       // =============================================
-      // *** FLOW #4: Static tictactoe — React via CDN (no backend) ***
+      // *** STATIC APP ***
       // =============================================
 
-      ['F4-1: Create project', function (done) {
+      ['Static 1: Create project', function (done) {
          window._f4Project = 'test-flow4-' + testTimestamp ();
          mockPrompt (window._f4Project);
          B.call ('create', 'project');
@@ -893,7 +1468,7 @@
          return B.get ('currentProject') === window._f4Project || 'Failed to create flow #4 project';
       }],
 
-      ['F4-2: Write doc/main.md', function (done) {
+      ['Static 2: Write doc/main.md', function (done) {
          var docMain = [
             '# Tictactoe Project',
             '',
@@ -914,7 +1489,7 @@
          });
       }, function () {return true;}],
 
-      ['F4-3: Create dialog draft (orchestrator)', function (done) {
+      ['Static 3: Create dialog draft (orchestrator)', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f4Project) + '/dialogs');
          mockPrompt ('orchestrator');
          B.call ('create', 'dialog');
@@ -928,7 +1503,7 @@
          return true;
       }],
 
-      ['F4-4: Fire "please start" (non-blocking)', function (done) {
+      ['Static 4: Fire "please start" (non-blocking)', function (done) {
          var file = B.get ('currentFile');
          var parsed = file ? parseDialogFilename (file.name) : null;
          if (! parsed || ! parsed.dialogId) {
@@ -951,7 +1526,7 @@
          return window._f4FireError ? window._f4FireError : true;
       }],
 
-      ['F4-5: Poll until static page serves', function (done) {
+      ['Static 5: Poll until static page serves', function (done) {
          window._f4StaticPollError = null;
          var started = Date.now ();
          var attempt = function () {
@@ -960,7 +1535,7 @@
                window._f4StaticPollError = 'Timed out after 5 minutes waiting for static page';
                return done (SHORT_WAIT, POLL);
             }
-            console.log ('[F4 poll] waiting for /static/ ... ' + Math.round (elapsed / 1000) + 's');
+            console.log ('[Static poll] waiting for /static/ ... ' + Math.round (elapsed / 1000) + 's');
             c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/static/', {}, '', function (error, rs) {
                var code = rs && rs.xhr ? rs.xhr.status : null;
                if (! error && code === 200) {
@@ -976,7 +1551,7 @@
          return window._f4StaticPollError ? window._f4StaticPollError : true;
       }],
 
-      ['F4-6: index.html has React + app.js', function (done) {
+      ['Static 6: index.html has React + app.js', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f4Project) + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat index.html'}}, function (error, rs) {
             if (error || ! rs.body || ! rs.body.success) window._f4IndexError = 'cat index.html failed';
             else {
@@ -991,7 +1566,7 @@
          return window._f4IndexError ? window._f4IndexError : true;
       }],
 
-      ['F4-7: app.js has tictactoe logic', function (done) {
+      ['Static 7: app.js has tictactoe logic', function (done) {
          window._f4AppError = null;
          var started = Date.now ();
          var attempt = function () {
@@ -1014,7 +1589,7 @@
          return window._f4AppError ? window._f4AppError : true;
       }],
 
-      ['F4-8: Poll until embed block appears in doc/main.md', function (done) {
+      ['Static 8: Poll until embed block appears in doc/main.md', function (done) {
          window._f4EmbedPollError = null;
          var started = Date.now ();
          var attempt = function () {
@@ -1023,7 +1598,7 @@
                window._f4EmbedPollError = 'Timed out after 5 minutes waiting for static embed block in doc/main.md';
                return done (SHORT_WAIT, POLL);
             }
-            console.log ('[F4 poll] waiting for embed block ... ' + Math.round (elapsed / 1000) + 's');
+            console.log ('[Static poll] waiting for embed block ... ' + Math.round (elapsed / 1000) + 's');
             c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, '', function (error, rs) {
                if (! error && rs && rs.body && type (rs.body.content) === 'string') {
                   var content = rs.body.content;
@@ -1037,7 +1612,7 @@
          return window._f4EmbedPollError ? window._f4EmbedPollError : true;
       }],
 
-      ['F4-9: Verify embed block in doc/main.md', function (done) {
+      ['Static 9: Verify embed block in doc/main.md', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f4Project) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._f4EmbedContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -1052,10 +1627,10 @@
       // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
 
       // =============================================
-      // *** FLOW #5: Backend tictactoe — React via CDN, Express on port 4000, proxy embed ***
+      // *** APP WITH BACKEND ***
       // =============================================
 
-      ['F5-1: Create project', function (done) {
+      ['Backend 1: Create project', function (done) {
          window._f5Project = 'test-flow5-' + testTimestamp ();
          mockPrompt (window._f5Project);
          B.call ('create', 'project');
@@ -1065,7 +1640,7 @@
          return B.get ('currentProject') === window._f5Project || 'Failed to create flow #5 project';
       }],
 
-      ['F5-2: Write doc/main.md', function (done) {
+      ['Backend 2: Write doc/main.md', function (done) {
          var docMain = [
             '# Tictactoe Project (Backend)',
             '',
@@ -1088,7 +1663,7 @@
          });
       }, function () {return true;}],
 
-      ['F5-3: Create dialog draft (orchestrator)', function (done) {
+      ['Backend 3: Create dialog draft (orchestrator)', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f5Project) + '/dialogs');
          mockPrompt ('orchestrator');
          B.call ('create', 'dialog');
@@ -1105,7 +1680,7 @@
          return true;
       }],
 
-      ['F5-4: Fire "please start" (non-blocking)', function (done) {
+      ['Backend 4: Fire "please start" (non-blocking)', function (done) {
          var dialogId = window._f5DialogId;
          if (! dialogId) {
             var file = B.get ('currentFile');
@@ -1133,7 +1708,7 @@
          return window._f5FireError ? window._f5FireError : true;
       }],
 
-      ['F5-5: Poll until proxy serves the app on port 4000', function (done) {
+      ['Backend 5: Poll until proxy serves the app on port 4000', function (done) {
          window._f5ProxyPollError = null;
          var started = Date.now ();
          var attempt = function () {
@@ -1156,7 +1731,7 @@
          return window._f5ProxyPollError ? window._f5ProxyPollError : true;
       }],
 
-      ['F5-6: Proxy serves index.html with React + app.js', function (done) {
+      ['Backend 6: Proxy serves index.html with React + app.js', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/', {}, '', function (error, rs) {
             if (error || ! rs || ! rs.body) window._f5IndexError = 'Failed to fetch index via proxy';
             else {
@@ -1171,7 +1746,7 @@
          return window._f5IndexError ? window._f5IndexError : true;
       }],
 
-      ['F5-7: Proxy serves app.js with tictactoe logic', function (done) {
+      ['Backend 7: Proxy serves app.js with tictactoe logic', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/proxy/4000/app.js', {}, '', function (error, rs) {
             if (error || ! rs || ! rs.body) window._f5AppError = 'Failed to fetch app.js via proxy';
             else {
@@ -1185,7 +1760,7 @@
          return window._f5AppError ? window._f5AppError : true;
       }],
 
-      ['F5-8: Server process is running', function (done) {
+      ['Backend 8: Server process is running', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f5Project) + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'ps aux | grep node || true'}}, function (error, rs) {
             if (error || ! rs.body || ! rs.body.success) window._f5PsError = 'ps aux failed';
             else {
@@ -1198,7 +1773,7 @@
          return window._f5PsError ? window._f5PsError : true;
       }],
 
-      ['F5-9: Poll until embed block appears in doc/main.md', function (done) {
+      ['Backend 9: Poll until embed block appears in doc/main.md', function (done) {
          window._f5EmbedPollError = null;
          var started = Date.now ();
          var attempt = function () {
@@ -1219,7 +1794,7 @@
          return window._f5EmbedPollError ? window._f5EmbedPollError : true;
       }],
 
-      ['F5-10: Verify embed block in doc/main.md', function (done) {
+      ['Backend 10: Verify embed block in doc/main.md', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f5Project) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._f5EmbedContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -1234,10 +1809,10 @@
       // NOTE: Project is intentionally NOT deleted so the tictactoe embed remains playable
 
       // =============================================
-      // *** FLOW #6: Vi mode (navigation + cursor sync) ***
+      // *** VI MODE ***
       // =============================================
       /*
-      ['F6-1: Navigate to settings', function (done) {
+      ['Vi 1: Navigate to settings', function (done) {
          window.__vibeyViDebug = true;
          B.call ('navigate', 'hash', '#/settings');
          done (SHORT_WAIT, POLL);
@@ -1247,14 +1822,14 @@
          return true;
       }],
 
-      ['F6-2: Reset vi mode off', function (done) {
+      ['Vi 2: Reset vi mode off', function (done) {
          if (B.get ('viMode')) B.call ('toggle', 'viMode');
          done (SHORT_WAIT, POLL);
       }, function () {
          return B.get ('viMode') === false || 'Expected viMode false after reset';
       }],
 
-      ['F6-3: Enable vi mode', function (done) {
+      ['Vi 3: Enable vi mode', function (done) {
          B.call ('toggle', 'viMode');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -1265,7 +1840,7 @@
          return true;
       }],
 
-      ['F6-4: Server persisted viMode true', function (done) {
+      ['Vi 4: Server persisted viMode true', function (done) {
          c.ajax ('get', 'settings', {}, '', function (error, rs) {
             window._f6Settings = rs && rs.body;
             done (SHORT_WAIT, POLL);
@@ -1276,7 +1851,7 @@
          return true;
       }],
 
-      ['F6-5: Create project + seed doc/main.md', function (done) {
+      ['Vi 5: Create project + seed doc/main.md', function (done) {
          window._f6Project = 'test-flow6-' + testTimestamp ();
          window._f6Content = [
             'alpha beta gamma',
@@ -1293,7 +1868,7 @@
          return true;
       }],
 
-      ['F6-6: Write doc/main.md and open editor', function (done) {
+      ['Vi 6: Write doc/main.md and open editor', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f6Project) + '/file/doc/main.md', {}, {content: window._f6Content}, function () {
             B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f6Project) + '/docs/main.md');
             done (MEDIUM_WAIT, POLL);
@@ -1305,7 +1880,7 @@
          return true;
       }],
 
-      ['F6-7: Switch to edit mode + normal mode baseline', function (done) {
+      ['Vi 7: Switch to edit mode + normal mode baseline', function (done) {
          if (B.get ('editorPreview')) B.call ('toggle', 'editorPreview');
          done (SHORT_WAIT, POLL);
       }, function () {
@@ -1321,7 +1896,7 @@
          return true;
       }],
 
-      ['F6-8: Word motions w/b and line ends', function (done) {
+      ['Vi 8: Word motions w/b and line ends', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
@@ -1336,7 +1911,7 @@
          return true;
       }],
 
-      ['F6-9: Second w moves to next word', function (done) {
+      ['Vi 9: Second w moves to next word', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
@@ -1349,7 +1924,7 @@
          return true;
       }],
 
-      ['F6-10: b moves back a word', function (done) {
+      ['Vi 10: b moves back a word', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
@@ -1362,7 +1937,7 @@
          return true;
       }],
 
-      ['F6-11: 0 and $ jump to line start/end', function (done) {
+      ['Vi 11: 0 and $ jump to line start/end', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
@@ -1376,7 +1951,7 @@
          return true;
       }],
 
-      ['F6-12: j/k keep column', function (done) {
+      ['Vi 12: j/k keep column', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
@@ -1393,7 +1968,7 @@
          return true;
       }],
 
-      ['F6-13: G to end, gg to start', function (done) {
+      ['Vi 13: G to end, gg to start', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
@@ -1411,7 +1986,7 @@
          return true;
       }],
 
-      ['F6-14: i enters insert at cursor position', function (done) {
+      ['Vi 14: i enters insert at cursor position', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          textarea.focus ();
@@ -1427,7 +2002,7 @@
          return true;
       }],
 
-      ['F6-15: Escape returns to normal with same cursor', function (done) {
+      ['Vi 15: Escape returns to normal with same cursor', function (done) {
          var textarea = getTextarea ();
          if (textarea) pressKey (textarea, 'Escape');
          done (SHORT_WAIT, POLL);
@@ -1441,7 +2016,7 @@
          return true;
       }],
 
-      ['F6-16: a inserts after cursor', function (done) {
+      ['Vi 16: a inserts after cursor', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          setCursor (textarea, 6);
@@ -1460,7 +2035,7 @@
          return true;
       }],
 
-      ['F6-17: I jumps to line start', function (done) {
+      ['Vi 17: I jumps to line start', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          setCursor (textarea, 11);
@@ -1479,7 +2054,7 @@
          return true;
       }],
 
-      ['F6-18: A jumps to line end', function (done) {
+      ['Vi 18: A jumps to line end', function (done) {
          var textarea = getTextarea ();
          if (! textarea) return done (SHORT_WAIT, POLL);
          setCursor (textarea, 0);
@@ -1498,7 +2073,7 @@
          return true;
       }],
 
-      ['F6-19: o opens line below', function (done) {
+      ['Vi 19: o opens line below', function (done) {
          var content = 'line one\nline two\nline three';
          B.call ('set', ['currentFile', 'content'], content);
          B.call ('set', ['currentFile', 'original'], content);
@@ -1518,7 +2093,7 @@
          return true;
       }],
 
-      ['F6-20: O opens line above', function (done) {
+      ['Vi 20: O opens line above', function (done) {
          var content = 'line one\nline two\nline three';
          B.call ('set', ['currentFile', 'content'], content);
          B.call ('set', ['currentFile', 'original'], content);
@@ -1541,7 +2116,7 @@
          return true;
       }],
 
-      ['F6-21: o on last line without trailing newline', function (done) {
+      ['Vi 21: o on last line without trailing newline', function (done) {
          var content = 'first\nsecond';
          B.call ('set', ['currentFile', 'content'], content);
          B.call ('set', ['currentFile', 'original'], content);
@@ -1559,7 +2134,7 @@
          return true;
       }],
 
-      ['F6-22: O on first line', function (done) {
+      ['Vi 22: O on first line', function (done) {
          var content = 'alpha\nbeta';
          B.call ('set', ['currentFile', 'content'], content);
          B.call ('set', ['currentFile', 'original'], content);
@@ -1577,14 +2152,14 @@
          return true;
       }],
 
-      ['F6-23: Disable vi mode', function (done) {
+      ['Vi 23: Disable vi mode', function (done) {
          if (B.get ('viMode')) B.call ('toggle', 'viMode');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          return B.get ('viMode') === false || 'Expected viMode false after toggle off';
       }],
 
-      ['F6-24: Server persisted viMode false', function (done) {
+      ['Vi 24: Server persisted viMode false', function (done) {
          c.ajax ('get', 'settings', {}, '', function (error, rs) {
             window._f6SettingsAfter = rs && rs.body;
             done (SHORT_WAIT, POLL);
@@ -1595,24 +2170,24 @@
          return true;
       }],
 
-      ['F6-25: Delete project', function (done) {
+      ['Vi 25: Delete project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f6Project);
          done (MEDIUM_WAIT, POLL);
       }, function () {return true;}],
 
-      ['F6-Cleanup: restore prompt', function () {
+      ['Vi 26: Cleanup restore prompt', function () {
          restorePrompt ();
          return true;
       }],
       */
 
       // =============================================
-      // *** FLOW #7: Snapshots ***
+      // *** SNAPSHOTS ***
       // =============================================
 
-      ['F7-1: Create project for snapshots', function (done) {
+      ['Snapshots 1: Create project for snapshots', function (done) {
          window._f7Project = 'test-flow7-' + testTimestamp ();
          mockPrompt (window._f7Project);
          B.call ('create', 'project');
@@ -1622,13 +2197,13 @@
          return B.get ('currentProject') === window._f7Project || 'Failed to create flow #7 project';
       }],
 
-      ['F7-2: Write doc/main.md', function (done) {
+      ['Snapshots 2: Write doc/main.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f7Project) + '/file/doc/main.md', {}, {content: '# Snapshot Test\n\nThis content should survive a snapshot and restore.\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['F7-3: Write extra file doc/notes.md', function (done) {
+      ['Snapshots 3: Write extra file doc/notes.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f7Project) + '/file/doc/notes.md', {}, {content: '# Notes\n\nSome extra notes.\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
@@ -1636,7 +2211,7 @@
 
       // --- F7: Create a snapshot ---
 
-      ['F7-4: Create snapshot via header button', function (done) {
+      ['Snapshots 4: Create snapshot via header button', function (done) {
          // Mock prompt for label
          mockPrompt ('before refactor');
          B.call ('create', 'snapshot');
@@ -1647,7 +2222,7 @@
          return true;
       }],
 
-      ['F7-5: Snapshot appears in snapshots list', function (done) {
+      ['Snapshots 5: Snapshot appears in snapshots list', function (done) {
          // Dismiss any pending alert
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
@@ -1667,7 +2242,7 @@
 
       // --- F7: Navigate to snapshots view ---
 
-      ['F7-6: Navigate to snapshots view', function (done) {
+      ['Snapshots 6: Navigate to snapshots view', function (done) {
          B.call ('navigate', 'hash', '#/snapshots');
          done (SHORT_WAIT, POLL);
       }, function () {
@@ -1676,7 +2251,7 @@
          return true;
       }],
 
-      ['F7-7: Snapshot visible in snapshots view', function () {
+      ['Snapshots 7: Snapshot visible in snapshots view', function () {
          var heading = findByText ('.editor-filename', 'Snapshots');
          if (! heading) return 'Snapshots heading not found';
          var item = findByText ('.file-item', 'before refactor');
@@ -1684,7 +2259,7 @@
          return true;
       }],
 
-      ['F7-8: Snapshot entry shows restore, download, delete buttons', function () {
+      ['Snapshots 8: Snapshot entry shows restore, download, delete buttons', function () {
          var item = findByText ('.file-item', 'before refactor');
          if (! item) return 'Snapshot item not found';
          var buttons = item.querySelectorAll ('button');
@@ -1697,14 +2272,14 @@
 
       // --- F7: Create second snapshot (no label) ---
 
-      ['F7-9: Create second snapshot without label', function (done) {
+      ['Snapshots 9: Create second snapshot without label', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f7Project) + '/docs');
          done (SHORT_WAIT, POLL);
       }, function () {
          return B.get ('currentProject') === window._f7Project || 'Not on project';
       }],
 
-      ['F7-10: Create second snapshot', function (done) {
+      ['Snapshots 10: Create second snapshot', function (done) {
          mockPrompt ('');
          B.call ('create', 'snapshot');
          done (MEDIUM_WAIT, POLL);
@@ -1713,7 +2288,7 @@
          return true;
       }],
 
-      ['F7-11: Two snapshots in list', function (done) {
+      ['Snapshots 11: Two snapshots in list', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -1728,7 +2303,7 @@
 
       // --- F7: Restore snapshot as new project ---
 
-      ['F7-12: Restore snapshot as new project', function (done) {
+      ['Snapshots 12: Restore snapshot as new project', function (done) {
          mockPrompt ('Restored Flow7 Test');
          B.call ('restore', 'snapshot', window._f7SnapshotId, window._f7SnapshotProjectName);
          done (MEDIUM_WAIT, POLL);
@@ -1741,7 +2316,7 @@
          return true;
       }],
 
-      ['F7-13: Restored project has both files', function (done) {
+      ['Snapshots 13: Restored project has both files', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/files', {}, '', function (error, rs) {
             window._f7RestoredFiles = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -1754,7 +2329,7 @@
          return true;
       }],
 
-      ['F7-14: Restored doc/main.md matches original', function (done) {
+      ['Snapshots 14: Restored doc/main.md matches original', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._f7RestoredContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -1764,7 +2339,7 @@
          return true;
       }],
 
-      ['F7-15: Restored doc/notes.md matches original', function (done) {
+      ['Snapshots 15: Restored doc/notes.md matches original', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/notes.md', {}, '', function (error, rs) {
             window._f7RestoredNotes = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -1776,13 +2351,13 @@
 
       // --- F7: Modify original, verify restored unaffected ---
 
-      ['F7-16: Modify original project doc/main.md', function (done) {
+      ['Snapshots 16: Modify original project doc/main.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f7Project) + '/file/doc/main.md', {}, {content: '# Modified After Snapshot\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['F7-17: Restored project unaffected by original modification', function (done) {
+      ['Snapshots 17: Restored project unaffected by original modification', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._f7CheckContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -1794,7 +2369,7 @@
 
       // --- F7: Delete a snapshot ---
 
-      ['F7-18: Delete second snapshot', function (done) {
+      ['Snapshots 18: Delete second snapshot', function (done) {
          B.call ('delete', 'snapshot', window._f7SnapshotId2);
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -1803,7 +2378,7 @@
          return true;
       }],
 
-      ['F7-19: Deleted snapshot gone from list', function (done) {
+      ['Snapshots 19: Deleted snapshot gone from list', function (done) {
          // Override confirm for delete call
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
@@ -1817,7 +2392,7 @@
 
       // --- F7: Snapshot survives project deletion ---
 
-      ['F7-20: Delete original project', function (done) {
+      ['Snapshots 20: Delete original project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f7Project);
@@ -1826,7 +2401,7 @@
          return true;
       }],
 
-      ['F7-21: Snapshot still in list after project deletion', function (done) {
+      ['Snapshots 21: Snapshot still in list after project deletion', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -1840,7 +2415,7 @@
 
       // --- F7: Snapshots view shows empty state ---
 
-      ['F7-22: Delete remaining snapshot', function (done) {
+      ['Snapshots 22: Delete remaining snapshot', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'snapshot', window._f7SnapshotId);
@@ -1849,7 +2424,7 @@
          return true;
       }],
 
-      ['F7-23: No snapshots left for this project', function (done) {
+      ['Snapshots 23: No snapshots left for this project', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -1863,7 +2438,7 @@
 
       // --- F7: Cleanup ---
 
-      ['F7-24: Delete restored project', function (done) {
+      ['Snapshots 24: Delete restored project', function (done) {
          if (! window._f7RestoredProject) return done ();
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
@@ -1873,203 +2448,49 @@
          return true;
       }],
 
-      ['F7-Cleanup: restore prompt', function () {
+      ['Snapshots 25: Cleanup restore prompt', function () {
          restorePrompt ();
          return true;
       }],
 
-      // =============================================
-      // *** FLOW #8: Uploads ***
-      // =============================================
 
-      ['F8-1: Create project for uploads', function (done) {
-         window._f8Project = 'test-flow8-' + testTimestamp ();
-         mockPrompt (window._f8Project);
-         B.call ('create', 'project');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         return B.get ('currentProject') === window._f8Project || 'Failed to create flow #8 project';
-      }],
-
-      ['F8-2: Upload image via API', function (done) {
-         var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f8Project) + '/upload', {}, {
-            name: 'pixel.png',
-            content: dataUrl,
-            contentType: 'image/png'
-         }, function (error, rs) {
-            window._f8UploadImage = rs && rs.body;
-            window._f8UploadImageError = error ? (error.status || error.message) : null;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._f8UploadImageError) return 'Image upload failed: ' + window._f8UploadImageError;
-         var entry = window._f8UploadImage || {};
-         if (entry.name !== 'pixel.png') return 'Upload response missing pixel.png';
-         if (! entry.url) return 'Upload response missing url';
-         return true;
-      }],
-
-      ['F8-3: Uploads list includes image metadata', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f8Project) + '/uploads', {}, '', function (error, rs) {
-            window._f8Uploads = error ? null : (rs.body || []);
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         var uploads = window._f8Uploads;
-         if (type (uploads) !== 'array') return 'Uploads list missing or not array';
-         var image = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'pixel.png') return item; });
-         if (! image) return 'pixel.png not found in uploads list';
-         if (! image.size || image.size <= 0) return 'pixel.png size invalid';
-         if (! image.contentType || image.contentType.indexOf ('image/') !== 0) return 'pixel.png contentType invalid: ' + image.contentType;
-         window._f8UploadImage = image;
-         return true;
-      }],
-
-      ['F8-4: Fetch image upload', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f8Project) + '/upload/pixel.png', {}, '', function (error, rs) {
-            window._f8UploadFetch = {error: error, rs: rs};
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         var result = window._f8UploadFetch || {};
-         if (result.error) return 'Upload fetch failed';
-         var rs = result.rs || {};
-         var status = rs.xhr ? rs.xhr.status : null;
-         if (status !== 200) return 'Expected status 200 for pixel.png, got ' + status;
-         var body = rs.body || '';
-         if (! body || body.length === 0) return 'Upload fetch returned empty body';
-         var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
-         if (contentType && contentType.indexOf ('image/png') === -1) return 'Expected image/png content-type, got ' + contentType;
-         return true;
-      }],
-
-      ['F8-5: Upload text file via API', function (done) {
-         var text = 'Hello uploads.';
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f8Project) + '/upload', {}, {
-            name: 'notes.txt',
-            content: btoa (text),
-            contentType: 'text/plain'
-         }, function (error, rs) {
-            window._f8UploadText = rs && rs.body;
-            window._f8UploadTextError = error ? (error.status || error.message) : null;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._f8UploadTextError) return 'Text upload failed: ' + window._f8UploadTextError;
-         var entry = window._f8UploadText || {};
-         if (entry.name !== 'notes.txt') return 'Upload response missing notes.txt';
-         return true;
-      }],
-
-      ['F8-6: Upload file with space in name', function (done) {
-         var text = 'Hello spaced uploads.';
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f8Project) + '/upload', {}, {
-            name: 'space name.txt',
-            content: btoa (text),
-            contentType: 'text/plain'
-         }, function (error, rs) {
-            window._f8UploadSpace = rs && rs.body;
-            window._f8UploadSpaceError = error ? (error.status || error.message) : null;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._f8UploadSpaceError) return 'Space-name upload failed: ' + window._f8UploadSpaceError;
-         var entry = window._f8UploadSpace || {};
-         if (entry.name !== 'space name.txt') return 'Upload response missing space name.txt';
-         return true;
-      }],
-
-      ['F8-7: Uploads list contains all files', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f8Project) + '/uploads', {}, '', function (error, rs) {
-            window._f8Uploads = error ? null : (rs.body || []);
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         var uploads = window._f8Uploads;
-         if (type (uploads) !== 'array' || uploads.length < 3) return 'Expected at least 3 uploads';
-         var text = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'notes.txt') return item; });
-         if (! text) return 'notes.txt not found in uploads list';
-         if (! text.contentType || text.contentType.indexOf ('text/plain') === -1) return 'notes.txt contentType invalid';
-         var spaced = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'space name.txt') return item; });
-         if (! spaced) return 'space name.txt not found in uploads list';
-         window._f8UploadText = text;
-         window._f8UploadSpace = spaced;
-         return true;
-      }],
-
-      ['F8-8: Navigate to docs view', function (done) {
-         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f8Project) + '/docs');
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var tab = B.get ('tab');
-         if (tab !== 'docs') return 'Expected docs tab for uploads';
-         return true;
-      }],
-
-      ['F8-9: Uploads section visible with items', function () {
-         var section = document.querySelector ('.upload-section');
-         if (! section) return 'Uploads section not found in sidebar';
-         var item = findByText ('.upload-item', 'pixel.png');
-         if (! item) return 'pixel.png not listed in uploads sidebar';
-         return true;
-      }],
-
-      ['F8-10: Select image upload shows preview', function (done) {
-         B.call ('select', 'upload', window._f8UploadImage);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var preview = document.querySelector ('.upload-preview img');
-         if (! preview) return 'Image preview not shown';
-         return true;
-      }],
-
-      ['F8-11: Select text upload shows metadata', function (done) {
-         B.call ('select', 'upload', window._f8UploadText);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var meta = document.querySelector ('.upload-meta');
-         if (! meta) return 'Upload metadata panel not shown for text file';
-         if (meta.textContent.indexOf ('Type:') === -1) return 'Metadata panel missing Type line';
-         return true;
-      }],
-
-      ['F8-12: Select spaced upload shows metadata', function (done) {
-         B.call ('select', 'upload', window._f8UploadSpace);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var meta = document.querySelector ('.upload-meta');
-         if (! meta) return 'Upload metadata panel not shown for spaced file';
-         if (meta.textContent.indexOf ('space name.txt') === -1) return 'Metadata panel missing spaced filename';
-         return true;
-      }],
-
-      ['F8-13: Delete uploads project', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'project', window._f8Project);
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         return true;
-      }],
 
    ];
 
-   // Filter tests by flow
-   var filteredTests = flowFilter === 'ALL' ? allTests : dale.fil (allTests, undefined, function (test) {
-      if (testFlow (test [0]) === flowFilter) return test;
+   var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'dialog (safety)', 'static', 'backend', 'vi', 'snapshots'];
+
+   var filterValue = flowFilter.toLowerCase ().trim ();
+
+   var testsBySuite = dale.acc (allTests, {}, function (acc, test) {
+      var suite = testFlow (test [0]);
+      if (! acc [suite]) acc [suite] = [];
+      acc [suite].push (test);
+      return acc;
    });
 
+   var filteredTests = [];
+
+   if (filterValue === 'all') {
+      dale.go (SUITE_ORDER, function (suite) {
+         if (testsBySuite [suite]) filteredTests = filteredTests.concat (testsBySuite [suite]);
+      });
+      dale.go (testsBySuite, function (tests, suite) {
+         if (! inc (SUITE_ORDER, suite)) filteredTests = filteredTests.concat (tests);
+      });
+   }
+   else {
+      filteredTests = testsBySuite [filterValue] || [];
+   }
+
    if (filteredTests.length === 0) {
-      alert ('❌ No tests found for flow: ' + flowFilter);
+      alert ('❌ No tests found for suite: ' + flowFilter);
       return;
    }
 
-   console.log ('Running ' + filteredTests.length + ' tests (flow: ' + flowFilter + ')');
+   console.log ('Running ' + filteredTests.length + ' tests (suite: ' + flowFilter + ')');
 
    c.test (filteredTests, function (error, time) {
-      var label = flowFilter === 'ALL' ? 'all flows' : 'flow ' + flowFilter;
+      var label = filterValue === 'all' ? 'all suites' : flowFilter;
       if (error) {
          console.error ('❌ Test FAILED:', error.test, '— Result:', error.result);
          alert ('❌ Test FAILED: ' + error.test + '\n\nResult: ' + error.result);

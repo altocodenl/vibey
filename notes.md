@@ -1,5 +1,33 @@
 ## Vibey development notes
 
+### 2026-03-06
+
+- Refreshing the page on an active dialog makes it able for you to talk to it, which shouldn't be the case. Or opening a new tab on an active dialog, same thing. Is the dialog going on safely? The client should look up the status statelessly.
+- Merge flow 3 into flow 1.
+- Rename flow 8 to flow 3.
+- Please read the .md for the test suites and add tests there that test special characters in the creation. Also add tests in dialog to check that the status changes from active to done whenever we expect a switch.
+- Perfect. Now please put names on the suites on test-server, and remove any numberings from tags. Make the runner take the suites in the order they are presented in the readme.
+- Please implement the project flow in test-server. You can re-build/re-run vibey and run that particular flow until it works.
+- Now take the description of the dialog suite in readme.md and make it into a coherent sequence of linear steps: checking for the statuses after each action, doing the action-safety check while the dialog is already active, etc.
+- Brilliant. Now reimplement the dialog flow with 1:1 on test-server.
+- Great work. Now review the actual backend tests for docs and see if 100% of that is in the readme.md description. Then, add numberings to the .md, then to the .js, then run that suite.
+- Let's proceed with the upload suite. Please review what's implemented in test-server for that suite to see if there's something mentioned there not mentioned in the .md. Then number the entries in the .md, following the style of previous flows documented (if you can think of something else to test, also add it). Then ensure that the .js is 1:1 with the .md. You can run that flow. Only in test-server.
+- Let's proceed with the snapshot test suite. First, read it from readme.md. Please review what's implemented in test-server for that suite. If there are good tests in the implementation that are not in the .md, add them to the .md. Then, number the .md tests like we do for suites above. Then ensure that the .js implements every test in the .md, maintaining 1:1 with the .md. You can fix the server if necessary and restart docker. Please run the flow. Ignore client tests for now.
+- Let's proceed with the autogit test suite. First, read it from readme.md. Please review what's implemented in test-server for that suite. If there are good tests in the implementation that are not in the .md, add them to the .md. Then, number the .md tests like we do for suites above. Then ensure that the .js implements every test in the .md, maintaining 1:1 with the .md. You can fix the server if necessary and restart docker. Please run the flow. Ignore client tests for now.
+
+- We're refactoring the tests. readme.md and test-server.js is quite ahead of test-client.js. Please take the first flow (project) and see if there are client-specific tests that are not in readme.md or test-server.js yet.
+- Great! Now make sure the client tests for the project flow matches 1:1 the readme.md, and that it passes.
+
+
+- Now make a single suite of dialog tests (currently it's splitted) in test-server.
+- Brilliant. Let's move on to the next suite, doc: qualify readme.md with client-specific assertions.
+- Brilliant. Let's move on to the next suite, upload: qualify readme.md with client-specific assertions.
+
+
+- Please review the backend for bugs. If you find something, don't fix it. Spot it, then see if we have a test for it. Then report back.
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
+
 ### 2026-03-05
 
 https://acko.net/blog/the-l-in-llm-stands-for-lying/
