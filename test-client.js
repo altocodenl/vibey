@@ -608,18 +608,18 @@
          return true;
       }],
 
-      ['Dialog 2: Create project via API', function (done) {
-         c.ajax ('post', 'projects', {}, {name: TEST_PROJECT}, function (error, rs) {
-            window._f1ProjectCreate = {error: error, rs: rs};
-            done (SHORT_WAIT, POLL);
-         });
+      ['Dialog 2: Create project via prompt and navigate into it', function (done) {
+         mockPrompt (TEST_PROJECT);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
       }, function () {
-         var result = window._f1ProjectCreate || {};
-         if (result.error) return 'Project creation failed';
-         var body = result.rs && result.rs.body ? result.rs.body : {};
-         if (! body.slug) return 'Missing slug in project create response';
-         window._f1ProjectSlug = body.slug;
-         window._f1ProjectName = body.name;
+         restorePrompt ();
+         var project = B.get ('currentProject');
+         if (! project) return 'currentProject not set after creation';
+         window._f1ProjectSlug = project;
+         window._f1ProjectName = TEST_PROJECT;
+         var tab = B.get ('tab');
+         if (tab !== 'docs') return 'Expected docs tab after project creation, got "' + tab + '"';
          return true;
       }],
 
@@ -638,6 +638,8 @@
          var body = result.rs && result.rs.body ? result.rs.body : {};
          if (! body.dialogId) return 'Missing dialogId in dialog/new response';
          if (! body.filename || body.filename.indexOf ('-done.md') === -1) return 'Expected done filename, got ' + body.filename;
+         if (body.provider !== 'openai') return 'Expected provider openai, got ' + body.provider;
+         if (body.model !== 'gpt-5.2-codex') return 'Expected model gpt-5.2-codex, got ' + body.model;
          if (body.status !== 'done') return 'Expected status done, got ' + body.status;
          window._f1DialogId = body.dialogId;
          return true;
@@ -685,6 +687,8 @@
          var result = window._f1DialogStart || {};
          if (result.error) return 'Dialog start failed';
          var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (! body.dialogId) return 'Missing dialogId in PUT dialog response';
+         if (! body.filename) return 'Missing filename in PUT dialog response';
          if (body.status !== 'active') return 'Expected active status, got ' + body.status;
          return true;
       }],
@@ -902,8 +906,11 @@
       }, function () {
          var result = window._f1AgentA || {};
          if (result.error) return 'Agent-a creation failed';
-         window._f1AgentADialog = result.rs && result.rs.body ? result.rs.body.dialogId : null;
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         window._f1AgentADialog = body.dialogId || null;
          if (! window._f1AgentADialog) return 'Missing dialogId for agent-a';
+         if (body.status !== 'done') return 'Expected agent-a draft status done, got ' + body.status;
+         if (! body.filename || body.filename.indexOf ('-done.md') === -1) return 'Expected agent-a filename ending -done.md, got ' + body.filename;
          return true;
       }],
 
@@ -915,8 +922,11 @@
       }, function () {
          var result = window._f1AgentB || {};
          if (result.error) return 'Agent-b creation failed';
-         window._f1AgentBDialog = result.rs && result.rs.body ? result.rs.body.dialogId : null;
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         window._f1AgentBDialog = body.dialogId || null;
          if (! window._f1AgentBDialog) return 'Missing dialogId for agent-b';
+         if (body.status !== 'done') return 'Expected agent-b draft status done, got ' + body.status;
+         if (! body.filename || body.filename.indexOf ('-done.md') === -1) return 'Expected agent-b filename ending -done.md, got ' + body.filename;
          return true;
       }],
 
@@ -1035,11 +1045,15 @@
       }],
 
       ['Dialog 29: Delete project while agent-b active', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'project', window._f1ProjectSlug);
-         done (MEDIUM_WAIT, POLL);
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._f1ProjectSlug), {}, '', function (error, rs) {
+            window._f1DeleteWhileActive = {error: error, rs: rs};
+            done (MEDIUM_WAIT, POLL);
+         });
       }, function () {
+         var result = window._f1DeleteWhileActive || {};
+         if (result.error) return 'Delete project while agent-b active failed';
+         var status = result.rs && result.rs.xhr ? result.rs.xhr.status : null;
+         if (status !== 200) return 'Expected 200 on delete, got ' + status;
          return true;
       }],
 

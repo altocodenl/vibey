@@ -876,7 +876,7 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 **Dialog:**
 
 1. `GET /` — confirm HTML shell loads `client.js`.
-2. `POST /projects` — create project.
+2. `POST /projects` — create project. Client: create via prompt, verify `currentProject` is set and app navigates to Docs tab.
 3. `POST /project/:p/dialog/new` (openai, gpt-5.2-codex, slug `flow1-read-vibey`) — response has `dialogId`, `filename`, `provider`, `model`, `status: done`, filename ends `-done.md`.
 4. `GET /project/:p/dialogs` — draft is listed, status `done`.
 5. `POST /project/:p/tool/execute` (write_file `test-sample.txt`) — seed a file.
