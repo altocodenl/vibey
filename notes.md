@@ -1,5 +1,42 @@
 ## Vibey development notes
 
+### 2026-03-07
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
+
+
+- Goal: Have an endpoint that gives you SSE streaming of the dialog that's independent of the POST. Be able to tap into dialog streams instead of just getting the files, so we can refresh the page. Change the spec, the tests in readme.md, then the actual tests.
+ Design sketch:
+ 1. POST /project/:p/dialog
+     - Start the dialog asynchronously.
+     - Return JSON immediately: {dialogId, filename, status:"active"}.
+     - No SSE on POST.
+ 2. GET /project/:p/dialog/:id/stream (SSE)
+     - If dialog is active, stream live chunks/tool events.
+     - If dialog is done, either:
+           - return 204, or
+           - immediately send a done event and close.
+ 3. GET /project/:p/dialog/:id
+     - Always returns the current markdown from disk.
+ 4. Client behavior
+     - When opening a dialog, call GET /dialog/:id.
+     - If status is active, open GET /dialog/:id/stream to follow live output.
+     - On reconnect (refresh), you re-read the file and optionally reattach to stream.
+
+- Let's start by modifying readme.md to document this.
+- Please now edit the test suite for the server.
+- Please now implement the server.
+- Please run that suite in the server and see if it works.
+- Please now change the client.
+
+
+- Let's get the test-client tests aligned with the flows documented in readme.md, 1:1, and passing. Let's take the first suite and check it. When it looks aligned, you can run it. If you modify test-client.js, you need to copy it straight into the vibey container to avoid having to do a restart on it, since another agent is working on other parts.
+- Please do the same thing for the doc flow.
+- Time to do the same for the upload flow!
+- Onwards! Time to do the same for snapshot.
+- Can you remove autogit from the client tests, if it is there?
+- Now a big one. Let's do dialog.
+
 ### 2026-03-06
 
 - Refreshing the page on an active dialog makes it able for you to talk to it, which shouldn't be the case. Or opening a new tab on an active dialog, same thing. Is the dialog going on safely? The client should look up the status statelessly.

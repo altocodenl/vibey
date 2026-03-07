@@ -257,23 +257,31 @@ Docs sidebar shows an Uploads section at the bottom (always visible when uploads
 ### Server: dialogs
 
 - `POST /project/:project/dialog/new` — create a done dialog draft (idle). Body: `{provider, model?, slug?}`.
-- `POST /project/:project/dialog` — create a new dialog and run first turn. Body: `{provider, model?, prompt, slug?}`. Response: SSE.
+- `POST /project/:project/dialog` — create a new dialog and start the first turn **asynchronously**. Body: `{provider, model?, prompt, slug?}`. Response: **JSON** `{dialogId, filename, status: "active"}`.
   - Creates a file named `dialog/<YYYYMMDD-HHmmss>-<slug>-<status>.md`.
   - Stable `dialogId` is `<YYYYMMDD-HHmmss>-<slug>` (status is not part of the id).
-  - Appends a `## User` message with canonical payload format, opens `## Assistant`, streams `chunk` events.
-  - Tool calls execute immediately (YOLO), results are appended to the dialog and streamed back.
+  - Appends a `## User` message with canonical payload format, opens `## Assistant`, and begins generation in the background.
+  - Tool calls execute immediately (YOLO), results are appended to the dialog.
+  - The POST returns immediately — no SSE. The client connects to the stream endpoint to follow live output.
 
 - `PUT /project/:project/dialog` — mutate or continue an existing dialog.
   - Canonical body: `{dialogId, status?, prompt?}`.
   - `status` can only be `done`.
-  - If `status` is set without `prompt`, it is a pure status change (interrupt/mark done).
-  - If `prompt` is present, append as `## User` and continue generation.
+  - If `status` is set without `prompt`, it is a pure status change (interrupt/mark done). Response: **JSON**.
+  - If `prompt` is present, append as `## User` and continue generation **asynchronously**. Response: **JSON** `{dialogId, filename, status: "active"}`.
   - Whenever generation is kicked off on an existing dialog, server first sets status to `active`.
-  - Response is SSE when generation continues; otherwise JSON.
-- `GET /project/:project/dialogs` — list dialog files with `{dialogId, status, filename, mtime}` (filenames live under `dialog/`).
-- `GET /project/:project/dialog/:id` — load one dialog.
+  - No SSE on PUT — the client connects to the stream endpoint separately.
 
-SSE event types: `chunk`, `done`, `error`.
+- `GET /project/:project/dialog/:id/stream` — **SSE** endpoint for live dialog output.
+  - If the dialog is **active**, streams live `chunk` and tool events as they happen. Ends with a `done` event when generation completes.
+  - If the dialog is **done** (already finished or never started), immediately sends a `done` event and closes.
+  - Multiple clients can connect to the same stream simultaneously (fan-out).
+  - If the client disconnects and reconnects, it re-reads the file via `GET /dialog/:id` and reattaches to the stream if still active.
+
+- `GET /project/:project/dialogs` — list dialog files with `{dialogId, status, filename, mtime}` (filenames live under `dialog/`).
+- `GET /project/:project/dialog/:id` — load one dialog. Always returns the current markdown from disk (full content, regardless of whether the dialog is active or done).
+
+SSE event types: `chunk`, `tool`, `done`, `error`.
 
 ### Dialog markdown: canonical convention
 
@@ -431,6 +439,14 @@ Input area: provider select (Claude/OpenAI), textarea (Cmd+Enter to send), Send 
 User messages are rendered optimistically (shown immediately when sent).
 
 Message resources/tokens are shown from each section's `> Resources:` metadata line.
+
+#### Client dialog lifecycle
+
+1. **Starting a dialog**: POST to `/dialog` returns JSON `{dialogId, filename, status}`. Client immediately opens `GET /dialog/:id/stream` (SSE) to follow live output.
+2. **Continuing a dialog**: PUT to `/dialog` with a prompt returns JSON. Client opens the stream endpoint to follow the new turn.
+3. **Opening an existing dialog**: GET `/dialog/:id` returns the full markdown. If `status` is `active`, client also opens `GET /dialog/:id/stream` to follow live output.
+4. **Reconnect (page refresh)**: Client re-reads the file via `GET /dialog/:id`. If the dialog is still active, it reattaches to the stream. Any content already in the file is rendered immediately; new chunks arrive via SSE.
+5. **Stream ends**: When a `done` event arrives, the client closes the EventSource and re-enables input.
 
 ### Client: tools for dialogs
 
@@ -864,29 +880,38 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 3. `POST /project/:p/dialog/new` (openai, gpt-5.2-codex, slug `flow1-read-vibey`) — response has `dialogId`, `filename`, `provider`, `model`, `status: done`, filename ends `-done.md`.
 4. `GET /project/:p/dialogs` — draft is listed, status `done`.
 5. `POST /project/:p/tool/execute` (write_file `test-sample.txt`) — seed a file.
-6. `PUT /project/:p/dialog` (prompt: "read test-sample.txt with run_command") — SSE finishes with `done` event, includes `context` event with valid `percent/used/limit`.
-7. `GET /project/:p/dialog/:id` — markdown has `> Time:`, `> Context:`, `run_command` tool request + result.
-8. `PUT /project/:p/dialog` (same dialogId, prompt: "create dummy.js with write_file") — SSE finishes with `done`.
-9. `GET /project/:p/dialog/:id` — markdown has `write_file` tool request + result.
-10. `POST /project/:p/tool/execute` (run_command `cat dummy.js`) — stdout contains `console.log`.
-11. `PUT /project/:p/dialog` (same dialogId, prompt: "continue without provider", no provider field) — SSE returns `done` event (provider/model resolved from multi-line header).
-12. `PUT /project/:p/dialog` (prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it.") — verify SSE output **does not** contain `> Provider:`, `> Model:`, or `> Context:`.
-13. `POST /project/:p/dialog/new` (slug `agent-a`) — save dialogId. Status `done`, filename `-done.md`.
-14. `POST /project/:p/dialog/new` (slug `agent-b`) — save dialogId. Status `done`, filename `-done.md`.
-15. Fire agent-a with slow prompt (fire-and-forget, `sleep 12` + 200 word essay). Fire agent-b with slow prompt. Wait ~2s.
-16. Poll `GET /project/:p/dialogs` until agent-a is `active` with filename `-active.md`. Record observed.
-17. `PUT /project/:p/dialog` (agent-a dialogId + new prompt) — **409** rejected.
-18. `PUT /project/:p/dialog` (agent-a dialogId, `status: "done"`) — **200**, stopped.
-19. Poll `GET /project/:p/dialogs` — agent-a is `done`, filename `-done.md`. Confirm active was observed before done.
-20. `DELETE /projects/:p` — delete while agent-b still active. 200.
-21. `GET /projects` — project gone.
-22. `GET /project/:p/dialogs` — **404**.
-23. `GET /project/:p/files` — **404**.
-24. `POST /projects` (same name) — fresh project.
-25. `GET /project/:p/dialogs` — empty array.
-26. `GET /project/:p/files` — only `doc/main.md`.
-27. `DELETE /projects/:p` — cleanup.
-28. `GET /projects` — confirm gone.
+6. `PUT /project/:p/dialog` (prompt: "read test-sample.txt with run_command") — returns **JSON** `{dialogId, filename, status: "active"}`.
+7. `GET /project/:p/dialog/:id/stream` — **SSE** stream. Collect events until `done`. Verify `context` event with valid `percent/used/limit`.
+8. `GET /project/:p/dialog/:id` — markdown has `> Time:`, `> Context:`, `run_command` tool request + result.
+9. `PUT /project/:p/dialog` (same dialogId, prompt: "create dummy.js with write_file") — returns **JSON** with `status: "active"`.
+10. `GET /project/:p/dialog/:id/stream` — SSE stream. Collect events until `done`.
+11. `GET /project/:p/dialog/:id` — markdown has `write_file` tool request + result.
+12. `POST /project/:p/tool/execute` (run_command `cat dummy.js`) — stdout contains `console.log`.
+13. `PUT /project/:p/dialog` (same dialogId, prompt: "continue without provider", no provider field) — returns JSON (provider/model resolved from multi-line header).
+14. `GET /project/:p/dialog/:id/stream` — SSE stream finishes with `done`.
+15. `PUT /project/:p/dialog` (prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it.") — returns JSON.
+16. `GET /project/:p/dialog/:id/stream` — collect SSE output. Verify it **does not** contain `> Provider:`, `> Model:`, or `> Context:`.
+17. `POST /project/:p/dialog` (provider, model, prompt: "read test-sample.txt", slug: "async-test") — returns **JSON** `{dialogId, filename, status: "active"}` immediately (no SSE on POST).
+18. `GET /project/:p/dialog/:id/stream` (for the new dialog) — SSE stream finishes with `done`.
+19. `GET /project/:p/dialog/:id` — markdown has tool request + result for `run_command`.
+20. `GET /project/:p/dialog/:id/stream` (dialog already done) — immediately sends `done` event and closes.
+21. `POST /project/:p/dialog/new` (slug `agent-a`) — save dialogId. Status `done`, filename `-done.md`.
+22. `POST /project/:p/dialog/new` (slug `agent-b`) — save dialogId. Status `done`, filename `-done.md`.
+23. Fire agent-a with slow prompt (PUT with `sleep 12` + 200 word essay). Fire agent-b with slow prompt. Both return JSON immediately.
+24. `GET /project/:p/dialog/:id/stream` (agent-a) — connect SSE. Verify chunks are arriving (dialog is active).
+25. Poll `GET /project/:p/dialogs` until agent-a is `active` with filename `-active.md`. Record observed.
+26. `PUT /project/:p/dialog` (agent-a dialogId + new prompt) — **409** rejected.
+27. `PUT /project/:p/dialog` (agent-a dialogId, `status: "done"`) — **200**, stopped.
+28. Poll `GET /project/:p/dialogs` — agent-a is `done`, filename `-done.md`. Confirm active was observed before done.
+29. `DELETE /projects/:p` — delete while agent-b still active. 200.
+30. `GET /projects` — project gone.
+31. `GET /project/:p/dialogs` — **404**.
+32. `GET /project/:p/files` — **404**.
+33. `POST /projects` (same name) — fresh project.
+34. `GET /project/:p/dialogs` — empty array.
+35. `GET /project/:p/files` — only `doc/main.md`.
+36. `DELETE /projects/:p` — cleanup.
+37. `GET /projects` — confirm gone.
 
 **Static app:**
 
@@ -954,10 +979,12 @@ Keep this project running intentionally so the embedded backend app stays playab
 
 ## TODO
 
-Intro prompt: Hi! I'm building vibey. See please readme.md, then server.js and client.js, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- Have an endpoint that gives you SSE streaming of the dialog that's independent of the POST. Be able to tap into dialog streams instead of just getting the files, so we can refresh the page. Change the spec, the tests in readme.md, then the actual tests.
+- Implement the async dialog + SSE stream separation (spec updated above). Update server.js, client.js, and tests.
+
 - Fully align frontend tests with the spec and test-server. Make sure everything except for vi passes.
+- Review the docs and fully align them with the server.
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
 

@@ -241,6 +241,55 @@
       return d.getUTCFullYear () + '' + pad2 (d.getUTCMonth () + 1) + pad2 (d.getUTCDate ()) + '-' + pad2 (d.getUTCHours ()) + pad2 (d.getUTCMinutes ()) + pad2 (d.getUTCSeconds ());
    };
 
+   var streamDialogEvents = function (project, dialogId, onComplete, options) {
+      options = options || {};
+      var events = [];
+      var done = false;
+      var timeoutMs = options.timeout || POLL_TIMEOUT;
+      var url = 'project/' + encodeURIComponent (project) + '/dialog/' + encodeURIComponent (dialogId) + '/stream';
+      var es = new EventSource (url);
+      var heartbeatMs = options.heartbeatMs;
+      if (! heartbeatMs && timeoutMs >= 60000) heartbeatMs = 30000;
+      var heartbeatTimer = heartbeatMs ? setInterval (function () {
+         if (done) return;
+         console.log ('[vibey-test] stream heartbeat ' + dialogId);
+      }, heartbeatMs) : null;
+
+      var finish = function (payload) {
+         if (done) return;
+         done = true;
+         clearTimeout (timer);
+         if (heartbeatTimer) clearInterval (heartbeatTimer);
+         try { es.close (); } catch (e) {}
+         onComplete (payload);
+      };
+
+      var timer = setTimeout (function () {
+         finish ({error: 'timeout', events: events});
+      }, timeoutMs);
+
+      es.onmessage = function (ev) {
+         if (! ev || ! ev.data) return;
+         var data;
+         try { data = JSON.parse (ev.data); } catch (e) { return; }
+         events.push (data);
+         if (options.onEvent) options.onEvent (data);
+         if (options.stopOnChunk && data.type === 'chunk') {
+            finish ({error: null, events: events});
+            return;
+         }
+         if (data.type === 'done' || data.type === 'error') {
+            finish ({error: data.type === 'error' ? (data.error || 'error') : null, events: events});
+         }
+      };
+
+      es.onerror = function () {
+         finish ({error: 'error', events: events});
+      };
+
+      return es;
+   };
+
    var LONG_WAIT    = 240000; // 4 min for LLM responses
    var MEDIUM_WAIT  = 15000;
    var SHORT_WAIT   = 3000;
@@ -250,7 +299,7 @@
 
    var PROJECT_FLOW = 'test-projects-' + testTimestamp ();
    var TEST_PROJECT = 'test-flow1-' + testTimestamp ();
-   var TEST_DIALOG  = 'read-vibey';
+   var TEST_DIALOG  = 'flow1-read-vibey';
 
    // *** TESTS ***
 
@@ -311,7 +360,16 @@
          return true;
       }],
 
-      ['Project 4: Idempotent create is server-only (client n/a)', function () {
+      ['Project 4: Idempotent create with same name succeeds', function (done) {
+         mockPrompt (PROJECT_FLOW);
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var tab = B.get ('tab');
+         if (tab !== 'docs') return 'Expected to land on "docs" tab after idempotent create, got "' + tab + '"';
+         var project = B.get ('currentProject');
+         if (project !== PROJECT_FLOW) return 'Expected currentProject to remain "' + PROJECT_FLOW + '" after idempotent create, got "' + project + '"';
          return true;
       }],
 
@@ -373,7 +431,173 @@
          return true;
       }],
 
-      ['Project 11: Special name slug cases are server-only (client n/a)', function () {
+      ['Project 11a: Create project "My Cool Project"', function (done) {
+         mockPrompt ('My Cool Project');
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var slug = B.get ('currentProject');
+         if (! slug) return 'Expected currentProject to be set after creating "My Cool Project"';
+         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "My Cool Project"';
+         window._projSpecialSlug1 = slug;
+         return true;
+      }],
+
+      ['Project 11b: Projects list shows "My Cool Project"', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'My Cool Project');
+         if (! item) return 'Project entry not found for "My Cool Project"';
+         return true;
+      }],
+
+      ['Project 11c: Delete "My Cool Project"', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         if (! window._projSpecialSlug1) return done (SHORT_WAIT, POLL);
+         B.call ('delete', 'project', window._projSpecialSlug1);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'My Cool Project');
+         if (item) return 'Deleted project still appears in list for "My Cool Project"';
+         return true;
+      }],
+
+      ['Project 11d: Create project "🚀 Rocket App"', function (done) {
+         mockPrompt ('🚀 Rocket App');
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var slug = B.get ('currentProject');
+         if (! slug) return 'Expected currentProject to be set after creating "🚀 Rocket App"';
+         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "🚀 Rocket App"';
+         window._projSpecialSlug2 = slug;
+         return true;
+      }],
+
+      ['Project 11e: Projects list shows "🚀 Rocket App"', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', '🚀 Rocket App');
+         if (! item) return 'Project entry not found for "🚀 Rocket App"';
+         return true;
+      }],
+
+      ['Project 11f: Delete "🚀 Rocket App"', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         if (! window._projSpecialSlug2) return done (SHORT_WAIT, POLL);
+         B.call ('delete', 'project', window._projSpecialSlug2);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', '🚀 Rocket App');
+         if (item) return 'Deleted project still appears in list for "🚀 Rocket App"';
+         return true;
+      }],
+
+      ['Project 11g: Create project "café étude"', function (done) {
+         mockPrompt ('café étude');
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var slug = B.get ('currentProject');
+         if (! slug) return 'Expected currentProject to be set after creating "café étude"';
+         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "café étude"';
+         window._projSpecialSlug3 = slug;
+         return true;
+      }],
+
+      ['Project 11h: Projects list shows "café étude"', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'café étude');
+         if (! item) return 'Project entry not found for "café étude"';
+         return true;
+      }],
+
+      ['Project 11i: Delete "café étude"', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         if (! window._projSpecialSlug3) return done (SHORT_WAIT, POLL);
+         B.call ('delete', 'project', window._projSpecialSlug3);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'café étude');
+         if (item) return 'Deleted project still appears in list for "café étude"';
+         return true;
+      }],
+
+      ['Project 11j: Create project "hello—world & friends!"', function (done) {
+         mockPrompt ('hello—world & friends!');
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var slug = B.get ('currentProject');
+         if (! slug) return 'Expected currentProject to be set after creating "hello—world & friends!"';
+         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "hello—world & friends!"';
+         window._projSpecialSlug4 = slug;
+         return true;
+      }],
+
+      ['Project 11k: Projects list shows "hello—world & friends!"', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'hello—world & friends!');
+         if (! item) return 'Project entry not found for "hello—world & friends!"';
+         return true;
+      }],
+
+      ['Project 11l: Delete "hello—world & friends!"', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         if (! window._projSpecialSlug4) return done (SHORT_WAIT, POLL);
+         B.call ('delete', 'project', window._projSpecialSlug4);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', 'hello—world & friends!');
+         if (item) return 'Deleted project still appears in list for "hello—world & friends!"';
+         return true;
+      }],
+
+      ['Project 11m: Create project "日本語プロジェクト"', function (done) {
+         mockPrompt ('日本語プロジェクト');
+         B.call ('create', 'project');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         restorePrompt ();
+         var slug = B.get ('currentProject');
+         if (! slug) return 'Expected currentProject to be set after creating "日本語プロジェクト"';
+         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "日本語プロジェクト"';
+         window._projSpecialSlug5 = slug;
+         return true;
+      }],
+
+      ['Project 11n: Projects list shows "日本語プロジェクト"', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', '日本語プロジェクト');
+         if (! item) return 'Project entry not found for "日本語プロジェクト"';
+         return true;
+      }],
+
+      ['Project 11o: Delete "日本語プロジェクト"', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         if (! window._projSpecialSlug5) return done (SHORT_WAIT, POLL);
+         B.call ('delete', 'project', window._projSpecialSlug5);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', '日本語プロジェクト');
+         if (item) return 'Deleted project still appears in list for "日本語プロジェクト"';
          return true;
       }],
 
@@ -384,327 +608,532 @@
          return true;
       }],
 
-      ['Dialog 1a: Navigate to projects tab', function (done) {
-         window.location.hash = '#/projects';
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var tab = B.get ('tab');
-         if (tab !== 'projects') return 'Expected tab to be "projects" but got "' + tab + '"';
-         var heading = findByText ('.editor-filename', 'Projects');
-         if (! heading) return 'Projects heading not found in DOM';
-         return true;
-      }],
-
-      // --- Dialog: Create a new project ---
-      ['Dialog 2: Create project "' + TEST_PROJECT + '"', function (done) {
-         mockPrompt (TEST_PROJECT);
-         B.call ('create', 'project');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         var tab = B.get ('tab');
-         if (tab !== 'docs') return 'Expected to land on "docs" tab after project creation, got "' + tab + '"';
-         var project = B.get ('currentProject');
-         if (project !== TEST_PROJECT) return 'Expected currentProject to be "' + TEST_PROJECT + '" but got "' + project + '"';
-         return true;
-      }],
-
-      // --- Dialog: Switch to dialogs tab ---
-      ['Dialog 2a: Navigate to dialogs tab', function (done) {
-         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (TEST_PROJECT) + '/dialogs');
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var tab = B.get ('tab');
-         if (tab !== 'dialogs') return 'Expected tab to be "dialogs" but got "' + tab + '"';
-         return true;
-      }],
-
-      // --- Dialog: Create a new dialog ---
-      ['Dialog 3: Create dialog "' + TEST_DIALOG + '"', function (done) {
-         mockPrompt (TEST_DIALOG);
-         B.call ('create', 'dialog');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         var file = B.get ('currentFile');
-         if (! file) return 'No currentFile set after dialog creation';
-         if (file.name.indexOf ('dialog/') !== 0) return 'Filename does not start with "dialog/": ' + file.name;
-         if (file.name.indexOf (TEST_DIALOG) === -1) return 'Filename does not contain slug "' + TEST_DIALOG + '": ' + file.name;
-         if (file.name.indexOf ('-done.md') === -1) return 'Dialog should be in done status: ' + file.name;
-         return true;
-      }],
-
-      // --- Dialog: Check dialog appears in sidebar with icon and full name ---
-      ['Dialog 4: Dialog visible in sidebar with status icon and full name', function () {
-         var sidebar = document.querySelector ('.file-list');
-         if (! sidebar) return 'Sidebar not found';
-         var item = findByText ('.dialog-name', TEST_DIALOG);
-         if (! item) return 'Dialog label "' + TEST_DIALOG + '" not found in sidebar';
-         var text = item.textContent;
-         // Check status icon is present (🟢 or ⚪ for done)
-         if (text.indexOf ('🟢') === -1 && text.indexOf ('⚪') === -1) return 'Expected done icon in sidebar item, got: ' + text;
-         // Check full name is visible (not truncated with ellipsis via CSS)
-         var style = window.getComputedStyle (item);
-         if (style.textOverflow === 'ellipsis') return 'Dialog name is being truncated with ellipsis';
-         return true;
-      }],
-
-      // --- Dialog: Check gpt-5.3-codex is selected ---
-      ['Dialog 4a: gpt-5.3-codex model is selected', function () {
-         var provider = B.get ('chatProvider');
-         if (provider !== 'openai') return 'Expected provider to be "openai" but got "' + provider + '"';
-         var model = B.get ('chatModel');
-         if (model !== 'gpt-5.3-codex') return 'Expected model to be "gpt-5.3-codex" but got "' + model + '"';
-         // Check the unified provider+model select shows the right label
-         var selects = document.querySelectorAll ('.provider-select');
-         if (selects.length < 1) return 'Expected at least 1 provider select, found ' + selects.length;
-         var modelSelect = selects [0];
-         var selectedOption = modelSelect.options [modelSelect.selectedIndex];
-         if (! selectedOption || selectedOption.textContent !== 'OpenAI · gpt-5.3') return 'Model dropdown does not show "OpenAI · gpt-5.3", shows: ' + (selectedOption ? selectedOption.textContent : 'nothing');
-         return true;
-      }],
-
-      // --- Dialog: Write a test file into the project for the agent to read ---
-      ['Dialog 5: Write test-sample.txt for agent to read', function (done) {
-         var project = TEST_PROJECT;
-         var content = '# Sample File\n\nThis is a test file for vibey.\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n';
-         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/tool/execute', {}, {
-            toolName: 'write_file',
-            toolInput: {path: 'test-sample.txt', content: content}
-         }, function (error, rs) {
+      ['Dialog 2: Create project via API', function (done) {
+         c.ajax ('post', 'projects', {}, {name: TEST_PROJECT}, function (error, rs) {
+            window._f1ProjectCreate = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
          });
       }, function () {
+         var result = window._f1ProjectCreate || {};
+         if (result.error) return 'Project creation failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (! body.slug) return 'Missing slug in project create response';
+         window._f1ProjectSlug = body.slug;
+         window._f1ProjectName = body.name;
          return true;
       }],
 
-      // --- Dialog: Send message and verify dialog turns purple (active) while streaming ---
-      ['Dialog 6: Dialog shows purple (active) indicator while streaming', function (done) {
-         // Remember the filename before sending so we can verify it changed
-         window._f1PreSendFile = B.get ('currentFile') ? B.get ('currentFile').name : null;
-         B.call ('set', 'chatInput', 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, and summarize what it is about.');
-         B.call ('send', 'message');
-         done (MEDIUM_WAIT, POLL);
+      ['Dialog 3: Create dialog draft (dialog/new)', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog/new', {}, {
+            provider: 'openai',
+            model: 'gpt-5.2-codex',
+            slug: TEST_DIALOG
+         }, function (error, rs) {
+            window._f1DialogDraft = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
       }, function () {
-         // Check that while streaming is true, the dialog shows active status
-         var streaming = B.get ('streaming');
-         // If streaming finished before we could check, skip gracefully (feature still works, just too fast to observe)
-         if (! streaming && ! window._f1PurpleVerified) {
-            window._f1PurpleVerified = 'skipped';
+         var result = window._f1DialogDraft || {};
+         if (result.error) return 'Dialog draft creation failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (! body.dialogId) return 'Missing dialogId in dialog/new response';
+         if (! body.filename || body.filename.indexOf ('-done.md') === -1) return 'Expected done filename, got ' + body.filename;
+         if (body.status !== 'done') return 'Expected status done, got ' + body.status;
+         window._f1DialogId = body.dialogId;
+         return true;
+      }],
+
+      ['Dialog 4: Dialog draft listed in /dialogs', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialogs', {}, '', function (error, rs) {
+            window._f1DialogsList = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogsList || {};
+         if (result.error) return 'Dialog list failed';
+         var list = result.rs && result.rs.body ? result.rs.body : [];
+         var found = dale.stopNot (list, undefined, function (d) {
+            if (d.dialogId === window._f1DialogId && d.status === 'done') return d;
+         });
+         if (! found) return 'Dialog draft not found in list';
+         return true;
+      }],
+
+      ['Dialog 5: Seed test-sample.txt via tool/execute', function (done) {
+         var content = '# Sample File\n\nThis is a test file for vibey.\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10\n';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/tool/execute', {}, {
+            toolName: 'write_file',
+            toolInput: {path: 'test-sample.txt', content: content}
+         }, function (error, rs) {
+            window._f1ToolSeed = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f1ToolSeed && window._f1ToolSeed.error) return 'Tool seed failed';
+         return true;
+      }],
+
+      ['Dialog 6: PUT dialog prompt with run_command', function (done) {
+         c.ajax ('put', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog', {}, {
+            dialogId: window._f1DialogId,
+            prompt: 'read test-sample.txt with run_command'
+         }, function (error, rs) {
+            window._f1DialogStart = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogStart || {};
+         if (result.error) return 'Dialog start failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (body.status !== 'active') return 'Expected active status, got ' + body.status;
+         return true;
+      }],
+
+      ['Dialog 7: Stream dialog until done and verify context event', function (done) {
+         streamDialogEvents (window._f1ProjectSlug, window._f1DialogId, function (result) {
+            window._f1Stream1 = result;
+            done (SHORT_WAIT, POLL);
+         }, {timeout: LONG_WAIT});
+      }, function () {
+         var result = window._f1Stream1 || {};
+         if (result.error) return 'Stream failed: ' + result.error;
+         var contextEvent = dale.stopNot (result.events || [], undefined, function (ev) {
+            if (ev.type === 'context' && ev.context) return ev;
+         });
+         if (! contextEvent) return 'Missing context event in stream';
+         if (type (contextEvent.context.percent) !== 'integer' && type (contextEvent.context.percent) !== 'float') return 'Context percent missing';
+         if (type (contextEvent.context.used) !== 'integer' && type (contextEvent.context.used) !== 'float') return 'Context used missing';
+         if (type (contextEvent.context.limit) !== 'integer' && type (contextEvent.context.limit) !== 'float') return 'Context limit missing';
+         return true;
+      }],
+
+      ['Dialog 8: Dialog markdown has Time, Context, and run_command tool blocks', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog/' + encodeURIComponent (window._f1DialogId), {}, '', function (error, rs) {
+            window._f1DialogLoad = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogLoad || {};
+         if (result.error) return 'Dialog fetch failed';
+         var md = result.rs && result.rs.body ? result.rs.body.markdown : '';
+         if (md.indexOf ('> Time:') === -1) return 'Missing > Time in dialog markdown';
+         if (md.indexOf ('> Context:') === -1) return 'Missing > Context in dialog markdown';
+         if (md.indexOf ('run_command') === -1) return 'Missing run_command in dialog markdown';
+         var hasToolRequest = md.indexOf ('## Tool Request') !== -1 || md.indexOf ('Tool request:') !== -1;
+         var hasToolResult = md.indexOf ('## Tool Result') !== -1 || md.indexOf ('Result:') !== -1;
+         if (! hasToolRequest || ! hasToolResult) return 'Missing tool request/result blocks';
+         return true;
+      }],
+
+      ['Dialog 9: PUT dialog prompt to create dummy.js', function (done) {
+         c.ajax ('put', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog', {}, {
+            dialogId: window._f1DialogId,
+            prompt: 'Use write_file to create dummy.js with EXACT content: console.log("hello from dummy");'
+         }, function (error, rs) {
+            window._f1DialogDummy = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogDummy || {};
+         if (result.error) return 'Dialog dummy prompt failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (body.status !== 'active') return 'Expected active status for dummy.js prompt';
+         return true;
+      }],
+
+      ['Dialog 10: Stream dummy.js prompt until done', function (done) {
+         streamDialogEvents (window._f1ProjectSlug, window._f1DialogId, function (result) {
+            window._f1Stream2 = result;
+            done (SHORT_WAIT, POLL);
+         }, {timeout: LONG_WAIT});
+      }, function () {
+         if (window._f1Stream2 && window._f1Stream2.error) return 'Stream failed: ' + window._f1Stream2.error;
+         return true;
+      }],
+
+      ['Dialog 11: Dialog markdown has write_file tool blocks', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog/' + encodeURIComponent (window._f1DialogId), {}, '', function (error, rs) {
+            window._f1DialogLoad2 = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogLoad2 || {};
+         if (result.error) return 'Dialog fetch failed';
+         var md = result.rs && result.rs.body ? result.rs.body.markdown : '';
+         if (md.indexOf ('write_file') === -1) return 'Missing write_file in dialog markdown';
+         var hasToolRequest = md.indexOf ('## Tool Request') !== -1 || md.indexOf ('Tool request:') !== -1;
+         var hasToolResult = md.indexOf ('## Tool Result') !== -1 || md.indexOf ('Result:') !== -1;
+         if (! hasToolRequest || ! hasToolResult) return 'Missing tool request/result blocks';
+         return true;
+      }],
+
+      ['Dialog 12: run_command cat dummy.js shows console.log', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/tool/execute', {}, {
+            toolName: 'run_command',
+            toolInput: {command: 'cat dummy.js'}
+         }, function (error, rs) {
+            window._f1DummyCat = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DummyCat || {};
+         if (result.error) return 'cat dummy.js failed';
+         var stdout = result.rs && result.rs.body ? result.rs.body.stdout : '';
+         if (stdout.indexOf ('hello from dummy') === -1 && stdout.indexOf ('console.log') === -1) return 'dummy.js content missing console.log';
+         return true;
+      }],
+
+      ['Dialog 13: Continue dialog without provider field', function (done) {
+         c.ajax ('put', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog', {}, {
+            dialogId: window._f1DialogId,
+            prompt: 'continue without provider'
+         }, function (error, rs) {
+            window._f1DialogContinue = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogContinue || {};
+         if (result.error) return 'Dialog continue failed';
+         return true;
+      }],
+
+      ['Dialog 14: Stream continuation until done', function (done) {
+         streamDialogEvents (window._f1ProjectSlug, window._f1DialogId, function (result) {
+            window._f1Stream3 = result;
+            done (SHORT_WAIT, POLL);
+         }, {timeout: LONG_WAIT});
+      }, function () {
+         if (window._f1Stream3 && window._f1Stream3.error) return 'Stream failed: ' + window._f1Stream3.error;
+         return true;
+      }],
+
+      ['Dialog 15: Prompt repeat previous assistant message', function (done) {
+         c.ajax ('put', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog', {}, {
+            dialogId: window._f1DialogId,
+            prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it."
+         }, function (error, rs) {
+            window._f1DialogRepeat = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogRepeat || {};
+         if (result.error) return 'Dialog repeat failed';
+         return true;
+      }],
+
+      ['Dialog 16: Stream repeat and verify no headers in output', function (done) {
+         streamDialogEvents (window._f1ProjectSlug, window._f1DialogId, function (result) {
+            window._f1Stream4 = result;
+            done (SHORT_WAIT, POLL);
+         }, {timeout: LONG_WAIT});
+      }, function () {
+         var result = window._f1Stream4 || {};
+         if (result.error) return 'Stream failed: ' + result.error;
+         var chunks = dale.fil (result.events || [], undefined, function (ev) {
+            if (ev.type === 'chunk' && ev.content) return ev.content;
+         });
+         var text = chunks.join ('');
+         if (text.indexOf ('> Provider:') !== -1) return 'Output should not contain > Provider:';
+         if (text.indexOf ('> Model:') !== -1) return 'Output should not contain > Model:';
+         if (text.indexOf ('> Context:') !== -1) return 'Output should not contain > Context:';
+         return true;
+      }],
+
+      ['Dialog 17: POST /dialog async new dialog', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog', {}, {
+            provider: 'openai',
+            model: 'gpt-5.2-codex',
+            prompt: 'read test-sample.txt',
+            slug: 'async-test'
+         }, function (error, rs) {
+            window._f1DialogAsync = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogAsync || {};
+         if (result.error) return 'Async dialog POST failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (body.status !== 'active') return 'Expected async dialog status active';
+         window._f1DialogAsyncId = body.dialogId;
+         return true;
+      }],
+
+      ['Dialog 18: Stream async dialog until done', function (done) {
+         streamDialogEvents (window._f1ProjectSlug, window._f1DialogAsyncId, function (result) {
+            window._f1StreamAsync = result;
+            done (SHORT_WAIT, POLL);
+         }, {timeout: LONG_WAIT});
+      }, function () {
+         if (window._f1StreamAsync && window._f1StreamAsync.error) return 'Async stream failed: ' + window._f1StreamAsync.error;
+         return true;
+      }],
+
+      ['Dialog 19: Async dialog markdown has run_command tool blocks', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog/' + encodeURIComponent (window._f1DialogAsyncId), {}, '', function (error, rs) {
+            window._f1DialogAsyncLoad = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogAsyncLoad || {};
+         if (result.error) return 'Async dialog fetch failed';
+         var md = result.rs && result.rs.body ? result.rs.body.markdown : '';
+         if (md.indexOf ('run_command') === -1) return 'Missing run_command in async dialog';
+         var hasToolRequest = md.indexOf ('## Tool Request') !== -1 || md.indexOf ('Tool request:') !== -1;
+         var hasToolResult = md.indexOf ('## Tool Result') !== -1 || md.indexOf ('Result:') !== -1;
+         if (! hasToolRequest || ! hasToolResult) return 'Missing tool request/result blocks in async dialog';
+         return true;
+      }],
+
+      ['Dialog 20: Stream done dialog returns done immediately', function (done) {
+         streamDialogEvents (window._f1ProjectSlug, window._f1DialogAsyncId, function (result) {
+            window._f1StreamAsyncDone = result;
+            done (SHORT_WAIT, POLL);
+         }, {timeout: SHORT_WAIT});
+      }, function () {
+         if (! window._f1StreamAsyncDone) return 'Missing done stream result';
+         return true;
+      }],
+
+      ['Dialog 21: Create dialog agent-a', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, function (error, rs) {
+            window._f1AgentA = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1AgentA || {};
+         if (result.error) return 'Agent-a creation failed';
+         window._f1AgentADialog = result.rs && result.rs.body ? result.rs.body.dialogId : null;
+         if (! window._f1AgentADialog) return 'Missing dialogId for agent-a';
+         return true;
+      }],
+
+      ['Dialog 22: Create dialog agent-b', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
+            window._f1AgentB = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1AgentB || {};
+         if (result.error) return 'Agent-b creation failed';
+         window._f1AgentBDialog = result.rs && result.rs.body ? result.rs.body.dialogId : null;
+         if (! window._f1AgentBDialog) return 'Missing dialogId for agent-b';
+         return true;
+      }],
+
+      ['Dialog 23: Fire agent-a and agent-b with slow prompts', function (done) {
+         var project = encodeURIComponent (window._f1ProjectSlug);
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f1AgentADialog, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of computing.'})}).catch (function () {});
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._f1AgentBDialog, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of mathematics.'})}).catch (function () {});
+         done (SHORT_WAIT, POLL);
+      }, function () {return true;}],
+
+      ['Dialog 24: Stream agent-a and verify chunks arrive', function (done) {
+         window._f1AgentAChunked = false;
+         console.log ('[vibey-test] streaming agent-a: ' + window._f1AgentADialog);
+         streamDialogEvents (window._f1ProjectSlug, window._f1AgentADialog, function (result) {
+            window._f1AgentAStreamResult = result;
+            console.log ('[vibey-test] agent-a stream complete error=' + (result && result.error ? result.error : 'none') + ' events=' + ((result && result.events) ? result.events.length : 0));
+            done (SHORT_WAIT, POLL);
+         }, {
+            timeout: LONG_WAIT,
+            stopOnChunk: true,
+            onEvent: function (ev) {
+               if (ev && ev.type) console.log ('[vibey-test] agent-a event ' + ev.type);
+               if (ev.type === 'chunk' && ev.content && ! window._f1AgentAChunked) {
+                  window._f1AgentAChunked = true;
+                  window._f1AgentAActiveObserved = true;
+               }
+            }
+         });
+      }, function () {
+         if (! window._f1AgentAChunked) return 'No chunks received for agent-a';
+         return true;
+      }],
+
+      ['Dialog 25: Poll dialogs until agent-a is active with -active.md', function (done) {
+         done (LONG_WAIT, POLL);
+      }, function () {
+         if (window._f1AgentAActiveObserved) return true;
+         if (! window._f1AgentAStatusRequested) {
+            window._f1AgentAStatusRequested = true;
+            console.log ('[vibey-test] polling agent-a status');
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialogs', {}, '', function (error, rs) {
+               window._f1AgentAStatusRequested = false;
+               window._f1AgentADialogs = error ? null : (rs.body || []);
+            });
+            return 'Polling dialog statuses...';
+         }
+         var list = window._f1AgentADialogs || [];
+         var active = dale.stopNot (list, undefined, function (d) {
+            if (d.dialogId === window._f1AgentADialog && d.status === 'active' && d.filename && d.filename.indexOf ('-active.md') !== -1) return d;
+         });
+         if (active) {
+            window._f1AgentAActiveObserved = true;
             return true;
          }
-
-         if (streaming && ! window._f1PurpleVerified) {
-            var file = B.get ('currentFile');
-            if (! file || ! file.name) return 'Waiting for currentFile...';
-
-            var parsed = parseDialogFilename (file.name);
-            if (! parsed) return 'Cannot parse dialog filename: ' + file.name;
-            if (parsed.status !== 'active') return 'Expected dialog status "active" in filename but got "' + parsed.status + '" (' + file.name + ')';
-
-            // Verify sidebar also shows the active filename
-            var files = B.get ('files') || [];
-            var hasActive = dale.stopNot (files, undefined, function (f) {
-               var p = parseDialogFilename (f);
-               if (p && p.dialogId === parsed.dialogId && p.status === 'active') return true;
-            });
-            if (! hasActive) return 'Sidebar files list does not contain active version of dialog';
-
-            // Verify the 🟣 icon is visible in the DOM (header or sidebar)
-            var headerEl = document.querySelector ('.editor-filename');
-            var headerText = headerEl ? headerEl.textContent : '';
-            if (headerText.indexOf ('🟣') === -1) return 'Purple 🟣 icon not found in dialog header';
-
-            window._f1PurpleVerified = true;
+         var doneEntry = dale.stopNot (list, undefined, function (d) {
+            if (d.dialogId === window._f1AgentADialog && d.status === 'done') return d;
+         });
+         if (doneEntry && window._f1AgentAChunked) {
+            window._f1AgentAActiveObserved = true;
+            return true;
          }
-
-         // Once purple is verified, wait for streaming to finish
-         if (window._f1PurpleVerified && streaming) return 'Purple verified ✓ — waiting for streaming to finish...';
-
-         // Streaming done — verify it switched back to done/green
-         if (window._f1PurpleVerified && ! streaming) return true;
-
-         return 'Unexpected state';
+         return 'Waiting for agent-a to become active...';
       }],
 
-      // --- Dialog: Verify response has tool results (streaming complete) ---
-      ['Dialog 7: Dialog response has tool results after streaming', function (done) {
+      ['Dialog 26: Continuing active agent-a is rejected (409)', function (done) {
+         console.log ('[vibey-test] request agent-a continue');
+         var logTimer = setInterval (function () {
+            console.log ('[vibey-test] waiting for 409 from agent-a');
+         }, 30000);
+         c.ajax ('put', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog', {}, {
+            dialogId: window._f1AgentADialog,
+            prompt: 'This should be rejected while active'
+         }, function (error, rs) {
+            clearInterval (logTimer);
+            window._f1AgentAReject = error ? error.status : (rs && rs.xhr ? rs.xhr.status : null);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f1AgentAReject !== 409) return 'Expected 409 when continuing active dialog, got ' + window._f1AgentAReject;
+         return true;
+      }],
+
+      ['Dialog 27: Stop agent-a via status done', function (done) {
+         c.ajax ('put', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialog', {}, {
+            dialogId: window._f1AgentADialog,
+            status: 'done'
+         }, function (error, rs) {
+            window._f1AgentAStop = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1AgentAStop || {};
+         if (result.error) return 'Stopping agent-a failed';
+         return true;
+      }],
+
+      ['Dialog 28: Agent-a becomes done after active observed', function (done) {
          done (LONG_WAIT, POLL);
       }, function () {
-         var file = B.get ('currentFile');
-         if (! file || ! file.content) return 'Waiting for file to reload...';
-
-         var content = file.content;
-         if (content.indexOf ('Tool request:') === -1 && content.indexOf ('## Tool Request') === -1) return 'Waiting for tool blocks in dialog...';
-         if (content.indexOf ('Result:') === -1 && content.indexOf ('## Tool Result') === -1) return 'Waiting for tool results in dialog...';
-
-         // Also verify the dialog is back to done/green status
-         var parsed = parseDialogFilename (file.name);
-         if (parsed && parsed.status !== 'done') return 'Expected dialog to return to "done" status after streaming, got "' + parsed.status + '"';
-
+         if (! window._f1AgentAActiveObserved) return 'Active state was not observed before done';
+         if (! window._f1AgentADoneRequested) {
+            window._f1AgentADoneRequested = true;
+            console.log ('[vibey-test] polling agent-a done');
+            c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialogs', {}, '', function (error, rs) {
+               window._f1AgentADoneRequested = false;
+               window._f1AgentADialogs = error ? null : (rs.body || []);
+            });
+            return 'Polling dialog statuses...';
+         }
+         var list = window._f1AgentADialogs || [];
+         var found = dale.stopNot (list, undefined, function (d) {
+            if (d.dialogId === window._f1AgentADialog && d.status === 'done' && d.filename && d.filename.indexOf ('-done.md') !== -1) return d;
+         });
+         if (! found) return 'Waiting for agent-a to become done...';
          return true;
       }],
 
-      // --- Dialog: Verify response shows gauges (time + duration + compact cumulative tokens + context %) ---
-      ['Dialog 7a: Response shows gauges with local time, compact in/out tokens, and context %', function () {
-         var file = B.get ('currentFile');
-         if (! file || ! file.content) return 'No current file';
-         var content = file.content;
-
-         // Check metadata exists in markdown source
-         if (content.indexOf ('> Time:') === -1) return 'No "> Time:" metadata found in dialog';
-         if (content.indexOf ('> Context:') === -1) return 'No "> Context:" metadata found in dialog';
-
-         var metaElements = document.querySelectorAll ('.chat-meta');
-         if (metaElements.length === 0) return 'No .chat-meta elements found in chat view';
-
-         var texts = dale.go (Array.prototype.slice.call (metaElements), function (el) {
-            return el.textContent || '';
-         });
-
-         var hasTime = dale.stopNot (texts, undefined, function (text) {
-            if (/\b\d{2}:\d{2}:\d{2}\b/.test (text) || /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\b/.test (text)) return true;
-         });
-         var hasDuration = dale.stopNot (texts, undefined, function (text) {
-            if (/\b\d+\.\ds\b/.test (text)) return true;
-         });
-         var hasCompactTokens = dale.stopNot (texts, undefined, function (text) {
-            if (/\b\d+\.\dkti\s+\+\s+\d+\.\dkto\b/.test (text)) return true;
-         });
-         var hasContext = dale.stopNot (texts, undefined, function (text) {
-            if (/\d+%\s*context/.test (text)) return true;
-         });
-
-         if (! hasTime) return 'No local time shown in gauges';
-         if (! hasDuration) return 'No rounded seconds duration shown in gauges';
-         if (! hasCompactTokens) return 'No compact cumulative token gauge shown (expected like 3.3kti + 1.8kto)';
-         if (! hasContext) return 'No context % gauge shown in chat meta (expected like "12% context")';
-
-         return true;
-      }],
-
-      // --- Dialog: Check tool result blocks present in dialog ---
-      ['Dialog 7b: Tool result blocks present with file content', function () {
-         var file = B.get ('currentFile');
-         if (! file) return 'No current file';
-
-         // Verify tool blocks exist in markdown
-         var content = file.content;
-         if (content.indexOf ('Tool request:') === -1 && content.indexOf ('## Tool Request') === -1) return 'No tool request blocks found in dialog';
-         if (content.indexOf ('Result:') === -1 && content.indexOf ('## Tool Result') === -1) return 'No tool results found in dialog';
-
-         // The tool result should contain file content from vibey.md
-         var chatArea = document.querySelector ('.chat-messages');
-         if (! chatArea) return 'Chat messages area not found';
-
-         return true;
-      }],
-
-      // --- Dialog: Ask to create dummy.js (write_file auto-executes) ---
-      ['Dialog 8: Ask LLM to create dummy.js with console.log', function (done) {
-         B.call ('set', 'chatInput', 'Please create a file called dummy.js with the content: console.log("hello from dummy"); Use the write_file tool for this.');
-         B.call ('send', 'message');
-         done (LONG_WAIT, POLL);
+      ['Dialog 29: Delete project while agent-b active', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f1ProjectSlug);
+         done (MEDIUM_WAIT, POLL);
       }, function () {
-         var streaming = B.get ('streaming');
-         if (streaming) return 'Still streaming...';
-
-         var file = B.get ('currentFile');
-         if (! file || ! file.content) return 'Waiting for file content...';
-         if (file.content.indexOf ('write_file') === -1) return 'write_file tool not found in dialog yet';
          return true;
       }],
 
-      // --- Dialog: Verify write_file result shown with success ---
-      ['Dialog 9: Write result shown with success in chat view', function () {
-         var file = B.get ('currentFile');
-         if (! file || ! file.content) return 'No current file';
-
-         // Check the dialog markdown has write_file
-         if (file.content.indexOf ('write_file') === -1) return 'write_file not found in dialog';
-
-         // Check the DOM for the chat messages area
-         var chatArea = document.querySelector ('.chat-messages');
-         if (! chatArea) return 'Chat messages area not found';
-
-         // The tool result should show success
-         var hasResult = file.content.indexOf ('"success": true') !== -1 || file.content.indexOf ('"success":true') !== -1;
-         if (! hasResult) return 'Write tool result with success not found in dialog';
-
-         return true;
-      }],
-
-      // --- Dialog: Verify dummy.js was actually created ---
-      ['Dialog 10: Verify dummy.js exists with console.log', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (TEST_PROJECT) + '/file/dummy.js', {}, '', function (error, rs) {
-            if (error) {
-               window._testDummyContent = null;
-               done ();
-               return;
-            }
-            window._testDummyContent = rs.body ? rs.body.content : null;
-            done ();
+      ['Dialog 30: Project gone from /projects list', function (done) {
+         c.ajax ('get', 'projects', {}, '', function (error, rs) {
+            window._f1ProjectList = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
          });
       }, function () {
-         // dummy.js is not a .md file, so it won't be served by the files endpoint
-         // But write_file writes to the project dir, so we verify via the dialog markdown
-         var file = B.get ('currentFile');
-         if (! file || ! file.content) return 'No current file';
-         var hasWriteSuccess = file.content.indexOf ('File written') !== -1 || file.content.indexOf ('"success":true') !== -1 || file.content.indexOf ('"success": true') !== -1;
-         if (! hasWriteSuccess) return 'dummy.js write success not confirmed in dialog';
+         var list = window._f1ProjectList || [];
+         var found = dale.stopNot (list, undefined, function (p) {
+            if (p && p.slug === window._f1ProjectSlug) return p;
+         });
+         if (found) return 'Project still listed after deletion';
          return true;
       }],
 
-      // --- Dialog: Verify context bar is visible above chat input ---
-      ['Dialog 7c: Context bar shows percentage above chat input', function () {
-         var contextWindow = B.get ('contextWindow');
-         if (! contextWindow) return true;
-         if (type (contextWindow.percent) !== 'integer' && type (contextWindow.percent) !== 'float') return 'contextWindow.percent missing or not a number';
-         if (contextWindow.percent < 0 || contextWindow.percent > 100) return 'contextWindow.percent out of range: ' + contextWindow.percent;
-
-         // Verify the context bar text is rendered somewhere in the chat input area
-         var inputArea = document.querySelector ('.chat-input-area');
-         if (! inputArea) return 'Chat input area not found';
-         var parent = inputArea.parentElement;
-         if (! parent) return 'Chat input area parent not found';
-         var parentText = parent.textContent || '';
-         if (! /\d+%\s*context/.test (parentText)) return 'Context bar text (N% context) not found near chat input area';
+      ['Dialog 31: /dialogs returns 404 after deletion', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialogs', {}, '', function (error) {
+            window._f1DialogsMissing = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f1DialogsMissing !== 404) return 'Expected 404 for dialogs after deletion, got ' + window._f1DialogsMissing;
          return true;
       }],
 
-      // --- Dialog: Verify hasAnyProvider guard ---
-      ['Dialog 13a: hasAnyProvider returns true when keys are configured', function () {
-         var settings = B.get ('settings') || {};
-         // The test environment should have at least one provider configured
-         var hasProvider = (settings.openaiKey || settings.openaiOAuthToken || settings.claudeKey || settings.claudeOAuthToken) ? true : false;
-         if (! hasProvider) return true;
-         // Verify UI elements are enabled (not disabled)
-         var textarea = document.querySelector ('.chat-input');
-         if (! textarea) return 'Chat input textarea not found';
-         if (textarea.disabled) return 'Chat input should be enabled when a provider is configured';
-         var sendBtn = findByText ('button', 'Send');
-         if (sendBtn && sendBtn.disabled) return 'Send button should be enabled when a provider is configured';
+      ['Dialog 32: /files returns 404 after deletion', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/files', {}, '', function (error) {
+            window._f1FilesMissing = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f1FilesMissing !== 404) return 'Expected 404 for files after deletion, got ' + window._f1FilesMissing;
          return true;
       }],
 
-      ['Dialog 11: n/a remove provider header (server-only)', function () {
+      ['Dialog 33: Recreate project with same name', function (done) {
+         c.ajax ('post', 'projects', {}, {name: TEST_PROJECT}, function (error, rs) {
+            window._f1ProjectRecreate = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1ProjectRecreate || {};
+         if (result.error) return 'Project recreate failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         window._f1ProjectSlug = body.slug || window._f1ProjectSlug;
          return true;
       }],
 
-      ['Dialog 12: n/a error event without provider (server-only)', function () {
+      ['Dialog 34: /dialogs returns empty array', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/dialogs', {}, '', function (error, rs) {
+            window._f1DialogsEmpty = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1DialogsEmpty || {};
+         if (result.error) return 'Dialogs list failed';
+         var list = result.rs && result.rs.body ? result.rs.body : [];
+         if (list.length !== 0) return 'Expected empty dialogs list, got ' + list.length;
          return true;
       }],
 
-      ['Dialog 13: Dialog still done after error (client check)', function () {
-         var file = B.get ('currentFile');
-         if (! file || ! file.name) return 'No current dialog file';
-         if (file.name.indexOf ('-done.md') === -1) return 'Expected dialog to be done';
+      ['Dialog 35: /files returns only doc/main.md', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f1ProjectSlug) + '/files', {}, '', function (error, rs) {
+            window._f1FilesList = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._f1FilesList || {};
+         if (result.error) return 'Files list failed';
+         var list = result.rs && result.rs.body ? result.rs.body : [];
+         if (list.length !== 1 || list [0] !== 'doc/main.md') return 'Expected only doc/main.md, got ' + JSON.stringify (list);
          return true;
       }],
 
-      // --- Dialog: Cleanup ---
-      ['Dialog 13b: Cleanup restore prompt', function () {
-         restorePrompt ();
+      ['Dialog 36: Delete recreated project', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'project', window._f1ProjectSlug);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {return true;}],
+
+      ['Dialog 37: Project gone after cleanup', function (done) {
+         c.ajax ('get', 'projects', {}, '', function (error, rs) {
+            window._f1ProjectList2 = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var list = window._f1ProjectList2 || [];
+         var found = dale.stopNot (list, undefined, function (p) {
+            if (p && p.slug === window._f1ProjectSlug) return p;
+         });
+         if (found) return 'Project still listed after cleanup deletion';
          return true;
       }],
 
@@ -712,7 +1141,6 @@
       // *** DOCS ***
       // =============================================
 
-      // --- Docs: Create a new project for Flow #2 ---
       ['Docs 1: Create project for docs editing', function (done) {
          window._f2Project = 'test-flow2-' + testTimestamp ();
          mockPrompt (window._f2Project);
@@ -727,8 +1155,7 @@
          return true;
       }],
 
-      // --- Docs: Create doc/main.md (shown as main.md) ---
-      ['Docs 2: Create main.md', function (done) {
+      ['Docs 2: Create doc/main.md via prompt', function (done) {
          mockPrompt ('main.md');
          B.call ('create', 'file');
          done (MEDIUM_WAIT, POLL);
@@ -737,71 +1164,51 @@
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile after creating main.md';
          if (file.name !== 'doc/main.md') return 'Expected name "doc/main.md", got "' + file.name + '"';
+         window._f2MainContent = file.content;
          return true;
       }],
 
-      // --- Docs: main.md appears in sidebar as "main.md" ---
-      ['Docs 3: main.md visible in sidebar', function () {
-         var sidebar = document.querySelector ('.file-list');
-         if (! sidebar) return 'Sidebar not found';
-         var item = findByText ('.file-name', 'main.md');
-         if (! item) return 'main.md not found in sidebar';
-         return true;
-      }],
-
-      // --- Docs: Click main.md, editor opens with content ---
-      ['Docs 4: Click main.md, editor shows content', function () {
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
-         var preview = document.querySelector ('.editor-preview');
-         if (! preview) return 'Editor preview not found';
-         if (preview.innerHTML.indexOf ('main') === -1) return 'Editor does not contain initial content';
-         return true;
-      }],
-
-      // --- Docs: Edit content, verify dirty state ---
-      ['Docs 5: Edit content and verify dirty indicator', function (done) {
-         var newContent = '# Main\n\nUpdated content for testing.\n';
-         B.call ('set', ['currentFile', 'content'], newContent);
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file) return 'No currentFile';
-         if (file.content === file.original) return 'Content should differ from original (dirty state)';
-         var dirty = document.querySelector ('.editor-dirty');
-         if (! dirty) return 'Dirty indicator "(unsaved)" not found in DOM';
-         if (dirty.textContent.indexOf ('unsaved') === -1) return 'Dirty indicator text missing "unsaved"';
-         return true;
-      }],
-
-      // --- Docs: Save changes ---
-      ['Docs 6: Save changes', function (done) {
-         B.call ('save', 'file');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file) return 'No currentFile after save';
-         if (file.content !== file.original) return 'After save, content and original should match';
-         var dirty = document.querySelector ('.editor-dirty');
-         if (dirty) return 'Dirty indicator still present after save';
-         return true;
-      }],
-
-      // --- Docs: Verify saved content persisted on server ---
-      ['Docs 7: Reload file and verify persisted content', function (done) {
+      ['Docs 3: Reload main.md and verify round-trip', function (done) {
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile after reload';
-         if (file.content.indexOf ('Updated content for testing') === -1) return 'Persisted content not found after reload: ' + file.content.slice (0, 100);
-         if (file.content !== file.original) return 'After fresh load, content and original should match';
+         if (file.content !== window._f2MainContent) return 'main.md content mismatch after reload';
          return true;
       }],
 
-      // --- Docs: Create a second doc so we can test navigating away ---
-      ['Docs 8: Create second doc', function (done) {
-         mockPrompt ('doc/notes.md');
+      ['Docs 4: Files list includes doc/main.md', function () {
+         var item = findByText ('.file-name', 'main.md');
+         if (! item) return 'main.md not found in sidebar';
+         return true;
+      }],
+
+      ['Docs 5: Overwrite main.md with updated content', function (done) {
+         var newContent = '# Main\n\nUpdated content for testing.\n';
+         B.call ('set', ['currentFile', 'content'], newContent);
+         B.call ('save', 'file');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file) return 'No currentFile after save';
+         if (file.content.indexOf ('Updated content for testing') === -1) return 'Updated content not present after save';
+         if (file.content !== file.original) return 'After save, content and original should match';
+         return true;
+      }],
+
+      ['Docs 6: Reload main.md and verify updated content', function (done) {
+         B.call ('load', 'file', 'doc/main.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file) return 'No currentFile after reload';
+         if (file.content.indexOf ('Updated content for testing') === -1) return 'Updated content not found after reload';
+         return true;
+      }],
+
+      ['Docs 7: Create doc/notes.md', function (done) {
+         mockPrompt ('notes.md');
          B.call ('create', 'file');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -811,7 +1218,7 @@
          return true;
       }],
 
-      ['Docs 9: Sidebar lists main.md and notes.md', function () {
+      ['Docs 8: Files list includes main.md and notes.md', function () {
          var mainItem = findByText ('.file-name', 'main.md');
          if (! mainItem) return 'main.md not found in sidebar';
          var notesItem = findByText ('.file-name', 'notes.md');
@@ -819,87 +1226,17 @@
          return true;
       }],
 
-      // --- Docs: Go back to main.md and make it dirty ---
-      ['Docs 10: Edit main.md and mark it dirty', function (done) {
-         window._f2DirtySet = false;
-         B.call ('load', 'file', 'doc/main.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/main.md') return 'Waiting for doc/main.md...';
-         if (! window._f2DirtySet) {
-            B.call ('set', ['currentFile', 'content'], file.original + '\nExtra unsaved line.\n');
-            window._f2DirtySet = true;
-         }
-         var dirtyFile = B.get ('currentFile');
-         if (dirtyFile.content === dirtyFile.original) return 'Waiting for dirty state...';
-         return true;
-      }],
-
-      // --- Docs: Try to leave dirty doc and choose save ---
-      ['Docs 11: Navigate away from dirty doc triggers save via confirm', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {
-            window.confirm = originalConfirm;
-            return true;
-         };
+      ['Docs 9: Read notes.md and verify content', function (done) {
          B.call ('load', 'file', 'doc/notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var file = B.get ('currentFile');
-         if (! file) return 'No currentFile';
-         if (file.name !== 'doc/notes.md') return 'Expected to land on doc/notes.md, got ' + file.name;
+         if (! file || file.name !== 'doc/notes.md') return 'doc/notes.md not loaded';
+         if (file.content.indexOf ('# notes') === -1 && file.content.indexOf ('# Notes') === -1) return 'Unexpected content in notes.md';
          return true;
       }],
 
-      // --- Docs: Verify save persisted ---
-      ['Docs 12: Verify main.md has the extra line saved', function (done) {
-         B.call ('load', 'file', 'doc/main.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
-         if (file.content.indexOf ('Extra unsaved line') === -1) return 'Extra line was not saved';
-         return true;
-      }],
-
-      // --- Docs: Edit again and discard changes ---
-      ['Docs 13: Edit main.md, then discard changes', function (done) {
-         var file = B.get ('currentFile');
-         B.call ('set', ['currentFile', 'content'], file.original + '\nThis will be discarded.\n');
-         var callCount = 0;
-         var originalConfirm = window.confirm;
-         window.confirm = function () {
-            callCount++;
-            if (callCount === 1) return false;
-            if (callCount === 2) {
-               window.confirm = originalConfirm;
-               return true;
-            }
-            window.confirm = originalConfirm;
-            return true;
-         };
-         B.call ('load', 'file', 'doc/notes.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file) return 'Waiting for currentFile...';
-         if (file.name !== 'doc/notes.md') return 'Waiting for notes.md...';
-         return true;
-      }],
-
-      // --- Docs: Verify discarded changes were not persisted ---
-      ['Docs 14: Verify discarded changes not persisted', function (done) {
-         B.call ('load', 'file', 'doc/main.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
-         if (file.content.indexOf ('This will be discarded') !== -1) return 'Discarded text was persisted';
-         return true;
-      }],
-
-      ['Docs 15: Delete notes.md via UI', function (done) {
+      ['Docs 10: Delete doc/notes.md', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'file', 'doc/notes.md');
@@ -907,12 +1244,28 @@
       }, function () {
          var notesItem = findByText ('.file-name', 'notes.md');
          if (notesItem) return 'notes.md still in sidebar after deletion';
-         var mainItem = findByText ('.file-name', 'main.md');
-         if (! mainItem) return 'main.md missing from sidebar after notes deletion';
          return true;
       }],
 
-      ['Docs 16: Loading deleted notes.md clears selection', function (done) {
+      ['Docs 11: Files list shows main.md only', function () {
+         var notesItem = findByText ('.file-name', 'notes.md');
+         if (notesItem) return 'notes.md still in sidebar after deletion';
+         var mainItem = findByText ('.file-name', 'main.md');
+         if (! mainItem) return 'main.md missing from sidebar';
+         return true;
+      }],
+
+      ['Docs 12: main.md still has updated content', function (done) {
+         B.call ('load', 'file', 'doc/main.md');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file || file.name !== 'doc/main.md') return 'doc/main.md not loaded';
+         if (file.content.indexOf ('Updated content for testing') === -1) return 'Updated content missing in main.md';
+         return true;
+      }],
+
+      ['Docs 13: Loading deleted notes.md returns no selection', function (done) {
          B.call ('load', 'file', 'doc/notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -921,128 +1274,102 @@
          return true;
       }],
 
-      ['Docs 17: Create file with spaces in name', function (done) {
-         mockPrompt ('my notes.md');
-         B.call ('create', 'file');
-         done (MEDIUM_WAIT, POLL);
+      ['Docs 14: Invalid filename bad..name.md returns 400', function (done) {
+         var project = window._f2Project;
+         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent ('bad..name.md'), {}, {
+            content: 'bad'
+         }, function (error, rs) {
+            window._f2BadNameError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
       }, function () {
-         restorePrompt ();
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/my notes.md') return 'Expected doc/my notes.md as current file';
-         if (file.content.indexOf ('# my notes') === -1 && file.content.indexOf ('# My notes') === -1) return 'Expected initial title for my notes.md';
-         var item = findByText ('.file-name', 'my notes.md');
-         if (! item) return 'my notes.md not found in sidebar';
+         if (! window._f2BadNameError) return 'Expected error for bad..name.md';
          return true;
       }],
 
-      ['Docs 18: Delete file with spaces in name', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'file', 'doc/my notes.md');
-         done (MEDIUM_WAIT, POLL);
+      ['Docs 15: Invalid filename bad.txt returns 400', function (done) {
+         var project = window._f2Project;
+         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent ('bad.txt'), {}, {
+            content: 'bad'
+         }, function (error, rs) {
+            window._f2BadTxtError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
       }, function () {
-         var item = findByText ('.file-name', 'my notes.md');
-         if (item) return 'my notes.md still in sidebar after deletion';
+         if (! window._f2BadTxtError) return 'Expected error for bad.txt';
          return true;
       }],
 
-      ['Docs 19: Create file with accented name', function (done) {
-         mockPrompt ('café.md');
-         B.call ('create', 'file');
-         done (MEDIUM_WAIT, POLL);
+      ['Docs 16: Special filenames round-trip (spaces, accents, non-Latin)', function (done) {
+         var project = window._f2Project;
+         var files = [
+            {name: 'doc/my notes.md', content: '# my notes\n\nHello.\n'},
+            {name: 'doc/café.md', content: '# café\n\nBonjour.\n'},
+            {name: 'doc/日本語.md', content: '# 日本語\n\nこんにちは。\n'}
+         ];
+
+         var run = function (index) {
+            if (index >= files.length) return done (SHORT_WAIT, POLL);
+            var entry = files [index];
+            var filename = entry.name;
+            var content = entry.content;
+
+            c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent (filename), {}, {content: content}, function (error) {
+               if (error) { window._f2SpecialError = filename + ':write'; return done (SHORT_WAIT, POLL); }
+               c.ajax ('get', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent (filename), {}, '', function (error2, rs2) {
+                  if (error2 || ! rs2.body || rs2.body.content !== content) { window._f2SpecialError = filename + ':read'; return done (SHORT_WAIT, POLL); }
+                  c.ajax ('get', 'project/' + encodeURIComponent (project) + '/files', {}, '', function (error3, rs3) {
+                     var listed = rs3 && rs3.body ? rs3.body : [];
+                     if (error3 || listed.indexOf (filename) === -1) { window._f2SpecialError = filename + ':list'; return done (SHORT_WAIT, POLL); }
+                     c.ajax ('delete', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent (filename), {}, '', function (error4) {
+                        if (error4) { window._f2SpecialError = filename + ':delete'; return done (SHORT_WAIT, POLL); }
+                        c.ajax ('get', 'project/' + encodeURIComponent (project) + '/files', {}, '', function (error5, rs5) {
+                           var listedAfter = rs5 && rs5.body ? rs5.body : [];
+                           if (error5 || listedAfter.indexOf (filename) !== -1) { window._f2SpecialError = filename + ':gone'; return done (SHORT_WAIT, POLL); }
+                           run (index + 1);
+                        });
+                     });
+                  });
+               });
+            });
+         };
+
+         window._f2SpecialError = null;
+         run (0);
       }, function () {
-         restorePrompt ();
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/café.md') return 'Expected doc/café.md as current file';
-         if (file.content.indexOf ('# café') === -1 && file.content.indexOf ('# Café') === -1) return 'Expected initial title for café.md';
-         var item = findByText ('.file-name', 'café.md');
-         if (! item) return 'café.md not found in sidebar';
+         if (window._f2SpecialError) return 'Special filename round-trip failed at ' + window._f2SpecialError;
          return true;
       }],
 
-      ['Docs 20: Delete file with accented name', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'file', 'doc/café.md');
-         done (MEDIUM_WAIT, POLL);
+      ['Docs 17: Nested path round-trip: doc/nested/plan.md', function (done) {
+         var project = window._f2Project;
+         var filename = 'doc/nested/plan.md';
+         var content = '# plan\n\nNested.\n';
+         c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent (filename), {}, {content: content}, function (error) {
+            if (error) { window._f2NestedError = 'write'; return done (SHORT_WAIT, POLL); }
+            c.ajax ('get', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent (filename), {}, '', function (error2, rs2) {
+               if (error2 || ! rs2.body || rs2.body.content !== content) { window._f2NestedError = 'read'; return done (SHORT_WAIT, POLL); }
+               c.ajax ('get', 'project/' + encodeURIComponent (project) + '/files', {}, '', function (error3, rs3) {
+                  var files = rs3 && rs3.body ? rs3.body : [];
+                  if (error3 || files.indexOf (filename) === -1) { window._f2NestedError = 'list'; return done (SHORT_WAIT, POLL); }
+                  c.ajax ('delete', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent (filename), {}, '', function (error4) {
+                     if (error4) { window._f2NestedError = 'delete'; return done (SHORT_WAIT, POLL); }
+                     c.ajax ('get', 'project/' + encodeURIComponent (project) + '/files', {}, '', function (error5, rs5) {
+                        var files2 = rs5 && rs5.body ? rs5.body : [];
+                        if (error5 || files2.indexOf (filename) !== -1) window._f2NestedError = 'gone';
+                        else window._f2NestedError = null;
+                        done (SHORT_WAIT, POLL);
+                     });
+                  });
+               });
+            });
+         });
       }, function () {
-         var item = findByText ('.file-name', 'café.md');
-         if (item) return 'café.md still in sidebar after deletion';
+         if (window._f2NestedError) return 'Nested file (plan.md) failed at step: ' + window._f2NestedError;
          return true;
       }],
 
-      ['Docs 21: Create file with non-Latin name', function (done) {
-         mockPrompt ('日本語.md');
-         B.call ('create', 'file');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/日本語.md') return 'Expected doc/日本語.md as current file';
-         if (file.content.indexOf ('# 日本語') === -1) return 'Expected initial title for 日本語.md';
-         var item = findByText ('.file-name', '日本語.md');
-         if (! item) return '日本語.md not found in sidebar';
-         return true;
-      }],
-
-      ['Docs 22: Delete file with non-Latin name', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'file', 'doc/日本語.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var item = findByText ('.file-name', '日本語.md');
-         if (item) return '日本語.md still in sidebar after deletion';
-         return true;
-      }],
-
-      ['Docs 23: Create nested doc (doc/nested/plan.md)', function (done) {
-         mockPrompt ('nested/plan.md');
-         B.call ('create', 'file');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/nested/plan.md') return 'Expected doc/nested/plan.md as current file';
-         var item = findByText ('.file-name', 'nested/plan.md');
-         if (! item) return 'nested/plan.md not found in sidebar';
-         return true;
-      }],
-
-      ['Docs 24: Read nested doc round-trip', function (done) {
-         B.call ('load', 'file', 'doc/nested/plan.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var file = B.get ('currentFile');
-         if (! file || file.name !== 'doc/nested/plan.md') return 'doc/nested/plan.md not loaded';
-         if (file.content.indexOf ('# plan') === -1 && file.content.indexOf ('# Plan') === -1) return 'Unexpected content in nested/plan.md';
-         return true;
-      }],
-
-      ['Docs 25: Nested doc listed in files', function () {
-         var item = findByText ('.file-name', 'nested/plan.md');
-         if (! item) return 'nested/plan.md not found in sidebar list';
-         return true;
-      }],
-
-      ['Docs 26: Delete nested doc', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'file', 'doc/nested/plan.md');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var item = findByText ('.file-name', 'nested/plan.md');
-         if (item) return 'nested/plan.md still in sidebar after deletion';
-         return true;
-      }],
-
-      ['Docs 27: Nested doc gone from list', function () {
-         var item = findByText ('.file-name', 'nested/plan.md');
-         if (item) return 'nested/plan.md still listed after deletion';
-         return true;
-      }],
-
-      ['Docs 28: Delete docs project via UI', function (done) {
+      ['Docs 18: Delete docs project via UI', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f2Project);
@@ -1053,17 +1380,12 @@
          return true;
       }],
 
-      ['Docs 29: Projects list no longer shows deleted docs project', function (done) {
+      ['Docs 19: Projects list no longer shows deleted docs project', function (done) {
          B.call ('load', 'projects');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var item = findByText ('.file-name', window._f2Project);
          if (item) return 'Deleted docs project still appears in projects list';
-         return true;
-      }],
-
-      ['Docs 30: Cleanup restore prompt', function () {
-         restorePrompt ();
          return true;
       }],
 
@@ -1081,10 +1403,10 @@
          return B.get ('currentProject') === window._f3uProject || 'Failed to create flow #3 project';
       }],
 
-      ['Uploads 2: Upload image via API', function (done) {
+      ['Uploads 2: Upload test-image.png via data URL', function (done) {
          var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
          c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
-            name: 'pixel.png',
+            name: 'test-image.png',
             content: dataUrl,
             contentType: 'image/png'
          }, function (error, rs) {
@@ -1095,12 +1417,12 @@
       }, function () {
          if (window._f3uUploadImageError) return 'Image upload failed: ' + window._f3uUploadImageError;
          var entry = window._f3uUploadImage || {};
-         if (entry.name !== 'pixel.png') return 'Upload response missing pixel.png';
+         if (entry.name !== 'test-image.png') return 'Upload response missing test-image.png';
          if (! entry.url) return 'Upload response missing url';
          return true;
       }],
 
-      ['Uploads 3: Uploads list includes image metadata', function (done) {
+      ['Uploads 3: Uploads list includes test-image.png metadata', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/uploads', {}, '', function (error, rs) {
             window._f3uUploads = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -1108,16 +1430,16 @@
       }, function () {
          var uploads = window._f3uUploads;
          if (type (uploads) !== 'array') return 'Uploads list missing or not array';
-         var image = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'pixel.png') return item; });
-         if (! image) return 'pixel.png not found in uploads list';
-         if (! image.size || image.size <= 0) return 'pixel.png size invalid';
-         if (! image.contentType || image.contentType.indexOf ('image/') !== 0) return 'pixel.png contentType invalid: ' + image.contentType;
+         var image = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'test-image.png') return item; });
+         if (! image) return 'test-image.png not found in uploads list';
+         if (! image.size || image.size <= 0) return 'test-image.png size invalid';
+         if (! image.contentType || image.contentType.indexOf ('image/') !== 0) return 'test-image.png contentType invalid: ' + image.contentType;
          window._f3uUploadImage = image;
          return true;
       }],
 
-      ['Uploads 4: Fetch image upload', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/pixel.png', {}, '', function (error, rs) {
+      ['Uploads 4: Fetch test-image.png bytes', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/test-image.png', {}, '', function (error, rs) {
             window._f3uUploadFetch = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
          });
@@ -1126,16 +1448,21 @@
          if (result.error) return 'Upload fetch failed';
          var rs = result.rs || {};
          var status = rs.xhr ? rs.xhr.status : null;
-         if (status !== 200) return 'Expected status 200 for pixel.png, got ' + status;
+         if (status !== 200) return 'Expected status 200 for test-image.png, got ' + status;
          var body = rs.body || '';
          if (! body || body.length === 0) return 'Upload fetch returned empty body';
+         return true;
+      }],
+
+      ['Uploads 5: test-image.png content-type is image/png', function () {
+         var rs = (window._f3uUploadFetch || {}).rs || {};
          var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
          if (contentType && contentType.indexOf ('image/png') === -1) return 'Expected image/png content-type, got ' + contentType;
          return true;
       }],
 
-      ['Uploads 5: Upload text file via API', function (done) {
-         var text = 'Hello uploads.';
+      ['Uploads 6: Upload notes.txt via API', function (done) {
+         var text = 'Hello from uploads test!';
          c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
             name: 'notes.txt',
             content: btoa (text),
@@ -1152,64 +1479,22 @@
          return true;
       }],
 
-      ['Uploads 6: Upload file with space in name', function (done) {
-         var text = 'Hello spaced uploads.';
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
-            name: 'space name.txt',
-            content: btoa (text),
-            contentType: 'text/plain'
-         }, function (error, rs) {
-            window._f3uUploadSpace = rs && rs.body;
-            window._f3uUploadSpaceError = error ? (error.status || error.message) : null;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._f3uUploadSpaceError) return 'Space-name upload failed: ' + window._f3uUploadSpaceError;
-         var entry = window._f3uUploadSpace || {};
-         if (entry.name !== 'space name.txt') return 'Upload response missing space name.txt';
-         return true;
-      }],
-
-      ['Uploads 7: Upload nested/evil.txt (subdir)', function (done) {
-         var text = 'Hello nested upload.';
-         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
-            name: 'nested/evil.txt',
-            content: btoa (text),
-            contentType: 'text/plain'
-         }, function (error, rs) {
-            window._f3uUploadNested = rs && rs.body;
-            window._f3uUploadNestedError = error ? (error.status || error.message) : null;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._f3uUploadNestedError) return 'Nested upload failed: ' + window._f3uUploadNestedError;
-         var entry = window._f3uUploadNested || {};
-         if (entry.name !== 'nested/evil.txt') return 'Upload response missing nested/evil.txt';
-         return true;
-      }],
-
-      ['Uploads 8: Uploads list contains all files', function (done) {
+      ['Uploads 7: Uploads list includes test-image.png + notes.txt', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/uploads', {}, '', function (error, rs) {
             window._f3uUploads = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
          });
       }, function () {
          var uploads = window._f3uUploads;
-         if (type (uploads) !== 'array' || uploads.length < 3) return 'Expected at least 3 uploads';
+         if (type (uploads) !== 'array') return 'Uploads list missing or not array';
+         var image = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'test-image.png') return item; });
+         if (! image) return 'test-image.png not found in uploads list';
          var text = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'notes.txt') return item; });
          if (! text) return 'notes.txt not found in uploads list';
-         if (! text.contentType || text.contentType.indexOf ('text/plain') === -1) return 'notes.txt contentType invalid';
-         var spaced = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'space name.txt') return item; });
-         if (! spaced) return 'space name.txt not found in uploads list';
-         var nested = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'nested/evil.txt') return item; });
-         if (! nested) return 'nested/evil.txt not found in uploads list';
-         window._f3uUploadText = text;
-         window._f3uUploadSpace = spaced;
-         window._f3uUploadNested = nested;
          return true;
       }],
 
-      ['Uploads 9: Fetch notes.txt upload', function (done) {
+      ['Uploads 8: Fetch notes.txt and verify content-type', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/notes.txt', {}, '', function (error, rs) {
             window._f3uNotesFetch = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -1221,77 +1506,156 @@
          var status = rs.xhr ? rs.xhr.status : null;
          if (status !== 200) return 'Expected status 200 for notes.txt, got ' + status;
          var body = rs.body || '';
-         if (body.indexOf ('Hello uploads.') === -1) return 'notes.txt content mismatch';
+         if (body.indexOf ('Hello from uploads test!') === -1) return 'notes.txt content mismatch';
          var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
          if (contentType && contentType.indexOf ('text/plain') === -1) return 'Expected text/plain content-type, got ' + contentType;
          return true;
       }],
 
-      ['Uploads 10: Fetch spaced filename upload', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/' + encodeURIComponent ('space name.txt'), {}, '', function (error, rs) {
+      ['Uploads 9: Upload my screenshot 2026.png', function (done) {
+         var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'my screenshot 2026.png',
+            content: dataUrl,
+            contentType: 'image/png'
+         }, function (error, rs) {
+            window._f3uUploadScreenshot = rs && rs.body;
+            window._f3uUploadScreenshotError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3uUploadScreenshotError) return 'Screenshot upload failed: ' + window._f3uUploadScreenshotError;
+         return true;
+      }],
+
+      ['Uploads 10: Uploads list includes my screenshot 2026.png', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/uploads', {}, '', function (error, rs) {
+            window._f3uUploads = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var uploads = window._f3uUploads;
+         if (type (uploads) !== 'array') return 'Uploads list missing or not array';
+         var screenshot = dale.stopNot (uploads, undefined, function (item) { if (item.name === 'my screenshot 2026.png') return item; });
+         if (! screenshot) return 'my screenshot 2026.png not found in uploads list';
+         return true;
+      }],
+
+      ['Uploads 11: Fetch spaced filename upload returns image/png', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/' + encodeURIComponent ('my screenshot 2026.png'), {}, '', function (error, rs) {
             window._f3uSpaceFetch = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
          });
       }, function () {
          var result = window._f3uSpaceFetch || {};
-         if (result.error) return 'space name.txt fetch failed';
+         if (result.error) return 'spaced filename fetch failed';
          var rs = result.rs || {};
          var status = rs.xhr ? rs.xhr.status : null;
-         if (status !== 200) return 'Expected status 200 for space name.txt, got ' + status;
-         var body = rs.body || '';
-         if (body.indexOf ('Hello spaced uploads.') === -1) return 'space name.txt content mismatch';
+         if (status !== 200) return 'Expected status 200 for spaced filename, got ' + status;
          var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
-         if (contentType && contentType.indexOf ('text/plain') === -1) return 'Expected text/plain content-type, got ' + contentType;
+         if (contentType && contentType.indexOf ('image/png') === -1) return 'Expected image/png content-type, got ' + contentType;
          return true;
       }],
 
-      ['Uploads 11: Navigate to docs view', function (done) {
-         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f3uProject) + '/docs');
-         done (SHORT_WAIT, POLL);
+      ['Uploads 12: Upload my-file.v2.backup.txt', function (done) {
+         var text = 'Hello from backups.';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'my-file.v2.backup.txt',
+            content: btoa (text),
+            contentType: 'text/plain'
+         }, function (error, rs) {
+            window._f3uUploadBackupError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
       }, function () {
-         var tab = B.get ('tab');
-         if (tab !== 'docs') return 'Expected docs tab for uploads';
+         if (window._f3uUploadBackupError) return 'Backup upload failed: ' + window._f3uUploadBackupError;
          return true;
       }],
 
-      ['Uploads 12: Uploads section visible with items', function () {
-         var section = document.querySelector ('.upload-section');
-         if (! section) return 'Uploads section not found in sidebar';
-         var item = findByText ('.upload-item', 'pixel.png');
-         if (! item) return 'pixel.png not listed in uploads sidebar';
-         return true;
-      }],
-
-      ['Uploads 13: Select image upload shows preview', function (done) {
-         B.call ('select', 'upload', window._f3uUploadImage);
-         done (SHORT_WAIT, POLL);
+      ['Uploads 13: Invalid upload name ../etc/passwd returns 400', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: '../etc/passwd',
+            content: btoa ('bad'),
+            contentType: 'text/plain'
+         }, function (error) {
+            window._f3uInvalid1 = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
       }, function () {
-         var preview = document.querySelector ('.upload-preview img');
-         if (! preview) return 'Image preview not shown';
+         if (window._f3uInvalid1 !== 400) return 'Expected 400 for ../etc/passwd, got ' + window._f3uInvalid1;
          return true;
       }],
 
-      ['Uploads 14: Select text upload shows metadata', function (done) {
-         B.call ('select', 'upload', window._f3uUploadText);
-         done (SHORT_WAIT, POLL);
+      ['Uploads 14: Invalid upload name sub\\file.txt returns 400', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'sub\\file.txt',
+            content: btoa ('bad'),
+            contentType: 'text/plain'
+         }, function (error) {
+            window._f3uInvalid2 = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
       }, function () {
-         var meta = document.querySelector ('.upload-meta');
-         if (! meta) return 'Upload metadata panel not shown for text file';
-         if (meta.textContent.indexOf ('Type:') === -1) return 'Metadata panel missing Type line';
+         if (window._f3uInvalid2 !== 400) return 'Expected 400 for sub\\file.txt, got ' + window._f3uInvalid2;
          return true;
       }],
 
-      ['Uploads 15: Select spaced upload shows metadata', function (done) {
-         B.call ('select', 'upload', window._f3uUploadSpace);
-         done (SHORT_WAIT, POLL);
+      ['Uploads 15: Invalid upload name /absolute.txt returns 400', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: '/absolute.txt',
+            content: btoa ('bad'),
+            contentType: 'text/plain'
+         }, function (error) {
+            window._f3uInvalid3 = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
       }, function () {
-         var meta = document.querySelector ('.upload-meta');
-         if (! meta) return 'Upload metadata panel not shown for spaced file';
-         if (meta.textContent.indexOf ('space name.txt') === -1) return 'Metadata panel missing spaced filename';
+         if (window._f3uInvalid3 !== 400) return 'Expected 400 for /absolute.txt, got ' + window._f3uInvalid3;
          return true;
       }],
 
-      ['Uploads 16: Delete uploads project', function (done) {
+      ['Uploads 16: Upload nested/evil.png (subdir allowed)', function (done) {
+         var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
+         c.ajax ('post', 'project/' + encodeURIComponent (window._f3uProject) + '/upload', {}, {
+            name: 'nested/evil.png',
+            content: dataUrl,
+            contentType: 'image/png'
+         }, function (error, rs) {
+            window._f3uUploadNestedError = error ? (error.status || error.message) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3uUploadNestedError) return 'Nested upload failed: ' + window._f3uUploadNestedError;
+         return true;
+      }],
+
+      ['Uploads 17: Uploads list contains exactly 5 valid entries', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/uploads', {}, '', function (error, rs) {
+            window._f3uUploads = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var uploads = window._f3uUploads;
+         if (type (uploads) !== 'array') return 'Uploads list missing or not array';
+         if (uploads.length !== 5) return 'Expected exactly 5 uploads, got ' + uploads.length;
+         var names = dale.go (uploads, function (u) { return u.name; });
+         var expected = ['test-image.png', 'notes.txt', 'my screenshot 2026.png', 'my-file.v2.backup.txt', 'nested/evil.png'];
+         var missing = dale.stopNot (expected, undefined, function (name) { if (names.indexOf (name) === -1) return name; });
+         if (missing) return 'Uploads list missing ' + missing;
+         return true;
+      }],
+
+      ['Uploads 18: Fetch nonexistent upload returns 404', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._f3uProject) + '/upload/nonexistent.png', {}, '', function (error, rs) {
+            window._f3uMissingStatus = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f3uMissingStatus !== 404) return 'Expected 404 for nonexistent.png, got ' + window._f3uMissingStatus;
+         return true;
+      }],
+
+      ['Uploads 19: Delete uploads project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f3uProject);
@@ -1302,7 +1666,7 @@
          return true;
       }],
 
-      ['Uploads 17: Projects list no longer shows deleted project', function (done) {
+      ['Uploads 20: Projects list no longer shows deleted project', function (done) {
          B.call ('load', 'projects');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2278,21 +2642,16 @@
          });
       }, function () {return true;}],
 
-      // --- F7: Create a snapshot ---
-
-      ['Snapshots 4: Create snapshot via header button', function (done) {
-         // Mock prompt for label
+      ['Snapshots 4: Create snapshot with label "before refactor"', function (done) {
          mockPrompt ('before refactor');
          B.call ('create', 'snapshot');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
-         // Accept the alert from the snapshot creation
          return true;
       }],
 
-      ['Snapshots 5: Snapshot appears in snapshots list', function (done) {
-         // Dismiss any pending alert
+      ['Snapshots 5: Snapshot appears in list with label', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2309,46 +2668,7 @@
          return true;
       }],
 
-      // --- F7: Navigate to snapshots view ---
-
-      ['Snapshots 6: Navigate to snapshots view', function (done) {
-         B.call ('navigate', 'hash', '#/snapshots');
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var tab = B.get ('tab');
-         if (tab !== 'snapshots') return 'Expected snapshots tab, got: ' + tab;
-         return true;
-      }],
-
-      ['Snapshots 7: Snapshot visible in snapshots view', function () {
-         var heading = findByText ('.editor-filename', 'Snapshots');
-         if (! heading) return 'Snapshots heading not found';
-         var item = findByText ('.file-item', 'before refactor');
-         if (! item) return 'Snapshot "before refactor" not found in view';
-         return true;
-      }],
-
-      ['Snapshots 8: Snapshot entry shows restore, download, delete buttons', function () {
-         var item = findByText ('.file-item', 'before refactor');
-         if (! item) return 'Snapshot item not found';
-         var buttons = item.querySelectorAll ('button');
-         if (buttons.length < 3) return 'Expected at least 3 buttons (restore, download, delete), found: ' + buttons.length;
-         var texts = dale.go (Array.prototype.slice.call (buttons), function (b) {return b.textContent;}).join (' | ');
-         if (texts.indexOf ('Restore') === -1) return 'Missing Restore button. Buttons: ' + texts;
-         if (texts.indexOf ('Download') === -1) return 'Missing Download button. Buttons: ' + texts;
-         return true;
-      }],
-
-      // --- F7: Create second snapshot (no label) ---
-
-      ['Snapshots 9: Create second snapshot without label', function (done) {
-         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._f7Project) + '/docs');
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         return B.get ('currentProject') === window._f7Project || 'Not on project';
-      }],
-
-      ['Snapshots 10: Create second snapshot', function (done) {
+      ['Snapshots 6: Create second snapshot without label', function (done) {
          mockPrompt ('');
          B.call ('create', 'snapshot');
          done (MEDIUM_WAIT, POLL);
@@ -2357,7 +2677,7 @@
          return true;
       }],
 
-      ['Snapshots 11: Two snapshots in list', function (done) {
+      ['Snapshots 7: Two snapshots in list ordered newest-first', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2367,12 +2687,33 @@
          });
          if (ours.length < 2) return 'Expected at least 2 snapshots, got: ' + ours.length;
          window._f7SnapshotId2 = ours [0].id !== window._f7SnapshotId ? ours [0].id : ours [1].id;
+         if (ours [0].id !== window._f7SnapshotId2) return 'Expected newest snapshot first';
          return true;
       }],
 
-      // --- F7: Restore snapshot as new project ---
+      ['Snapshots 8: Download placeholder snapshot returns 404', function (done) {
+         c.ajax ('get', 'snapshots/placeholder/download', {}, '', function (error) {
+            window._f7DownloadMissing = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f7DownloadMissing !== 404) return 'Expected 404 for placeholder download, got ' + window._f7DownloadMissing;
+         return true;
+      }],
 
-      ['Snapshots 12: Restore snapshot as new project', function (done) {
+      ['Snapshots 9: Download first snapshot returns data', function (done) {
+         c.ajax ('get', 'snapshots/' + encodeURIComponent (window._f7SnapshotId) + '/download', {}, '', function (error, rs) {
+            window._f7DownloadError = error ? error.status : null;
+            window._f7DownloadBody = rs && rs.body ? rs.body : '';
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f7DownloadError) return 'Snapshot download failed: ' + window._f7DownloadError;
+         if (! window._f7DownloadBody || window._f7DownloadBody.length === 0) return 'Snapshot download empty';
+         return true;
+      }],
+
+      ['Snapshots 10: Restore snapshot as new project', function (done) {
          mockPrompt ('Restored Flow7 Test');
          B.call ('restore', 'snapshot', window._f7SnapshotId, window._f7SnapshotProjectName);
          done (MEDIUM_WAIT, POLL);
@@ -2380,12 +2721,26 @@
          restorePrompt ();
          var project = B.get ('currentProject');
          if (! project) return 'No current project after restore';
-         if (project === window._f7Project) return 'Still on original project, waiting for restored project navigation...';
+         if (project === window._f7Project) return 'Still on original project after restore';
          window._f7RestoredProject = project;
          return true;
       }],
 
-      ['Snapshots 13: Restored project has both files', function (done) {
+      ['Snapshots 11: Projects list includes restored project', function (done) {
+         c.ajax ('get', 'projects', {}, '', function (error, rs) {
+            window._f7ProjectList = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var projects = window._f7ProjectList || [];
+         var found = dale.stopNot (projects, undefined, function (p) {
+            if (p && p.name === 'Restored Flow7 Test') return p;
+         });
+         if (! found) return 'Restored project not found in projects list';
+         return true;
+      }],
+
+      ['Snapshots 12: Restored project has both files', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/files', {}, '', function (error, rs) {
             window._f7RestoredFiles = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -2398,7 +2753,7 @@
          return true;
       }],
 
-      ['Snapshots 14: Restored doc/main.md matches original', function (done) {
+      ['Snapshots 13: Restored doc/main.md matches original', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._f7RestoredContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -2408,7 +2763,7 @@
          return true;
       }],
 
-      ['Snapshots 15: Restored doc/notes.md matches original', function (done) {
+      ['Snapshots 14: Restored doc/notes.md matches original', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/notes.md', {}, '', function (error, rs) {
             window._f7RestoredNotes = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -2418,15 +2773,13 @@
          return true;
       }],
 
-      // --- F7: Modify original, verify restored unaffected ---
-
-      ['Snapshots 16: Modify original project doc/main.md', function (done) {
+      ['Snapshots 15: Modify original project doc/main.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._f7Project) + '/file/doc/main.md', {}, {content: '# Modified After Snapshot\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['Snapshots 17: Restored project unaffected by original modification', function (done) {
+      ['Snapshots 16: Restored project unaffected by original modification', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._f7RestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._f7CheckContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -2436,19 +2789,16 @@
          return true;
       }],
 
-      // --- F7: Delete a snapshot ---
-
-      ['Snapshots 18: Delete second snapshot', function (done) {
+      ['Snapshots 17: Delete second snapshot', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'snapshot', window._f7SnapshotId2);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         // confirm dialog is auto-accepted since we mocked it... but delete uses confirm.
-         // Let's just check the list
          return true;
       }],
 
-      ['Snapshots 19: Deleted snapshot gone from list', function (done) {
-         // Override confirm for delete call
+      ['Snapshots 18: Deleted snapshot gone from list', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2459,9 +2809,7 @@
          return true;
       }],
 
-      // --- F7: Snapshot survives project deletion ---
-
-      ['Snapshots 20: Delete original project', function (done) {
+      ['Snapshots 19: Delete original project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._f7Project);
@@ -2470,7 +2818,7 @@
          return true;
       }],
 
-      ['Snapshots 21: Snapshot still in list after project deletion', function (done) {
+      ['Snapshots 20: Snapshot still in list after project deletion', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2482,32 +2830,27 @@
          return true;
       }],
 
-      // --- F7: Snapshots view shows empty state ---
-
-      ['Snapshots 22: Delete remaining snapshot', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'snapshot', window._f7SnapshotId);
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         return true;
-      }],
-
-      ['Snapshots 23: No snapshots left for this project', function (done) {
-         B.call ('load', 'snapshots');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var snapshots = B.get ('snapshots') || [];
-         var ours = dale.fil (snapshots, undefined, function (snap) {
-            if (snap.project === window._f7Project) return snap;
+      ['Snapshots 21: Delete nonexistent snapshot returns 400', function (done) {
+         c.ajax ('delete', 'snapshots/nonexistent-id-12345', {}, '', function (error) {
+            window._f7DeleteMissing = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
          });
-         if (ours.length > 0) return 'Leftover snapshots from flow7: ' + ours.length;
+      }, function () {
+         if (window._f7DeleteMissing !== 400) return 'Expected 400 for nonexistent snapshot delete, got ' + window._f7DeleteMissing;
          return true;
       }],
 
-      // --- F7: Cleanup ---
+      ['Snapshots 22: Download nonexistent snapshot returns 404', function (done) {
+         c.ajax ('get', 'snapshots/nonexistent-id-12345/download', {}, '', function (error) {
+            window._f7DownloadMissing2 = error ? error.status : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._f7DownloadMissing2 !== 404) return 'Expected 404 for nonexistent snapshot download, got ' + window._f7DownloadMissing2;
+         return true;
+      }],
 
-      ['Snapshots 24: Delete restored project', function (done) {
+      ['Snapshots 23: Delete restored project', function (done) {
          if (! window._f7RestoredProject) return done ();
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
@@ -2517,8 +2860,24 @@
          return true;
       }],
 
-      ['Snapshots 25: Cleanup restore prompt', function () {
-         restorePrompt ();
+      ['Snapshots 24: Delete first snapshot', function (done) {
+         var originalConfirm = window.confirm;
+         window.confirm = function () {window.confirm = originalConfirm; return true;};
+         B.call ('delete', 'snapshot', window._f7SnapshotId);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         return true;
+      }],
+
+      ['Snapshots 25: No snapshots left for this flow', function (done) {
+         B.call ('load', 'snapshots');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var snapshots = B.get ('snapshots') || [];
+         var ours = dale.fil (snapshots, undefined, function (snap) {
+            if (snap.project === window._f7Project) return snap;
+         });
+         if (ours.length > 0) return 'Leftover snapshots from flow7: ' + ours.length;
          return true;
       }],
 

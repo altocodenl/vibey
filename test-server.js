@@ -94,6 +94,66 @@ var fetchDialogMarkdown = function (project, dialogId, cb) {
    req.end ();
 };
 
+// Connect to GET /project/:p/dialog/:id/stream and collect SSE events until done/error/close
+var collectSSE = function (project, dialogId, cb) {
+   var events = [];
+   var called = false;
+   var finish = function (error) {
+      if (called) return;
+      called = true;
+      cb (error, events);
+   };
+   var req = http.request ({
+      hostname: 'localhost',
+      port: 5353,
+      path: '/project/' + project + '/dialog/' + dialogId + '/stream',
+      method: 'GET',
+      headers: {Accept: 'text/event-stream'}
+   }, function (res) {
+      // If the dialog is already done, server may return 200 with immediate done event
+      var raw = '';
+      res.on ('data', function (chunk) {
+         raw += chunk;
+         // Parse complete SSE blocks as they arrive
+         var blocks = raw.split (/\n\n+/);
+         // Last block may be incomplete, keep it
+         raw = blocks.pop () || '';
+         dale.go (blocks, function (block) {
+            var dataLines = dale.fil (block.split ('\n'), undefined, function (line) {
+               if (line.indexOf ('data: ') === 0) return line.slice (6);
+            });
+            if (! dataLines.length) return;
+            try {
+               var ev = JSON.parse (dataLines.join ('\n'));
+               events.push (ev);
+               if (ev.type === 'done' || ev.type === 'error') finish (ev.type === 'error' ? new Error (ev.error || 'SSE error') : null);
+            }
+            catch (e) {
+               events.push ({type: 'invalid_json', raw: dataLines.join ('\n')});
+            }
+         });
+      });
+      res.on ('end', function () {
+         // Parse any remaining data
+         if (raw.trim ()) {
+            var dataLines = dale.fil (raw.split ('\n'), undefined, function (line) {
+               if (line.indexOf ('data: ') === 0) return line.slice (6);
+            });
+            if (dataLines.length) {
+               try {
+                  var ev = JSON.parse (dataLines.join ('\n'));
+                  events.push (ev);
+               }
+               catch (e) {}
+            }
+         }
+         finish (null);
+      });
+   });
+   req.on ('error', function (err) {finish (err);});
+   req.end ();
+};
+
 // Simple HTTP GET that returns the body as a string
 var httpGet = function (port, path, cb) {
    var req = http.request ({hostname: 'localhost', port: port, path: path, method: 'GET'}, function (res) {
@@ -408,30 +468,43 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 6: run_command via SSE', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
-      return {
+   // Test 6: PUT returns JSON immediately (async generation)
+   ['Dialog 6: PUT returns JSON with status active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
          dialogId: s.dialogId,
          prompt: 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, then summarize it in 3 short bullets. You must use the tool.'
-      };
-   }, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'string') return log ('Expected SSE text body');
-
-      var events = parseSSE (rs.body);
-      if (! getEventsByType (events, 'done').length) {
-         var eventTypes = dale.go (events, function (event) {return event && event.type ? event.type : 'unknown'}).join (', ');
-         return log ('Expected done event. Events: ' + eventTypes);
-      }
-      var contextEvents = getEventsByType (events, 'context');
-      if (! contextEvents.length) return log ('Expected at least one context SSE event');
-      var ctx = contextEvents [0].context;
-      if (! ctx || (type (ctx.percent) !== 'integer' && type (ctx.percent) !== 'float')) return log ('Context event missing numeric percent field');
-      if (ctx.percent < 0 || ctx.percent > 100) return log ('Context percent out of range: ' + ctx.percent);
-      if (type (ctx.used) !== 'integer' || ctx.used < 0) return log ('Context used should be a non-negative integer');
-      if (type (ctx.limit) !== 'integer' || ctx.limit < 1) return log ('Context limit should be a positive integer');
-      return true;
+      }, function (error, code, body) {
+         if (error) return log ('PUT /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (type (body) !== 'object') return log ('Expected JSON object, got ' + type (body));
+         if (body.status !== 'active') return log ('Expected status active, got: ' + body.status);
+         if (! body.dialogId) return log ('Missing dialogId in response');
+         if (! body.filename) return log ('Missing filename in response');
+         next ();
+      });
    }],
 
-   ['Dialog 7: Markdown has Time + Context + run_command', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Test 7: Connect to SSE stream, collect events until done
+   ['Dialog 7: SSE stream has context event', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      collectSSE (PROJECT, s.dialogId, function (error, events) {
+         if (error) return log ('SSE stream error: ' + error.message);
+         if (! getEventsByType (events, 'done').length) {
+            var eventTypes = dale.go (events, function (ev) {return ev && ev.type ? ev.type : 'unknown';}).join (', ');
+            return log ('Expected done event. Events: ' + eventTypes);
+         }
+         var contextEvents = getEventsByType (events, 'context');
+         if (! contextEvents.length) return log ('Expected at least one context SSE event');
+         var ctx = contextEvents [0].context;
+         if (! ctx || (type (ctx.percent) !== 'integer' && type (ctx.percent) !== 'float')) return log ('Context event missing numeric percent field');
+         if (ctx.percent < 0 || ctx.percent > 100) return log ('Context percent out of range: ' + ctx.percent);
+         if (type (ctx.used) !== 'integer' || ctx.used < 0) return log ('Context used should be a non-negative integer');
+         if (type (ctx.limit) !== 'integer' || ctx.limit < 1) return log ('Context limit should be a positive integer');
+         next ();
+      });
+   }],
+
+   // Test 8: Verify markdown on disk
+   ['Dialog 8: Markdown has Time + Context + run_command', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       fetchDialogMarkdown (PROJECT, s.dialogId, function (error, md) {
          if (error) return log ('Could not fetch dialog: ' + error.message);
          if (md.indexOf ('> Time:') === -1) return log ('Dialog markdown missing > Time metadata');
@@ -442,23 +515,34 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 8: write_file via SSE', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
-      return {
+   // Test 9: PUT for write_file returns JSON
+   ['Dialog 9: PUT write_file returns JSON with status active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
          dialogId: s.dialogId,
          prompt: 'Please create a file called dummy.js with the content: console.log("hello from dummy"); Use the write_file tool for this.'
-      };
-   }, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'string') return log ('Expected SSE text body');
-
-      var events = parseSSE (rs.body);
-      if (! getEventsByType (events, 'done').length) {
-         var eventTypes = dale.go (events, function (event) {return event && event.type ? event.type : 'unknown'}).join (', ');
-         return log ('Expected done event. Events: ' + eventTypes);
-      }
-      return true;
+      }, function (error, code, body) {
+         if (error) return log ('PUT /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (type (body) !== 'object') return log ('Expected JSON object');
+         if (body.status !== 'active') return log ('Expected status active, got: ' + body.status);
+         next ();
+      });
    }],
 
-   ['Dialog 9: Markdown has write_file', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Test 10: Collect SSE stream until done
+   ['Dialog 10: SSE stream finishes with done', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      collectSSE (PROJECT, s.dialogId, function (error, events) {
+         if (error) return log ('SSE stream error: ' + error.message);
+         if (! getEventsByType (events, 'done').length) {
+            var eventTypes = dale.go (events, function (ev) {return ev && ev.type ? ev.type : 'unknown';}).join (', ');
+            return log ('Expected done event. Events: ' + eventTypes);
+         }
+         next ();
+      });
+   }],
+
+   // Test 11: Verify markdown has write_file
+   ['Dialog 11: Markdown has write_file', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       fetchDialogMarkdown (PROJECT, s.dialogId, function (error, md) {
          if (error) return log ('Could not fetch dialog: ' + error.message);
          if (! hasToolMention (md, 'write_file')) return log ('Missing write_file block in dialog markdown');
@@ -467,37 +551,116 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 10: Verify dummy.js via tool/execute', 'post', 'project/' + PROJECT + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat dummy.js'}}, 200, function (s, rq, rs) {
+   // Test 12: Verify dummy.js exists
+   ['Dialog 12: Verify dummy.js via tool/execute', 'post', 'project/' + PROJECT + '/tool/execute', {}, {toolName: 'run_command', toolInput: {command: 'cat dummy.js'}}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || ! rs.body.success) return log ('run_command cat dummy.js failed: ' + JSON.stringify (rs.body));
       if ((rs.body.stdout || '').indexOf ('console.log') === -1) return log ('dummy.js does not contain console.log');
       return true;
    }],
 
-   ['Dialog 11: Continue without provider resolves from header', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
-      return {dialogId: s.dialogId, prompt: 'Continue without provider metadata.'};
-   }, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'string') return log ('Expected SSE text body');
-      var events = parseSSE (rs.body);
-      if (! getEventsByType (events, 'done').length) return log ('Expected done event');
-      return true;
+   // Test 13: Continue without provider — PUT returns JSON
+   ['Dialog 13: Continue without provider returns JSON', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
+         dialogId: s.dialogId,
+         prompt: 'Continue without provider metadata.'
+      }, function (error, code, body) {
+         if (error) return log ('PUT /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (type (body) !== 'object') return log ('Expected JSON object');
+         if (body.status !== 'active') return log ('Expected status active, got: ' + body.status);
+         next ();
+      });
    }],
 
-   ['Dialog 12: Metadata stripped from LLM input', 'put', 'project/' + PROJECT + '/dialog', {}, function (s) {
-      return {dialogId: s.dialogId, prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it."};
-   }, 200, function (s, rq, rs) {
-      if (type (rs.body) !== 'string') return log ('Expected SSE text body');
-      var events = parseSSE (rs.body);
-      if (! getEventsByType (events, 'done').length) return log ('Expected done event');
-      var combined = dale.go (events, function (event) {
-         if (event && event.type === 'chunk' && type (event.content) === 'string') return event.content;
-      }).join ('');
-      if (combined.indexOf ('> Provider:') !== -1) return log ('Output contains > Provider: metadata');
-      if (combined.indexOf ('> Model:') !== -1) return log ('Output contains > Model: metadata');
-      if (combined.indexOf ('> Context:') !== -1) return log ('Output contains > Context: metadata');
-      return true;
+   // Test 14: SSE stream finishes
+   ['Dialog 14: SSE stream finishes with done', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      collectSSE (PROJECT, s.dialogId, function (error, events) {
+         if (error) return log ('SSE stream error: ' + error.message);
+         if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+         next ();
+      });
    }],
 
-   ['Dialog 13: Create agent-a draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, 200, function (s, rq, rs) {
+   // Test 15: Metadata stripping — PUT returns JSON
+   ['Dialog 15: PUT for metadata stripping returns JSON', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
+         dialogId: s.dialogId,
+         prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it."
+      }, function (error, code, body) {
+         if (error) return log ('PUT /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (type (body) !== 'object') return log ('Expected JSON object');
+         next ();
+      });
+   }],
+
+   // Test 16: SSE stream output does not contain metadata
+   ['Dialog 16: SSE output has no metadata leakage', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      collectSSE (PROJECT, s.dialogId, function (error, events) {
+         if (error) return log ('SSE stream error: ' + error.message);
+         if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+         var combined = dale.go (events, function (ev) {
+            if (ev && ev.type === 'chunk' && type (ev.content) === 'string') return ev.content;
+         }).join ('');
+         if (combined.indexOf ('> Provider:') !== -1) return log ('Output contains > Provider: metadata');
+         if (combined.indexOf ('> Model:') !== -1) return log ('Output contains > Model: metadata');
+         if (combined.indexOf ('> Context:') !== -1) return log ('Output contains > Context: metadata');
+         next ();
+      });
+   }],
+
+   // Test 17: POST /dialog returns JSON (async, no SSE on POST)
+   ['Dialog 17: POST /dialog returns JSON immediately', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + PROJECT + '/dialog', {
+         provider: 'openai',
+         model: 'gpt-5.2-codex',
+         prompt: 'Please read test-sample.txt using the run_command tool with `cat test-sample.txt` and summarize it.',
+         slug: 'async-test'
+      }, function (error, code, body) {
+         if (error) return log ('POST /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (type (body) !== 'object') return log ('Expected JSON object');
+         if (body.status !== 'active') return log ('Expected status active, got: ' + body.status);
+         if (! body.dialogId) return log ('Missing dialogId');
+         if (! body.filename) return log ('Missing filename');
+         s.asyncDialogId = body.dialogId;
+         next ();
+      });
+   }],
+
+   // Test 18: SSE stream for the new dialog
+   ['Dialog 18: SSE stream for POST dialog finishes', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      collectSSE (PROJECT, s.asyncDialogId, function (error, events) {
+         if (error) return log ('SSE stream error: ' + error.message);
+         if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+         next ();
+      });
+   }],
+
+   // Test 19: Verify markdown has tool request + result
+   ['Dialog 19: POST dialog markdown has run_command', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fetchDialogMarkdown (PROJECT, s.asyncDialogId, function (error, md) {
+         if (error) return log ('Could not fetch dialog: ' + error.message);
+         if (! hasToolMention (md, 'run_command')) return log ('Missing run_command in dialog markdown');
+         if (! hasResultMarker (md)) return log ('Missing result marker in dialog markdown');
+         next ();
+      });
+   }],
+
+   // Test 20: SSE stream on done dialog returns immediate done
+   ['Dialog 20: SSE stream on done dialog returns done immediately', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      collectSSE (PROJECT, s.asyncDialogId, function (error, events) {
+         if (error) return log ('SSE stream error: ' + error.message);
+         if (! getEventsByType (events, 'done').length) return log ('Expected immediate done event for finished dialog');
+         // Should have no chunk events (dialog already done)
+         var chunks = getEventsByType (events, 'chunk');
+         if (chunks.length > 0) return log ('Expected no chunk events for finished dialog, got ' + chunks.length);
+         next ();
+      });
+   }],
+
+   // Test 21-22: Create agent drafts
+   ['Dialog 21: Create agent-a draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.dialogA = rs.body.dialogId;
       if (rs.body.status !== 'done') return log ('agent-a should start as done, got: ' + rs.body.status);
@@ -505,7 +668,7 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 14: Create agent-b draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, 200, function (s, rq, rs) {
+   ['Dialog 22: Create agent-b draft', 'post', 'project/' + PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.dialogB = rs.body.dialogId;
       if (rs.body.status !== 'done') return log ('agent-b should start as done, got: ' + rs.body.status);
@@ -513,13 +676,66 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 15: Fire both agents (non-blocking)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialogNoWait (PROJECT, s.dialogA, 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of computing.');
-      fireDialogNoWait (PROJECT, s.dialogB, 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of mathematics.');
-      setTimeout (next, 2000);
+   // Test 23: Fire both agents — PUT returns JSON immediately
+   ['Dialog 23: Fire both agents (non-blocking)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      var fired = 0;
+      var onFired = function () {
+         fired++;
+         if (fired === 2) setTimeout (next, 2000);
+      };
+      httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
+         dialogId: s.dialogA,
+         prompt: 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of computing.'
+      }, function () {onFired ();});
+      httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
+         dialogId: s.dialogB,
+         prompt: 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of mathematics.'
+      }, function () {onFired ();});
    }],
 
-   ['Dialog 16: Poll until agent-a is active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Test 24: Connect to agent-a's SSE stream, verify chunks arriving
+   ['Dialog 24: SSE stream for agent-a has chunks', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      // Connect briefly to verify the stream is active and producing events
+      var events = [];
+      var called = false;
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/project/' + PROJECT + '/dialog/' + s.dialogA + '/stream',
+         method: 'GET',
+         headers: {Accept: 'text/event-stream'}
+      }, function (res) {
+         var raw = '';
+         res.on ('data', function (chunk) {
+            raw += chunk;
+            var blocks = raw.split (/\n\n+/);
+            raw = blocks.pop () || '';
+            dale.go (blocks, function (block) {
+               var dataLines = dale.fil (block.split ('\n'), undefined, function (line) {
+                  if (line.indexOf ('data: ') === 0) return line.slice (6);
+               });
+               if (! dataLines.length) return;
+               try {events.push (JSON.parse (dataLines.join ('\n')));} catch (e) {}
+            });
+            // Once we've seen any event, we know the stream is live
+            if (! called && events.length > 0) {
+               called = true;
+               req.destroy ();
+               next ();
+            }
+         });
+         res.on ('end', function () {
+            if (! called) {called = true; next ();}
+         });
+      });
+      req.on ('error', function (err) {
+         if (err.code === 'ECONNRESET') return;
+      });
+      req.end ();
+   }],
+
+   // Test 25: Poll until agent-a is active
+   ['Dialog 25: Poll until agent-a is active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT + '/dialogs', function (error, status, body) {
             if (error || status !== 200) return done (false);
@@ -544,7 +760,8 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 17: Continuing active agent-a rejected (409)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Test 26: Continuing active agent-a rejected (409)
+   ['Dialog 26: Continuing active agent-a rejected (409)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {dialogId: s.dialogA, prompt: 'This must be rejected while agent-a is active.'}, function (error, code, body) {
          if (error) return log ('PUT /dialog rejection request failed: ' + error.message);
          if (code !== 409) return log ('Expected 409, got ' + code);
@@ -553,7 +770,8 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 18: Stop agent-a (200)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Test 27: Stop agent-a
+   ['Dialog 27: Stop agent-a (200)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {dialogId: s.dialogA, status: 'done'}, function (error, code, body) {
          if (error) return log ('PUT /dialog stop failed: ' + error.message);
          if (code !== 200) return log ('Expected 200 when stopping, got ' + code);
@@ -563,7 +781,8 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 19: Agent-a is done, active was observed', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Test 28: Agent-a is done, active was observed
+   ['Dialog 28: Agent-a is done, active was observed', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       pollUntil (function (done) {
          httpGet (5353, '/project/' + PROJECT + '/dialogs', function (error, status, body) {
             if (error || status !== 200) return done (false);
@@ -585,33 +804,34 @@ var dialogSequence = [
       });
    }],
 
-   ['Dialog 20: Delete project while agent-b active', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
+   // Test 29-37: Cleanup
+   ['Dialog 29: Delete project while agent-b active', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
 
-   ['Dialog 21: Project gone from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 30: Project gone from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, PROJECT)) return log ('Project still exists after deletion');
       return true;
    }],
 
-   ['Dialog 22: Dialogs endpoint 404', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 404],
+   ['Dialog 31: Dialogs endpoint 404', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 404],
 
-   ['Dialog 23: Files endpoint 404', 'get', 'project/' + PROJECT + '/files', {}, '', 404],
+   ['Dialog 32: Files endpoint 404', 'get', 'project/' + PROJECT + '/files', {}, '', 404],
 
-   ['Dialog 24: Re-create project', 'post', 'projects', {}, {name: PROJECT}, 200, function (s, rq, rs) {
+   ['Dialog 33: Re-create project', 'post', 'projects', {}, {name: PROJECT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Re-creation failed');
       return true;
    }],
 
-   ['Dialog 25: No dialogs in fresh project', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 34: No dialogs in fresh project', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (rs.body.length !== 0) return log ('Expected 0 dialogs, got ' + rs.body.length);
       return true;
    }],
 
-   ['Dialog 26: Only doc/main.md in fresh project', 'get', 'project/' + PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 35: Only doc/main.md in fresh project', 'get', 'project/' + PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var unexpected = dale.fil (rs.body, undefined, function (name) {
          if (name !== 'doc/main.md') return name;
@@ -620,12 +840,12 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 27: Cleanup delete', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Dialog 36: Cleanup delete', 'delete', 'projects/' + PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Cleanup deletion failed');
       return true;
    }],
 
-   ['Dialog 28: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 37: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, PROJECT)) return log ('Project still exists after final deletion');
       return true;
@@ -1073,55 +1293,19 @@ var DOC_MAIN_F4 = [
    '',
 ].join ('\n') + '\n';
 
-// Fire-and-forget: start a dialog via PUT (SSE), read just enough to confirm it started, then abort.
+// Fire-and-forget: start a dialog via PUT (returns JSON immediately), call back once confirmed.
 var fireDialog = function (project, dialogId, prompt, cb) {
-   var options = {
-      hostname: 'localhost',
-      port: 5353,
-      path: '/project/' + project + '/dialog',
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'}
-   };
-   var body = JSON.stringify ({dialogId: dialogId, prompt: prompt});
-   var called = false;
-   var req = http.request (options, function (res) {
-      var got = '';
-      res.on ('data', function (chunk) {
-         got += chunk;
-         // As soon as we see the first SSE event (chunk/tool/error), we know the LLM started. Abort — let it run in background.
-         if (! called && (got.indexOf ('"type":"chunk"') !== -1 || got.indexOf ('"type":"tool_request"') !== -1 || got.indexOf ('"type":"tool_result"') !== -1 || got.indexOf ('"type":"error"') !== -1)) {
-            called = true;
-            req.destroy ();
-            if (got.indexOf ('"type":"error"') !== -1) return cb (new Error ('SSE error: ' + got.slice (0, 500)));
-            cb (null);
-         }
-      });
-      res.on ('end', function () {if (! called) {called = true; cb (null);}});
+   httpJson ('PUT', '/project/' + project + '/dialog', {dialogId: dialogId, prompt: prompt}, function (error, code, body) {
+      if (error) return cb (error);
+      if (code !== 200) return cb (new Error ('PUT /dialog returned ' + code + ': ' + JSON.stringify (body)));
+      if (body && body.error) return cb (new Error ('Dialog error: ' + body.error));
+      cb (null);
    });
-   req.on ('error', function (err) {
-      // ECONNRESET is expected since we abort
-      if (err.code === 'ECONNRESET') return;
-   });
-   req.write (body);
-   req.end ();
 };
 
-// Fire-and-forget: send PUT to start a dialog, don't wait for any SSE data.
+// Fire-and-forget: send PUT to start a dialog, don't wait for response.
 var fireDialogNoWait = function (project, dialogId, prompt) {
-   var body = JSON.stringify ({dialogId: dialogId, prompt: prompt});
-   var req = http.request ({
-      hostname: 'localhost',
-      port: 5353,
-      path: '/project/' + project + '/dialog',
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'}
-   }, function (res) {
-      res.on ('data', function () {});
-      res.on ('end', function () {});
-   });
-   req.on ('error', function () {});
-   req.write (body);
-   req.end ();
+   httpJson ('PUT', '/project/' + project + '/dialog', {dialogId: dialogId, prompt: prompt}, function () {});
 };
 
 // Poll until a condition is met, with timeout

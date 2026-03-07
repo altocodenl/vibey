@@ -22,6 +22,7 @@ var stop = function (rs, rules) {
 
 var crypto = require ('crypto');
 var http   = require ('http');
+var EventEmitter = require ('events');
 
 // *** PROMPTS ***
 
@@ -1082,8 +1083,10 @@ var activeStreamKey = function (projectName, dialogId) {
 
 var beginActiveStream = function (projectName, dialogId) {
    var controller = new AbortController ();
-   ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)] = {controller: controller, requestedStatus: null};
-   return controller;
+   var emitter = new EventEmitter ();
+   emitter.setMaxListeners (50);
+   ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)] = {controller: controller, requestedStatus: null, emitter: emitter};
+   return {controller: controller, emitter: emitter};
 };
 
 var getActiveStream = function (projectName, dialogId) {
@@ -1091,6 +1094,8 @@ var getActiveStream = function (projectName, dialogId) {
 };
 
 var endActiveStream = function (projectName, dialogId) {
+   var stream = ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)];
+   if (stream && stream.emitter) stream.emitter.removeAllListeners ();
    delete ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)];
 };
 
@@ -2268,11 +2273,25 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    ensureDialogFile (projectName, dialog, provider, defaultModel);
    appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
 
+   // Register active stream so /stream endpoint can connect
+   var stream = beginActiveStream (projectName, dialogId);
+   var wrappedOnChunk = function (chunk) {
+      if (chunk && type (chunk) === 'object' && chunk.type) {
+         stream.emitter.emit ('event', chunk);
+      }
+      else {
+         stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+      }
+      if (onChunk) onChunk (chunk);
+   };
+
    try {
-      var result = await runCompletion (projectName, dialog, provider, defaultModel, onChunk, abortSignal);
+      var result = await runCompletion (projectName, dialog, provider, defaultModel, wrappedOnChunk, abortSignal || stream.controller.signal);
       setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/success');
       result.filename = dialog.filename;
       result.status = dialog.status;
+      stream.emitter.emit ('event', {type: 'done', result: result});
+      endActiveStream (projectName, dialogId);
       return result;
    }
    catch (error) {
@@ -2282,6 +2301,8 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
       catch (statusError) {
          clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=startDialogTurn/error error=' + statusError.message);
       }
+      stream.emitter.emit ('event', {type: 'error', error: error.message});
+      endActiveStream (projectName, dialogId);
       throw error;
    }
 };
@@ -2969,7 +2990,7 @@ var routes = [
       }
    }],
 
-   // Create dialog + first turn (SSE)
+   // Create dialog + first turn (async, returns JSON immediately)
    ['post', 'project/:project/dialog', async function (rq, rs) {
       if (stop (rs, [
          ['provider', rq.body.provider, 'string', {oneOf: ['claude', 'openai']}],
@@ -2979,65 +3000,89 @@ var routes = [
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
       if (rq.body.slug !== undefined && type (rq.body.slug) !== 'string') return reply (rs, 400, {error: 'slug must be a string'});
 
-      rs.writeHead (200, {
-         'Content-Type': 'text/event-stream',
-         'Cache-Control': 'no-cache, no-transform',
-         'Connection': 'keep-alive',
-         'X-Accel-Buffering': 'no'
-      });
+      var projectName = rq.data.params.project;
+      var provider = rq.body.provider;
+      var prompt = rq.body.prompt;
+      var model = rq.body.model;
+      var slug = rq.body.slug;
 
-      if (rs.flushHeaders) rs.flushHeaders ();
-      // Kickstart the stream so intermediaries flush headers immediately.
-      rs.write (':ok\n\n');
-      var streamStart = Date.now ();
-      var firstChunkSent = false;
-
+      // Validate project
       try {
-         var result = await startDialogTurn (
-            rq.data.params.project,
-            rq.body.provider,
-            rq.body.prompt,
-            rq.body.model,
-            rq.body.slug,
-            function (chunk) {
-               if (! firstChunkSent) {
-                  firstChunkSent = true;
-                  clog ('SSE first chunk (POST /dialog) after ' + (Date.now () - streamStart) + 'ms for project ' + rq.data.params.project);
-               }
-               if (chunk && type (chunk) === 'object' && chunk.type) {
-                  rs.write ('data: ' + JSON.stringify (chunk) + '\n\n');
-               }
-               else {
-                  rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
-               }
-               if (rs.flush) rs.flush ();
-            }
-         );
-
-         try {
-            var persisted = loadDialog (rq.data.params.project, result.dialogId);
-            if (persisted.exists) {
-               result.filename = persisted.filename;
-               result.status = persisted.status;
-            }
-         }
-         catch (statusReadError) {
-            clog ('[dialog-status] verify-failed project=' + rq.data.params.project + ' dialogId=' + result.dialogId + ' context=route/post-dialog/done error=' + statusReadError.message);
-         }
-
-         await autoCommitApi (rq.data.params.project, 'POST', '/project/' + rq.data.params.project + '/dialog');
-
-         rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
-         rs.end ();
+         getExistingProject (projectName);
       }
       catch (error) {
-         clog ('Chat error:', error.message);
-         rs.write ('data: ' + JSON.stringify ({type: 'error', error: error.message}) + '\n\n');
-         rs.end ();
+         return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
       }
+
+      // Create the dialog file and set it to active
+      var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
+      var dialogId = createDialogId (projectName, slug);
+      var filename = buildDialogFilename (dialogId, 'active');
+      var dialog = {
+         dialogId: dialogId,
+         filename: filename,
+         status: 'active',
+         exists: false,
+         markdown: '',
+         metadata: {}
+      };
+
+      ensureDialogFile (projectName, dialog, provider, defaultModel);
+      appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
+
+      // Set up active stream with emitter for fan-out
+      var stream = beginActiveStream (projectName, dialogId);
+
+      // Return JSON immediately
+      reply (rs, 200, {dialogId: dialogId, filename: dialog.filename, status: 'active'});
+
+      // Run generation in the background
+      runCompletion (projectName, dialog, provider, defaultModel, function (chunk) {
+         if (chunk && type (chunk) === 'object' && chunk.type) {
+            stream.emitter.emit ('event', chunk);
+         }
+         else {
+            stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+         }
+      }, stream.controller.signal)
+      .then (function (result) {
+         setDialogStatus (projectName, dialog, 'done', 'route/post-dialog/success');
+         result.filename = dialog.filename;
+         result.status = dialog.status;
+         return autoCommitApi (projectName, 'POST', '/project/' + projectName + '/dialog').then (function () {
+            stream.emitter.emit ('event', {type: 'done', result: result});
+            endActiveStream (projectName, dialogId);
+         });
+      })
+      .catch (function (error) {
+         clog ('Chat error (async POST /dialog):', error.message);
+         if (error && error.name === 'AbortError') {
+            try {
+               var activeAfterAbort = getActiveStream (projectName, dialogId);
+               var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
+               var dialogAfterAbort = loadDialog (projectName, dialogId);
+               if (dialogAfterAbort.exists) setDialogStatus (projectName, dialogAfterAbort, requestedStatus, 'route/post-dialog/abort');
+               stream.emitter.emit ('event', {type: 'done', result: {dialogId: dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}});
+            }
+            catch (interruptError) {
+               stream.emitter.emit ('event', {type: 'error', error: interruptError.message});
+            }
+         }
+         else {
+            try {
+               var dialogAfterError = loadDialog (projectName, dialogId);
+               if (dialogAfterError.exists) setDialogStatus (projectName, dialogAfterError, 'done', 'route/post-dialog/error');
+            }
+            catch (statusError) {
+               clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/post-dialog/error error=' + statusError.message);
+            }
+            stream.emitter.emit ('event', {type: 'error', error: error.message});
+         }
+         endActiveStream (projectName, dialogId);
+      });
    }],
 
-   // Update dialog (optional SSE when continuing)
+   // Update dialog (returns JSON; generation runs in background)
    ['put', 'project/:project/dialog', async function (rq, rs) {
       if (stop (rs, [
          ['dialogId', rq.body.dialogId, 'string'],
@@ -3049,18 +3094,19 @@ var routes = [
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
 
       var projectName = rq.data.params.project;
+      var dialogId = rq.body.dialogId;
       var continues = type (rq.body.prompt) === 'string' && !! rq.body.prompt.trim ();
 
       if (! continues) {
-         var active = getActiveStream (projectName, rq.body.dialogId);
+         var active = getActiveStream (projectName, dialogId);
          if (active && rq.body.status === 'done') {
             active.requestedStatus = rq.body.status;
             active.controller.abort ();
-            return reply (rs, 200, {ok: true, dialogId: rq.body.dialogId, interrupted: true, status: rq.body.status});
+            return reply (rs, 200, {ok: true, dialogId: dialogId, interrupted: true, status: rq.body.status});
          }
 
          try {
-            var result = await updateDialogTurn (projectName, rq.body.dialogId, rq.body.status, null, rq.body.provider, rq.body.model, null);
+            var result = await updateDialogTurn (projectName, dialogId, rq.body.status, null, rq.body.provider, rq.body.model, null);
             await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
             return reply (rs, 200, result);
          }
@@ -3069,110 +3115,86 @@ var routes = [
          }
       }
 
-      var alreadyActive = getActiveStream (projectName, rq.body.dialogId);
+      // Continuing with a prompt — check for conflicts
+      var alreadyActive = getActiveStream (projectName, dialogId);
       if (alreadyActive) {
-         return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: rq.body.dialogId, status: 'active'});
+         return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: dialogId, status: 'active'});
       }
 
+      var dialog;
       try {
-         var liveDialog = loadDialog (projectName, rq.body.dialogId);
-         if (! liveDialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
-         if (liveDialog.status === 'active') {
-            return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: rq.body.dialogId, status: 'active'});
+         dialog = loadDialog (projectName, dialogId);
+         if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
+         if (dialog.status === 'active') {
+            return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: dialogId, status: 'active'});
          }
       }
       catch (dialogStateError) {
          return reply (rs, 400, {error: dialogStateError.message});
       }
 
-      rs.writeHead (200, {
-         'Content-Type': 'text/event-stream',
-         'Cache-Control': 'no-cache, no-transform',
-         'Connection': 'keep-alive',
-         'X-Accel-Buffering': 'no'
-      });
+      // Set dialog to active, append user message
+      setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
+      appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + rq.body.prompt.trim () + '\n\n');
 
-      if (rs.flushHeaders) rs.flushHeaders ();
-      // Kickstart the stream so intermediaries flush headers immediately.
-      rs.write (':ok\n\n');
-      var streamStart = Date.now ();
-      var firstChunkSent = false;
-
-      var controller = beginActiveStream (projectName, rq.body.dialogId);
-
-      try {
-         var result = await updateDialogTurn (
-            projectName,
-            rq.body.dialogId,
-            rq.body.status,
-            rq.body.prompt,
-            rq.body.provider,
-            rq.body.model,
-            function (chunk) {
-               if (! firstChunkSent) {
-                  firstChunkSent = true;
-                  clog ('SSE first chunk (PUT /dialog) after ' + (Date.now () - streamStart) + 'ms for dialog ' + rq.body.dialogId);
-               }
-               if (chunk && type (chunk) === 'object' && chunk.type) {
-                  rs.write ('data: ' + JSON.stringify (chunk) + '\n\n');
-               }
-               else {
-                  rs.write ('data: ' + JSON.stringify ({type: 'chunk', content: chunk}) + '\n\n');
-               }
-               if (rs.flush) rs.flush ();
-            },
-            controller.signal
-         );
-
-         try {
-            var persisted = loadDialog (projectName, result.dialogId);
-            if (persisted.exists) {
-               result.filename = persisted.filename;
-               result.status = persisted.status;
-            }
-         }
-         catch (statusReadError) {
-            clog ('[dialog-status] verify-failed project=' + projectName + ' dialogId=' + result.dialogId + ' context=route/put-dialog/done error=' + statusReadError.message);
-         }
-
-         await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
-
-         rs.write ('data: ' + JSON.stringify ({type: 'done', result: result}) + '\n\n');
-         rs.end ();
+      var meta = parseMetadata (pfs.readFile (projectName, dialog.filename));
+      var resolvedProvider = rq.body.provider || meta.provider;
+      if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
+         return reply (rs, 400, {error: 'Unable to determine provider for dialog update'});
       }
-      catch (error) {
+      var resolvedModel = rq.body.model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
+
+      // Set up active stream with emitter for fan-out
+      var stream = beginActiveStream (projectName, dialogId);
+
+      // Return JSON immediately
+      reply (rs, 200, {dialogId: dialogId, filename: dialog.filename, status: 'active'});
+
+      // Run generation in the background
+      runCompletion (projectName, dialog, resolvedProvider, resolvedModel, function (chunk) {
+         if (chunk && type (chunk) === 'object' && chunk.type) {
+            stream.emitter.emit ('event', chunk);
+         }
+         else {
+            stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+         }
+      }, stream.controller.signal)
+      .then (function (result) {
+         setDialogStatus (projectName, dialog, 'done', 'route/put-dialog/success');
+         result.filename = dialog.filename;
+         result.status = dialog.status;
+         return autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog').then (function () {
+            stream.emitter.emit ('event', {type: 'done', result: result});
+            endActiveStream (projectName, dialogId);
+         });
+      })
+      .catch (function (error) {
          if (error && error.name === 'AbortError') {
             try {
-               var activeAfterAbort = getActiveStream (projectName, rq.body.dialogId);
+               var activeAfterAbort = getActiveStream (projectName, dialogId);
                var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
-               var dialogAfterAbort = loadDialog (projectName, rq.body.dialogId);
+               var dialogAfterAbort = loadDialog (projectName, dialogId);
                if (dialogAfterAbort.exists) setDialogStatus (projectName, dialogAfterAbort, requestedStatus, 'route/put-dialog/abort');
-               await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
-               rs.write ('data: ' + JSON.stringify ({type: 'done', result: {dialogId: rq.body.dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}}) + '\n\n');
-               rs.end ();
+               autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog').catch (function () {});
+               stream.emitter.emit ('event', {type: 'done', result: {dialogId: dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}});
             }
             catch (interruptError) {
-               rs.write ('data: ' + JSON.stringify ({type: 'error', error: interruptError.message}) + '\n\n');
-               rs.end ();
+               stream.emitter.emit ('event', {type: 'error', error: interruptError.message});
             }
          }
          else {
             try {
-               var dialogAfterError = loadDialog (projectName, rq.body.dialogId);
+               var dialogAfterError = loadDialog (projectName, dialogId);
                if (dialogAfterError.exists) setDialogStatus (projectName, dialogAfterError, 'done', 'route/put-dialog/error');
             }
             catch (statusError) {
-               clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + rq.body.dialogId + ' context=route/put-dialog/error error=' + statusError.message);
+               clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/put-dialog/error error=' + statusError.message);
             }
-
-            clog ('Dialog update error:', error.message);
-            rs.write ('data: ' + JSON.stringify ({type: 'error', error: error.message}) + '\n\n');
-            rs.end ();
+            clog ('Dialog update error (async PUT /dialog):', error.message);
+            stream.emitter.emit ('event', {type: 'error', error: error.message});
          }
-      }
-      finally {
-         endActiveStream (projectName, rq.body.dialogId);
-      }
+         endActiveStream (projectName, dialogId);
+      });
    }],
 
    // Execute a tool directly
@@ -3192,6 +3214,61 @@ var routes = [
       }
    }],
 
+   // SSE stream for live dialog output
+   ['get', /^\/project\/([^/]+)\/dialog\/([^/]+)\/stream$/, function (rq, rs) {
+      var projectName = decodeURIComponent (rq.data.params [0]);
+      var dialogId = decodeURIComponent (rq.data.params [1]);
+
+      var resolved = resolveProject (rs, projectName);
+      if (! resolved) return;
+
+      var dialog = loadDialog (projectName, dialogId);
+      if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
+
+      // Set up SSE headers — Connection: close prevents client agents from
+      // pooling this socket, which would poison the pool on client disconnect.
+      rs.writeHead (200, {
+         'Content-Type': 'text/event-stream',
+         'Cache-Control': 'no-cache, no-transform',
+         'Connection': 'close',
+         'X-Accel-Buffering': 'no'
+      });
+      if (rs.flushHeaders) rs.flushHeaders ();
+      rs.write (':ok\n\n');
+
+      // If dialog is done (no active stream), send done immediately and close
+      var activeStream = getActiveStream (projectName, dialogId);
+      if (! activeStream) {
+         rs.write ('data: ' + JSON.stringify ({type: 'done', result: {dialogId: dialogId, filename: dialog.filename, status: dialog.status}}) + '\n\n');
+         rs.end ();
+         return;
+      }
+
+      // Subscribe to the active stream's emitter
+      var onEvent = function (event) {
+         try {
+            rs.write ('data: ' + JSON.stringify (event) + '\n\n');
+            if (rs.flush) rs.flush ();
+         }
+         catch (e) {}
+
+         // Close on terminal events
+         if (event.type === 'done' || event.type === 'error') {
+            activeStream.emitter.removeListener ('event', onEvent);
+            rs.end ();
+         }
+      };
+
+      activeStream.emitter.on ('event', onEvent);
+
+      // Clean up if client disconnects
+      rq.connection.on ('close', function () {
+         if (activeStream && activeStream.emitter) {
+            activeStream.emitter.removeListener ('event', onEvent);
+         }
+      });
+   }],
+
    // Get dialog by ID
    ['get', 'project/:project/dialog/:id', function (rq, rs) {
       var dialogId = rq.data.params.id;
@@ -3206,6 +3283,7 @@ var routes = [
          reply (rs, 200, {
             dialogId: dialogId,
             filename: dialog.filename,
+            status: dialog.status,
             messages: parseSections (content),
             markdown: content
          });

@@ -242,6 +242,8 @@ var isChatNearBottom = function (node) {
    return (node.scrollHeight - (node.scrollTop + node.clientHeight)) <= 24;
 };
 
+var activeDialogStream = null;
+
 // *** VI CONTROLLER ***
 
 var viController = {};
@@ -852,7 +854,8 @@ B.mrespond ([
          viOverlayChat: null,
          uploads: [],
          currentUpload: null,
-         uploading: false
+         uploading: false,
+         streamingDialogId: null
       });
       B.call (x, 'load', 'projects');
       B.call (x, 'load', 'settings');
@@ -1353,6 +1356,23 @@ B.mrespond ([
                      B.call (x, 'set', 'chatModel', hFound.model);
                   }
                }
+
+               // If dialog is active, attach to the SSE stream
+               var parsedDialog = parseDialogFilename (rs.body.name) || {};
+               if (parsedDialog.dialogId) {
+                  fetch (projectPath (project, 'dialog/' + encodeURIComponent (parsedDialog.dialogId))).then (function (resp) {
+                     if (! resp.ok) return null;
+                     return resp.json ();
+                  }).then (function (data) {
+                     if (! data) return;
+                     if (data.filename && data.filename !== rs.body.name) {
+                        B.call (x, 'set', ['currentFile', 'name'], data.filename);
+                     }
+                     if (data.status === 'active') {
+                        B.call (x, 'start', 'dialogStream', parsedDialog.dialogId, data.filename || rs.body.name);
+                     }
+                  }).catch (function () {});
+               }
             }
             B.call (x, 'write', 'hash');
             // Initialize vi cursor overlay after DOM redraws with the new file
@@ -1700,7 +1720,26 @@ B.mrespond ([
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify (payload)
          }).then (function (response) {
-            B.call (x, 'process', 'stream', response, streamFilename, originalInput);
+            if (! response.ok) {
+               return response.text ().then (function (text) {
+                  throw new Error (text || ('HTTP ' + response.status));
+               });
+            }
+            return response.json ();
+         }).then (function (data) {
+            var dialogId = parsed ? parsed.dialogId : (data && data.dialogId);
+            var filename = (data && data.filename) ? data.filename : streamFilename;
+
+            if (filename) {
+               B.call (x, 'set', ['currentFile', 'name'], filename);
+               // Ensure file exists in sidebar and load it if needed
+               B.call (x, 'load', 'files');
+               if (! parsed) B.call (x, 'load', 'file', filename);
+            }
+
+            if (dialogId) {
+               B.call (x, 'start', 'dialogStream', dialogId, filename || streamFilename, originalInput);
+            }
          }).catch (function (err) {
             B.call (x, 'report', 'error', 'Failed to send: ' + err.message);
             B.call (x, 'set', 'streaming', false);
@@ -1737,99 +1776,119 @@ B.mrespond ([
       runSend ();
    }],
 
-   // Process stream response (SSE or JSON fallback)
-   ['process', 'stream', function (x, response, filename, originalInput) {
+   // Start dialog stream (GET /dialog/:id/stream)
+   ['start', 'dialogStream', function (x, dialogId, filename, originalInput) {
+      var project = B.get ('currentProject');
+      if (! project || ! dialogId) return;
+
+      // Avoid duplicate streams
+      if (activeDialogStream && activeDialogStream.dialogId === dialogId) return;
+
+      // Abort any existing stream
+      if (activeDialogStream && activeDialogStream.abort) {
+         try {activeDialogStream.abort ();} catch (e) {}
+      }
+
+      var controller = new AbortController ();
+      activeDialogStream = {dialogId: dialogId, abort: function () {controller.abort ();}};
+      var previousDialogId = B.get ('streamingDialogId');
+      B.call (x, 'set', 'streamingDialogId', dialogId);
+      B.call (x, 'set', 'streaming', true);
+      if (previousDialogId !== dialogId) B.call (x, 'set', 'streamingContent', '');
+      else B.call (x, 'set', 'streamingContent', B.get ('streamingContent') || '');
+
       var targetFilename = filename;
-      var contentType = (response.headers && response.headers.get ('content-type')) || '';
 
       var finalize = function () {
+         if (activeDialogStream && activeDialogStream.dialogId === dialogId) activeDialogStream = null;
+         B.call (x, 'set', 'streamingDialogId', null);
          B.call (x, 'set', 'streaming', false);
          B.call (x, 'set', 'optimisticUserMessage', null);
          if (targetFilename) B.call (x, 'load', 'file', targetFilename);
          B.call (x, 'load', 'files');
       };
 
-      if (! response.ok) {
-         return response.text ().then (function (text) {
-            B.call (x, 'report', 'error', 'Request failed: ' + response.status + ' ' + text);
-            B.call (x, 'set', 'streaming', false);
-            B.call (x, 'set', 'optimisticUserMessage', null);
-            if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
-         });
-      }
-
-      if (contentType.indexOf ('text/event-stream') === -1 || ! response.body) {
-         return response.json ().then (function (data) {
-            if (data && data.filename) targetFilename = data.filename;
-            finalize ();
-         }).catch (function () {
-            finalize ();
-         });
-      }
-
-      var reader = response.body.getReader ();
-      var decoder = new TextDecoder ();
-      var buffer = '';
-
-      function read () {
-         reader.read ().then (function (result) {
-            if (result.done) return finalize ();
-
-            buffer += decoder.decode (result.value, {stream: true});
-            var lines = buffer.split ('\n');
-            buffer = lines.pop ();
-
-            dale.go (lines, function (line) {
-               if (! line.startsWith ('data: ')) return;
-
-               try {
-                  var data = JSON.parse (line.slice (6));
-                  if (data.type === 'chunk') {
-                     var current = B.get ('streamingContent') || '';
-                     B.call (x, 'set', 'streamingContent', current + data.content);
-                  }
-                  else if (data.type === 'context') {
-                     B.call (x, 'set', 'contextWindow', data.context);
-                  }
-                  else if (data.type === 'tool_request') {
-                     var tool = data.tool || {};
-                     var friendly = toolFriendlyName (tool.name || 'tool');
-                     var inputSummary = formatToolInputPreview (tool.input || {}) || '';
-                     var currentReq = B.get ('streamingContent') || '';
-                     B.call (x, 'set', 'streamingContent', currentReq + '\n\n⏳ ' + friendly + '\n' + inputSummary + '\n');
-                  }
-                  else if (data.type === 'tool_result') {
-                     var tool = data.tool || {};
-                     var friendly = toolFriendlyName (tool.name || 'tool');
-                     var resultObj = tool.result || {};
-                     var icon = (resultObj.success === false || resultObj.error) ? '✗' : '✓';
-                     var resultPreview = formatToolResultPreview (resultObj, 3) || '(ok)';
-                     var currentRes = B.get ('streamingContent') || '';
-                     B.call (x, 'set', 'streamingContent', currentRes + icon + ' ' + friendly + '\n' + resultPreview + '\n');
-                  }
-                  else if (data.type === 'done') {
-                     if (data.result && data.result.filename) targetFilename = data.result.filename;
-                  }
-                  else if (data.type === 'error') {
-                     B.call (x, 'report', 'error', data.error);
-                     B.call (x, 'set', 'streaming', false);
-                     B.call (x, 'set', 'optimisticUserMessage', null);
-                     if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
-                  }
-               }
-               catch (e) {}
+      fetch (projectPath (project, 'dialog/' + encodeURIComponent (dialogId) + '/stream'), {
+         method: 'GET',
+         headers: {Accept: 'text/event-stream'},
+         signal: controller.signal
+      }).then (function (response) {
+         if (! response.ok) {
+            return response.text ().then (function (text) {
+               B.call (x, 'report', 'error', 'Stream request failed: ' + response.status + ' ' + text);
+               finalize ();
             });
+         }
 
-            read ();
-         }).catch (function (error) {
-            B.call (x, 'report', 'error', 'Stream error: ' + error.message);
-            B.call (x, 'set', 'streaming', false);
-            B.call (x, 'set', 'optimisticUserMessage', null);
-            if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
-         });
-      }
+         if (! response.body) return finalize ();
 
-      read ();
+         var reader = response.body.getReader ();
+         var decoder = new TextDecoder ();
+         var buffer = '';
+
+         function read () {
+            reader.read ().then (function (result) {
+               if (result.done) return finalize ();
+
+               buffer += decoder.decode (result.value, {stream: true});
+               var lines = buffer.split ('\n');
+               buffer = lines.pop ();
+
+               dale.go (lines, function (line) {
+                  if (! line.startsWith ('data: ')) return;
+
+                  try {
+                     var data = JSON.parse (line.slice (6));
+                     if (data.type === 'chunk') {
+                        var current = B.get ('streamingContent') || '';
+                        B.call (x, 'set', 'streamingContent', current + data.content);
+                     }
+                     else if (data.type === 'context') {
+                        B.call (x, 'set', 'contextWindow', data.context);
+                     }
+                     else if (data.type === 'tool_request') {
+                        var tool = data.tool || {};
+                        var friendly = toolFriendlyName (tool.name || 'tool');
+                        var inputSummary = formatToolInputPreview (tool.input || {}) || '';
+                        var currentReq = B.get ('streamingContent') || '';
+                        B.call (x, 'set', 'streamingContent', currentReq + '\n\n⏳ ' + friendly + '\n' + inputSummary + '\n');
+                     }
+                     else if (data.type === 'tool_result') {
+                        var tool = data.tool || {};
+                        var friendly = toolFriendlyName (tool.name || 'tool');
+                        var resultObj = tool.result || {};
+                        var icon = (resultObj.success === false || resultObj.error) ? '✗' : '✓';
+                        var resultPreview = formatToolResultPreview (resultObj, 3) || '(ok)';
+                        var currentRes = B.get ('streamingContent') || '';
+                        B.call (x, 'set', 'streamingContent', currentRes + icon + ' ' + friendly + '\n' + resultPreview + '\n');
+                     }
+                     else if (data.type === 'done') {
+                        if (data.result && data.result.filename) targetFilename = data.result.filename;
+                     }
+                     else if (data.type === 'error') {
+                        B.call (x, 'report', 'error', data.error);
+                        if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
+                     }
+                  }
+                  catch (e) {}
+               });
+
+               read ();
+            }).catch (function (error) {
+               if (error && error.name === 'AbortError') return finalize ();
+               B.call (x, 'report', 'error', 'Stream error: ' + error.message);
+               if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
+               finalize ();
+            });
+         }
+
+         read ();
+      }).catch (function (error) {
+         if (error && error.name === 'AbortError') return finalize ();
+         B.call (x, 'report', 'error', 'Stream error: ' + error.message);
+         if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
+         finalize ();
+      });
    }],
 
 
@@ -1843,6 +1902,11 @@ B.mrespond ([
       var file = B.get ('currentFile');
       var parsed = file && parseDialogFilename (file.name);
       if (! parsed) return;
+
+      if (activeDialogStream && activeDialogStream.dialogId === parsed.dialogId) {
+         try {activeDialogStream.abort ();} catch (e) {}
+         activeDialogStream = null;
+      }
 
       fetch (projectPath (B.get ('currentProject'), 'dialog'), {
          method: 'PUT',
