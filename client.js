@@ -1260,6 +1260,7 @@ B.mrespond ([
 
          setTimeout (function () {
             if (B.get ('currentFile')) return;
+            if (B.get ('loadingFile')) return;
             var tab = B.get ('tab');
             if (tab !== 'docs' && tab !== 'dialogs') return;
             var hashTarget = B.get ('hashTarget');

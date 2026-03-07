@@ -763,6 +763,7 @@ var dialogSequence = [
    // Test 26: Continuing active agent-a rejected (409)
    ['Dialog 26: Continuing active agent-a rejected (409)', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {dialogId: s.dialogA, prompt: 'This must be rejected while agent-a is active.'}, function (error, code, body) {
+         if (error) console.log (error);
          if (error) return log ('PUT /dialog rejection request failed: ' + error.message);
          if (code !== 409) return log ('Expected 409, got ' + code);
          if (! body || ! body.error) return log ('Expected error payload for 409');
