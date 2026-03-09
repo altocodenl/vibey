@@ -2900,6 +2900,7 @@
    ];
 
    var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'dialog (safety)', 'static', 'backend', 'vi', 'snapshots'];
+   var FAST_SUITES = ['project', 'dialog', 'docs', 'uploads', 'dialog (safety)', 'static'];
 
    var filterValue = flowFilter.toLowerCase ().trim ();
 
@@ -2918,6 +2919,11 @@
       });
       dale.go (testsBySuite, function (tests, suite) {
          if (! inc (SUITE_ORDER, suite)) filteredTests = filteredTests.concat (tests);
+      });
+   }
+   else if (filterValue === 'fast') {
+      dale.go (FAST_SUITES, function (suite) {
+         if (testsBySuite [suite]) filteredTests = filteredTests.concat (testsBySuite [suite]);
       });
    }
    else {

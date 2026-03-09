@@ -465,6 +465,44 @@ var execSync = require ('child_process').execSync;
 
 var SANDBOX_IMAGE = 'vibey-sandbox:latest';
 
+// Promisified exec for non-blocking docker operations
+var execA = function (command, options) {
+   return new Promise (function (resolve, reject) {
+      exec (command, options || {encoding: 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+         if (error) {
+            error.stdout = stdout;
+            error.stderr = stderr;
+            reject (error);
+         }
+         else resolve ((stdout || '').toString ());
+      });
+   });
+};
+
+// Promisified exec that returns a Buffer (for binary reads)
+var execABuf = function (command, options) {
+   return new Promise (function (resolve, reject) {
+      exec (command, options || {encoding: 'buffer', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+         if (error) reject (error);
+         else resolve (stdout);
+      });
+   });
+};
+
+// Promisified exec with stdin piped in (for writes)
+var execAWithInput = function (command, input, encoding) {
+   return new Promise (function (resolve, reject) {
+      var child = exec (command, {encoding: encoding || 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+         if (error) reject (error);
+         else resolve ((stdout || '').toString ());
+      });
+      if (input !== undefined && input !== null) {
+         child.stdin.write (input);
+      }
+      child.stdin.end ();
+   });
+};
+
 var containerName = function (projectName) {
    return 'vibey-proj-' + projectName;
 };
@@ -486,10 +524,10 @@ var cleanupProjectContainers = function () {
    }
 };
 
-var containerExists = function (projectName) {
+var containerExists = async function (projectName) {
    var name = containerName (projectName);
    try {
-      var id = execSync ('docker ps -aq --filter name=^/' + name + '$', {encoding: 'utf8'}).trim ();
+      var id = (await execA ('docker ps -aq --filter name=^/' + name + '$')).trim ();
       return !! id;
    }
    catch (e) {
@@ -497,10 +535,10 @@ var containerExists = function (projectName) {
    }
 };
 
-var containerRunning = function (projectName) {
+var containerRunning = async function (projectName) {
    var name = containerName (projectName);
    try {
-      var id = execSync ('docker ps -q --filter name=^/' + name + '$', {encoding: 'utf8'}).trim ();
+      var id = (await execA ('docker ps -q --filter name=^/' + name + '$')).trim ();
       return !! id;
    }
    catch (e) {
@@ -508,52 +546,51 @@ var containerRunning = function (projectName) {
    }
 };
 
-var ensureProjectContainer = function (projectName) {
+var ensureProjectContainer = async function (projectName) {
    var name = containerName (projectName);
    var vol = volumeName (projectName);
 
    // Already running
-   if (containerRunning (projectName)) return;
+   if (await containerRunning (projectName)) return;
 
    // Exists but stopped — start it
-   if (containerExists (projectName)) {
-      execSync ('docker start ' + name, {encoding: 'utf8'});
+   if (await containerExists (projectName)) {
+      await execA ('docker start ' + name);
       clog ('Started existing container: ' + name);
       return;
    }
 
    // Create volume if it doesn't exist
    try {
-      execSync ('docker volume inspect ' + vol + ' >/dev/null 2>&1', {encoding: 'utf8'});
+      await execA ('docker volume inspect ' + vol + ' >/dev/null 2>&1');
    }
    catch (e) {
-      execSync ('docker volume create --label vibey=project --label vibey-project=' + projectName + ' ' + vol, {encoding: 'utf8'});
+      await execA ('docker volume create --label vibey=project --label vibey-project=' + projectName + ' ' + vol);
    }
 
    // Create new container with its own volume
-   execSync (
+   await execA (
       'docker run -d' +
       ' --name ' + name +
       ' --label vibey=project' +
       ' --label vibey-project=' + projectName +
       ' -v ' + vol + ':/workspace' +
       ' -w /workspace' +
-      ' ' + SANDBOX_IMAGE,
-      {encoding: 'utf8'}
+      ' ' + SANDBOX_IMAGE
    );
    clog ('Created project container: ' + name);
 };
 
-var removeProjectContainer = function (projectName) {
+var removeProjectContainer = async function (projectName) {
    var name = containerName (projectName);
    var vol = volumeName (projectName);
    try {
-      execSync ('docker rm -f ' + name, {encoding: 'utf8'});
+      await execA ('docker rm -f ' + name);
       clog ('Removed project container: ' + name);
    }
    catch (e) {}
    try {
-      execSync ('docker volume rm ' + vol, {encoding: 'utf8'});
+      await execA ('docker volume rm ' + vol);
       clog ('Removed project volume: ' + vol);
    }
    catch (e) {}
@@ -561,9 +598,9 @@ var removeProjectContainer = function (projectName) {
    if (GIT_REPO_READY) delete GIT_REPO_READY [projectName];
 };
 
-var getContainerIP = function (projectName) {
+var getContainerIP = async function (projectName) {
    var name = containerName (projectName);
-   var ip = execSync ("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' " + name, {encoding: 'utf8'}).trim ();
+   var ip = (await execA ("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' " + name)).trim ();
    if (! ip) throw new Error ('Container has no IP address');
    return ip;
 };
@@ -572,26 +609,31 @@ var shQuote = function (value) {
    return "'" + String (value).replace (/'/g, "'\\''") + "'";
 };
 
-var dockerExec = function (projectName, command, cb) {
+var dockerExec = function (projectName, command) {
    var name = containerName (projectName);
    // Escape single quotes in command for sh -c
    var escaped = command.replace (/'/g, "'\\''");
    // Use setsid so that backgrounded processes (e.g. `node server.js &`) survive
    // the docker exec session ending. Without setsid, docker kills orphaned children
    // when the sh process exits.
-   exec ('docker exec ' + name + " setsid sh -c '" + escaped + "'", {timeout: 30000, maxBuffer: 1024 * 1024}, cb);
+   return new Promise (function (resolve) {
+      exec ('docker exec ' + name + " setsid sh -c '" + escaped + "'", {timeout: 30000, maxBuffer: 1024 * 1024}, function (error, stdout, stderr) {
+         if (error) resolve ({error: error, stdout: stdout, stderr: stderr});
+         else       resolve ({error: null, stdout: stdout, stderr: stderr});
+      });
+   });
 };
 
 // *** PROJECT FS ***
 
 // All project file operations go through the container boundary.
-// These are synchronous (using execSync) for simplicity — ~20-50ms per call.
+// These are async (using exec) to avoid blocking the event loop.
 
 var pfs = {
-   readdir: function (projectName) {
+   readdir: async function (projectName) {
       var name = containerName (projectName);
       try {
-         var output = execSync ('docker exec ' + name + " sh -c 'find /workspace -type f'", {encoding: 'utf8'}).trim ();
+         var output = (await execA ('docker exec ' + name + " sh -c 'find /workspace -type f'")).trim ();
          if (! output) return [];
          return dale.fil (output.split ('\n'), undefined, function (line) {
             if (! line) return;
@@ -603,51 +645,51 @@ var pfs = {
       }
    },
 
-   readFile: function (projectName, filename) {
+   readFile: async function (projectName, filename) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'});
+      return await execA ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filename));
    },
 
-   writeFile: function (projectName, filename, content) {
+   writeFile: async function (projectName, filename, content) {
       var name = containerName (projectName);
       var dir = filename.replace (/\/[^/]+$/, '');
       if (dir && dir !== filename) {
          try {
-            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
+            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
          }
          catch (e) {}
       }
       var command = 'cat > ' + shQuote ('/workspace/' + filename);
-      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
+      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
    },
 
-   appendFile: function (projectName, filename, content) {
+   appendFile: async function (projectName, filename, content) {
       var name = containerName (projectName);
       var dir = filename.replace (/\/[^/]+$/, '');
       if (dir && dir !== filename) {
          try {
-            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
+            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
          }
          catch (e) {}
       }
       var command = 'cat >> ' + shQuote ('/workspace/' + filename);
-      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
+      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
    },
 
-   rename: function (projectName, oldName, newName) {
+   rename: async function (projectName, oldName, newName) {
       var name = containerName (projectName);
-      execSync ('docker exec ' + name + ' mv ' + shQuote ('/workspace/' + oldName) + ' ' + shQuote ('/workspace/' + newName), {encoding: 'utf8'});
+      await execA ('docker exec ' + name + ' mv ' + shQuote ('/workspace/' + oldName) + ' ' + shQuote ('/workspace/' + newName));
    },
 
-   unlink: function (projectName, filename) {
+   unlink: async function (projectName, filename) {
       var name = containerName (projectName);
-      execSync ('docker exec ' + name + ' rm ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'});
+      await execA ('docker exec ' + name + ' rm ' + shQuote ('/workspace/' + filename));
    },
 
-   exists: function (projectName, filename) {
+   exists: async function (projectName, filename) {
       var name = containerName (projectName);
       try {
-         execSync ('docker exec ' + name + ' test -f ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'});
+         await execA ('docker exec ' + name + ' test -f ' + shQuote ('/workspace/' + filename));
          return true;
       }
       catch (e) {
@@ -655,11 +697,11 @@ var pfs = {
       }
    },
 
-   stat: function (projectName, filename) {
+   stat: async function (projectName, filename) {
       var name = containerName (projectName);
       try {
          // stat -c %Y gives mtime as unix epoch seconds
-         var output = execSync ('docker exec ' + name + ' stat -c %Y ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'}).trim ();
+         var output = (await execA ('docker exec ' + name + ' stat -c %Y ' + shQuote ('/workspace/' + filename))).trim ();
          return {mtime: new Date (Number (output) * 1000)};
       }
       catch (e) {
@@ -667,11 +709,11 @@ var pfs = {
       }
    },
 
-   statDetailed: function (projectName, filename) {
+   statDetailed: async function (projectName, filename) {
       var name = containerName (projectName);
       try {
          // stat -c '%Y %s' gives mtime and size in bytes
-         var output = execSync ('docker exec ' + name + ' stat -c "%Y %s" ' + shQuote ('/workspace/' + filename), {encoding: 'utf8'}).trim ();
+         var output = (await execA ('docker exec ' + name + ' stat -c "%Y %s" ' + shQuote ('/workspace/' + filename))).trim ();
          var parts = output.split (' ');
          return {
             mtime: new Date (Number (parts [0]) * 1000),
@@ -684,21 +726,21 @@ var pfs = {
    },
 
    // Read a file from any path inside the container (for static proxy)
-   readFileAt: function (projectName, path) {
+   readFileAt: async function (projectName, path) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat ' + shQuote (path), {encoding: 'utf8'});
+      return await execA ('docker exec ' + name + ' cat ' + shQuote (path));
    },
 
    // Read a binary file from any path inside the container (for static proxy)
-   readFileBinaryAt: function (projectName, path) {
+   readFileBinaryAt: async function (projectName, path) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat ' + shQuote (path), {encoding: 'buffer'});
+      return await execABuf ('docker exec ' + name + ' cat ' + shQuote (path));
    },
 
-   existsAt: function (projectName, path) {
+   existsAt: async function (projectName, path) {
       var name = containerName (projectName);
       try {
-         execSync ('docker exec ' + name + ' test -f ' + shQuote (path), {encoding: 'utf8'});
+         await execA ('docker exec ' + name + ' test -f ' + shQuote (path));
          return true;
       }
       catch (e) {
@@ -707,44 +749,44 @@ var pfs = {
    },
 
    // mkdir -p for a path inside /workspace
-   mkdirp: function (projectName, dirpath) {
+   mkdirp: async function (projectName, dirpath) {
       var name = containerName (projectName);
-      execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dirpath), {encoding: 'utf8'});
+      await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dirpath));
    },
 
    // Write file at any path inside /workspace (for tool write_file)
-   writeFileAt: function (projectName, filepath, content) {
+   writeFileAt: async function (projectName, filepath, content) {
       var name = containerName (projectName);
       // Ensure parent directory exists
       var dir = filepath.replace (/\/[^/]+$/, '');
       if (dir && dir !== filepath) {
          try {
-            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
+            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
          }
          catch (e) {}
       }
       var command = 'cat > ' + shQuote ('/workspace/' + filepath);
-      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'utf8'});
+      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
    },
 
    // Write binary file at any path inside /workspace (for uploads)
-   writeFileBinaryAt: function (projectName, filepath, content) {
+   writeFileBinaryAt: async function (projectName, filepath, content) {
       var name = containerName (projectName);
       var dir = filepath.replace (/\/[^/]+$/, '');
       if (dir && dir !== filepath) {
          try {
-            execSync ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir), {encoding: 'utf8'});
+            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
          }
          catch (e) {}
       }
       var command = 'cat > ' + shQuote ('/workspace/' + filepath);
-      execSync ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), {input: content, encoding: 'buffer'});
+      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content, 'buffer');
    },
 
    // Read file at any path inside /workspace (for tool edit_file)
-   readFileInWorkspace: function (projectName, filepath) {
+   readFileInWorkspace: async function (projectName, filepath) {
       var name = containerName (projectName);
-      return execSync ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filepath), {encoding: 'utf8'});
+      return await execA ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filepath));
    }
 };
 
@@ -884,8 +926,8 @@ var generateSnapshotId = function () {
    return formatDialogTimestamp () + '-' + crypto.randomBytes (4).toString ('hex');
 };
 
-var createSnapshot = function (projectName, label) {
-   getExistingProject (projectName);
+var createSnapshot = async function (projectName, label) {
+   await getExistingProject (projectName);
    ensureSnapshotsDir ();
 
    var id = generateSnapshotId ();
@@ -894,12 +936,12 @@ var createSnapshot = function (projectName, label) {
    var name = containerName (projectName);
 
    // Create tar.gz of /workspace inside the project container, pipe it out
-   execSync ('docker exec ' + name + ' tar czf - -C /workspace . > ' + JSON.stringify (archivePath), {encoding: 'buffer', shell: '/bin/sh'});
+   await execA ('docker exec ' + name + ' tar czf - -C /workspace . > ' + JSON.stringify (archivePath), {encoding: 'buffer', shell: '/bin/sh'});
 
    var fileCount = 0;
    try {
       // Count all files recursively under /workspace
-      fileCount = Number (execSync ('docker exec ' + name + " sh -c 'find /workspace -type f | wc -l'", {encoding: 'utf8'}).trim ()) || 0;
+      fileCount = Number ((await execA ('docker exec ' + name + " sh -c 'find /workspace -type f | wc -l'")).trim ()) || 0;
    }
    catch (e) {}
 
@@ -922,7 +964,7 @@ var createSnapshot = function (projectName, label) {
    return entry;
 };
 
-var restoreSnapshot = function (snapshotId, newProjectName) {
+var restoreSnapshot = async function (snapshotId, newProjectName) {
    var index = loadSnapshotsIndex ();
    var entry = dale.stopNot (index, undefined, function (e) {
       if (e.id === snapshotId) return e;
@@ -933,11 +975,11 @@ var restoreSnapshot = function (snapshotId, newProjectName) {
    if (! fs.existsSync (archivePath)) throw new Error ('Snapshot archive missing: ' + entry.file);
 
    var displayName = newProjectName || (entry.projectName + ' (restored ' + formatDialogTimestamp () + ')');
-   var slug = ensureProject (displayName);
+   var slug = await ensureProject (displayName);
 
    var name = containerName (slug);
    // Pipe the tar.gz into the new container's /workspace
-   execSync ('cat ' + JSON.stringify (archivePath) + ' | docker exec -i ' + name + ' tar xzf - -C /workspace', {encoding: 'buffer', shell: '/bin/sh'});
+   await execA ('cat ' + JSON.stringify (archivePath) + ' | docker exec -i ' + name + ' tar xzf - -C /workspace', {encoding: 'buffer', shell: '/bin/sh'});
 
    return {slug: slug, name: displayName, snapshotId: snapshotId};
 };
@@ -999,10 +1041,10 @@ var validateProjectName = function (projectName) {
    return projectName;
 };
 
-var volumeExists = function (projectName) {
+var volumeExists = async function (projectName) {
    var vol = volumeName (projectName);
    try {
-      execSync ('docker volume inspect ' + vol + ' >/dev/null 2>&1', {encoding: 'utf8'});
+      await execA ('docker volume inspect ' + vol + ' >/dev/null 2>&1');
       return true;
    }
    catch (e) {
@@ -1010,31 +1052,31 @@ var volumeExists = function (projectName) {
    }
 };
 
-var projectExists = function (projectName) {
-   return containerExists (projectName) || volumeExists (projectName);
+var projectExists = async function (projectName) {
+   return (await containerExists (projectName)) || (await volumeExists (projectName));
 };
 
-var ensureProject = function (projectName) {
+var ensureProject = async function (projectName) {
    var slug = slugifyProjectName (projectName);
-   ensureProjectContainer (slug);
-   ensureProjectLayout (slug);
+   await ensureProjectContainer (slug);
+   await ensureProjectLayout (slug);
    return slug;
 };
 
-var getExistingProject = function (projectName) {
+var getExistingProject = async function (projectName) {
    projectName = validateProjectName (projectName);
-   if (! projectExists (projectName)) throw new Error ('Project not found');
+   if (! (await projectExists (projectName))) throw new Error ('Project not found');
    // ensureProjectContainer handles all cases: running, stopped, or missing container (volume-only)
-   ensureProjectContainer (projectName);
-   ensureProjectLayout (projectName);
+   await ensureProjectContainer (projectName);
+   await ensureProjectLayout (projectName);
    return projectName;
 };
 
-var listProjects = function () {
+var listProjects = async function () {
    try {
       var projectsBySlug = {};
 
-      var output = execSync ('docker ps -a --filter label=vibey=project --format "{{.Names}}"', {encoding: 'utf8'}).trim ();
+      var output = (await execA ('docker ps -a --filter label=vibey=project --format "{{.Names}}"')).trim ();
       if (output) {
          var names = output.split ('\n');
          dale.go (names, function (name) {
@@ -1044,12 +1086,12 @@ var listProjects = function () {
          });
       }
 
-      var volumes = execSync ('docker volume ls -q --filter label=vibey=project', {encoding: 'utf8'}).trim ();
+      var volumes = (await execA ('docker volume ls -q --filter label=vibey=project')).trim ();
       if (volumes) {
          var volumeNames = volumes.split ('\n').filter (Boolean);
          if (volumeNames.length) {
             var format = '{{.Name}} {{index .Labels "vibey-project"}}';
-            var inspect = execSync ('docker volume inspect -f ' + shQuote (format) + ' ' + dale.go (volumeNames, shQuote).join (' '), {encoding: 'utf8'}).trim ();
+            var inspect = (await execA ('docker volume inspect -f ' + shQuote (format) + ' ' + dale.go (volumeNames, shQuote).join (' '))).trim ();
             if (inspect) {
                dale.go (inspect.split ('\n'), function (line) {
                   line = line.trim ();
@@ -1114,11 +1156,11 @@ var isUploadPath = function (name) {
    return name.indexOf (UPLOAD_DIR + '/') === 0;
 };
 
-var ensureProjectLayout = function (projectName) {
+var ensureProjectLayout = async function (projectName) {
    try {
-      pfs.mkdirp (projectName, DOC_DIR);
-      pfs.mkdirp (projectName, DIALOG_DIR);
-      pfs.mkdirp (projectName, UPLOAD_DIR);
+      await pfs.mkdirp (projectName, DOC_DIR);
+      await pfs.mkdirp (projectName, DIALOG_DIR);
+      await pfs.mkdirp (projectName, UPLOAD_DIR);
    }
    catch (e) {}
 };
@@ -1138,11 +1180,11 @@ var compactText = function (text, maxLines, maxChars) {
    return compacted;
 };
 
-var getDocMainContent = function (projectName) {
-   if (! pfs.exists (projectName, DOC_MAIN_FILE)) return null;
+var getDocMainContent = async function (projectName) {
+   if (! (await pfs.exists (projectName, DOC_MAIN_FILE))) return null;
 
    try {
-      var content = pfs.readFile (projectName, DOC_MAIN_FILE);
+      var content = await pfs.readFile (projectName, DOC_MAIN_FILE);
       if (! content || ! content.trim ()) return null;
       return {name: DOC_MAIN_FILE, content: content.trim ()};
    }
@@ -1151,22 +1193,22 @@ var getDocMainContent = function (projectName) {
    }
 };
 
-var getDocMainInjection = function (projectName) {
-   var docMain = getDocMainContent (projectName);
+var getDocMainInjection = async function (projectName) {
+   var docMain = await getDocMainContent (projectName);
    if (! docMain) return '';
    return '\n\nProject instructions (' + docMain.name + '):\n\n' + docMain.content;
 };
 
-var upsertDocMainContextBlock = function (projectName, filename) {
-   if (! pfs.exists (projectName, filename)) return;
+var upsertDocMainContextBlock = async function (projectName, filename) {
+   if (! (await pfs.exists (projectName, filename))) return;
 
-   var markdown = pfs.readFile (projectName, filename);
+   var markdown = await pfs.readFile (projectName, filename);
    var blockRe = /<!-- DOC_MAIN_CONTEXT_START -->[\s\S]*?<!-- DOC_MAIN_CONTEXT_END -->\n\n?/;
    markdown = markdown.replace (blockRe, '');
 
-   var docMain = getDocMainContent (projectName);
+   var docMain = await getDocMainContent (projectName);
    if (! docMain) {
-      pfs.writeFile (projectName, filename, markdown);
+      await pfs.writeFile (projectName, filename, markdown);
       return;
    }
 
@@ -1184,17 +1226,17 @@ var upsertDocMainContextBlock = function (projectName, filename) {
    }
    else markdown = block + markdown;
 
-   pfs.writeFile (projectName, filename, markdown);
+   await pfs.writeFile (projectName, filename, markdown);
 };
 
 // *** MCP TOOLS ***
 
 // Context window sizes (tokens) per model
 // Sources:
-//   OpenAI: chatgpt.com/backend-api/codex/models endpoint (2026-03-04)
+//   OpenAI: user-provided for gpt-5.4 (2026-03-09)
 //   Claude: docs.anthropic.com/en/docs/about-claude/models (200K standard)
 var CONTEXT_WINDOWS = {
-   'gpt-5.3-codex':              272000,
+   'gpt-5.4':                    1050000,
    'gpt-5.2-codex':              272000,
    'claude-opus-4-6':            200000,
    'claude-sonnet-4-6':          200000,
@@ -1315,98 +1357,91 @@ var sanitizeToolPath = function (path) {
 };
 
 // Execute a tool inside the project container
-var executeTool = function (toolName, toolInput, projectName) {
-   return new Promise (function (resolve) {
+var executeTool = async function (toolName, toolInput, projectName) {
+   try {
+      await getExistingProject (projectName);
+   }
+   catch (error) {
+      return {success: false, error: error.message};
+   }
+
+   var finalizeTool = async function (result) {
       try {
-         getExistingProject (projectName);
+         await maybeAutoCommit (projectName, {kind: 'tool', tool: toolName});
       }
       catch (error) {
-         return resolve ({success: false, error: error.message});
+         clog ('Auto-commit failed after tool ' + toolName + ' in ' + projectName + ': ' + error.message);
+         return {success: false, error: 'Auto-commit failed after tool ' + toolName + ': ' + error.message};
+      }
+      return result;
+   };
+
+   if (toolName === 'run_command') {
+      var r = await dockerExec (projectName, toolInput.command);
+      if (r.error) return await finalizeTool ({success: false, error: r.error.message, stderr: r.stderr});
+      else         return await finalizeTool ({success: true, stdout: r.stdout, stderr: r.stderr});
+   }
+
+   if (toolName === 'write_file') {
+      try {
+         var writePath = sanitizeToolPath (toolInput.path);
+         await pfs.writeFileAt (projectName, writePath, toolInput.content);
+         return await finalizeTool ({success: true, message: 'File written: ' + toolInput.path});
+      }
+      catch (error) {
+         return await finalizeTool ({success: false, error: error.message});
+      }
+   }
+
+   if (toolName === 'edit_file') {
+      try {
+         var editPath = sanitizeToolPath (toolInput.path);
+         var content = await pfs.readFileInWorkspace (projectName, editPath);
+
+         var count = content.split (toolInput.old_string).length - 1;
+
+         if (count === 0) {
+            return await finalizeTool ({success: false, error: 'old_string not found in file'});
+         }
+         if (count > 1) {
+            return await finalizeTool ({success: false, error: 'old_string found ' + count + ' times — must be unique. Add more surrounding context.'});
+         }
+         var updated = content.replace (toolInput.old_string, toolInput.new_string);
+         await pfs.writeFileAt (projectName, editPath, updated);
+         return await finalizeTool ({success: true, message: 'Edit applied to ' + toolInput.path});
+      }
+      catch (error) {
+         return await finalizeTool ({success: false, error: error.message});
+      }
+   }
+
+   if (toolName === 'launch_agent') {
+      if (toolInput.provider !== 'claude' && toolInput.provider !== 'openai') {
+         return await finalizeTool ({success: false, error: 'launch_agent: provider must be claude or openai'});
+      }
+      if (type (toolInput.prompt) !== 'string' || ! toolInput.prompt.trim ()) {
+         return await finalizeTool ({success: false, error: 'launch_agent: prompt is required'});
       }
 
-      var finalizeTool = function (result) {
-         maybeAutoCommit (projectName, {kind: 'tool', tool: toolName})
-            .then (function () {
-               resolve (result);
-            })
-            .catch (function (error) {
-               clog ('Auto-commit failed after tool ' + toolName + ' in ' + projectName + ': ' + error.message);
-               resolve ({success: false, error: 'Auto-commit failed after tool ' + toolName + ': ' + error.message});
-            });
-      };
-
-      if (toolName === 'run_command') {
-         dockerExec (projectName, toolInput.command, function (error, stdout, stderr) {
-            if (error) finalizeTool ({success: false, error: error.message, stderr: stderr});
-            else       finalizeTool ({success: true, stdout: stdout, stderr: stderr});
+      try {
+         var result = await startDialogTurn (projectName, toolInput.provider, toolInput.prompt.trim (), toolInput.model, toolInput.slug, null);
+         return await finalizeTool ({
+            success: true,
+            launched: {
+               dialogId: result.dialogId,
+               filename: result.filename,
+               status: result.status,
+               provider: result.provider,
+               model: result.model
+            }
          });
       }
-
-      else if (toolName === 'write_file') {
-         try {
-            var writePath = sanitizeToolPath (toolInput.path);
-            pfs.writeFileAt (projectName, writePath, toolInput.content);
-            finalizeTool ({success: true, message: 'File written: ' + toolInput.path});
-         }
-         catch (error) {
-            finalizeTool ({success: false, error: error.message});
-         }
+      catch (error) {
+         return await finalizeTool ({success: false, error: 'launch_agent failed: ' + error.message});
       }
+   }
 
-      else if (toolName === 'edit_file') {
-         try {
-            var editPath = sanitizeToolPath (toolInput.path);
-            var content = pfs.readFileInWorkspace (projectName, editPath);
-
-            var count = content.split (toolInput.old_string).length - 1;
-
-            if (count === 0) {
-               finalizeTool ({success: false, error: 'old_string not found in file'});
-            }
-            else if (count > 1) {
-               finalizeTool ({success: false, error: 'old_string found ' + count + ' times — must be unique. Add more surrounding context.'});
-            }
-            else {
-               var updated = content.replace (toolInput.old_string, toolInput.new_string);
-               pfs.writeFileAt (projectName, editPath, updated);
-               finalizeTool ({success: true, message: 'Edit applied to ' + toolInput.path});
-            }
-         }
-         catch (error) {
-            finalizeTool ({success: false, error: error.message});
-         }
-      }
-
-      else if (toolName === 'launch_agent') {
-         if (toolInput.provider !== 'claude' && toolInput.provider !== 'openai') {
-            return finalizeTool ({success: false, error: 'launch_agent: provider must be claude or openai'});
-         }
-         if (type (toolInput.prompt) !== 'string' || ! toolInput.prompt.trim ()) {
-            return finalizeTool ({success: false, error: 'launch_agent: prompt is required'});
-         }
-
-         startDialogTurn (projectName, toolInput.provider, toolInput.prompt.trim (), toolInput.model, toolInput.slug, null)
-            .then (function (result) {
-               finalizeTool ({
-                  success: true,
-                  launched: {
-                     dialogId: result.dialogId,
-                     filename: result.filename,
-                     status: result.status,
-                     provider: result.provider,
-                     model: result.model
-                  }
-               });
-            })
-            .catch (function (error) {
-               finalizeTool ({success: false, error: 'launch_agent failed: ' + error.message});
-            });
-      }
-
-      else {
-         finalizeTool ({success: false, error: 'Unknown tool: ' + toolName});
-      }
-   });
+   return await finalizeTool ({success: false, error: 'Unknown tool: ' + toolName});
 };
 
 // *** LLM FUNCTIONS ***
@@ -1517,9 +1552,9 @@ var parseUsageNumbers = function (usage) {
    return {input: input, output: output, total: total};
 };
 
-var getLastCumulativeUsage = function (projectName, filename) {
-   if (! pfs.exists (projectName, filename)) return {input: 0, output: 0, total: 0};
-   var text = pfs.readFile (projectName, filename);
+var getLastCumulativeUsage = async function (projectName, filename) {
+   if (! (await pfs.exists (projectName, filename))) return {input: 0, output: 0, total: 0};
+   var text = await pfs.readFile (projectName, filename);
    var re = /^> Usage cumulative:\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s*$/gm;
    var match, lastMatch = null;
    while ((match = re.exec (text)) !== null) lastMatch = match;
@@ -1531,15 +1566,15 @@ var getLastCumulativeUsage = function (projectName, filename) {
    };
 };
 
-var appendToDialog = function (projectName, filename, text) {
-   pfs.appendFile (projectName, filename, text);
+var appendToDialog = async function (projectName, filename, text) {
+   await pfs.appendFile (projectName, filename, text);
 };
 
-var appendUsageToAssistantSection = function (projectName, filename, usage) {
+var appendUsageToAssistantSection = async function (projectName, filename, usage) {
    var normalized = parseUsageNumbers (usage);
    if (! normalized) return;
 
-   var cumulative = getLastCumulativeUsage (projectName, filename);
+   var cumulative = await getLastCumulativeUsage (projectName, filename);
    // Input tokens already include the full conversation history each turn,
    // so cumulative input = this turn's input (not a running sum).
    // Output tokens are genuinely new each turn, so those accumulate.
@@ -1547,20 +1582,20 @@ var appendUsageToAssistantSection = function (projectName, filename, usage) {
    cumulative.output += normalized.output;
    cumulative.total = normalized.input + cumulative.output;
 
-   appendToDialog (projectName, filename,
+   await appendToDialog (projectName, filename,
       '> Usage: input=' + normalized.input + ' output=' + normalized.output + ' total=' + normalized.total + '\n' +
       '> Usage cumulative: input=' + cumulative.input + ' output=' + cumulative.output + ' total=' + cumulative.total + '\n\n'
    );
 };
 
-var finalizeAssistantTime = function (projectName, filename, startIso, endIso) {
+var finalizeAssistantTime = async function (projectName, filename, startIso, endIso) {
    var marker = '> Time: ' + startIso + ' - ...';
    var replacement = '> Time: ' + startIso + ' - ' + endIso;
-   var text = pfs.readFile (projectName, filename);
+   var text = await pfs.readFile (projectName, filename);
    var index = text.lastIndexOf (marker);
    if (index < 0) return;
    text = text.slice (0, index) + replacement + text.slice (index + marker.length);
-   pfs.writeFile (projectName, filename, text);
+   await pfs.writeFile (projectName, filename, text);
 };
 
 var parseDialogForProvider = function (markdown, provider) {
@@ -1668,8 +1703,8 @@ var parseDialogFilename = function (filename) {
    return {dialogId: legacy [1], status: legacy [2]};
 };
 
-var findDialogFilename = function (projectName, dialogId) {
-   var files = pfs.readdir (projectName);
+var findDialogFilename = async function (projectName, dialogId) {
+   var files = await pfs.readdir (projectName);
    var found = dale.stopNot (files, undefined, function (file) {
       var parsed = parseDialogFilename (file);
       if (parsed && parsed.dialogId === dialogId) return file;
@@ -1677,19 +1712,19 @@ var findDialogFilename = function (projectName, dialogId) {
    return found || null;
 };
 
-var createDialogId = function (projectName, slug) {
+var createDialogId = async function (projectName, slug) {
    var base = formatDialogTimestamp () + '-' + sanitizeForFilename (slug || 'dialog');
    var candidate = base;
    var counter = 2;
-   while (findDialogFilename (projectName, candidate)) {
+   while (await findDialogFilename (projectName, candidate)) {
       candidate = base + '-' + counter;
       counter++;
    }
    return candidate;
 };
 
-var loadDialog = function (projectName, dialogId) {
-   var filename = findDialogFilename (projectName, dialogId);
+var loadDialog = async function (projectName, dialogId) {
+   var filename = await findDialogFilename (projectName, dialogId);
    if (! filename) {
       return {
          dialogId: dialogId,
@@ -1701,7 +1736,7 @@ var loadDialog = function (projectName, dialogId) {
       };
    }
 
-   var markdown = pfs.readFile (projectName, filename);
+   var markdown = await pfs.readFile (projectName, filename);
    var parsed = parseDialogFilename (filename) || {status: 'active'};
 
    return {
@@ -1714,13 +1749,13 @@ var loadDialog = function (projectName, dialogId) {
    };
 };
 
-var setDialogStatus = function (projectName, dialog, status, context) {
+var setDialogStatus = async function (projectName, dialog, status, context) {
    context = context || 'unknown';
 
    if (! inc (DIALOG_STATUSES, status)) throw new Error ('Invalid status: ' + status);
    if (! dialog || ! dialog.dialogId) throw new Error ('Dialog not found');
 
-   var currentFilename = findDialogFilename (projectName, dialog.dialogId);
+   var currentFilename = await findDialogFilename (projectName, dialog.dialogId);
    if (! currentFilename) throw new Error ('Dialog not found: ' + dialog.dialogId);
 
    var parsed = parseDialogFilename (currentFilename);
@@ -1740,10 +1775,10 @@ var setDialogStatus = function (projectName, dialog, status, context) {
    var newFilename = buildDialogFilename (dialog.dialogId, status);
 
    try {
-      pfs.rename (projectName, currentFilename, newFilename);
+      await pfs.rename (projectName, currentFilename, newFilename);
 
-      var oldExists = pfs.exists (projectName, currentFilename);
-      var newExists = pfs.exists (projectName, newFilename);
+      var oldExists = await pfs.exists (projectName, currentFilename);
+      var newExists = await pfs.exists (projectName, newFilename);
 
       clog ('[dialog-status] renamed project=' + projectName + ' dialogId=' + dialog.dialogId + ' old=' + currentFilename + ' new=' + newFilename + ' oldExists=' + oldExists + ' newExists=' + newExists);
 
@@ -1759,21 +1794,21 @@ var setDialogStatus = function (projectName, dialog, status, context) {
    }
 };
 
-var ensureDialogFile = function (projectName, dialog, provider, model) {
+var ensureDialogFile = async function (projectName, dialog, provider, model) {
    if (dialog.exists) {
       if (dialog.metadata.provider && dialog.metadata.model) {
-         upsertDocMainContextBlock (projectName, dialog.filename);
+         await upsertDocMainContextBlock (projectName, dialog.filename);
          return;
       }
-      var content = pfs.readFile (projectName, dialog.filename);
+      var content = await pfs.readFile (projectName, dialog.filename);
       var headerLine = '> Provider: ' + provider + '\n' + '> Model: ' + model + '\n';
       if (! /\n> Started:/.test (content)) headerLine += '> Started: ' + new Date ().toISOString () + '\n';
       headerLine += '\n';
       if (content.startsWith ('# Dialog\n\n')) content = '# Dialog\n\n' + headerLine + content.slice (10);
       else content = '# Dialog\n\n' + headerLine + content;
-      pfs.writeFile (projectName, dialog.filename, content);
-      upsertDocMainContextBlock (projectName, dialog.filename);
-      dialog.markdown = pfs.readFile (projectName, dialog.filename);
+      await pfs.writeFile (projectName, dialog.filename, content);
+      await upsertDocMainContextBlock (projectName, dialog.filename);
+      dialog.markdown = await pfs.readFile (projectName, dialog.filename);
       dialog.metadata = {provider: provider, model: model};
       return;
    }
@@ -1781,14 +1816,14 @@ var ensureDialogFile = function (projectName, dialog, provider, model) {
    var header = '# Dialog\n\n';
    header += '> Provider: ' + provider + '\n' + '> Model: ' + model + '\n';
    header += '> Started: ' + new Date ().toISOString () + '\n\n';
-   pfs.writeFile (projectName, dialog.filename, header);
-   upsertDocMainContextBlock (projectName, dialog.filename);
+   await pfs.writeFile (projectName, dialog.filename, header);
+   await upsertDocMainContextBlock (projectName, dialog.filename);
    dialog.exists = true;
-   dialog.markdown = pfs.readFile (projectName, dialog.filename);
+   dialog.markdown = await pfs.readFile (projectName, dialog.filename);
 };
 
-var writeToolResults = function (projectName, filename, resultsById) {
-   var markdown = pfs.readFile (projectName, filename);
+var writeToolResults = async function (projectName, filename, resultsById) {
+   var markdown = await pfs.readFile (projectName, filename);
    var toolCalls = parseToolCalls (markdown, true);
 
    // Collect replacements, then apply in reverse order to preserve positions
@@ -1804,7 +1839,7 @@ var writeToolResults = function (projectName, filename, resultsById) {
       markdown = markdown.slice (0, r.start) + r.text + markdown.slice (r.end);
    });
 
-   pfs.writeFile (projectName, filename, markdown);
+   await pfs.writeFile (projectName, filename, markdown);
 };
 
 // Implementation function for Claude (streaming with tool support)
@@ -1954,7 +1989,7 @@ var normalizeMessagesForResponsesApi = function (messages) {
 
 // Implementation function for OpenAI (streaming with tool support)
 var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal) {
-   model = model || 'gpt-5.2-codex';
+   model = model || 'gpt-5.4';
 
    var systemPrompt = loadSystemPrompt () + getDocMainInjection (projectName);
 
@@ -2131,11 +2166,11 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
    };
 };
 
-var appendToolCallsToAssistantSection = function (projectName, filename, toolCalls) {
+var appendToolCallsToAssistantSection = async function (projectName, filename, toolCalls) {
    if (! toolCalls || ! toolCalls.length) return;
-   dale.go (toolCalls, function (tc) {
-      appendToDialog (projectName, filename, buildToolBlock (tc) + '\n\n');
-   });
+   for (var i = 0; i < toolCalls.length; i++) {
+      await appendToDialog (projectName, filename, buildToolBlock (toolCalls [i]) + '\n\n');
+   }
 };
 
 var runCompletion = async function (projectName, dialog, provider, model, onChunk, abortSignal) {
@@ -2143,15 +2178,21 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
    var lastContent = '';
 
    while (true) {
-      upsertDocMainContextBlock (projectName, dialog.filename);
-      var markdown = pfs.readFile (projectName, dialog.filename);
+      await upsertDocMainContextBlock (projectName, dialog.filename);
+      var markdown = await pfs.readFile (projectName, dialog.filename);
       var messages = parseDialogForProvider (markdown, provider);
 
       var assistantStart = new Date ().toISOString ();
-      appendToDialog (projectName, dialog.filename, '## Assistant\n> Model: ' + model + '\n> Time: ' + assistantStart + ' - ...\n\n');
+      await appendToDialog (projectName, dialog.filename, '## Assistant\n> Model: ' + model + '\n> Time: ' + assistantStart + ' - ...\n\n');
 
+      // writeChunk is called synchronously from the LLM stream handlers.
+      // We queue async writes so they execute sequentially without blocking
+      // the event loop or the stream reader.
+      var writeQueue = Promise.resolve ();
       var writeChunk = function (chunk) {
-         appendToDialog (projectName, dialog.filename, chunk);
+         writeQueue = writeQueue.then (function () {
+            return appendToDialog (projectName, dialog.filename, chunk);
+         });
          if (onChunk) onChunk (chunk);
       };
 
@@ -2162,8 +2203,10 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          lastContent = result.content || '';
 
-         appendToDialog (projectName, dialog.filename, '\n\n');
-         appendUsageToAssistantSection (projectName, dialog.filename, result.usage);
+         // Wait for all queued chunk writes to complete before continuing
+         await writeQueue;
+         await appendToDialog (projectName, dialog.filename, '\n\n');
+         await appendUsageToAssistantSection (projectName, dialog.filename, result.usage);
 
          // Compute and emit context window usage
          // result.usage.input already includes the full conversation history for this turn,
@@ -2172,10 +2215,10 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          var normalized = parseUsageNumbers (result.usage);
          var contextUsed = normalized ? normalized.input + normalized.output : 0;
          var contextPercent = contextUsed ? Math.round (contextUsed / contextLimit * 100) : 0;
-         appendToDialog (projectName, dialog.filename, '> Context: used=' + contextUsed + ' limit=' + contextLimit + ' percent=' + contextPercent + '%\n');
+         await appendToDialog (projectName, dialog.filename, '> Context: used=' + contextUsed + ' limit=' + contextLimit + ' percent=' + contextPercent + '%\n');
          if (onChunk) onChunk ({type: 'context', context: {used: contextUsed, limit: contextLimit, percent: contextPercent}});
 
-         appendToolCallsToAssistantSection (projectName, dialog.filename, result.toolCalls);
+         await appendToolCallsToAssistantSection (projectName, dialog.filename, result.toolCalls);
 
          var resultsById = {};
          var executed = [];
@@ -2194,7 +2237,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
             executed.push ({id: tc.id, name: tc.name, result: toolResult});
          }
 
-         if (dale.keys (resultsById).length) writeToolResults (projectName, dialog.filename, resultsById);
+         if (dale.keys (resultsById).length) await writeToolResults (projectName, dialog.filename, resultsById);
          if (executed.length) autoExecutedAll = autoExecutedAll.concat (executed);
          if (onChunk && executed.length) {
             dale.go (executed, function (tc) {
@@ -2216,7 +2259,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       }
       finally {
          try {
-            finalizeAssistantTime (projectName, dialog.filename, assistantStart, new Date ().toISOString ());
+            await finalizeAssistantTime (projectName, dialog.filename, assistantStart, new Date ().toISOString ());
          }
          catch (error) {}
       }
@@ -2224,14 +2267,14 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
 };
 
-var createDialogDraft = function (projectName, provider, model, slug) {
+var createDialogDraft = async function (projectName, provider, model, slug) {
    if (provider !== 'claude' && provider !== 'openai') {
       throw new Error ('Unknown provider: ' + provider + '. Use "claude" or "openai".');
    }
 
-   getExistingProject (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
-   var dialogId = createDialogId (projectName, slug || 'dialog');
+   await getExistingProject (projectName);
+   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+   var dialogId = await createDialogId (projectName, slug || 'dialog');
    var filename = buildDialogFilename (dialogId, 'done');
    var dialog = {
       dialogId: dialogId,
@@ -2242,7 +2285,7 @@ var createDialogDraft = function (projectName, provider, model, slug) {
       metadata: {}
    };
 
-   ensureDialogFile (projectName, dialog, provider, defaultModel);
+   await ensureDialogFile (projectName, dialog, provider, defaultModel);
 
    return {
       dialogId: dialog.dialogId,
@@ -2258,9 +2301,9 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
       throw new Error ('Unknown provider: ' + provider + '. Use "claude" or "openai".');
    }
 
-   getExistingProject (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
-   var dialogId = createDialogId (projectName, slug);
+   await getExistingProject (projectName);
+   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+   var dialogId = await createDialogId (projectName, slug);
    var dialog = {
       dialogId: dialogId,
       filename: buildDialogFilename (dialogId, 'active'),
@@ -2270,8 +2313,8 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
       metadata: {}
    };
 
-   ensureDialogFile (projectName, dialog, provider, defaultModel);
-   appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
+   await ensureDialogFile (projectName, dialog, provider, defaultModel);
+   await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
 
    // Register active stream so /stream endpoint can connect
    var stream = beginActiveStream (projectName, dialogId);
@@ -2287,7 +2330,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
 
    try {
       var result = await runCompletion (projectName, dialog, provider, defaultModel, wrappedOnChunk, abortSignal || stream.controller.signal);
-      setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/success');
+      await setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/success');
       result.filename = dialog.filename;
       result.status = dialog.status;
       stream.emitter.emit ('event', {type: 'done', result: result});
@@ -2296,7 +2339,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    }
    catch (error) {
       try {
-         setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/error');
+         await setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/error');
       }
       catch (statusError) {
          clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=startDialogTurn/error error=' + statusError.message);
@@ -2308,34 +2351,34 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
 };
 
 var updateDialogTurn = async function (projectName, dialogId, status, prompt, provider, model, onChunk, abortSignal) {
-   var dialog = loadDialog (projectName, dialogId);
+   var dialog = await loadDialog (projectName, dialogId);
    if (! dialog.exists) throw new Error ('Dialog not found: ' + dialogId);
 
    var shouldContinue = (type (prompt) === 'string' && prompt.trim ());
 
    if (shouldContinue) {
-      setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
+      await setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
       if (type (prompt) === 'string' && prompt.trim ()) {
-         appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt.trim () + '\n\n');
+         await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt.trim () + '\n\n');
       }
 
-      var meta = parseMetadata (pfs.readFile (projectName, dialog.filename));
+      var meta = parseMetadata (await pfs.readFile (projectName, dialog.filename));
       var resolvedProvider = provider || meta.provider;
       if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
          throw new Error ('Unable to determine provider for dialog update');
       }
-      var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
+      var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
 
       try {
          var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal);
-         setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/success');
+         await setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/success');
          result.filename = dialog.filename;
          result.status = dialog.status;
          return result;
       }
       catch (error) {
          try {
-            setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/error');
+            await setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/error');
          }
          catch (statusError) {
             clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=updateDialogTurn/error error=' + statusError.message);
@@ -2344,7 +2387,7 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
       }
    }
 
-   if (status && status === 'done') setDialogStatus (projectName, dialog, status, 'updateDialogTurn/status-only');
+   if (status && status === 'done') await setDialogStatus (projectName, dialog, status, 'updateDialogTurn/status-only');
 
    return {
       dialogId: dialog.dialogId,
@@ -2395,32 +2438,34 @@ var uploadContentType = function (name, provided) {
    return 'application/octet-stream';
 };
 
-var listUploads = function (projectName) {
-   var files = pfs.readdir (projectName);
+var listUploads = async function (projectName) {
+   var files = await pfs.readdir (projectName);
    var uploadFiles = dale.fil (files, undefined, function (file) {
       if (isUploadPath (file)) return file;
    });
 
-   var entries = dale.go (uploadFiles, function (file) {
+   var entries = [];
+   for (var i = 0; i < uploadFiles.length; i++) {
+      var file = uploadFiles [i];
       var shortName = file.slice (UPLOAD_DIR.length + 1);
-      var stat = pfs.statDetailed (projectName, file);
-      return {
+      var stat = await pfs.statDetailed (projectName, file);
+      entries.push ({
          name: shortName,
          path: file,
          size: stat.size || 0,
          mtime: stat.mtime.getTime (),
          contentType: uploadContentType (shortName),
-      };
-   });
+      });
+   }
 
    entries.sort (function (a, b) { return b.mtime - a.mtime; });
    return entries;
 };
 
 // Resolve project for route handlers; replies with error and returns null on failure
-var resolveProject = function (rs, projectName) {
+var resolveProject = async function (rs, projectName) {
    try {
-      return getExistingProject (projectName);
+      return await getExistingProject (projectName);
    }
    catch (error) {
       reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
@@ -2666,9 +2711,9 @@ var routes = [
 
    // *** PROJECTS ***
 
-   ['get', 'projects', function (rq, rs) {
+   ['get', 'projects', async function (rq, rs) {
       try {
-         reply (rs, 200, listProjects ());
+         reply (rs, 200, await listProjects ());
       }
       catch (error) {
          reply (rs, 500, {error: error.message});
@@ -2679,11 +2724,11 @@ var routes = [
       if (stop (rs, [['name', rq.body.name, 'string']])) return;
       try {
          var displayName = rq.body.name.trim ();
-         var slug = ensureProject (displayName);
-         pfs.mkdirp (slug, DOC_DIR);
-         pfs.mkdirp (slug, DIALOG_DIR);
-         if (! pfs.exists (slug, DOC_MAIN_FILE)) {
-            pfs.writeFile (slug, DOC_MAIN_FILE, '# ' + displayName + '\n');
+         var slug = await ensureProject (displayName);
+         await pfs.mkdirp (slug, DOC_DIR);
+         await pfs.mkdirp (slug, DIALOG_DIR);
+         if (! (await pfs.exists (slug, DOC_MAIN_FILE))) {
+            await pfs.writeFile (slug, DOC_MAIN_FILE, '# ' + displayName + '\n');
          }
          await autoCommitApi (slug, 'POST', '/projects');
          reply (rs, 200, {ok: true, slug: slug, name: displayName});
@@ -2693,7 +2738,7 @@ var routes = [
       }
    }],
 
-   ['delete', 'projects/:name', function (rq, rs) {
+   ['delete', 'projects/:name', async function (rq, rs) {
       var projectName = rq.data.params.name;
 
       try {
@@ -2703,11 +2748,11 @@ var routes = [
          return reply (rs, 400, {error: error.message});
       }
 
-      if (! projectExists (projectName)) return reply (rs, 404, {error: 'Project not found'});
+      if (! (await projectExists (projectName))) return reply (rs, 404, {error: 'Project not found'});
 
       // Abort active dialog streams
       try {
-         var files = pfs.readdir (projectName);
+         var files = await pfs.readdir (projectName);
          dale.go (files, function (file) {
             var parsed = parseDialogFilename (file);
             if (! parsed) return;
@@ -2720,15 +2765,15 @@ var routes = [
       }
       catch (error) {}
 
-      removeProjectContainer (projectName);
+      await removeProjectContainer (projectName);
       reply (rs, 200, {ok: true, name: projectName});
    }],
 
-   ['post', 'project/:project/snapshot', function (rq, rs) {
+   ['post', 'project/:project/snapshot', async function (rq, rs) {
       var projectName = rq.data.params.project;
       try {
          var label = (rq.body.label && type (rq.body.label) === 'string') ? rq.body.label.trim () : '';
-         var entry = createSnapshot (projectName, label);
+         var entry = await createSnapshot (projectName, label);
          reply (rs, 200, entry);
       }
       catch (error) {
@@ -2747,11 +2792,11 @@ var routes = [
       }
    }],
 
-   ['post', 'snapshots/:id/restore', function (rq, rs) {
+   ['post', 'snapshots/:id/restore', async function (rq, rs) {
       var snapshotId = rq.data.params.id;
       try {
          var newName = (rq.body.name && type (rq.body.name) === 'string') ? rq.body.name.trim () : null;
-         var result = restoreSnapshot (snapshotId, newName);
+         var result = await restoreSnapshot (snapshotId, newName);
          reply (rs, 200, result);
       }
       catch (error) {
@@ -2799,20 +2844,21 @@ var routes = [
 
    // *** FILES ***
 
-   ['get', 'project/:project/files', function (rq, rs) {
-      var projectName = resolveProject (rs, rq.data.params.project);
+   ['get', 'project/:project/files', async function (rq, rs) {
+      var projectName = await resolveProject (rs, rq.data.params.project);
       if (! projectName) return;
 
       try {
-         var files = pfs.readdir (projectName);
+         var files = await pfs.readdir (projectName);
          var managedFiles = dale.fil (files, undefined, function (file) {
             if (managedFilePath (file)) return file;
          });
          // Sort by modification time, most recent first
-         var withStats = dale.go (managedFiles, function (file) {
-            var stat = pfs.stat (projectName, file);
-            return {name: file, mtime: stat.mtime.getTime ()};
-         });
+         var withStats = [];
+         for (var i = 0; i < managedFiles.length; i++) {
+            var stat = await pfs.stat (projectName, managedFiles [i]);
+            withStats.push ({name: managedFiles [i], mtime: stat.mtime.getTime ()});
+         }
          withStats.sort (function (a, b) { return b.mtime - a.mtime; });
          reply (rs, 200, dale.go (withStats, function (f) { return f.name; }));
       }
@@ -2821,17 +2867,17 @@ var routes = [
       }
    }],
 
-   ['get', /^\/project\/([^/]+)\/file\/(.+)$/, function (rq, rs) {
+   ['get', /^\/project\/([^/]+)\/file\/(.+)$/, async function (rq, rs) {
       var projectSlug = decodeURIComponent (rq.data.params [0]);
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectName = resolveProject (rs, projectSlug);
+      var projectName = await resolveProject (rs, projectSlug);
       if (! projectName) return;
 
       try {
-         if (! pfs.exists (projectName, name)) return reply (rs, 404, {error: 'File not found'});
-         var content = pfs.readFile (projectName, name);
+         if (! (await pfs.exists (projectName, name))) return reply (rs, 404, {error: 'File not found'});
+         var content = await pfs.readFile (projectName, name);
          reply (rs, 200, {name: name, content: content});
       }
       catch (error) {
@@ -2848,12 +2894,12 @@ var routes = [
          ['content', rq.body.content, 'string'],
       ])) return;
 
-      var projectName = resolveProject (rs, projectSlug);
+      var projectName = await resolveProject (rs, projectSlug);
       if (! projectName) return;
 
       return withProjectMutationLock (projectName, async function () {
          try {
-            pfs.writeFile (projectName, name, rq.body.content);
+            await pfs.writeFile (projectName, name, rq.body.content);
             await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/file/' + name);
             reply (rs, 200, {ok: true, name: name});
          }
@@ -2868,12 +2914,12 @@ var routes = [
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectName = resolveProject (rs, projectSlug);
+      var projectName = await resolveProject (rs, projectSlug);
       if (! projectName) return;
 
       try {
-         if (! pfs.exists (projectName, name)) return reply (rs, 404, {error: 'File not found'});
-         pfs.unlink (projectName, name);
+         if (! (await pfs.exists (projectName, name))) return reply (rs, 404, {error: 'File not found'});
+         await pfs.unlink (projectName, name);
          await autoCommitApi (projectName, 'DELETE', '/project/' + projectName + '/file/' + name);
          reply (rs, 200, {ok: true});
       }
@@ -2884,12 +2930,12 @@ var routes = [
 
    // *** UPLOADS ***
 
-   ['get', 'project/:project/uploads', function (rq, rs) {
-      var projectName = resolveProject (rs, rq.data.params.project);
+   ['get', 'project/:project/uploads', async function (rq, rs) {
+      var projectName = await resolveProject (rs, rq.data.params.project);
       if (! projectName) return;
 
       try {
-         var entries = listUploads (projectName);
+         var entries = await listUploads (projectName);
          reply (rs, 200, dale.go (entries, function (entry) {
             entry.url = '/project/' + encodeURIComponent (projectName) + '/upload/' + encodeURIComponent (entry.name);
             return entry;
@@ -2906,7 +2952,7 @@ var routes = [
          ['content', rq.body.content, 'string']
       ])) return;
 
-      var projectName = resolveProject (rs, rq.data.params.project);
+      var projectName = await resolveProject (rs, rq.data.params.project);
       if (! projectName) return;
 
       var name = rq.body.name.trim ();
@@ -2927,10 +2973,10 @@ var routes = [
          }
          var buffer = Buffer.from (base64, 'base64');
          var filepath = UPLOAD_DIR + '/' + name;
-         pfs.writeFileBinaryAt (projectName, filepath, buffer);
+         await pfs.writeFileBinaryAt (projectName, filepath, buffer);
          await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/upload');
 
-         var stat = pfs.statDetailed (projectName, filepath);
+         var stat = await pfs.statDetailed (projectName, filepath);
          reply (rs, 200, {
             ok: true,
             name: name,
@@ -2945,18 +2991,18 @@ var routes = [
       }
    }],
 
-   ['get', /^\/project\/([^/]+)\/upload\/(.+)$/, function (rq, rs) {
+   ['get', /^\/project\/([^/]+)\/upload\/(.+)$/, async function (rq, rs) {
       var projectSlug = decodeURIComponent (rq.data.params [0]);
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validUploadName (name)) return reply (rs, 400, {error: 'Invalid upload name'});
 
-      var projectName = resolveProject (rs, projectSlug);
+      var projectName = await resolveProject (rs, projectSlug);
       if (! projectName) return;
 
       try {
          var filepath = UPLOAD_DIR + '/' + name;
-         if (! pfs.existsAt (projectName, '/workspace/' + filepath)) return reply (rs, 404, {error: 'Upload not found'});
-         var buffer = pfs.readFileBinaryAt (projectName, '/workspace/' + filepath);
+         if (! (await pfs.existsAt (projectName, '/workspace/' + filepath))) return reply (rs, 404, {error: 'Upload not found'});
+         var buffer = await pfs.readFileBinaryAt (projectName, '/workspace/' + filepath);
          var contentType = uploadContentType (name);
          rs.writeHead (200, {
             'Content-Type': contentType,
@@ -2981,7 +3027,7 @@ var routes = [
       if (rq.body.slug !== undefined && type (rq.body.slug) !== 'string') return reply (rs, 400, {error: 'slug must be a string'});
 
       try {
-         var created = createDialogDraft (rq.data.params.project, rq.body.provider, rq.body.model, rq.body.slug || 'dialog');
+         var created = await createDialogDraft (rq.data.params.project, rq.body.provider, rq.body.model, rq.body.slug || 'dialog');
          await autoCommitApi (rq.data.params.project, 'POST', '/project/' + rq.data.params.project + '/dialog/new');
          reply (rs, 200, created);
       }
@@ -3008,15 +3054,15 @@ var routes = [
 
       // Validate project
       try {
-         getExistingProject (projectName);
+         await getExistingProject (projectName);
       }
       catch (error) {
          return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
       }
 
       // Create the dialog file and set it to active
-      var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
-      var dialogId = createDialogId (projectName, slug);
+      var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+      var dialogId = await createDialogId (projectName, slug);
       var filename = buildDialogFilename (dialogId, 'active');
       var dialog = {
          dialogId: dialogId,
@@ -3027,8 +3073,8 @@ var routes = [
          metadata: {}
       };
 
-      ensureDialogFile (projectName, dialog, provider, defaultModel);
-      appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
+      await ensureDialogFile (projectName, dialog, provider, defaultModel);
+      await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
 
       // Set up active stream with emitter for fan-out
       var stream = beginActiveStream (projectName, dialogId);
@@ -3037,49 +3083,50 @@ var routes = [
       reply (rs, 200, {dialogId: dialogId, filename: dialog.filename, status: 'active'});
 
       // Run generation in the background
-      runCompletion (projectName, dialog, provider, defaultModel, function (chunk) {
-         if (chunk && type (chunk) === 'object' && chunk.type) {
-            stream.emitter.emit ('event', chunk);
-         }
-         else {
-            stream.emitter.emit ('event', {type: 'chunk', content: chunk});
-         }
-      }, stream.controller.signal)
-      .then (function (result) {
-         setDialogStatus (projectName, dialog, 'done', 'route/post-dialog/success');
-         result.filename = dialog.filename;
-         result.status = dialog.status;
-         return autoCommitApi (projectName, 'POST', '/project/' + projectName + '/dialog').then (function () {
+      (async function () {
+         try {
+            var result = await runCompletion (projectName, dialog, provider, defaultModel, function (chunk) {
+               if (chunk && type (chunk) === 'object' && chunk.type) {
+                  stream.emitter.emit ('event', chunk);
+               }
+               else {
+                  stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+               }
+            }, stream.controller.signal);
+            await setDialogStatus (projectName, dialog, 'done', 'route/post-dialog/success');
+            result.filename = dialog.filename;
+            result.status = dialog.status;
+            await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/dialog');
             stream.emitter.emit ('event', {type: 'done', result: result});
             endActiveStream (projectName, dialogId);
-         });
-      })
-      .catch (function (error) {
-         clog ('Chat error (async POST /dialog):', error.message);
-         if (error && error.name === 'AbortError') {
-            try {
-               var activeAfterAbort = getActiveStream (projectName, dialogId);
-               var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
-               var dialogAfterAbort = loadDialog (projectName, dialogId);
-               if (dialogAfterAbort.exists) setDialogStatus (projectName, dialogAfterAbort, requestedStatus, 'route/post-dialog/abort');
-               stream.emitter.emit ('event', {type: 'done', result: {dialogId: dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}});
-            }
-            catch (interruptError) {
-               stream.emitter.emit ('event', {type: 'error', error: interruptError.message});
-            }
          }
-         else {
-            try {
-               var dialogAfterError = loadDialog (projectName, dialogId);
-               if (dialogAfterError.exists) setDialogStatus (projectName, dialogAfterError, 'done', 'route/post-dialog/error');
+         catch (error) {
+            clog ('Chat error (async POST /dialog):', error.message);
+            if (error && error.name === 'AbortError') {
+               try {
+                  var activeAfterAbort = getActiveStream (projectName, dialogId);
+                  var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
+                  var dialogAfterAbort = await loadDialog (projectName, dialogId);
+                  if (dialogAfterAbort.exists) await setDialogStatus (projectName, dialogAfterAbort, requestedStatus, 'route/post-dialog/abort');
+                  stream.emitter.emit ('event', {type: 'done', result: {dialogId: dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}});
+               }
+               catch (interruptError) {
+                  stream.emitter.emit ('event', {type: 'error', error: interruptError.message});
+               }
             }
-            catch (statusError) {
-               clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/post-dialog/error error=' + statusError.message);
+            else {
+               try {
+                  var dialogAfterError = await loadDialog (projectName, dialogId);
+                  if (dialogAfterError.exists) await setDialogStatus (projectName, dialogAfterError, 'done', 'route/post-dialog/error');
+               }
+               catch (statusError) {
+                  clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/post-dialog/error error=' + statusError.message);
+               }
+               stream.emitter.emit ('event', {type: 'error', error: error.message});
             }
-            stream.emitter.emit ('event', {type: 'error', error: error.message});
+            endActiveStream (projectName, dialogId);
          }
-         endActiveStream (projectName, dialogId);
-      });
+      }) ();
    }],
 
    // Update dialog (returns JSON; generation runs in background)
@@ -3123,7 +3170,7 @@ var routes = [
 
       var dialog;
       try {
-         dialog = loadDialog (projectName, dialogId);
+         dialog = await loadDialog (projectName, dialogId);
          if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
          if (dialog.status === 'active') {
             return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: dialogId, status: 'active'});
@@ -3134,15 +3181,15 @@ var routes = [
       }
 
       // Set dialog to active, append user message
-      setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
-      appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + rq.body.prompt.trim () + '\n\n');
+      await setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
+      await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + rq.body.prompt.trim () + '\n\n');
 
-      var meta = parseMetadata (pfs.readFile (projectName, dialog.filename));
+      var meta = parseMetadata (await pfs.readFile (projectName, dialog.filename));
       var resolvedProvider = rq.body.provider || meta.provider;
       if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
          return reply (rs, 400, {error: 'Unable to determine provider for dialog update'});
       }
-      var resolvedModel = rq.body.model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.2-codex');
+      var resolvedModel = rq.body.model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
 
       // Set up active stream with emitter for fan-out
       var stream = beginActiveStream (projectName, dialogId);
@@ -3151,50 +3198,51 @@ var routes = [
       reply (rs, 200, {dialogId: dialogId, filename: dialog.filename, status: 'active'});
 
       // Run generation in the background
-      runCompletion (projectName, dialog, resolvedProvider, resolvedModel, function (chunk) {
-         if (chunk && type (chunk) === 'object' && chunk.type) {
-            stream.emitter.emit ('event', chunk);
-         }
-         else {
-            stream.emitter.emit ('event', {type: 'chunk', content: chunk});
-         }
-      }, stream.controller.signal)
-      .then (function (result) {
-         setDialogStatus (projectName, dialog, 'done', 'route/put-dialog/success');
-         result.filename = dialog.filename;
-         result.status = dialog.status;
-         return autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog').then (function () {
+      (async function () {
+         try {
+            var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, function (chunk) {
+               if (chunk && type (chunk) === 'object' && chunk.type) {
+                  stream.emitter.emit ('event', chunk);
+               }
+               else {
+                  stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+               }
+            }, stream.controller.signal);
+            await setDialogStatus (projectName, dialog, 'done', 'route/put-dialog/success');
+            result.filename = dialog.filename;
+            result.status = dialog.status;
+            await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
             stream.emitter.emit ('event', {type: 'done', result: result});
             endActiveStream (projectName, dialogId);
-         });
-      })
-      .catch (function (error) {
-         if (error && error.name === 'AbortError') {
-            try {
-               var activeAfterAbort = getActiveStream (projectName, dialogId);
-               var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
-               var dialogAfterAbort = loadDialog (projectName, dialogId);
-               if (dialogAfterAbort.exists) setDialogStatus (projectName, dialogAfterAbort, requestedStatus, 'route/put-dialog/abort');
-               autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog').catch (function () {});
-               stream.emitter.emit ('event', {type: 'done', result: {dialogId: dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}});
-            }
-            catch (interruptError) {
-               stream.emitter.emit ('event', {type: 'error', error: interruptError.message});
-            }
          }
-         else {
-            try {
-               var dialogAfterError = loadDialog (projectName, dialogId);
-               if (dialogAfterError.exists) setDialogStatus (projectName, dialogAfterError, 'done', 'route/put-dialog/error');
+         catch (error) {
+            if (error && error.name === 'AbortError') {
+               try {
+                  var activeAfterAbort = getActiveStream (projectName, dialogId);
+                  var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
+                  var dialogAfterAbort = await loadDialog (projectName, dialogId);
+                  if (dialogAfterAbort.exists) await setDialogStatus (projectName, dialogAfterAbort, requestedStatus, 'route/put-dialog/abort');
+                  await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog').catch (function () {});
+                  stream.emitter.emit ('event', {type: 'done', result: {dialogId: dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}});
+               }
+               catch (interruptError) {
+                  stream.emitter.emit ('event', {type: 'error', error: interruptError.message});
+               }
             }
-            catch (statusError) {
-               clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/put-dialog/error error=' + statusError.message);
+            else {
+               try {
+                  var dialogAfterError = await loadDialog (projectName, dialogId);
+                  if (dialogAfterError.exists) await setDialogStatus (projectName, dialogAfterError, 'done', 'route/put-dialog/error');
+               }
+               catch (statusError) {
+                  clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/put-dialog/error error=' + statusError.message);
+               }
+               clog ('Dialog update error (async PUT /dialog):', error.message);
+               stream.emitter.emit ('event', {type: 'error', error: error.message});
             }
-            clog ('Dialog update error (async PUT /dialog):', error.message);
-            stream.emitter.emit ('event', {type: 'error', error: error.message});
+            endActiveStream (projectName, dialogId);
          }
-         endActiveStream (projectName, dialogId);
-      });
+      }) ();
    }],
 
    // Execute a tool directly
@@ -3215,14 +3263,14 @@ var routes = [
    }],
 
    // SSE stream for live dialog output
-   ['get', /^\/project\/([^/]+)\/dialog\/([^/]+)\/stream$/, function (rq, rs) {
+   ['get', /^\/project\/([^/]+)\/dialog\/([^/]+)\/stream$/, async function (rq, rs) {
       var projectName = decodeURIComponent (rq.data.params [0]);
       var dialogId = decodeURIComponent (rq.data.params [1]);
 
-      var resolved = resolveProject (rs, projectName);
+      var resolved = await resolveProject (rs, projectName);
       if (! resolved) return;
 
-      var dialog = loadDialog (projectName, dialogId);
+      var dialog = await loadDialog (projectName, dialogId);
       if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
 
       // Set up SSE headers — Connection: close prevents client agents from
@@ -3270,16 +3318,16 @@ var routes = [
    }],
 
    // Get dialog by ID
-   ['get', 'project/:project/dialog/:id', function (rq, rs) {
+   ['get', 'project/:project/dialog/:id', async function (rq, rs) {
       var dialogId = rq.data.params.id;
-      var projectName = resolveProject (rs, rq.data.params.project);
+      var projectName = await resolveProject (rs, rq.data.params.project);
       if (! projectName) return;
 
-      var dialog = loadDialog (projectName, dialogId);
+      var dialog = await loadDialog (projectName, dialogId);
       if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
 
       try {
-         var content = pfs.readFile (projectName, dialog.filename);
+         var content = await pfs.readFile (projectName, dialog.filename);
          reply (rs, 200, {
             dialogId: dialogId,
             filename: dialog.filename,
@@ -3294,23 +3342,24 @@ var routes = [
    }],
 
    // List all dialogs
-   ['get', 'project/:project/dialogs', function (rq, rs) {
-      var projectName = resolveProject (rs, rq.data.params.project);
+   ['get', 'project/:project/dialogs', async function (rq, rs) {
+      var projectName = await resolveProject (rs, rq.data.params.project);
       if (! projectName) return;
 
       try {
-         var files = pfs.readdir (projectName);
+         var files = await pfs.readdir (projectName);
          var dialogFiles = dale.fil (files, undefined, function (file) {
             var parsed = parseDialogFilename (file);
             if (parsed) return file;
          });
          // Sort by modification time, most recent first
-         var withStats = dale.fil (dialogFiles, undefined, function (file) {
-            var parsed = parseDialogFilename (file);
-            if (! parsed) return;
-            var stat = pfs.stat (projectName, file);
-            return {dialogId: parsed.dialogId, status: parsed.status, filename: file, mtime: stat.mtime.getTime ()};
-         });
+         var withStats = [];
+         for (var i = 0; i < dialogFiles.length; i++) {
+            var parsed = parseDialogFilename (dialogFiles [i]);
+            if (! parsed) continue;
+            var stat = await pfs.stat (projectName, dialogFiles [i]);
+            withStats.push ({dialogId: parsed.dialogId, status: parsed.status, filename: dialogFiles [i], mtime: stat.mtime.getTime ()});
+         }
          withStats.sort (function (a, b) { return b.mtime - a.mtime; });
          reply (rs, 200, withStats);
       }
@@ -3321,7 +3370,7 @@ var routes = [
 
    // *** STATIC PROXY ***
 
-   ['get', /^\/project\/([^/]+)\/static(\/.*)?$/, function (rq, rs) {
+   ['get', /^\/project\/([^/]+)\/static(\/.*)?$/, async function (rq, rs) {
       var projectName = decodeURIComponent (rq.data.params [0]);
       var rawPath = rq.data.params [1] || '/';
 
@@ -3331,7 +3380,7 @@ var routes = [
       }
 
       // Validate project exists
-      var resolved = resolveProject (rs, projectName);
+      var resolved = await resolveProject (rs, projectName);
       if (! resolved) return;
 
       var filePath = rawPath || '/';
@@ -3344,9 +3393,9 @@ var routes = [
 
       try {
          var fullPath = '/workspace/' + filePath;
-         if (! pfs.existsAt (projectName, fullPath)) return reply (rs, 404, {error: 'File not found'});
+         if (! (await pfs.existsAt (projectName, fullPath))) return reply (rs, 404, {error: 'File not found'});
 
-         var content = pfs.readFileBinaryAt (projectName, fullPath);
+         var content = await pfs.readFileBinaryAt (projectName, fullPath);
 
          // Determine content type from extension
          var ext = Path.extname (filePath).toLowerCase ();
@@ -3381,7 +3430,7 @@ var routes = [
 
    // *** EMBED PROXY ***
 
-   ['all', /^\/project\/([^/]+)\/proxy\/(\d+)(\/.*)?$/, function (rq, rs) {
+   ['all', /^\/project\/([^/]+)\/proxy\/(\d+)(\/.*)?$/, async function (rq, rs) {
       var projectName = decodeURIComponent (rq.data.params [0]);
       var port = Number (rq.data.params [1]);
       var proxyPath = rq.data.params [2] || '/';
@@ -3399,7 +3448,7 @@ var routes = [
 
       // Validate project exists
       try {
-         getExistingProject (projectName);
+         await getExistingProject (projectName);
       }
       catch (error) {
          return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
@@ -3408,7 +3457,7 @@ var routes = [
       // Resolve container IP
       var targetHost;
       try {
-         targetHost = getContainerIP (projectName);
+         targetHost = await getContainerIP (projectName);
       }
       catch (e) {
          return reply (rs, 502, {error: 'Could not resolve container IP: ' + e.message});

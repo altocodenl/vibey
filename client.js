@@ -52,14 +52,14 @@ var dialogDisplayLabel = function (filename) {
 };
 
 var MODEL_OPTIONS = [
-   {provider: 'openai', model: 'gpt-5.3-codex',               label: 'OpenAI · gpt-5.3'},
+   {provider: 'openai', model: 'gpt-5.4',                     label: 'OpenAI · gpt-5.4'},
    {provider: 'openai', model: 'gpt-5.2-codex',               label: 'OpenAI · gpt-5.2'},
    {provider: 'claude', model: 'claude-opus-4-6',              label: 'Claude · opus-4-6'},
    {provider: 'claude', model: 'claude-sonnet-4-6',            label: 'Claude · sonnet-4-6'}
 ];
 
 var CONTEXT_WINDOWS = {
-   'gpt-5.3-codex': 272000,
+   'gpt-5.4': 1050000,
    'gpt-5.2-codex': 272000,
    'claude-opus-4-6': 200000,
    'claude-sonnet-4-6': 200000
@@ -832,7 +832,7 @@ B.mrespond ([
       B.call (x, 'set', [], {
          tab: 'projects',
          chatProvider: 'openai',
-         chatModel: 'gpt-5.3-codex',
+         chatModel: 'gpt-5.4',
          chatInput: '',
          chatAutoStick: true,
          editorPreview: true,

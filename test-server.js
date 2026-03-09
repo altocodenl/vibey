@@ -95,12 +95,21 @@ var fetchDialogMarkdown = function (project, dialogId, cb) {
 };
 
 // Connect to GET /project/:p/dialog/:id/stream and collect SSE events until done/error/close
-var collectSSE = function (project, dialogId, cb) {
+var collectSSE = function (project, dialogId, cb, options) {
+   options = options || {};
    var events = [];
    var called = false;
+   var heartbeatTimer = null;
+   if (options.heartbeatMs) {
+      heartbeatTimer = setInterval (function () {
+         if (called) return;
+         if (options.onHeartbeat) options.onHeartbeat (events);
+      }, options.heartbeatMs);
+   }
    var finish = function (error) {
       if (called) return;
       called = true;
+      if (heartbeatTimer) clearInterval (heartbeatTimer);
       cb (error, events);
    };
    var req = http.request ({
@@ -126,6 +135,7 @@ var collectSSE = function (project, dialogId, cb) {
             try {
                var ev = JSON.parse (dataLines.join ('\n'));
                events.push (ev);
+               if (options.onEvent) options.onEvent (ev, events);
                if (ev.type === 'done' || ev.type === 'error') finish (ev.type === 'error' ? new Error (ev.error || 'SSE error') : null);
             }
             catch (e) {
@@ -143,6 +153,7 @@ var collectSSE = function (project, dialogId, cb) {
                try {
                   var ev = JSON.parse (dataLines.join ('\n'));
                   events.push (ev);
+                  if (options.onEvent) options.onEvent (ev, events);
                }
                catch (e) {}
             }
@@ -531,13 +542,29 @@ var dialogSequence = [
 
    // Test 10: Collect SSE stream until done
    ['Dialog 10: SSE stream finishes with done', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      var started = Date.now ();
+      log ('[dialog-10] stream start ' + s.dialogId);
       collectSSE (PROJECT, s.dialogId, function (error, events) {
+         var elapsed = Math.round ((Date.now () - started) / 1000);
+         log ('[dialog-10] stream complete in ' + elapsed + 's, events=' + events.length + (error ? (' error=' + error.message) : ''));
          if (error) return log ('SSE stream error: ' + error.message);
          if (! getEventsByType (events, 'done').length) {
             var eventTypes = dale.go (events, function (ev) {return ev && ev.type ? ev.type : 'unknown';}).join (', ');
             return log ('Expected done event. Events: ' + eventTypes);
          }
          next ();
+      }, {
+         heartbeatMs: 10000,
+         onHeartbeat: function (events) {
+            var elapsed = Math.round ((Date.now () - started) / 1000);
+            log ('[dialog-10] streaming... ' + elapsed + 's events=' + events.length);
+         },
+         onEvent: function (ev, events) {
+            if (! ev || ! ev.type) return;
+            var extra = '';
+            if (ev.type === 'chunk' && type (ev.content) === 'string') extra = ' len=' + ev.content.length;
+            log ('[dialog-10] event ' + ev.type + extra + ' total=' + events.length);
+         }
       });
    }],
 
@@ -596,7 +623,11 @@ var dialogSequence = [
 
    // Test 16: SSE stream output does not contain metadata
    ['Dialog 16: SSE output has no metadata leakage', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      var started = Date.now ();
+      log ('[dialog-16] stream start ' + s.dialogId);
       collectSSE (PROJECT, s.dialogId, function (error, events) {
+         var elapsed = Math.round ((Date.now () - started) / 1000);
+         log ('[dialog-16] stream complete in ' + elapsed + 's, events=' + events.length + (error ? (' error=' + error.message) : ''));
          if (error) return log ('SSE stream error: ' + error.message);
          if (! getEventsByType (events, 'done').length) return log ('Expected done event');
          var combined = dale.go (events, function (ev) {
@@ -606,6 +637,18 @@ var dialogSequence = [
          if (combined.indexOf ('> Model:') !== -1) return log ('Output contains > Model: metadata');
          if (combined.indexOf ('> Context:') !== -1) return log ('Output contains > Context: metadata');
          next ();
+      }, {
+         heartbeatMs: 10000,
+         onHeartbeat: function (events) {
+            var elapsed = Math.round ((Date.now () - started) / 1000);
+            log ('[dialog-16] streaming... ' + elapsed + 's events=' + events.length);
+         },
+         onEvent: function (ev, events) {
+            if (! ev || ! ev.type) return;
+            var extra = '';
+            if (ev.type === 'chunk' && type (ev.content) === 'string') extra = ' len=' + ev.content.length;
+            log ('[dialog-16] event ' + ev.type + extra + ' total=' + events.length);
+         }
       });
    }],
 
@@ -2104,23 +2147,28 @@ var autogitSequence = [
 
 // Suite order matches readme.md test suites section.
 var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', /*vi, */'dialog', 'static', 'backend'];
+var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit'];
 
 var allSuites = {
    project:  projectSequence,
    doc:      docSequence,
    upload:   uploadSequence,
    snapshot: snapshotsSequence,
-   autogit:   autogitSequence,
-   dialog:    dialogSequence,
-   static:    staticSequence,
-   backend:   backendSequence,
-   vi:        viSequence
+   autogit:  autogitSequence,
+   dialog:   dialogSequence,
+   static:   staticSequence,
+   backend:  backendSequence,
+   vi:       viSequence
 };
 
 var requestedSuites = [];
 dale.go (process.argv.slice (2), function (arg) {
    var match = arg.match (/^--flow=(.+)$/);
-   if (match) requestedSuites.push (match [1]);
+   if (! match) return;
+   if (match [1] === 'fast') return dale.go (FAST_SUITES, function (name) {
+      requestedSuites.push (name);
+   });
+   requestedSuites.push (match [1]);
 });
 
 if (! requestedSuites.length) requestedSuites = SUITE_ORDER;
