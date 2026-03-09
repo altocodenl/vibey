@@ -1127,8 +1127,10 @@ var beginActiveStream = function (projectName, dialogId) {
    var controller = new AbortController ();
    var emitter = new EventEmitter ();
    emitter.setMaxListeners (50);
-   ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)] = {controller: controller, requestedStatus: null, emitter: emitter};
-   return {controller: controller, emitter: emitter};
+   var resolve;
+   var settled = new Promise (function (r) { resolve = r; });
+   ACTIVE_STREAMS [activeStreamKey (projectName, dialogId)] = {controller: controller, requestedStatus: null, emitter: emitter, settled: settled, settle: resolve};
+   return {controller: controller, emitter: emitter, settle: resolve};
 };
 
 var getActiveStream = function (projectName, dialogId) {
@@ -2750,7 +2752,8 @@ var routes = [
 
       if (! (await projectExists (projectName))) return reply (rs, 404, {error: 'Project not found'});
 
-      // Abort active dialog streams
+      // Abort active dialog streams and wait for them to settle
+      var settledPromises = [];
       try {
          var files = await pfs.readdir (projectName);
          dale.go (files, function (file) {
@@ -2759,11 +2762,13 @@ var routes = [
             var active = getActiveStream (projectName, parsed.dialogId);
             if (! active) return;
             active.requestedStatus = 'done';
+            settledPromises.push (active.settled);
             active.controller.abort ();
-            endActiveStream (projectName, parsed.dialogId);
          });
       }
       catch (error) {}
+
+      if (settledPromises.length) await Promise.all (settledPromises);
 
       await removeProjectContainer (projectName);
       reply (rs, 200, {ok: true, name: projectName});
@@ -3099,6 +3104,7 @@ var routes = [
             await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/dialog');
             stream.emitter.emit ('event', {type: 'done', result: result});
             endActiveStream (projectName, dialogId);
+            stream.settle ();
          }
          catch (error) {
             clog ('Chat error (async POST /dialog):', error.message);
@@ -3125,6 +3131,7 @@ var routes = [
                stream.emitter.emit ('event', {type: 'error', error: error.message});
             }
             endActiveStream (projectName, dialogId);
+            stream.settle ();
          }
       }) ();
    }],
@@ -3214,6 +3221,7 @@ var routes = [
             await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
             stream.emitter.emit ('event', {type: 'done', result: result});
             endActiveStream (projectName, dialogId);
+            stream.settle ();
          }
          catch (error) {
             if (error && error.name === 'AbortError') {
@@ -3241,6 +3249,7 @@ var routes = [
                stream.emitter.emit ('event', {type: 'error', error: error.message});
             }
             endActiveStream (projectName, dialogId);
+            stream.settle ();
          }
       }) ();
    }],
@@ -3533,6 +3542,25 @@ process.on ('SIGTERM', function () {cleanupAndExit ('SIGTERM');});
 process.on ('SIGINT',  function () {cleanupAndExit ('SIGINT');});
 
 var port = 5353;
+
+// Lean server logs: print req/res without headers or bodies
+cicek.logconsole = function (message) {
+   if (message [2] === 'request') {
+      console.log ('-----------');
+      console.log (' REQUEST ' + message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
+   }
+   else if (message [2] === 'response') {
+      var code = message [3].code + '';
+      var color = '\033[37m\033[4' + ({1: 6, 2: 2, 3: 4, 4: 3, 5: 1}) [code [0]] + 'm' + code + '\033[0m\033[1m';
+      console.log ('-----------');
+      console.log ('RESPONSE ' + message [3].id, message [3].method.toUpperCase (), message [3].url, color, '(' + message [3].duration + 'ms)');
+   }
+   else if (message [2] !== 'requestContent') {
+      console.log ('-----------');
+      console.log.apply (console, message);
+   }
+};
+
 cicek.listen ({port: port}, routes);
 
 clog ('vibey server running on port ' + port);

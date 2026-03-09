@@ -483,7 +483,7 @@ var dialogSequence = [
    ['Dialog 6: PUT returns JSON with status active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
          dialogId: s.dialogId,
-         prompt: 'Please read the file test-sample.txt using the run_command tool with `cat test-sample.txt`, then summarize it in 3 short bullets. You must use the tool.'
+         prompt: 'Use the run_command tool to run `cat test-sample.txt`. Reply with its line count only.'
       }, function (error, code, body) {
          if (error) return log ('PUT /dialog failed: ' + error.message);
          if (code !== 200) return log ('Expected 200, got ' + code);
@@ -530,7 +530,7 @@ var dialogSequence = [
    ['Dialog 9: PUT write_file returns JSON with status active', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
          dialogId: s.dialogId,
-         prompt: 'Please create a file called dummy.js with the content: console.log("hello from dummy"); Use the write_file tool for this.'
+         prompt: 'Use write_file to create dummy.js with this exact content: console.log("hello from dummy");\nDo only this one tool call, nothing else.'
       }, function (error, code, body) {
          if (error) return log ('PUT /dialog failed: ' + error.message);
          if (code !== 200) return log ('Expected 200, got ' + code);
@@ -589,7 +589,7 @@ var dialogSequence = [
    ['Dialog 13: Continue without provider returns JSON', 'get', 'project/' + PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
          dialogId: s.dialogId,
-         prompt: 'Continue without provider metadata.'
+         prompt: 'Reply with the single word: ok'
       }, function (error, code, body) {
          if (error) return log ('PUT /dialog failed: ' + error.message);
          if (code !== 200) return log ('Expected 200, got ' + code);
@@ -657,7 +657,7 @@ var dialogSequence = [
       httpJson ('POST', '/project/' + PROJECT + '/dialog', {
          provider: 'openai',
          model: 'gpt-5.2-codex',
-         prompt: 'Please read test-sample.txt using the run_command tool with `cat test-sample.txt` and summarize it.',
+         prompt: 'Use the run_command tool to run `cat test-sample.txt`. Reply with its first line only.',
          slug: 'async-test'
       }, function (error, code, body) {
          if (error) return log ('POST /dialog failed: ' + error.message);
@@ -728,11 +728,11 @@ var dialogSequence = [
       };
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
          dialogId: s.dialogA,
-         prompt: 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of computing.'
+         prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'
       }, function () {onFired ();});
       httpJson ('PUT', '/project/' + PROJECT + '/dialog', {
          dialogId: s.dialogB,
-         prompt: 'First run the run_command tool with `sleep 12` and only then write a 200 word essay about the history of mathematics.'
+         prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'
       }, function () {onFired ();});
    }],
 
