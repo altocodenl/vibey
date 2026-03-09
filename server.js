@@ -2191,9 +2191,14 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       // We queue async writes so they execute sequentially without blocking
       // the event loop or the stream reader.
       var writeQueue = Promise.resolve ();
+      var queuedWriteError = null;
       var writeChunk = function (chunk) {
          writeQueue = writeQueue.then (function () {
+            if (queuedWriteError) return;
             return appendToDialog (projectName, dialog.filename, chunk);
+         }).catch (function (error) {
+            if (abortSignal && abortSignal.aborted) return;
+            queuedWriteError = queuedWriteError || error;
          });
          if (onChunk) onChunk (chunk);
       };
@@ -2207,6 +2212,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          // Wait for all queued chunk writes to complete before continuing
          await writeQueue;
+         if (queuedWriteError) throw queuedWriteError;
          await appendToDialog (projectName, dialog.filename, '\n\n');
          await appendUsageToAssistantSection (projectName, dialog.filename, result.usage);
 

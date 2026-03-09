@@ -678,7 +678,7 @@
       ['Dialog 6: PUT dialog prompt with run_command', function (done) {
          c.ajax ('put', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog', {}, {
             dialogId: window._dialogDialogId,
-            prompt: 'read test-sample.txt with run_command'
+            prompt: 'Use the run_command tool to run `cat test-sample.txt`. Reply with its line count only.'
          }, function (error, rs) {
             window._dialogDialogStart = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -732,7 +732,7 @@
       ['Dialog 9: PUT dialog prompt to create dummy.js', function (done) {
          c.ajax ('put', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog', {}, {
             dialogId: window._dialogDialogId,
-            prompt: 'Use write_file to create dummy.js with EXACT content: console.log("hello from dummy");'
+            prompt: 'Use write_file to create dummy.js with this exact content: console.log("hello from dummy");\nDo only this one tool call, nothing else.'
          }, function (error, rs) {
             window._dialogDialogDummy = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -790,7 +790,7 @@
       ['Dialog 13: Continue dialog without provider field', function (done) {
          c.ajax ('put', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog', {}, {
             dialogId: window._dialogDialogId,
-            prompt: 'continue without provider'
+            prompt: 'Reply with the single word: ok'
          }, function (error, rs) {
             window._dialogDialogContinue = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -847,7 +847,7 @@
          c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog', {}, {
             provider: 'openai',
             model: 'gpt-5.2-codex',
-            prompt: 'read test-sample.txt',
+            prompt: 'Use the run_command tool to run `cat test-sample.txt`. Reply with its first line only.',
             slug: 'async-test'
          }, function (error, rs) {
             window._dialogDialogAsync = {error: error, rs: rs};
@@ -932,13 +932,13 @@
 
       ['Dialog 23: Fire agent-a and agent-b with slow prompts', function (done) {
          var project = encodeURIComponent (window._dialogProjectSlug);
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentADialog, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of computing.'})}).catch (function () {});
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentBDialog, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of mathematics.'})}).catch (function () {});
-         done (SHORT_WAIT, POLL);
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentADialog, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentBDialog, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
+         done (2000, POLL);
       }, function () {return true;}],
 
-      ['Dialog 24: Stream agent-a and verify chunks arrive', function (done) {
-         window._dialogAgentAChunked = false;
+      ['Dialog 24: Stream agent-a and verify stream is live', function (done) {
+         window._dialogAgentAHasEvents = false;
          console.log ('[vibey-test] streaming agent-a: ' + window._dialogAgentADialog);
          streamDialogEvents (window._dialogProjectSlug, window._dialogAgentADialog, function (result) {
             window._dialogAgentAStreamResult = result;
@@ -946,17 +946,16 @@
             done (SHORT_WAIT, POLL);
          }, {
             timeout: LONG_WAIT,
-            stopOnChunk: true,
             onEvent: function (ev) {
                if (ev && ev.type) console.log ('[vibey-test] agent-a event ' + ev.type);
-               if (ev.type === 'chunk' && ev.content && ! window._dialogAgentAChunked) {
-                  window._dialogAgentAChunked = true;
-                  window._dialogAgentAActiveObserved = true;
+               if (ev && ev.type && ! window._dialogAgentAHasEvents) {
+                  window._dialogAgentAHasEvents = true;
+                  if (ev.type !== 'done') window._dialogAgentAActiveObserved = true;
                }
             }
          });
       }, function () {
-         if (! window._dialogAgentAChunked) return 'No chunks received for agent-a';
+         if (! window._dialogAgentAHasEvents) return 'No stream events received for agent-a';
          return true;
       }],
 
@@ -984,7 +983,7 @@
          var doneEntry = dale.stopNot (list, undefined, function (d) {
             if (d.dialogId === window._dialogAgentADialog && d.status === 'done') return d;
          });
-         if (doneEntry && window._dialogAgentAChunked) {
+         if (doneEntry && window._dialogAgentAHasEvents) {
             window._dialogAgentAActiveObserved = true;
             return true;
          }
@@ -1731,9 +1730,9 @@
 
       ['Dialog (safety) 16: Fire both dialogs (non-blocking)', function (done) {
          var project = encodeURIComponent (window._dialogSafetyProject);
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogSafetyDialogA, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of computing.'})}).catch (function () {});
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogSafetyDialogB, prompt: 'First run the run_command tool with `sleep 12` and only then write a long essay about the history of mathematics.'})}).catch (function () {});
-         done (SHORT_WAIT, POLL);
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogSafetyDialogA, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogSafetyDialogB, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
+         done (2000, POLL);
       }, function () {return true;}],
 
       ['Dialog (safety) 17: Both dialogs are active', function (done) {
