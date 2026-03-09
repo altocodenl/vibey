@@ -977,6 +977,83 @@ Keep this project running intentionally so the embedded backend app stays playab
   - Overwrite it (simulating `:w`) and verify new content persists.
 - Cleanup: reset vi mode false, clear API key, delete project.
 
+### Client implementation
+
+#### State variables (alphabetical, 38 total)
+
+| # | Key | Type / Purpose |
+|---|-----|----------------|
+| 1 | `chatAutoStick` | `bool` — auto-scroll chat to bottom |
+| 2 | `chatInput` | `string` — current chat textarea value |
+| 3 | `chatModel` | `string` — selected LLM model |
+| 4 | `chatProvider` | `string` — `'claude'` or `'openai'` |
+| 5 | `contextWindow` | `object\|null` — `{used, limit, percent}` from last assistant turn |
+| 6 | `currentFile` | `object\|null` — `{name, content, original}` for open file |
+| 7 | `currentProject` | `string\|null` — slug of open project |
+| 8 | `currentUpload` | `string\|null` — name of selected upload |
+| 9 | `editorPreview` | `bool` — show markdown preview in docs editor |
+| 10 | `files` | `array` — file list for current project |
+| 11 | `hashTarget` | `object\|null` — parsed URL hash target |
+| 12 | `loadingFile` | `bool\|null` — file loading in progress |
+| 13 | `oauthCode` | `string\|null` — OAuth manual code input |
+| 14 | `oauthLoading` | `bool\|null` — OAuth flow in progress |
+| 15 | `oauthStep` | `string\|null` — OAuth flow step |
+| 16 | `optimisticUserMessage` | `string\|null` — optimistic user message shown before server confirms |
+| 17 | `projects` | `array` — project list |
+| 18 | `savingFile` | `bool\|null` — file save in progress |
+| 19 | `savingSettings` | `bool\|null` — settings save in progress |
+| 20 | `settings` | `object` — loaded from server (`GET /settings`) |
+| 21 | `settingsEdits` | `object\|null` — pending settings edits |
+| 22 | `settingsShowMore` | `bool\|null` — show advanced settings |
+| 23 | `snapshots` | `array` — snapshot list |
+| 24 | `streaming` | `bool\|null` — SSE stream active |
+| 25 | `streamingContent` | `string\|null` — accumulated SSE content |
+| 26 | `streamingDialogId` | `string\|null` — dialogId of active stream |
+| 27 | `tab` | `string` — current tab (`projects`, `docs`, `dialogs`, `settings`, `snapshots`) |
+| 28 | `toolMessageExpanded` | `object` — `{key: bool}` toggle state for tool messages |
+| 29 | `uploading` | `bool` — upload in progress |
+| 30 | `uploads` | `array` — upload list for current project |
+| 31 | `viCursor` | `object` — `{line, col}` vi cursor position |
+| 32 | `viMode` | `bool` — vi mode enabled |
+| 33 | `viOverlayChat` | DOM ref — vi cursor overlay for chat input |
+| 34 | `viOverlayEditor` | DOM ref — vi cursor overlay for editor |
+| 35 | `viState` | `object` — `{mode, pending, register, lastSearch, message, commandPrefix, undoStack, redoStack}` |
+| 36 | `voiceActive` | `bool` — voice input active |
+| 37 | `voiceRecognition` | `object\|null` — SpeechRecognition instance |
+| 38 | `voiceSupported` | `bool` — browser supports speech recognition |
+
+#### Timeouts & intervals (8 total)
+
+| # | Line | Type | Delay | Purpose | Status |
+|---|------|------|-------|---------|--------|
+| 1 | 980 | `setTimeout` | 0ms | Auto-scroll chat to bottom after DOM update | 🟡 Could use `requestAnimationFrame` |
+| 2 | 1158 | `setTimeout` | 50ms | Focus textarea + init vi cursor after toggling vi mode | 🟡 Waiting for DOM redraw; fragile timing |
+| 3 | 1261 | `setTimeout` | 0ms | Auto-select first file after loading file list (if no file/hash target) | 🟡 Deferred to let `apply hashTarget` run first; could be a callback |
+| 4 | 1398 | `setTimeout` | 50ms | Init vi cursor overlay after loading a new file | 🟡 Same DOM-wait pattern as #2 |
+| 5 | 1554 | `setTimeout` | 0ms | Fallback for `requestAnimationFrame` (vi cursor restore) | 🟢 Fine — browser compat fallback |
+| 6 | 2012 | `clearTimeout` | — | Cancel pending voice command timer | 🟢 Fine — part of voice command debounce |
+| 7 | 2027 | `setTimeout` | 50ms | Delay `send message` after voice command to let `recognition.stop()` settle | 🟡 Fragile; should use `onend` callback |
+| 8 | 2054 | `setTimeout` | 1500ms | Voice command confirmation delay — wait to see if more speech follows | 🟢 Fine — intentional debounce for UX |
+
+#### Big `B.view` dependency lists (redraw hotspots)
+
+The two main views have very wide dependency lists, meaning they redraw on almost any state change:
+
+1. **Docs sidebar+editor view** (line 2107) — **13 dependencies**: `files`, `currentFile`, `loadingFile`, `savingFile`, `editorPreview`, `currentProject`, `viMode`, `viState`, `viCursor`, `viOverlayEditor`, `uploads`, `currentUpload`, `uploading`.
+
+2. **Dialogs view** (line 2979) — **18 dependencies**: `files`, `currentFile`, `loadingFile`, `chatInput`, `chatProvider`, `chatModel`, `streaming`, `streamingContent`, `optimisticUserMessage`, `toolMessageExpanded`, `voiceActive`, `voiceSupported`, `currentProject`, `viMode`, `viState`, `viOverlayChat`, `settings`, `contextWindow`.
+
+These are the main sources of redraw storms. For example, every keystroke in the chat input (`chatInput`) triggers a full redraw of the entire 18-dependency dialogs view. Similarly, every `viState` sub-key change (pending, register, message, etc.) redraws the full docs view.
+
+#### What to address
+
+Quick wins:
+- The 50ms `setTimeout` calls for vi cursor (lines 1158, 1398) use the same pattern — extract a shared helper.
+
+Bigger refactors:
+- Break up the two mega-views into smaller nested `B.view`s so that e.g. `chatInput` changes only redraw the input area, not the entire dialog view. The B.views can be inline, no need to extract them to a separate variable. Bring state down to where it's needed, instead of up as in react.
+- The `setTimeout(fn, 0)` calls for auto-file-select (line 1261) and auto-scroll (line 980) are workarounds for ordering issues — replace with explicit sequencing in responders.
+
 ## TODO
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.

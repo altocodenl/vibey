@@ -861,20 +861,6 @@ B.mrespond ([
       B.call (x, 'load', 'settings');
       B.call (x, 'read', 'hash');
 
-      if (! window.__vibeyDialogPoller) {
-         window.__vibeyDialogPoller = setInterval (function () {
-            return;
-            // TODO: fix
-            var tab = B.get ('tab');
-            var project = B.get ('currentProject');
-            var currentFile = B.get ('currentFile');
-            if (tab !== 'dialogs') return;
-            if (! project || ! currentFile || ! isDialogFile (currentFile.name)) return;
-            if (B.get ('loadingFile')) return;
-            B.call ('load', 'file', currentFile.name);
-            B.call ('load', 'files', project);
-         }, 2000);
-      }
    }],
 
    ['read', 'hash', function (x) {
@@ -1818,14 +1804,20 @@ B.mrespond ([
       else B.call (x, 'set', 'streamingContent', B.get ('streamingContent') || '');
 
       var targetFilename = filename;
+      var receivedContent = false;
 
       var finalize = function () {
          if (activeDialogStream && activeDialogStream.dialogId === dialogId) activeDialogStream = null;
          B.call (x, 'set', 'streamingDialogId', null);
          B.call (x, 'set', 'streaming', false);
          B.call (x, 'set', 'optimisticUserMessage', null);
-         if (targetFilename) B.call (x, 'load', 'file', targetFilename);
-         B.call (x, 'load', 'files');
+         // Only reload if the stream actually produced content; otherwise we'd
+         // loop endlessly on dialogs stuck with -active.md status but no
+         // generation running on the server.
+         if (receivedContent) {
+            if (targetFilename) B.call (x, 'load', 'file', targetFilename);
+            B.call (x, 'load', 'files');
+         }
       };
 
       fetch (projectPath (project, 'dialog/' + encodeURIComponent (dialogId) + '/stream'), {
@@ -1860,13 +1852,16 @@ B.mrespond ([
                   try {
                      var data = JSON.parse (line.slice (6));
                      if (data.type === 'chunk') {
+                        receivedContent = true;
                         var current = B.get ('streamingContent') || '';
                         B.call (x, 'set', 'streamingContent', current + data.content);
                      }
                      else if (data.type === 'context') {
+                        receivedContent = true;
                         B.call (x, 'set', 'contextWindow', data.context);
                      }
                      else if (data.type === 'tool_request') {
+                        receivedContent = true;
                         var tool = data.tool || {};
                         var friendly = toolFriendlyName (tool.name || 'tool');
                         var inputSummary = formatToolInputPreview (tool.input || {}) || '';
@@ -1874,6 +1869,7 @@ B.mrespond ([
                         B.call (x, 'set', 'streamingContent', currentReq + '\n\n⏳ ' + friendly + '\n' + inputSummary + '\n');
                      }
                      else if (data.type === 'tool_result') {
+                        receivedContent = true;
                         var tool = data.tool || {};
                         var friendly = toolFriendlyName (tool.name || 'tool');
                         var resultObj = tool.result || {};
@@ -1884,6 +1880,7 @@ B.mrespond ([
                      }
                      else if (data.type === 'done') {
                         if (data.result && data.result.filename) targetFilename = data.result.filename;
+                        if (data.result && data.result.status === 'done') receivedContent = true;
                      }
                      else if (data.type === 'error') {
                         B.call (x, 'report', 'error', data.error);
