@@ -1370,7 +1370,25 @@ B.mrespond ([
                         B.call (x, 'set', ['currentFile', 'name'], data.filename);
                      }
                      if (data.status === 'active') {
-                        B.call (x, 'start', 'dialogStream', parsedDialog.dialogId, data.filename || rs.body.name);
+                        // Extract the last assistant turn's content from the loaded
+                        // file so the streaming bubble can continue it seamlessly.
+                        // The SSE stream only sends forward-looking events, so without
+                        // this seed the pre-refresh text would be lost.
+                        var resumeMessages = parseDialogContent (rs.body.content);
+                        var resumeContent = '';
+                        if (resumeMessages.length) {
+                           // Collect trailing assistant + tool messages (the in-progress turn)
+                           var ri = resumeMessages.length - 1;
+                           while (ri >= 0 && resumeMessages [ri].role === 'tool') ri--;
+                           if (ri >= 0 && resumeMessages [ri].role === 'assistant') {
+                              var parts = [];
+                              for (var rj = ri; rj < resumeMessages.length; rj++) {
+                                 parts.push (resumeMessages [rj].content);
+                              }
+                              resumeContent = parts.join ('\n\n');
+                           }
+                        }
+                        B.call (x, 'start', 'dialogStream', parsedDialog.dialogId, data.filename || rs.body.name, undefined, resumeContent || undefined);
                      }
                   }).catch (function () {});
                }
@@ -1778,7 +1796,7 @@ B.mrespond ([
    }],
 
    // Start dialog stream (GET /dialog/:id/stream)
-   ['start', 'dialogStream', function (x, dialogId, filename, originalInput) {
+   ['start', 'dialogStream', function (x, dialogId, filename, originalInput, resumeContent) {
       var project = B.get ('currentProject');
       if (! project || ! dialogId) return;
 
@@ -1795,7 +1813,8 @@ B.mrespond ([
       var previousDialogId = B.get ('streamingDialogId');
       B.call (x, 'set', 'streamingDialogId', dialogId);
       B.call (x, 'set', 'streaming', true);
-      if (previousDialogId !== dialogId) B.call (x, 'set', 'streamingContent', '');
+      if (resumeContent) B.call (x, 'set', 'streamingContent', resumeContent);
+      else if (previousDialogId !== dialogId) B.call (x, 'set', 'streamingContent', '');
       else B.call (x, 'set', 'streamingContent', B.get ('streamingContent') || '');
 
       var targetFilename = filename;
@@ -2967,6 +2986,17 @@ views.dialogs = function () {
       var currentDialogParsed = isDialog ? (parseDialogFilename (currentFile.name) || {}) : {};
       var dialogIsActive = isDialog && currentDialogParsed.status === 'active';
       var messages = isDialog ? parseDialogContent (currentFile.content) : [];
+
+      // On mid-stream reconnect (streaming but no optimistic user message), the
+      // last assistant turn was seeded into streamingContent.  Remove it from the
+      // parsed messages so it doesn't render twice.
+      if (streaming && ! optimisticUserMessage && messages.length) {
+         var cut = messages.length;
+         while (cut > 0 && messages [cut - 1].role === 'tool') cut--;
+         if (cut > 0 && messages [cut - 1].role === 'assistant') cut--;
+         if (cut < messages.length) messages = messages.slice (0, cut);
+      }
+
       viMode = !! viMode;
       viState = viState || {};
       var noProvider = ! hasAnyProvider (settings);
