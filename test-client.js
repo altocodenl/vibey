@@ -274,6 +274,10 @@
          try { data = JSON.parse (ev.data); } catch (e) { return; }
          events.push (data);
          if (options.onEvent) options.onEvent (data);
+         if (options.stopOnAnyEvent) {
+            finish ({error: null, events: events});
+            return;
+         }
          if (options.stopOnChunk && data.type === 'chunk') {
             finish ({error: null, events: events});
             return;
@@ -946,6 +950,7 @@
             done (SHORT_WAIT, POLL);
          }, {
             timeout: LONG_WAIT,
+            stopOnAnyEvent: true,
             onEvent: function (ev) {
                if (ev && ev.type) console.log ('[vibey-test] agent-a event ' + ev.type);
                if (ev && ev.type && ! window._dialogAgentAHasEvents) {
