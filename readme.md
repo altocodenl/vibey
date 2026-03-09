@@ -1058,10 +1058,8 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- Implement the async dialog + SSE stream separation (spec updated above). Update server.js, client.js, and tests.
-
-- Fully align frontend tests with the spec and test-server. Make sure everything except for vi passes.
-- Review the docs and fully align them with the server.
+- Please fix all tests in the client: read the test suite, then fix it in order (fast suites at the beginning, slower ones at the end). You can rebuild vibey. Don't commit any fixes, but make changes. You can only make changes on this folder. You can use the globally installed pupeteer to run the tests, it should just work.
+- Client: the experience is bad (weird redraws, slow).
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
 

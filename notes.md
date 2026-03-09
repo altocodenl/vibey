@@ -1,5 +1,7 @@
 ## Vibey development notes
 
+### 2026-03-09
+
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
 These dialog tests take too long. Also, when I refresh the page on a dialog that just started, I don't get the page served until the dialog finishes. Could you please research these issues by inspecting the code? Vibey is running, you can rebuild it if youwant.
@@ -15,11 +17,10 @@ These dialog tests take too long. Also, when I refresh the page on a dialog that
 - Without restarting vibey yet, can you make the server logs much leaner, in that we should print incoming req and res without headers or bodies? Check how cicek allows to configure this.
 - Great! Another one: in the client, when the agent is streaming text, if I refresh midstream, I still see the stream but what was before the refresh is cut into a separate message. Why is this?
 
-
-
 - Nice. Now, the client is a bit of a mess: a lot of redraws, a lot of state variables, vfuns that are constantly redrawn. Let's clean this up by making  a list of state variables (those that go in gotoB state) and sort them alphabetically. Also make a list of timeouts or intervals, because most of them are suspect and can probably be refactored. Let's start by looking at what we have rather than fixing willy-nilly.
 
-- List vars, clean up setTimeouts, redraws, b.eventlog
+- Please rename all flowN (where N is a number) names on the tests for the server. Instead use the actual names of the suites.
+- Please rename all flowN (where N is a number) names on the tests for the client.
 
 ### 2026-03-07
 
