@@ -225,6 +225,20 @@ var projectPath = function (project, tail) {
    return 'project/' + encodeURIComponent (project) + '/' + tail;
 };
 
+var projectDisplayName = function (slug) {
+   if (! slug) return '';
+   return slug.replace (/\.([A-Za-z0-9_\-]+)\./g, function (match, encoded) {
+      try {
+         var base64 = encoded.replace (/-/g, '+').replace (/_/g, '/');
+         while (base64.length % 4) base64 += '=';
+         return decodeURIComponent (escape (atob (base64)));
+      }
+      catch (e) {
+         return match;
+      }
+   });
+};
+
 var isDirtyDoc = function (file) {
    return file && ! isDialogFile (file.name) && file.content !== file.original;
 };
@@ -830,32 +844,27 @@ B.mrespond ([
 
    ['initialize', [], function (x) {
       B.call (x, 'set', [], {
-         tab: 'projects',
-         chatProvider: 'openai',
-         chatModel: 'gpt-5.4',
-         chatInput: '',
-         chatAutoStick: true,
+         dialog: {
+            autoStick: true,
+            input: '',
+            model: 'gpt-5.4',
+            provider: 'openai',
+            voiceSupported: !! (window.SpeechRecognition || window.webkitSpeechRecognition)
+         },
          editorPreview: true,
-         voiceActive: false,
-         voiceSupported: !! (window.SpeechRecognition || window.webkitSpeechRecognition),
-         viMode: false,
+         tab: 'projects',
+         uploads: [],
+         viCursor: {line: 1, col: 1},
          viState: {
-            mode: 'insert',
-            pending: '',
-            register: '',
+            commandPrefix: '',
             lastSearch: '',
             message: '',
-            commandPrefix: '',
-            undoStack: [],
-            redoStack: []
-         },
-         viCursor: {line: 1, col: 1},
-         viOverlayEditor: null,
-         viOverlayChat: null,
-         uploads: [],
-         currentUpload: null,
-         uploading: false,
-         streamingDialogId: null
+            mode: 'insert',
+            pending: '',
+            redoStack: [],
+            register: '',
+            undoStack: []
+         }
       });
       B.call (x, 'load', 'projects');
       B.call (x, 'load', 'settings');
@@ -952,17 +961,17 @@ B.mrespond ([
    }],
 
    ['reset', 'chatInput', function (x) {
-      B.call (x, 'set', 'chatInput', ' ');
-      B.call (x, 'set', 'chatInput', '');
+      B.call (x, 'set', ['dialog', 'input'], ' ');
+      B.call (x, 'set', ['dialog', 'input'], '');
    }],
 
    ['track', 'chatScroll', function (x, ev) {
       var node = ev && ev.target ? ev.target : getChatMessagesNode ();
-      B.call (x, 'set', 'chatAutoStick', isChatNearBottom (node));
+      B.call (x, 'set', ['dialog', 'autoStick'], isChatNearBottom (node));
    }],
 
    ['maybe', 'autoscrollChat', function (x) {
-      if (B.get ('chatAutoStick') === false) return;
+      if (B.get ('dialog', 'autoStick') === false) return;
       setTimeout (function () {
          var node = getChatMessagesNode ();
          if (! node) return;
@@ -972,6 +981,22 @@ B.mrespond ([
 
    ['change', 'streamingContent', {match: B.changeResponder}, function (x) {
       B.call (x, 'maybe', 'autoscrollChat');
+   }],
+
+   ['change', 'streaming', {match: B.changeResponder}, function (x, streaming) {
+      if (streaming) {
+         if (window.vibeyingInterval) return;
+         B.call (x, 'set', 'vibeyingSpin', 0);
+         window.vibeyingInterval = setInterval (function () {
+            B.call ('set', 'vibeyingSpin', ((B.get ('vibeyingSpin') || 0) + 1) % 4);
+         }, 150);
+      } else {
+         if (window.vibeyingInterval) {
+            clearInterval (window.vibeyingInterval);
+            window.vibeyingInterval = null;
+         }
+         B.call (x, 'set', 'vibeyingSpin', 0);
+      }
    }],
 
    ['change', 'currentFile', {match: B.changeResponder}, function (x) {
@@ -1040,7 +1065,7 @@ B.mrespond ([
       if (ev && ev.stopPropagation) ev.stopPropagation ();
       if (ev && ev.preventDefault) ev.preventDefault ();
       if (! name) return;
-      if (! confirm ('Delete project "' + name + '"? This cannot be undone.')) return;
+      if (! confirm ('Delete project "' + projectDisplayName (name) + '"? This cannot be undone.')) return;
 
       B.call (x, 'delete', 'projects/' + encodeURIComponent (name), {}, '', function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to delete project');
@@ -1161,11 +1186,11 @@ B.mrespond ([
    }],
 
    ['login', 'oauth', function (x, provider) {
-      B.call (x, 'set', 'oauthLoading', provider);
-      B.call (x, 'set', 'oauthStep', null);
+      B.call (x, 'set', ['oauth', 'loading'], provider);
+      B.call (x, 'set', ['oauth', 'step'], null);
       B.call (x, 'post', 'settings/login/' + provider, {}, {}, function (x, error, rs) {
          if (error) {
-            B.call (x, 'set', 'oauthLoading', null);
+            B.call (x, 'set', ['oauth', 'loading'], null);
             return B.call (x, 'report', 'error', 'Failed to start login');
          }
          var body = rs.body;
@@ -1174,24 +1199,24 @@ B.mrespond ([
 
          if (body.flow === 'paste_code') {
             // Anthropic: user must paste code#state
-            B.call (x, 'set', 'oauthStep', {provider: provider, flow: 'paste_code', url: body.url});
-            B.call (x, 'set', 'oauthLoading', null);
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code', url: body.url});
+            B.call (x, 'set', ['oauth', 'loading'], null);
          }
          else {
             // OpenAI: wait for browser callback, then complete
-            B.call (x, 'set', 'oauthStep', {provider: provider, flow: 'waiting', url: body.url});
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting', url: body.url});
             B.call (x, 'complete', 'oauthCallback', provider, null);
          }
       });
    }],
 
    ['complete', 'oauthCallback', function (x, provider, manualCode) {
-      B.call (x, 'set', 'oauthLoading', provider);
+      B.call (x, 'set', ['oauth', 'loading'], provider);
       var body = manualCode ? {code: manualCode} : {};
       B.call (x, 'post', 'settings/login/' + provider + '/callback', {}, body, function (x, error, rs) {
-         B.call (x, 'set', 'oauthLoading', null);
-         B.call (x, 'set', 'oauthStep', null);
-         B.call (x, 'set', 'oauthCode', '');
+         B.call (x, 'set', ['oauth', 'loading'], null);
+         B.call (x, 'set', ['oauth', 'step'], null);
+         B.call (x, 'set', ['oauth', 'code'], '');
          if (error) return B.call (x, 'report', 'error', 'Login failed: ' + (rs && rs.body && rs.body.error ? rs.body.error : 'unknown error'));
          B.call (x, 'load', 'settings');
       });
@@ -1330,8 +1355,8 @@ B.mrespond ([
                      if (opt.model === lastModel) return opt;
                   });
                   if (found) {
-                     B.call (x, 'set', 'chatProvider', found.provider);
-                     B.call (x, 'set', 'chatModel', found.model);
+                     B.call (x, 'set', ['dialog', 'provider'], found.provider);
+                     B.call (x, 'set', ['dialog', 'model'], found.model);
                   }
                }
                else if (headerModelMatch) {
@@ -1341,8 +1366,8 @@ B.mrespond ([
                      if (opt.model === hModel) return opt;
                   });
                   if (hFound) {
-                     B.call (x, 'set', 'chatProvider', hFound.provider);
-                     B.call (x, 'set', 'chatModel', hFound.model);
+                     B.call (x, 'set', ['dialog', 'provider'], hFound.provider);
+                     B.call (x, 'set', ['dialog', 'model'], hFound.model);
                   }
                }
 
@@ -1507,7 +1532,7 @@ B.mrespond ([
       if (result.redoStack !== undefined) B.call (x, 'set', ['viState', 'redoStack'], result.redoStack);
 
       if (result.value !== undefined) {
-         if (isChat) B.call (x, 'set', 'chatInput', result.value);
+         if (isChat) B.call (x, 'set', ['dialog', 'input'], result.value);
          else B.call (x, 'set', ['currentFile', 'content'], result.value);
       }
 
@@ -1656,8 +1681,8 @@ B.mrespond ([
       var project = B.get ('currentProject');
       if (! project) return;
 
-      var provider = B.get ('chatProvider') || 'openai';
-      var model = B.get ('chatModel') || defaultModelForProvider (provider);
+      var provider = B.get ('dialog', 'provider') || 'openai';
+      var model = B.get ('dialog', 'model') || defaultModelForProvider (provider);
 
       B.call (x, 'post', projectPath (project, 'dialog/new'), {}, {
          provider: provider,
@@ -1669,7 +1694,7 @@ B.mrespond ([
          B.call (x, 'set', 'streaming', false);
          B.call (x, 'set', 'streamingContent', '');
          B.call (x, 'set', 'optimisticUserMessage', null);
-         B.call (x, 'set', 'chatInput', '');
+         B.call (x, 'set', ['dialog', 'input'], '');
 
          B.call (x, 'load', 'files');
          if (rs && rs.body && rs.body.filename) B.call (x, 'load', 'file', rs.body.filename);
@@ -1678,19 +1703,19 @@ B.mrespond ([
 
    ['change', 'chatProviderModel', function (x, key) {
       var parsed = parseModelOptionKey (key);
-      B.call (x, 'set', 'chatProvider', parsed.provider);
-      B.call (x, 'set', 'chatModel', parsed.model);
+      B.call (x, 'set', ['dialog', 'provider'], parsed.provider);
+      B.call (x, 'set', ['dialog', 'model'], parsed.model);
    }],
 
    ['send', 'message', function (x) {
       var file = B.get ('currentFile');
-      var input = B.get ('chatInput');
+      var input = B.get ('dialog', 'input');
       var project = B.get ('currentProject');
       if (! project) return;
       if (B.get ('streaming')) return;
 
-      var provider = B.get ('chatProvider') || 'openai';
-      var model = B.get ('chatModel') || defaultModelForProvider (provider);
+      var provider = B.get ('dialog', 'provider') || 'openai';
+      var model = B.get ('dialog', 'model') || defaultModelForProvider (provider);
       if (! input || ! input.trim ()) return;
 
       var parsed = file && parseDialogFilename (file.name);
@@ -1701,7 +1726,7 @@ B.mrespond ([
          B.call (x, 'set', 'streamingContent', '');
          B.call (x, 'set', 'optimisticUserMessage', originalInput);
          B.call (x, 'set', 'contextWindow', null);
-         B.call (x, 'set', 'chatInput', '');
+         B.call (x, 'set', ['dialog', 'input'], '');
          var inputNode = document.querySelector ('.chat-input');
          if (inputNode) inputNode.value = '';
 
@@ -1763,7 +1788,7 @@ B.mrespond ([
             B.call (x, 'report', 'error', 'Failed to send: ' + err.message);
             B.call (x, 'set', 'streaming', false);
             B.call (x, 'set', 'optimisticUserMessage', null);
-            B.call (x, 'set', 'chatInput', originalInput);
+            B.call (x, 'set', ['dialog', 'input'], originalInput);
          });
       };
 
@@ -1898,7 +1923,7 @@ B.mrespond ([
                      }
                      else if (data.type === 'error') {
                         B.call (x, 'report', 'error', data.error);
-                        if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
+                        if (originalInput) B.call (x, 'set', ['dialog', 'input'], originalInput);
                      }
                   }
                   catch (e) {}
@@ -1908,7 +1933,7 @@ B.mrespond ([
             }).catch (function (error) {
                if (error && error.name === 'AbortError') return finalize ();
                B.call (x, 'report', 'error', 'Stream error: ' + error.message);
-               if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
+               if (originalInput) B.call (x, 'set', ['dialog', 'input'], originalInput);
                finalize ();
             });
          }
@@ -1917,7 +1942,7 @@ B.mrespond ([
       }).catch (function (error) {
          if (error && error.name === 'AbortError') return finalize ();
          B.call (x, 'report', 'error', 'Stream error: ' + error.message);
-         if (originalInput) B.call (x, 'set', 'chatInput', originalInput);
+         if (originalInput) B.call (x, 'set', ['dialog', 'input'], originalInput);
          finalize ();
       });
    }],
@@ -1982,14 +2007,14 @@ B.mrespond ([
       var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (! SpeechRecognition) return B.call (x, 'report', 'error', 'Speech recognition is not supported in this browser');
 
-      if (B.get ('voiceActive')) {
-         var rec = B.get ('voiceRecognition');
+      if (B.get ('dialog', 'voiceActive')) {
+         var rec = B.get ('dialog', 'voiceRecognition');
          if (rec) {
             rec.vibeyIntentionalStop = true;
             rec.stop ();
          }
-         B.call (x, 'set', 'voiceActive', false);
-         B.call (x, 'set', 'voiceRecognition', null);
+         B.call (x, 'set', ['dialog', 'voiceActive'], false);
+         B.call (x, 'set', ['dialog', 'voiceRecognition'], null);
          return;
       }
 
@@ -2000,7 +2025,7 @@ B.mrespond ([
       recognition.vibeyIntentionalStop = false;
 
       var finalTranscript = '';
-      var baseInput = B.get ('chatInput') || '';
+      var baseInput = B.get ('dialog', 'input') || '';
       var commandTimer = null;
       var pendingCommand = null; // 'send' or 'stop'
 
@@ -2032,7 +2057,7 @@ B.mrespond ([
          dale.go (VOICE_COMMANDS, function (cmd) {
             if (cmd.action === action) finalTranscript = stripCommand (finalTranscript, cmd.re);
          });
-         B.call ('set', 'chatInput', buildChatInput (finalTranscript, ''));
+         B.call ('set', ['dialog', 'input'], buildChatInput (finalTranscript, ''));
          recognition.stop ();
          if (action === 'send') {
             setTimeout (function () {
@@ -2051,7 +2076,7 @@ B.mrespond ([
          // If we had a pending command but new speech arrived, cancel it — the phrase was part of normal speech
          if (pendingCommand) {
             cancelCommand ();
-            B.call ('set', 'chatInput', buildChatInput (finalTranscript, interim));
+            B.call ('set', ['dialog', 'input'], buildChatInput (finalTranscript, interim));
             return;
          }
 
@@ -2067,7 +2092,7 @@ B.mrespond ([
             }, 1500);
          }
 
-         B.call ('set', 'chatInput', buildChatInput (finalTranscript, interim));
+         B.call ('set', ['dialog', 'input'], buildChatInput (finalTranscript, interim));
       };
 
       recognition.onend = function () {
@@ -2084,20 +2109,20 @@ B.mrespond ([
             }
             catch (e) {}
          }
-         B.call ('set', 'voiceActive', false);
-         B.call ('set', 'voiceRecognition', null);
+         B.call ('set', ['dialog', 'voiceActive'], false);
+         B.call ('set', ['dialog', 'voiceRecognition'], null);
       };
 
       recognition.onerror = function (event) {
          cancelCommand ();
          if (event.error !== 'aborted' && event.error !== 'no-speech') B.call ('report', 'error', 'Voice error: ' + event.error);
-         B.call ('set', 'voiceActive', false);
-         B.call ('set', 'voiceRecognition', null);
+         B.call ('set', ['dialog', 'voiceActive'], false);
+         B.call ('set', ['dialog', 'voiceRecognition'], null);
       };
 
       recognition.start ();
-      B.call (x, 'set', 'voiceRecognition', recognition);
-      B.call (x, 'set', 'voiceActive', true);
+      B.call (x, 'set', ['dialog', 'voiceRecognition'], recognition);
+      B.call (x, 'set', ['dialog', 'voiceActive'], true);
    }],
 
    ['run', 'tests', function (x) {
@@ -2987,7 +3012,14 @@ var formatMessageGauges = function (msg) {
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['chatInput'], ['chatProvider'], ['chatModel'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['voiceActive'], ['voiceSupported'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow']], function (files, currentFile, loadingFile, chatInput, chatProvider, chatModel, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, voiceActive, voiceSupported, currentProject, viMode, viState, viOverlayChat, settings, contextWindow) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin) {
+
+      dialog = dialog || {};
+      var input = dialog.input;
+      var model = dialog.model;
+      var provider = dialog.provider;
+      var voiceActive = dialog.voiceActive;
+      var voiceSupported = dialog.voiceSupported;
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
          if (isDialogFile (f)) return f;
@@ -3091,7 +3123,7 @@ views.dialogs = function () {
                }
                if (! ctx) return '';
                // Recalculate % against the currently selected model
-               var selectedModel = chatModel || defaultModelForProvider (chatProvider || 'openai');
+               var selectedModel = model || defaultModelForProvider (provider || 'openai');
                var currentLimit = getContextWindowSize (selectedModel);
                var pct = Math.round (ctx.used / currentLimit * 100);
                var barColor = pct >= 80 ? '#e74c3c' : (pct >= 50 ? '#e6a817' : '#4ec970');
@@ -3103,6 +3135,11 @@ views.dialogs = function () {
                   ['span', {style: style ({'font-weight': pct >= 50 ? '600' : 'normal', 'white-space': 'nowrap'})}, pct + '% context']
                ]];
             }) (),
+            // Vibeying gauge (active dialog indicator)
+            (streaming || dialogIsActive) ? ['div', {class: 'vibeying-gauge'}, [
+               ['span', {class: 'vibeying-spinner'}, ['|', '/', '-', '\\'] [vibeyingSpin || 0]],
+               ['span', {class: 'vibeying-label'}, 'Vibeying']
+            ]] : '',
             // Input area
             ['div', {class: 'chat-input-area'}, [
                ['select', {
@@ -3111,17 +3148,17 @@ views.dialogs = function () {
                   disabled: noProvider || streaming || dialogIsActive
                }, dale.go (MODEL_OPTIONS, function (opt) {
                   var key = modelOptionKey (opt);
-                  var currentKey = (chatProvider || 'openai') + ':' + (chatModel || defaultModelForProvider (chatProvider || 'openai'));
+                  var currentKey = (provider || 'openai') + ':' + (model || defaultModelForProvider (provider || 'openai'));
                   return ['option', {value: key, selected: key === currentKey}, opt.label];
                })],
                ['div', {class: 'vi-textarea-wrap', style: style ({flex: 1})}, [
                   ['textarea', {
                      class: 'chat-input' + (viMode ? (' vi-active' + (viState.mode === 'insert' ? ' vi-insert' : '')) : ''),
                      rows: 2,
-                     value: chatInput || '',
+                     value: input || '',
                      placeholder: noProvider ? 'Configure an LLM provider in Settings to start' : 'Type a message... (Cmd+Enter to send)',
                      readonly: viMode && viState.mode !== 'insert',
-                     oninput: B.ev ('set', 'chatInput'),
+                     oninput: B.ev ('set', ['dialog', 'input'], {raw: 'this.value'}),
                      onkeydown: viMode
                         ? B.ev ('vi', 'key', {raw: 'event'})
                         : B.ev ('keydown', 'chatInput', {raw: 'event'}),
@@ -3156,7 +3193,7 @@ views.dialogs = function () {
                ['button', {
                   class: 'primary',
                   onclick: B.ev ('send', 'message'),
-                  disabled: noProvider || streaming || dialogIsActive || ! (chatInput && chatInput.trim ())
+                  disabled: noProvider || streaming || dialogIsActive || ! (input && input.trim ())
                }, streaming ? 'Sending...' : 'Send'],
                ((streaming || dialogIsActive) && isDialog) ? ['button', {
                   style: style ({'background-color': '#e67e22', color: 'white'}),
@@ -3198,7 +3235,7 @@ views.projects = function () {
 };
 
 views.settings = function () {
-   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauthLoading'], ['oauthStep'], ['oauthCode'], ['viMode'], ['settingsShowMore']], function (settingsData, edits, saving, showKeys, oauthLoading, oauthStep, oauthCode, viMode) {
+   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauth'], ['viMode'], ['settingsShowMore']], function (settingsData, edits, saving, showKeys, oauth, viMode) {
       settingsData = settingsData || {};
       edits = edits || {};
       var openai = settingsData.openai || {};
@@ -3206,6 +3243,10 @@ views.settings = function () {
       var openaiOAuth = settingsData.openaiOAuth || {};
       var claudeOAuth = settingsData.claudeOAuth || {};
       var settings = settingsData.editor || {};
+      oauth = oauth || {};
+      var oauthLoading = oauth.loading;
+      var oauthStep = oauth.step;
+      var oauthCode = oauth.code;
       viMode = !! viMode;
 
       var sectionTitle = function (title) {
@@ -3228,7 +3269,7 @@ views.settings = function () {
                   type: showKeys ? 'text' : 'password',
                   value: currentDisplay,
                   placeholder: 'Paste API key here...',
-                  oninput: B.ev ('set', ['settingsEdits', editKey]),
+                  oninput: B.ev ('set', ['settingsEdits', editKey], {raw: 'this.value'}),
                   style: style ({
                      flex: 1, padding: '0.6rem', 'border-radius': '6px', border: 'none',
                      'background-color': '#1a1a2e', color: '#eee', 'font-family': 'Monaco, Consolas, monospace', 'font-size': '13px'
@@ -3279,7 +3320,7 @@ views.settings = function () {
                      type: 'text',
                      value: oauthCode || '',
                      placeholder: 'Paste code#state here...',
-                     oninput: B.ev ('set', 'oauthCode'),
+                     oninput: B.ev ('set', ['oauth', 'code'], {raw: 'this.value'}),
                      style: style ({
                         flex: 1, padding: '0.6rem', 'border-radius': '6px', border: 'none',
                         'background-color': '#2a2a4e', color: '#eee', 'font-family': 'Monaco, Consolas, monospace', 'font-size': '13px'
@@ -3293,7 +3334,7 @@ views.settings = function () {
                   ['button', {
                      class: 'btn-small',
                      style: style ({'background-color': '#444'}),
-                     onclick: B.ev (['set', 'oauthStep', null], ['set', 'oauthLoading', null])
+                     onclick: B.ev (['set', ['oauth', 'step'], null], ['set', ['oauth', 'loading'], null])
                   }, 'Cancel']
                ]]
             ]] : '',
@@ -3306,7 +3347,7 @@ views.settings = function () {
                   ['button', {
                      class: 'btn-small',
                      style: style ({'background-color': '#444'}),
-                     onclick: B.ev (['set', 'oauthStep', null], ['set', 'oauthLoading', null])
+                     onclick: B.ev (['set', ['oauth', 'step'], null], ['set', ['oauth', 'loading'], null])
                   }, 'Cancel']
                ]]
             ]] : '',
@@ -3454,10 +3495,11 @@ views.main = function () {
       return ['div', {class: 'container'}, [
          ['style', window.vibeyCSS],
 
+
          ['div', {class: 'header'}, [
             ['h1', {style: style ({margin: 0, 'font-size': '1.5rem', cursor: 'pointer'}), onclick: B.ev ('navigate', 'hash', '#/projects')}, 'vibey'],
             ['div', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center'})}, [
-               currentProject ? ['span', {style: style ({color: '#9aa4bf'})}, currentProject] : '',
+               currentProject ? ['span', {style: style ({color: '#9aa4bf'})}, projectDisplayName (currentProject)] : '',
                currentProject ? ['button', {class: 'btn-small', onclick: B.ev ('create', 'snapshot')}, '📸 Snapshot'] : '',
                ['button', {
                   class: 'btn-small' + (tab === 'projects' ? ' primary' : ''),
@@ -3504,8 +3546,8 @@ window.addEventListener ('hashchange', function () {
 window.addEventListener ('keydown', function (ev) {
    if (ev.key !== ' ') return;
    if (B.get ('tab') !== 'dialogs') return;
-   if (B.get ('voiceActive')) return;
-   if (! B.get ('voiceSupported')) return;
+   if (B.get ('dialog', 'voiceActive')) return;
+   if (! B.get ('dialog', 'voiceSupported')) return;
    if (B.get ('streaming')) return;
 
    var tag = (document.activeElement || {}).tagName || '';

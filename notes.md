@@ -1,5 +1,128 @@
 ## Vibey development notes
 
+### 2026-03-10
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
+
+- When I run the project suite in the client, I get an alert saying "Couldn't load project". Can you detect alerts during the tests and mark them as errors that stop the suite?
+- Great! Can you please add a general "alert detection" to all client tests?
+- Dialog is not fast. Fast is all but dialog, static and backend. Can you check the definition?
+- I notice that going from pending to done takes a while sometimes. Is this because of git delays?
+- Remove the pfs.exists checks.
+- Please remove the redundant call to findDialogName. Also make the git command atomic, but ensure we don't create commits on empty changes.
+- Nice! Can you now take the dialog tests and make sure that the client tests are aligned with the server tests and with the spec? Just make sure there are no teeth missing from the client tests concerning dialogs.
+- When you're done, run the tests for dialog in the client. Also you can run the server ones too, one of them failed with 409 vs 200 expected. Just the dialog ones. You can rebuild vibey if you need to.
+- Can you now check alignment of the client tests with respect to spec/server tests for the static suite?
+- These sleeps are way too long. Why so long? Please shorten them, also you can then read the .mds to see what the LLMs actually called.
+- Please add a "Vibeying" moving gauge at the bottom of an active dialog.
+- Can you make it like that sequence that goes /-\| ?
+- Server log improvements: log when chunks are obtained from LLM to server, not the chunks themselves, just that we get them. Also log separately that chunks are being sent to client.
+- More server log improvements: all docker commands being sent (and when they're done too), almost like they were requests. Can you scope them by project too?
+- Please get rid of the dialog-status ad-hoc logs
+- Why so many of these? docker exec vibey-proj-dialog-20260310-202350-67449 mkdir -p '/workspace/doc'
+- Run the fast server suite yourself and detect unnecessary round trips please
+- Remove ensureProjectLayout from getExistingProject, just initialize the folders on project creation. Keep mkdir -p on writeFile so it's always there in case of rm -rf, it's no extra round trip either. As for running commands, first run them and if the container is not there, then ensure that it is there with the function. If you check something, you're already doing a roundtrip. Let the actual code handle it, and if there's nothing, then you return a 404.
+- Those functions can take a rs (response) and if there's no project, respond with a 404 directly. Make them return a false and then the outer function checks for a false value, and if it gets one, it returns too.
+```
+Please do this in the server
+
+ Performance: eliminate unnecessary docker round trips
+
+ ### Context
+
+  Every API request currently does 2 docker calls to check if the project container exists/is running, plus 3 mkdir -p calls to ensure doc/, dialog/,
+ uploads/
+   dirs exist. That's 5 extra docker execs (~250ms) before any actual work happens. The test suite logs show this clearly — every request has the same ps
+ -aq,
+  ps -q, mkdir doc, mkdir dialog, mkdir uploads preamble.
+
+ ### Changes
+
+ 1. Remove ensureProjectLayout from getExistingProject
+
+  In server.js, getExistingProject calls ensureProjectLayout which does 3 mkdir -p docker execs on every request. Remove that call. ensureProjectLayout
+ should
+  only be called from ensureProject (project creation / snapshot restore). The dirs live on the volume and survive container recreation.
+
+ 2. Replace optimistic existence checks with try-and-recover
+
+  Currently resolveProject → getExistingProject → projectExists (1 docker call) → ensureProjectContainer (1-2 more docker calls) runs before any actual work.
+  Instead:
+
+ - Remove getExistingProject, projectExists, containerExists, containerRunning, and resolveProject as gatekeepers.
+ - Let the actual pfs.* / dockerExec calls run directly. If the container doesn't exist, docker returns an error.
+ - Write a single recovery function: when a docker exec fails with "no such container", call ensureProjectContainer to create/start it, then retry the
+  original operation once. If it fails again or the volume doesn't exist either, return false and let the caller return (the function will have already sent
+ a
+  404 on rs).
+ - The pfs functions and dockerExec should accept rs as a parameter. On unrecoverable failure (no volume = no project), they write a 404 to rs and return
+  false. The calling route handler checks for false and returns early.
+
+  This makes the happy path (container running) zero extra docker calls — just the actual work. First access after restart pays one retry.
+
+ 3. Keep mkdir -p in writeFile / appendFile
+
+  The mkdir -p <dir> && cat > <file> pattern in writeFile and appendFile stays — it's already folded into a single docker exec so it's no extra round trip,
+  and it handles edge cases like an agent doing rm -rf.
+
+ 4. Remove synchronous execSync at startup
+
+  cleanupProjectContainers uses execSync. Make it async — it runs at server startup and there's no reason to block the event loop.
+
+ ### How to verify
+
+  Run node test-server fast and check the docker logs. The ps -aq, ps -q, and per-request mkdir calls should be gone. Each API request should show only the
+  docker execs for its actual work (cat, find, stat, etc.), plus one recovery round trip on first access after restart.
+```
+- Please make those extra folds on the calls. Also batch the mtimes.
+- Let's please now make server logs more unified: remove the "----" lines; make the docker calls be DOCKER REQUEST, with an id like the ones on HTTP REQ/RES, and an OK/FAILED with color. Make the docker logs have almost the same info as the HTTP calls. Also same for the SSE streams received from the LLM and sent to the client.
+- Amazing. Please remove the project= prefix on the docker logs. Also put padding space to the left of "HTTP" and "SSE" so that it aligns with the DOCKER logs. Also shorten REQUEST to REQ and RESPONSE to RES
+- Briliant! Now please run and fix the dialog test.
+
+
+
+
+
+
+
+- Dialog concurrency issue: make `PUT /project/:project/dialog` first-come-first-served **per dialog**. If two requests try to continue/start the same dialog concurrently, the first one should win and the other should get **409** instead of racing on dialog file renames. Start with modifying the dialog suite in readme.md, then in test-server.
+- Another agent is working on the server. Could you come up with a patch for fixing the above, but not implement it yet?
+- Can you modify the client so that slug names are shown prettily? Everywhere except the url, I think
+- Instead, port the deslugger function to the client and just use it
+
+- Let's reorganize the state variables in the client. Look at the list in readme.md. Take the oauth ones and put them under an object oauth, with three entries inside.
+- Please add the details on the nested oauths on the table, i want it all.
+- Can you remove the falsy/null inits in initialize? They are not necessary. If nothing is there, we default to undefined. dale.go calls can take undefined and won't iterate.
+- All the variables named chat..., I'm almost certain they concern dialogs. Please put them inside a dialog object. Including the voice ones. First the docs, then client.js.
+
+===
+
+Something that perhaps is still quite rare: have agents working on the background with your computer locked or turned off. vibey cloud would be really cloud based, so it's always running.
+Vibey cloud has two advantages over the local. These would be 4. and 5.
+- Always running
+- Accessible from any machine, by you or whoever you share the project with.
+
+
+Who would be interested in using vibey?
+claude:
+"People who think in text and want to build things without learning to code.
+
+ - Writers, academics, humanities people who have ideas for tools, games, or small apps but hit a wall at the terminal. Your readme calls them out directly:
+ "students of humanities stranded in the digital age."
+ - Designers and product thinkers who can describe what they want clearly but don't want to context-switch into an IDE.
+ - Solo founders / non-technical entrepreneurs who want to prototype something quickly — describe it, let agents build it, see it running in your browser.
+ - Teachers who want to create interactive learning materials without a dev team.
+ - Developers who are tired of scaffolding — sometimes you just want to say "build me a tictactoe game with React" and have it running in 30 seconds, embedded right in your notes.
+
+ The common thread: people who are articulate and have clear ideas, but for whom the toolchain is the bottleneck, not the thinking. Vibey turns prose into working software, and keeps everything legible as text — no black boxes."
+
+I just realized that the structure of gotoB state is the equivalent of the DB structure but on the frontend. The data at rest! The endpoints would be the rfuns, or perhaps the rfuns are the POST/PUT endpoints and the views are the GET endpoints. Yep, that's more like it:
+- Store <-> DB
+- rfuns <-> POST/PUT/DELETE endpoints
+- vfuns <-> GET endpoints
+
+Perhaps there could be a way to share your vibey as a static page so that people can use your app without logging in, as long as it requires minimal state that can be stored in localstorage.
+
 ### 2026-03-09
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.

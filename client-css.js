@@ -644,4 +644,25 @@ window.vibeyCSS = [
       'border-top': '1px solid #333',
       margin: '1rem 0',
    }],
+   // Vibeying gauge
+   ['.vibeying-gauge', {
+      display: 'flex',
+      'align-items': 'center',
+      gap: '8px',
+      padding: '4px 12px',
+      'font-size': '12px',
+      color: '#b07aff',
+   }],
+   ['.vibeying-spinner', {
+      'font-family': 'Monaco, Consolas, monospace',
+      'font-weight': 'bold',
+      'font-size': '14px',
+      width: '1ch',
+      'text-align': 'center',
+      display: 'inline-block',
+   }],
+   ['.vibeying-label', {
+      'font-weight': '600',
+      'letter-spacing': '0.06em',
+   }],
 ];

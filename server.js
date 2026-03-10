@@ -12,6 +12,46 @@ var clog = console.log;
 
 var type = teishi.type, eq = teishi.eq, last = teishi.last, inc = teishi.inc;
 
+var LOG_COLORS = {
+   ok: '\033[37m\033[42m',
+   failed: '\033[37m\033[41m',
+   info: '\033[37m\033[46m'
+};
+
+var colorLog = function (text, color) {
+   color = color || LOG_COLORS.info;
+   return color + text + '\033[0m\033[1m';
+};
+
+var logCodeColor = function (code) {
+   code = String (code || '0');
+   return colorLog (code, '\033[37m\033[4' + ({1: 6, 2: 2, 3: 4, 4: 3, 5: 1}) [code [0] || '5'] + 'm');
+};
+
+var logSeq = 0;
+var nextLogId = function () {
+   logSeq++;
+   return logSeq.toString (16).padStart (12, '0');
+};
+
+var logLine = function (kind, id) {
+   var parts = Array.prototype.slice.call (arguments, 2);
+   console.log ([kind, id].concat (parts).join (' '));
+};
+
+var logDockerStart = function (id, project, command) {
+   logLine ('DOCKER REQ', id, project, command.slice (0, 200));
+};
+
+var logDockerEnd = function (id, project, ok, ms, detail) {
+   var status = ok ? colorLog ('OK', LOG_COLORS.ok) : colorLog ('FAILED', LOG_COLORS.failed);
+   logLine ('DOCKER RES', id, project, status, '(' + ms + 'ms)', detail ? detail.slice (0, 200) : '');
+};
+
+var logStreamEvent = function (kind, id, projectName, dialogId, eventType, extra) {
+   logLine (kind, id, projectName, 'dialog=' + dialogId, 'type=' + eventType, extra || '');
+};
+
 var reply = function (rs, code, body, headers) {
    try {
       if (! rs) return;
@@ -473,40 +513,79 @@ var getApiKey = async function (provider) {
 // *** DOCKER CONTAINER MANAGEMENT ***
 
 var exec = require ('child_process').exec;
-var execSync = require ('child_process').execSync;
 
 var SANDBOX_IMAGE = 'vibey-sandbox:latest';
 
 // Promisified exec for non-blocking docker operations
+var dockerCmdId = 0;
+var dockerProject = function (command) {
+   var match = command.match (/vibey-proj-(\S+)/);
+   return match ? match [1] : 'system';
+};
 var execA = function (command, options) {
+   var id = nextLogId ();
+   dockerCmdId++;
+   var project = dockerProject (command);
+   logDockerStart (id, project, command);
+   var t = Date.now ();
    return new Promise (function (resolve, reject) {
       exec (command, options || {encoding: 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) {
             error.stdout = stdout;
             error.stderr = stderr;
+            logDockerEnd (id, project, false, Date.now () - t, error.message || '');
             reject (error);
          }
-         else resolve ((stdout || '').toString ());
+         else {
+            logDockerEnd (id, project, true, Date.now () - t);
+            resolve ((stdout || '').toString ());
+         }
       });
    });
 };
 
 // Promisified exec that returns a Buffer (for binary reads)
 var execABuf = function (command, options) {
+   var id = nextLogId ();
+   dockerCmdId++;
+   var project = dockerProject (command);
+   logDockerStart (id, project, command);
+   var t = Date.now ();
    return new Promise (function (resolve, reject) {
       exec (command, options || {encoding: 'buffer', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
-         if (error) reject (error);
-         else resolve (stdout);
+         if (error) {
+            error.stdout = stdout;
+            error.stderr = stderr;
+            logDockerEnd (id, project, false, Date.now () - t, error.message || '');
+            reject (error);
+         }
+         else {
+            logDockerEnd (id, project, true, Date.now () - t);
+            resolve (stdout);
+         }
       });
    });
 };
 
 // Promisified exec with stdin piped in (for writes)
 var execAWithInput = function (command, input, encoding) {
+   var id = nextLogId ();
+   dockerCmdId++;
+   var project = dockerProject (command);
+   logDockerStart (id, project, command);
+   var t = Date.now ();
    return new Promise (function (resolve, reject) {
       var child = exec (command, {encoding: encoding || 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
-         if (error) reject (error);
-         else resolve ((stdout || '').toString ());
+         if (error) {
+            error.stdout = stdout;
+            error.stderr = stderr;
+            logDockerEnd (id, project, false, Date.now () - t, error.message || '');
+            reject (error);
+         }
+         else {
+            logDockerEnd (id, project, true, Date.now () - t);
+            resolve ((stdout || '').toString ());
+         }
       });
       if (input !== undefined && input !== null) {
          child.stdin.write (input);
@@ -523,11 +602,30 @@ var volumeName = function (projectName) {
    return 'vibey-vol-' + projectName;
 };
 
-var cleanupProjectContainers = function () {
+var dockerErrorText = function (error) {
+   return [error && error.message, error && error.stderr, error && error.stdout].filter (Boolean).join ('\n').toLowerCase ();
+};
+
+var isNoSuchContainerError = function (error) {
+   var text = dockerErrorText (error);
+   return text.includes ('no such container');
+};
+
+var isAlreadyRunningContainerError = function (error) {
+   var text = dockerErrorText (error);
+   return text.includes ('is already running');
+};
+
+var isNoSuchFileError = function (error) {
+   var text = dockerErrorText (error);
+   return text.includes ('no such file or directory') || text.includes ('cannot stat') || text.includes ('can\'t stat');
+};
+
+var cleanupProjectContainers = async function () {
    try {
-      var ids = execSync ('docker ps -aq --filter label=vibey=project', {encoding: 'utf8'}).trim ();
+      var ids = (await execA ('docker ps -aq --filter label=vibey=project')).trim ();
       if (ids) {
-         execSync ('docker rm -f ' + ids, {encoding: 'utf8'});
+         await execA ('docker rm -f ' + ids);
          clog ('Cleaned up orphaned project containers: ' + ids);
       }
    }
@@ -536,51 +634,35 @@ var cleanupProjectContainers = function () {
    }
 };
 
-var containerExists = async function (projectName) {
-   var name = containerName (projectName);
-   try {
-      var id = (await execA ('docker ps -aq --filter name=^/' + name + '$')).trim ();
-      return !! id;
-   }
-   catch (e) {
-      return false;
-   }
-};
-
-var containerRunning = async function (projectName) {
-   var name = containerName (projectName);
-   try {
-      var id = (await execA ('docker ps -q --filter name=^/' + name + '$')).trim ();
-      return !! id;
-   }
-   catch (e) {
-      return false;
-   }
-};
-
-var ensureProjectContainer = async function (projectName) {
+var ensureProjectContainer = async function (projectName, options) {
+   options = options || {};
    var name = containerName (projectName);
    var vol = volumeName (projectName);
 
-   // Already running
-   if (await containerRunning (projectName)) return;
-
-   // Exists but stopped — start it
-   if (await containerExists (projectName)) {
+   try {
       await execA ('docker start ' + name);
       clog ('Started existing container: ' + name);
-      return;
+      return true;
+   }
+   catch (error) {
+      if (! isNoSuchContainerError (error)) {
+         if (isAlreadyRunningContainerError (error)) return true;
+         throw error;
+      }
    }
 
-   // Create volume if it doesn't exist
-   try {
-      await execA ('docker volume inspect ' + vol + ' >/dev/null 2>&1');
+   if (options.createVolume) {
+      try {
+         await execA ('docker volume inspect ' + vol + ' >/dev/null 2>&1');
+      }
+      catch (e) {
+         await execA ('docker volume create --label vibey=project --label vibey-project=' + projectName + ' ' + vol);
+      }
    }
-   catch (e) {
-      await execA ('docker volume create --label vibey=project --label vibey-project=' + projectName + ' ' + vol);
+   else {
+      if (! (await volumeExists (projectName))) return false;
    }
 
-   // Create new container with its own volume
    await execA (
       'docker run -d' +
       ' --name ' + name +
@@ -591,28 +673,66 @@ var ensureProjectContainer = async function (projectName) {
       ' ' + SANDBOX_IMAGE
    );
    clog ('Created project container: ' + name);
+   return true;
+};
+
+var replyProjectMissing = function (rs) {
+   if (rs) {
+      reply (rs, 404, {error: 'Project not found'});
+      return false;
+   }
+   throw new Error ('Project not found');
+};
+
+var withProjectContainerRecovery = async function (projectName, rs, fn) {
+   try {
+      return await fn ();
+   }
+   catch (error) {
+      if (! isNoSuchContainerError (error)) throw error;
+   }
+
+   if (! (await ensureProjectContainer (projectName, {createVolume: false}))) {
+      return replyProjectMissing (rs);
+   }
+
+   try {
+      return await fn ();
+   }
+   catch (error) {
+      if (isNoSuchContainerError (error)) return replyProjectMissing (rs);
+      throw error;
+   }
 };
 
 var removeProjectContainer = async function (projectName) {
    var name = containerName (projectName);
    var vol = volumeName (projectName);
+   var removed = false;
    try {
       await execA ('docker rm -f ' + name);
       clog ('Removed project container: ' + name);
+      removed = true;
    }
    catch (e) {}
    try {
       await execA ('docker volume rm ' + vol);
       clog ('Removed project volume: ' + vol);
+      removed = true;
    }
    catch (e) {}
    // Clear cached git-repo-ready flag so resurrection re-initializes
    if (GIT_REPO_READY) delete GIT_REPO_READY [projectName];
+   return removed;
 };
 
-var getContainerIP = async function (projectName) {
+var getContainerIP = async function (projectName, rs) {
    var name = containerName (projectName);
-   var ip = (await execA ("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' " + name)).trim ();
+   var ip = await withProjectContainerRecovery (projectName, rs, function () {
+      return execA ("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' " + name);
+   });
+   if (ip === false) return false;
+   ip = ip.trim ();
    if (! ip) throw new Error ('Container has no IP address');
    return ip;
 };
@@ -621,19 +741,36 @@ var shQuote = function (value) {
    return "'" + String (value).replace (/'/g, "'\\''") + "'";
 };
 
-var dockerExec = function (projectName, command) {
+var dockerExec = async function (projectName, command, rs) {
    var name = containerName (projectName);
    // Escape single quotes in command for sh -c
    var escaped = command.replace (/'/g, "'\\''");
    // Use setsid so that backgrounded processes (e.g. `node server.js &`) survive
    // the docker exec session ending. Without setsid, docker kills orphaned children
    // when the sh process exits.
-   return new Promise (function (resolve) {
-      exec ('docker exec ' + name + " setsid sh -c '" + escaped + "'", {timeout: 30000, maxBuffer: 1024 * 1024}, function (error, stdout, stderr) {
-         if (error) resolve ({error: error, stdout: stdout, stderr: stderr});
-         else       resolve ({error: null, stdout: stdout, stderr: stderr});
+   var run = function () {
+      return new Promise (function (resolve) {
+         exec ('docker exec ' + name + " setsid sh -c '" + escaped + "'", {timeout: 30000, maxBuffer: 1024 * 1024}, function (error, stdout, stderr) {
+            if (error) {
+               error.stdout = stdout;
+               error.stderr = stderr;
+               resolve ({error: error, stdout: stdout, stderr: stderr});
+            }
+            else resolve ({error: null, stdout: stdout, stderr: stderr});
+         });
       });
-   });
+   };
+
+   var result = await run ();
+   if (! result.error || ! isNoSuchContainerError (result.error)) return result;
+
+   if (! (await ensureProjectContainer (projectName, {createVolume: false}))) {
+      return replyProjectMissing (rs);
+   }
+
+   result = await run ();
+   if (result.error && isNoSuchContainerError (result.error)) return replyProjectMissing (rs);
+   return result;
 };
 
 // *** PROJECT FS ***
@@ -642,10 +779,14 @@ var dockerExec = function (projectName, command) {
 // These are async (using exec) to avoid blocking the event loop.
 
 var pfs = {
-   readdir: async function (projectName) {
+   readdir: async function (projectName, rs) {
       var name = containerName (projectName);
       try {
-         var output = (await execA ('docker exec ' + name + " sh -c 'find /workspace -type f'")).trim ();
+         var output = await withProjectContainerRecovery (projectName, rs, function () {
+            return execA ('docker exec ' + name + " sh -c 'find /workspace -type f'");
+         });
+         if (output === false) return false;
+         output = output.trim ();
          if (! output) return [];
          return dale.fil (output.split ('\n'), undefined, function (line) {
             if (! line) return;
@@ -657,148 +798,127 @@ var pfs = {
       }
    },
 
-   readFile: async function (projectName, filename) {
+   readFile: async function (projectName, filename, rs) {
       var name = containerName (projectName);
-      return await execA ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filename));
+      var content = await withProjectContainerRecovery (projectName, rs, function () {
+         return execA ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filename));
+      });
+      return content;
    },
 
-   writeFile: async function (projectName, filename, content) {
+   writeFile: async function (projectName, filename, content, rs) {
       var name = containerName (projectName);
       var dir = filename.replace (/\/[^/]+$/, '');
-      if (dir && dir !== filename) {
-         try {
-            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
-         }
-         catch (e) {}
-      }
-      var command = 'cat > ' + shQuote ('/workspace/' + filename);
-      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
+      var command = (dir && dir !== filename ? 'mkdir -p ' + shQuote ('/workspace/' + dir) + ' && ' : '') + 'cat > ' + shQuote ('/workspace/' + filename);
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
+      });
    },
 
-   appendFile: async function (projectName, filename, content) {
+   appendFile: async function (projectName, filename, content, rs) {
       var name = containerName (projectName);
       var dir = filename.replace (/\/[^/]+$/, '');
-      if (dir && dir !== filename) {
-         try {
-            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
-         }
-         catch (e) {}
-      }
-      var command = 'cat >> ' + shQuote ('/workspace/' + filename);
-      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
+      var command = (dir && dir !== filename ? 'mkdir -p ' + shQuote ('/workspace/' + dir) + ' && ' : '') + 'cat >> ' + shQuote ('/workspace/' + filename);
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
+      });
    },
 
-   rename: async function (projectName, oldName, newName) {
+   rename: async function (projectName, oldName, newName, rs) {
       var name = containerName (projectName);
-      await execA ('docker exec ' + name + ' mv ' + shQuote ('/workspace/' + oldName) + ' ' + shQuote ('/workspace/' + newName));
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execA ('docker exec ' + name + ' mv ' + shQuote ('/workspace/' + oldName) + ' ' + shQuote ('/workspace/' + newName));
+      });
    },
 
-   unlink: async function (projectName, filename) {
+   unlink: async function (projectName, filename, rs) {
       var name = containerName (projectName);
-      await execA ('docker exec ' + name + ' rm ' + shQuote ('/workspace/' + filename));
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execA ('docker exec ' + name + ' rm ' + shQuote ('/workspace/' + filename));
+      });
    },
 
-   exists: async function (projectName, filename) {
+   statsDetailed: async function (projectName, filenames, rs) {
       var name = containerName (projectName);
-      try {
-         await execA ('docker exec ' + name + ' test -f ' + shQuote ('/workspace/' + filename));
-         return true;
-      }
-      catch (e) {
-         return false;
-      }
-   },
+      filenames = filenames || [];
+      if (! filenames.length) return [];
 
-   stat: async function (projectName, filename) {
-      var name = containerName (projectName);
-      try {
-         // stat -c %Y gives mtime as unix epoch seconds
-         var output = (await execA ('docker exec ' + name + ' stat -c %Y ' + shQuote ('/workspace/' + filename))).trim ();
-         return {mtime: new Date (Number (output) * 1000)};
-      }
-      catch (e) {
-         return {mtime: new Date (0)};
-      }
-   },
+      var command = 'for f in';
+      dale.go (filenames, function (filename) {
+         command += ' ' + shQuote ('/workspace/' + filename);
+      });
+      command += '; do stat -c "%Y %s %n" "$f"; done';
 
-   statDetailed: async function (projectName, filename) {
-      var name = containerName (projectName);
-      try {
-         // stat -c '%Y %s' gives mtime and size in bytes
-         var output = (await execA ('docker exec ' + name + ' stat -c "%Y %s" ' + shQuote ('/workspace/' + filename))).trim ();
-         var parts = output.split (' ');
+      var output = await withProjectContainerRecovery (projectName, rs, function () {
+         return execA ('docker exec ' + name + ' sh -c ' + shQuote (command));
+      });
+      if (output === false) return false;
+      output = output.trim ();
+      if (! output) return [];
+
+      return dale.fil (output.split ('\n'), undefined, function (line) {
+         line = line.trim ();
+         if (! line) return;
+         var match = line.match (/^(\d+)\s+(\d+)\s+\/workspace\/(.+)$/);
+         if (! match) return;
          return {
-            mtime: new Date (Number (parts [0]) * 1000),
-            size: Number (parts [1] || 0)
+            name: match [3],
+            mtime: new Date (Number (match [1]) * 1000),
+            size: Number (match [2] || 0)
          };
-      }
-      catch (e) {
-         return {mtime: new Date (0), size: 0};
-      }
+      });
    },
 
    // Read a file from any path inside the container (for static proxy)
-   readFileAt: async function (projectName, path) {
+   readFileAt: async function (projectName, path, rs) {
       var name = containerName (projectName);
-      return await execA ('docker exec ' + name + ' cat ' + shQuote (path));
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execA ('docker exec ' + name + ' cat ' + shQuote (path));
+      });
    },
 
    // Read a binary file from any path inside the container (for static proxy)
-   readFileBinaryAt: async function (projectName, path) {
+   readFileBinaryAt: async function (projectName, path, rs) {
       var name = containerName (projectName);
-      return await execABuf ('docker exec ' + name + ' cat ' + shQuote (path));
-   },
-
-   existsAt: async function (projectName, path) {
-      var name = containerName (projectName);
-      try {
-         await execA ('docker exec ' + name + ' test -f ' + shQuote (path));
-         return true;
-      }
-      catch (e) {
-         return false;
-      }
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execABuf ('docker exec ' + name + ' cat ' + shQuote (path));
+      });
    },
 
    // mkdir -p for a path inside /workspace
-   mkdirp: async function (projectName, dirpath) {
+   mkdirp: async function (projectName, dirpath, rs) {
       var name = containerName (projectName);
-      await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dirpath));
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dirpath));
+      });
    },
 
    // Write file at any path inside /workspace (for tool write_file)
-   writeFileAt: async function (projectName, filepath, content) {
+   writeFileAt: async function (projectName, filepath, content, rs) {
       var name = containerName (projectName);
-      // Ensure parent directory exists
       var dir = filepath.replace (/\/[^/]+$/, '');
-      if (dir && dir !== filepath) {
-         try {
-            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
-         }
-         catch (e) {}
-      }
-      var command = 'cat > ' + shQuote ('/workspace/' + filepath);
-      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
+      var command = (dir && dir !== filepath ? 'mkdir -p ' + shQuote ('/workspace/' + dir) + ' && ' : '') + 'cat > ' + shQuote ('/workspace/' + filepath);
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content);
+      });
    },
 
    // Write binary file at any path inside /workspace (for uploads)
-   writeFileBinaryAt: async function (projectName, filepath, content) {
+   writeFileBinaryAt: async function (projectName, filepath, content, rs) {
       var name = containerName (projectName);
       var dir = filepath.replace (/\/[^/]+$/, '');
-      if (dir && dir !== filepath) {
-         try {
-            await execA ('docker exec ' + name + ' mkdir -p ' + shQuote ('/workspace/' + dir));
-         }
-         catch (e) {}
-      }
-      var command = 'cat > ' + shQuote ('/workspace/' + filepath);
-      await execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content, 'buffer');
+      var command = (dir && dir !== filepath ? 'mkdir -p ' + shQuote ('/workspace/' + dir) + ' && ' : '') + 'cat > ' + shQuote ('/workspace/' + filepath);
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execAWithInput ('docker exec -i ' + name + ' sh -c ' + JSON.stringify (command), content, 'buffer');
+      });
    },
 
    // Read file at any path inside /workspace (for tool edit_file)
-   readFileInWorkspace: async function (projectName, filepath) {
+   readFileInWorkspace: async function (projectName, filepath, rs) {
       var name = containerName (projectName);
-      return await execA ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filepath));
+      return await withProjectContainerRecovery (projectName, rs, function () {
+         return execA ('docker exec ' + name + ' cat ' + shQuote ('/workspace/' + filepath));
+      });
    }
 };
 
@@ -932,7 +1052,7 @@ var generateSnapshotId = function () {
 };
 
 var createSnapshot = async function (projectName, label) {
-   await getExistingProject (projectName);
+   projectName = validateProjectName (projectName);
    ensureSnapshotsDir ();
 
    var id = generateSnapshotId ();
@@ -941,12 +1061,18 @@ var createSnapshot = async function (projectName, label) {
    var name = containerName (projectName);
 
    // Create tar.gz of /workspace inside the project container, pipe it out
-   await execA ('docker exec ' + name + ' tar czf - -C /workspace . > ' + JSON.stringify (archivePath), {encoding: 'buffer', shell: '/bin/sh'});
+   var archived = await withProjectContainerRecovery (projectName, null, function () {
+      return execA ('docker exec ' + name + ' tar czf - -C /workspace . > ' + JSON.stringify (archivePath), {encoding: 'buffer', shell: '/bin/sh'});
+   });
+   if (archived === false) throw new Error ('Project not found');
 
    var fileCount = 0;
    try {
       // Count all files recursively under /workspace
-      fileCount = Number ((await execA ('docker exec ' + name + " sh -c 'find /workspace -type f | wc -l'")).trim ()) || 0;
+      var counted = await withProjectContainerRecovery (projectName, null, function () {
+         return execA ('docker exec ' + name + " sh -c 'find /workspace -type f | wc -l'");
+      });
+      if (counted !== false) fileCount = Number (counted.trim ()) || 0;
    }
    catch (e) {}
 
@@ -1057,24 +1183,21 @@ var volumeExists = async function (projectName) {
    }
 };
 
-var projectExists = async function (projectName) {
-   return (await containerExists (projectName)) || (await volumeExists (projectName));
+var validProjectNameOrReply = function (rs, projectName) {
+   try {
+      return validateProjectName (projectName);
+   }
+   catch (error) {
+      reply (rs, 400, {error: error.message});
+      return false;
+   }
 };
 
 var ensureProject = async function (projectName) {
    var slug = slugifyProjectName (projectName);
-   await ensureProjectContainer (slug);
+   await ensureProjectContainer (slug, {createVolume: true});
    await ensureProjectLayout (slug);
    return slug;
-};
-
-var getExistingProject = async function (projectName) {
-   projectName = validateProjectName (projectName);
-   if (! (await projectExists (projectName))) throw new Error ('Project not found');
-   // ensureProjectContainer handles all cases: running, stopped, or missing container (volume-only)
-   await ensureProjectContainer (projectName);
-   await ensureProjectLayout (projectName);
-   return projectName;
 };
 
 var listProjects = async function () {
@@ -1193,15 +1316,14 @@ var compactText = function (text, maxLines, maxChars) {
 };
 
 var getDocMainContent = async function (projectName) {
-   if (! (await pfs.exists (projectName, DOC_MAIN_FILE))) return null;
-
    try {
       var content = await pfs.readFile (projectName, DOC_MAIN_FILE);
       if (! content || ! content.trim ()) return null;
       return {name: DOC_MAIN_FILE, content: content.trim ()};
    }
    catch (error) {
-      return null;
+      if (isNoSuchFileError (error)) return null;
+      throw error;
    }
 };
 
@@ -1212,9 +1334,14 @@ var getDocMainInjection = async function (projectName) {
 };
 
 var upsertDocMainContextBlock = async function (projectName, filename) {
-   if (! (await pfs.exists (projectName, filename))) return;
-
-   var markdown = await pfs.readFile (projectName, filename);
+   var markdown;
+   try {
+      markdown = await pfs.readFile (projectName, filename);
+   }
+   catch (error) {
+      if (isNoSuchFileError (error)) return;
+      throw error;
+   }
    var blockRe = /<!-- DOC_MAIN_CONTEXT_START -->[\s\S]*?<!-- DOC_MAIN_CONTEXT_END -->\n\n?/;
    markdown = markdown.replace (blockRe, '');
 
@@ -1369,9 +1496,9 @@ var sanitizeToolPath = function (path) {
 };
 
 // Execute a tool inside the project container
-var executeTool = async function (toolName, toolInput, projectName) {
+var executeTool = async function (toolName, toolInput, projectName, rs) {
    try {
-      await getExistingProject (projectName);
+      projectName = validateProjectName (projectName);
    }
    catch (error) {
       return {success: false, error: error.message};
@@ -1389,7 +1516,8 @@ var executeTool = async function (toolName, toolInput, projectName) {
    };
 
    if (toolName === 'run_command') {
-      var r = await dockerExec (projectName, toolInput.command);
+      var r = await dockerExec (projectName, toolInput.command, rs);
+      if (r === false) return false;
       if (r.error) return await finalizeTool ({success: false, error: r.error.message, stderr: r.stderr});
       else         return await finalizeTool ({success: true, stdout: r.stdout, stderr: r.stderr});
    }
@@ -1397,7 +1525,8 @@ var executeTool = async function (toolName, toolInput, projectName) {
    if (toolName === 'write_file') {
       try {
          var writePath = sanitizeToolPath (toolInput.path);
-         await pfs.writeFileAt (projectName, writePath, toolInput.content);
+         var written = await pfs.writeFileAt (projectName, writePath, toolInput.content, rs);
+         if (written === false) return false;
          return await finalizeTool ({success: true, message: 'File written: ' + toolInput.path});
       }
       catch (error) {
@@ -1408,7 +1537,8 @@ var executeTool = async function (toolName, toolInput, projectName) {
    if (toolName === 'edit_file') {
       try {
          var editPath = sanitizeToolPath (toolInput.path);
-         var content = await pfs.readFileInWorkspace (projectName, editPath);
+         var content = await pfs.readFileInWorkspace (projectName, editPath, rs);
+         if (content === false) return false;
 
          var count = content.split (toolInput.old_string).length - 1;
 
@@ -1419,7 +1549,8 @@ var executeTool = async function (toolName, toolInput, projectName) {
             return await finalizeTool ({success: false, error: 'old_string found ' + count + ' times — must be unique. Add more surrounding context.'});
          }
          var updated = content.replace (toolInput.old_string, toolInput.new_string);
-         await pfs.writeFileAt (projectName, editPath, updated);
+         var edited = await pfs.writeFileAt (projectName, editPath, updated, rs);
+         if (edited === false) return false;
          return await finalizeTool ({success: true, message: 'Edit applied to ' + toolInput.path});
       }
       catch (error) {
@@ -1565,8 +1696,14 @@ var parseUsageNumbers = function (usage) {
 };
 
 var getLastCumulativeUsage = async function (projectName, filename) {
-   if (! (await pfs.exists (projectName, filename))) return {input: 0, output: 0, total: 0};
-   var text = await pfs.readFile (projectName, filename);
+   var text;
+   try {
+      text = await pfs.readFile (projectName, filename);
+   }
+   catch (error) {
+      if (isNoSuchFileError (error)) return {input: 0, output: 0, total: 0};
+      throw error;
+   }
    var re = /^> Usage cumulative:\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s*$/gm;
    var match, lastMatch = null;
    while ((match = re.exec (text)) !== null) lastMatch = match;
@@ -1715,8 +1852,9 @@ var parseDialogFilename = function (filename) {
    return {dialogId: legacy [1], status: legacy [2]};
 };
 
-var findDialogFilename = async function (projectName, dialogId) {
-   var files = await pfs.readdir (projectName);
+var findDialogFilename = async function (projectName, dialogId, rs) {
+   var files = await pfs.readdir (projectName, rs);
+   if (files === false) return false;
    var found = dale.stopNot (files, undefined, function (file) {
       var parsed = parseDialogFilename (file);
       if (parsed && parsed.dialogId === dialogId) return file;
@@ -1724,19 +1862,22 @@ var findDialogFilename = async function (projectName, dialogId) {
    return found || null;
 };
 
-var createDialogId = async function (projectName, slug) {
+var createDialogId = async function (projectName, slug, rs) {
    var base = formatDialogTimestamp () + '-' + sanitizeForFilename (slug || 'dialog');
    var candidate = base;
    var counter = 2;
-   while (await findDialogFilename (projectName, candidate)) {
+   while (true) {
+      var existing = await findDialogFilename (projectName, candidate, rs);
+      if (existing === false) return false;
+      if (! existing) return candidate;
       candidate = base + '-' + counter;
       counter++;
    }
-   return candidate;
 };
 
-var loadDialog = async function (projectName, dialogId) {
-   var filename = await findDialogFilename (projectName, dialogId);
+var loadDialog = async function (projectName, dialogId, rs) {
+   var filename = await findDialogFilename (projectName, dialogId, rs);
+   if (filename === false) return false;
    if (! filename) {
       return {
          dialogId: dialogId,
@@ -1748,7 +1889,8 @@ var loadDialog = async function (projectName, dialogId) {
       };
    }
 
-   var markdown = await pfs.readFile (projectName, filename);
+   var markdown = await pfs.readFile (projectName, filename, rs);
+   if (markdown === false) return false;
    var parsed = parseDialogFilename (filename) || {status: 'active'};
 
    return {
@@ -1772,30 +1914,21 @@ var setDialogStatus = async function (projectName, dialog, status, context) {
    var parsed = parseDialogFilename (currentFilename);
    var currentStatus = parsed ? parsed.status : dialog.status;
 
-   clog ('[dialog-status] request project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=' + context + ' from=' + currentStatus + ' to=' + status + ' file=' + currentFilename);
-
    dialog.exists = true;
    dialog.filename = currentFilename;
    dialog.status = currentStatus;
 
-   if (currentStatus === status) {
-      clog ('[dialog-status] noop project=' + projectName + ' dialogId=' + dialog.dialogId + ' status=' + status + ' file=' + currentFilename);
-      return dialog;
-   }
+   if (currentStatus === status) return dialog;
 
    var newFilename = buildDialogFilename (dialog.dialogId, status);
 
    try {
       await pfs.rename (projectName, currentFilename, newFilename);
-
-      clog ('[dialog-status] renamed project=' + projectName + ' dialogId=' + dialog.dialogId + ' old=' + currentFilename + ' new=' + newFilename);
-
       dialog.filename = newFilename;
       dialog.status = status;
       return dialog;
    }
    catch (error) {
-      clog ('[dialog-status] error project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=' + context + ' from=' + currentStatus + ' to=' + status + ' file=' + currentFilename + ' error=' + error.message);
       throw error;
    }
 };
@@ -2196,7 +2329,11 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       // the event loop or the stream reader.
       var writeQueue = Promise.resolve ();
       var queuedWriteError = null;
+      var llmStreamId = nextLogId ();
       var writeChunk = function (chunk) {
+         var eventType = type (chunk) === 'string' ? 'chunk' : ((chunk && chunk.type) || 'event');
+         var extra = type (chunk) === 'string' ? 'chars=' + chunk.length : '';
+         logStreamEvent ('   LLM STREAM', llmStreamId, projectName, dialog.dialogId, eventType, extra);
          writeQueue = writeQueue.then (function () {
             if (queuedWriteError) return;
             return appendToDialog (projectName, dialog.filename, chunk);
@@ -2284,7 +2421,7 @@ var createDialogDraft = async function (projectName, provider, model, slug) {
       throw new Error ('Unknown provider: ' + provider + '. Use "claude" or "openai".');
    }
 
-   await getExistingProject (projectName);
+   projectName = validateProjectName (projectName);
    var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
    var dialogId = await createDialogId (projectName, slug || 'dialog');
    var filename = buildDialogFilename (dialogId, 'done');
@@ -2313,7 +2450,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
       throw new Error ('Unknown provider: ' + provider + '. Use "claude" or "openai".');
    }
 
-   await getExistingProject (projectName);
+   projectName = validateProjectName (projectName);
    var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
    var dialogId = await createDialogId (projectName, slug);
    var dialog = {
@@ -2354,7 +2491,6 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
          await setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/error');
       }
       catch (statusError) {
-         clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=startDialogTurn/error error=' + statusError.message);
       }
       stream.emitter.emit ('event', {type: 'error', error: error.message});
       endActiveStream (projectName, dialogId);
@@ -2393,7 +2529,6 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
             await setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/error');
          }
          catch (statusError) {
-            clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialog.dialogId + ' context=updateDialogTurn/error error=' + statusError.message);
          }
          throw error;
       }
@@ -2450,39 +2585,29 @@ var uploadContentType = function (name, provided) {
    return 'application/octet-stream';
 };
 
-var listUploads = async function (projectName) {
-   var files = await pfs.readdir (projectName);
+var listUploads = async function (projectName, rs) {
+   var files = await pfs.readdir (projectName, rs);
+   if (files === false) return false;
    var uploadFiles = dale.fil (files, undefined, function (file) {
       if (isUploadPath (file)) return file;
    });
 
-   var entries = [];
-   for (var i = 0; i < uploadFiles.length; i++) {
-      var file = uploadFiles [i];
-      var shortName = file.slice (UPLOAD_DIR.length + 1);
-      var stat = await pfs.statDetailed (projectName, file);
-      entries.push ({
+   var stats = await pfs.statsDetailed (projectName, uploadFiles, rs);
+   if (stats === false) return false;
+
+   var entries = dale.go (stats, function (stat) {
+      var shortName = stat.name.slice (UPLOAD_DIR.length + 1);
+      return {
          name: shortName,
-         path: file,
+         path: stat.name,
          size: stat.size || 0,
          mtime: stat.mtime.getTime (),
          contentType: uploadContentType (shortName),
-      });
-   }
+      };
+   });
 
    entries.sort (function (a, b) { return b.mtime - a.mtime; });
    return entries;
-};
-
-// Resolve project for route handlers; replies with error and returns null on failure
-var resolveProject = async function (rs, projectName) {
-   try {
-      return await getExistingProject (projectName);
-   }
-   catch (error) {
-      reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
-      return null;
-   }
 };
 
 var autoCommitApi = function (projectName, method, path) {
@@ -2737,9 +2862,11 @@ var routes = [
       try {
          var displayName = rq.body.name.trim ();
          var slug = await ensureProject (displayName);
-         await pfs.mkdirp (slug, DOC_DIR);
-         await pfs.mkdirp (slug, DIALOG_DIR);
-         if (! (await pfs.exists (slug, DOC_MAIN_FILE))) {
+         try {
+            await pfs.readFile (slug, DOC_MAIN_FILE);
+         }
+         catch (error) {
+            if (! isNoSuchFileError (error)) throw error;
             await pfs.writeFile (slug, DOC_MAIN_FILE, '# ' + displayName + '\n');
          }
          await autoCommitApi (slug, 'POST', '/projects');
@@ -2751,21 +2878,16 @@ var routes = [
    }],
 
    ['delete', 'projects/:name', async function (rq, rs) {
-      var projectName = rq.data.params.name;
+      var projectName = validProjectNameOrReply (rs, rq.data.params.name);
+      if (! projectName) return;
 
-      try {
-         validateProjectName (projectName);
-      }
-      catch (error) {
-         return reply (rs, 400, {error: error.message});
-      }
-
-      if (! (await projectExists (projectName))) return reply (rs, 404, {error: 'Project not found'});
+      if (! (await volumeExists (projectName))) return reply (rs, 404, {error: 'Project not found'});
 
       // Abort active dialog streams and wait for them to settle
       var settledPromises = [];
       try {
-         var files = await pfs.readdir (projectName);
+         var files = await pfs.readdir (projectName, rs);
+         if (files === false) files = [];
          dale.go (files, function (file) {
             var parsed = parseDialogFilename (file);
             if (! parsed) return;
@@ -2792,7 +2914,7 @@ var routes = [
          reply (rs, 200, entry);
       }
       catch (error) {
-         reply (rs, 400, {error: error.message});
+         reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
       }
    }],
 
@@ -2860,22 +2982,19 @@ var routes = [
    // *** FILES ***
 
    ['get', 'project/:project/files', async function (rq, rs) {
-      var projectName = await resolveProject (rs, rq.data.params.project);
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
       if (! projectName) return;
 
       try {
-         var files = await pfs.readdir (projectName);
+         var files = await pfs.readdir (projectName, rs);
+         if (files === false) return;
          var managedFiles = dale.fil (files, undefined, function (file) {
             if (managedFilePath (file)) return file;
          });
-         // Sort by modification time, most recent first
-         var withStats = [];
-         for (var i = 0; i < managedFiles.length; i++) {
-            var stat = await pfs.stat (projectName, managedFiles [i]);
-            withStats.push ({name: managedFiles [i], mtime: stat.mtime.getTime ()});
-         }
-         withStats.sort (function (a, b) { return b.mtime - a.mtime; });
-         reply (rs, 200, dale.go (withStats, function (f) { return f.name; }));
+         var stats = await pfs.statsDetailed (projectName, managedFiles, rs);
+         if (stats === false) return;
+         stats.sort (function (a, b) { return b.mtime - a.mtime; });
+         reply (rs, 200, dale.go (stats, function (stat) { return stat.name; }));
       }
       catch (error) {
          reply (rs, 500, {error: 'Failed to read directory'});
@@ -2887,15 +3006,16 @@ var routes = [
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectName = await resolveProject (rs, projectSlug);
+      var projectName = validProjectNameOrReply (rs, projectSlug);
       if (! projectName) return;
 
       try {
-         if (! (await pfs.exists (projectName, name))) return reply (rs, 404, {error: 'File not found'});
-         var content = await pfs.readFile (projectName, name);
+         var content = await pfs.readFile (projectName, name, rs);
+         if (content === false) return;
          reply (rs, 200, {name: name, content: content});
       }
       catch (error) {
+         if (isNoSuchFileError (error)) return reply (rs, 404, {error: 'File not found'});
          reply (rs, 500, {error: 'Failed to read file'});
       }
    }],
@@ -2909,12 +3029,13 @@ var routes = [
          ['content', rq.body.content, 'string'],
       ])) return;
 
-      var projectName = await resolveProject (rs, projectSlug);
+      var projectName = validProjectNameOrReply (rs, projectSlug);
       if (! projectName) return;
 
       return withProjectMutationLock (projectName, async function () {
          try {
-            await pfs.writeFile (projectName, name, rq.body.content);
+            var written = await pfs.writeFile (projectName, name, rq.body.content, rs);
+            if (written === false) return;
             await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/file/' + name);
             reply (rs, 200, {ok: true, name: name});
          }
@@ -2929,16 +3050,17 @@ var routes = [
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validFilename (name)) return reply (rs, 400, {error: 'Invalid filename'});
 
-      var projectName = await resolveProject (rs, projectSlug);
+      var projectName = validProjectNameOrReply (rs, projectSlug);
       if (! projectName) return;
 
       try {
-         if (! (await pfs.exists (projectName, name))) return reply (rs, 404, {error: 'File not found'});
-         await pfs.unlink (projectName, name);
+         var removed = await pfs.unlink (projectName, name, rs);
+         if (removed === false) return;
          await autoCommitApi (projectName, 'DELETE', '/project/' + projectName + '/file/' + name);
          reply (rs, 200, {ok: true});
       }
       catch (error) {
+         if (isNoSuchFileError (error)) return reply (rs, 404, {error: 'File not found'});
          reply (rs, 500, {error: error.message || 'Failed to delete file'});
       }
    }],
@@ -2946,11 +3068,12 @@ var routes = [
    // *** UPLOADS ***
 
    ['get', 'project/:project/uploads', async function (rq, rs) {
-      var projectName = await resolveProject (rs, rq.data.params.project);
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
       if (! projectName) return;
 
       try {
-         var entries = await listUploads (projectName);
+         var entries = await listUploads (projectName, rs);
+         if (entries === false) return;
          reply (rs, 200, dale.go (entries, function (entry) {
             entry.url = '/project/' + encodeURIComponent (projectName) + '/upload/' + encodeURIComponent (entry.name);
             return entry;
@@ -2967,7 +3090,7 @@ var routes = [
          ['content', rq.body.content, 'string']
       ])) return;
 
-      var projectName = await resolveProject (rs, rq.data.params.project);
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
       if (! projectName) return;
 
       var name = rq.body.name.trim ();
@@ -2988,10 +3111,13 @@ var routes = [
          }
          var buffer = Buffer.from (base64, 'base64');
          var filepath = UPLOAD_DIR + '/' + name;
-         await pfs.writeFileBinaryAt (projectName, filepath, buffer);
+         var written = await pfs.writeFileBinaryAt (projectName, filepath, buffer, rs);
+         if (written === false) return;
          await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/upload');
 
-         var stat = await pfs.statDetailed (projectName, filepath);
+         var stats = await pfs.statsDetailed (projectName, [filepath], rs);
+         if (stats === false) return;
+         var stat = stats [0] || {size: buffer.length, mtime: new Date ()};
          reply (rs, 200, {
             ok: true,
             name: name,
@@ -3011,13 +3137,13 @@ var routes = [
       var name = decodeURIComponent (rq.data.params [1]);
       if (! validUploadName (name)) return reply (rs, 400, {error: 'Invalid upload name'});
 
-      var projectName = await resolveProject (rs, projectSlug);
+      var projectName = validProjectNameOrReply (rs, projectSlug);
       if (! projectName) return;
 
       try {
          var filepath = UPLOAD_DIR + '/' + name;
-         if (! (await pfs.existsAt (projectName, '/workspace/' + filepath))) return reply (rs, 404, {error: 'Upload not found'});
-         var buffer = await pfs.readFileBinaryAt (projectName, '/workspace/' + filepath);
+         var buffer = await pfs.readFileBinaryAt (projectName, '/workspace/' + filepath, rs);
+         if (buffer === false) return;
          var contentType = uploadContentType (name);
          rs.writeHead (200, {
             'Content-Type': contentType,
@@ -3026,6 +3152,7 @@ var routes = [
          rs.end (buffer);
       }
       catch (error) {
+         if (isNoSuchFileError (error)) return reply (rs, 404, {error: 'Upload not found'});
          if (! rs.headersSent) reply (rs, 500, {error: 'Failed to read upload'});
       }
    }],
@@ -3041,13 +3168,16 @@ var routes = [
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
       if (rq.body.slug !== undefined && type (rq.body.slug) !== 'string') return reply (rs, 400, {error: 'slug must be a string'});
 
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
+      if (! projectName) return;
+
       try {
-         var created = await createDialogDraft (rq.data.params.project, rq.body.provider, rq.body.model, rq.body.slug || 'dialog');
-         await autoCommitApi (rq.data.params.project, 'POST', '/project/' + rq.data.params.project + '/dialog/new');
+         var created = await createDialogDraft (projectName, rq.body.provider, rq.body.model, rq.body.slug || 'dialog');
+         await autoCommitApi (projectName, 'POST', '/project/' + projectName + '/dialog/new');
          reply (rs, 200, created);
       }
       catch (error) {
-         reply (rs, 400, {error: error.message});
+         reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
       }
    }],
 
@@ -3061,35 +3191,37 @@ var routes = [
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
       if (rq.body.slug !== undefined && type (rq.body.slug) !== 'string') return reply (rs, 400, {error: 'slug must be a string'});
 
-      var projectName = rq.data.params.project;
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
+      if (! projectName) return;
       var provider = rq.body.provider;
       var prompt = rq.body.prompt;
       var model = rq.body.model;
       var slug = rq.body.slug;
 
-      // Validate project
+      // Create the dialog file and set it to active
+      var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+      var dialogId;
+      var filename;
+      var dialog;
       try {
-         await getExistingProject (projectName);
+         dialogId = await createDialogId (projectName, slug, rs);
+         if (dialogId === false) return;
+         filename = buildDialogFilename (dialogId, 'active');
+         dialog = {
+            dialogId: dialogId,
+            filename: filename,
+            status: 'active',
+            exists: false,
+            markdown: '',
+            metadata: {}
+         };
+
+         await ensureDialogFile (projectName, dialog, provider, defaultModel);
+         await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
       }
       catch (error) {
          return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
       }
-
-      // Create the dialog file and set it to active
-      var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
-      var dialogId = await createDialogId (projectName, slug);
-      var filename = buildDialogFilename (dialogId, 'active');
-      var dialog = {
-         dialogId: dialogId,
-         filename: filename,
-         status: 'active',
-         exists: false,
-         markdown: '',
-         metadata: {}
-      };
-
-      await ensureDialogFile (projectName, dialog, provider, defaultModel);
-      await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
 
       // Set up active stream with emitter for fan-out
       var stream = beginActiveStream (projectName, dialogId);
@@ -3136,7 +3268,6 @@ var routes = [
                   if (dialogAfterError.exists) await setDialogStatus (projectName, dialogAfterError, 'done', 'route/post-dialog/error');
                }
                catch (statusError) {
-                  clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/post-dialog/error error=' + statusError.message);
                }
                stream.emitter.emit ('event', {type: 'error', error: error.message});
             }
@@ -3157,7 +3288,8 @@ var routes = [
       if (rq.body.provider !== undefined && (type (rq.body.provider) !== 'string' || ! inc (['claude', 'openai'], rq.body.provider))) return reply (rs, 400, {error: 'provider must be claude or openai'});
       if (rq.body.model !== undefined && type (rq.body.model) !== 'string') return reply (rs, 400, {error: 'model must be a string'});
 
-      var projectName = rq.data.params.project;
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
+      if (! projectName) return;
       var dialogId = rq.body.dialogId;
       var continues = type (rq.body.prompt) === 'string' && !! rq.body.prompt.trim ();
 
@@ -3175,7 +3307,7 @@ var routes = [
             return reply (rs, 200, result);
          }
          catch (error) {
-            return reply (rs, 400, {error: error.message});
+            return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
          }
       }
 
@@ -3193,7 +3325,11 @@ var routes = [
       var dialog;
       DIALOG_START_LOCKS [lockKey] = true;
       try {
-         dialog = await loadDialog (projectName, dialogId);
+         dialog = await loadDialog (projectName, dialogId, rs);
+         if (dialog === false) {
+            delete DIALOG_START_LOCKS [lockKey];
+            return;
+         }
          if (! dialog.exists) {
             delete DIALOG_START_LOCKS [lockKey];
             return reply (rs, 404, {error: 'Dialog not found'});
@@ -3209,10 +3345,15 @@ var routes = [
       }
       catch (dialogStateError) {
          delete DIALOG_START_LOCKS [lockKey];
-         return reply (rs, 400, {error: dialogStateError.message});
+         return reply (rs, dialogStateError.message === 'Project not found' ? 404 : 400, {error: dialogStateError.message});
       }
 
-      var meta = parseMetadata (await pfs.readFile (projectName, dialog.filename));
+      var dialogMarkdown = await pfs.readFile (projectName, dialog.filename, rs);
+      if (dialogMarkdown === false) {
+         delete DIALOG_START_LOCKS [lockKey];
+         return;
+      }
+      var meta = parseMetadata (dialogMarkdown);
       var resolvedProvider = rq.body.provider || meta.provider;
       if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
          delete DIALOG_START_LOCKS [lockKey];
@@ -3266,7 +3407,6 @@ var routes = [
                   if (dialogAfterError.exists) await setDialogStatus (projectName, dialogAfterError, 'done', 'route/put-dialog/error');
                }
                catch (statusError) {
-                  clog ('[dialog-status] finalize-failed project=' + projectName + ' dialogId=' + dialogId + ' context=route/put-dialog/error error=' + statusError.message);
                }
                clog ('Dialog update error (async PUT /dialog):', error.message);
                stream.emitter.emit ('event', {type: 'error', error: error.message});
@@ -3286,7 +3426,8 @@ var routes = [
       ])) return;
 
       try {
-         var result = await executeTool (rq.body.toolName, rq.body.toolInput, rq.data.params.project);
+         var result = await executeTool (rq.body.toolName, rq.body.toolInput, rq.data.params.project, rs);
+         if (result === false) return;
          reply (rs, 200, result);
       }
       catch (error) {
@@ -3297,13 +3438,18 @@ var routes = [
 
    // SSE stream for live dialog output
    ['get', /^\/project\/([^/]+)\/dialog\/([^/]+)\/stream$/, async function (rq, rs) {
-      var projectName = decodeURIComponent (rq.data.params [0]);
+      var projectName = validProjectNameOrReply (rs, decodeURIComponent (rq.data.params [0]));
+      if (! projectName) return;
       var dialogId = decodeURIComponent (rq.data.params [1]);
 
-      var resolved = await resolveProject (rs, projectName);
-      if (! resolved) return;
-
-      var dialog = await loadDialog (projectName, dialogId);
+      var dialog;
+      try {
+         dialog = await loadDialog (projectName, dialogId, rs);
+      }
+      catch (error) {
+         return reply (rs, error.message === 'Project not found' ? 404 : 500, {error: error.message});
+      }
+      if (dialog === false) return;
       if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
 
       // Set up SSE headers — Connection: close prevents client agents from
@@ -3317,18 +3463,26 @@ var routes = [
       if (rs.flushHeaders) rs.flushHeaders ();
       rs.write (':ok\n\n');
 
+      var sseStreamId = nextLogId ();
+      logLine ('   SSE REQ', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', rq.connection && rq.connection.remoteAddress ? rq.connection.remoteAddress : '');
+
       // If dialog is done (no active stream), send done immediately and close
       var activeStream = getActiveStream (projectName, dialogId);
       if (! activeStream) {
-         rs.write ('data: ' + JSON.stringify ({type: 'done', result: {dialogId: dialogId, filename: dialog.filename, status: dialog.status}}) + '\n\n');
+         var donePayload = JSON.stringify ({type: 'done', result: {dialogId: dialogId, filename: dialog.filename, status: dialog.status}});
+         logStreamEvent ('   SSE STREAM', sseStreamId, projectName, dialogId, 'done', 'bytes=' + Buffer.byteLength (donePayload));
+         rs.write ('data: ' + donePayload + '\n\n');
          rs.end ();
+         logLine ('   SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.ok), '(done)');
          return;
       }
 
       // Subscribe to the active stream's emitter
       var onEvent = function (event) {
          try {
-            rs.write ('data: ' + JSON.stringify (event) + '\n\n');
+            var payload = JSON.stringify (event);
+            logStreamEvent ('   SSE STREAM', sseStreamId, projectName, dialogId, event.type || 'event', 'bytes=' + Buffer.byteLength (payload));
+            rs.write ('data: ' + payload + '\n\n');
             if (rs.flush) rs.flush ();
          }
          catch (e) {}
@@ -3337,6 +3491,7 @@ var routes = [
          if (event.type === 'done' || event.type === 'error') {
             activeStream.emitter.removeListener ('event', onEvent);
             rs.end ();
+            logLine ('   SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog (event.type === 'error' ? 'FAILED' : 'OK', event.type === 'error' ? LOG_COLORS.failed : LOG_COLORS.ok), '(' + event.type + ')');
          }
       };
 
@@ -3347,20 +3502,29 @@ var routes = [
          if (activeStream && activeStream.emitter) {
             activeStream.emitter.removeListener ('event', onEvent);
          }
+         if (! rs.writableEnded) logLine ('   SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.info), '(client-closed)');
       });
    }],
 
    // Get dialog by ID
    ['get', 'project/:project/dialog/:id', async function (rq, rs) {
       var dialogId = rq.data.params.id;
-      var projectName = await resolveProject (rs, rq.data.params.project);
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
       if (! projectName) return;
 
-      var dialog = await loadDialog (projectName, dialogId);
+      var dialog;
+      try {
+         dialog = await loadDialog (projectName, dialogId, rs);
+      }
+      catch (error) {
+         return reply (rs, error.message === 'Project not found' ? 404 : 500, {error: error.message});
+      }
+      if (dialog === false) return;
       if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
 
       try {
-         var content = await pfs.readFile (projectName, dialog.filename);
+         var content = await pfs.readFile (projectName, dialog.filename, rs);
+         if (content === false) return;
          reply (rs, 200, {
             dialogId: dialogId,
             filename: dialog.filename,
@@ -3376,23 +3540,23 @@ var routes = [
 
    // List all dialogs
    ['get', 'project/:project/dialogs', async function (rq, rs) {
-      var projectName = await resolveProject (rs, rq.data.params.project);
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
       if (! projectName) return;
 
       try {
-         var files = await pfs.readdir (projectName);
+         var files = await pfs.readdir (projectName, rs);
+         if (files === false) return;
          var dialogFiles = dale.fil (files, undefined, function (file) {
             var parsed = parseDialogFilename (file);
             if (parsed) return file;
          });
-         // Sort by modification time, most recent first
-         var withStats = [];
-         for (var i = 0; i < dialogFiles.length; i++) {
-            var parsed = parseDialogFilename (dialogFiles [i]);
-            if (! parsed) continue;
-            var stat = await pfs.stat (projectName, dialogFiles [i]);
-            withStats.push ({dialogId: parsed.dialogId, status: parsed.status, filename: dialogFiles [i], mtime: stat.mtime.getTime ()});
-         }
+         var stats = await pfs.statsDetailed (projectName, dialogFiles, rs);
+         if (stats === false) return;
+         var withStats = dale.fil (stats, undefined, function (stat) {
+            var parsed = parseDialogFilename (stat.name);
+            if (! parsed) return;
+            return {dialogId: parsed.dialogId, status: parsed.status, filename: stat.name, mtime: stat.mtime.getTime ()};
+         });
          withStats.sort (function (a, b) { return b.mtime - a.mtime; });
          reply (rs, 200, withStats);
       }
@@ -3404,17 +3568,14 @@ var routes = [
    // *** STATIC PROXY ***
 
    ['get', /^\/project\/([^/]+)\/static(\/.*)?$/, async function (rq, rs) {
-      var projectName = decodeURIComponent (rq.data.params [0]);
+      var projectName = validProjectNameOrReply (rs, decodeURIComponent (rq.data.params [0]));
+      if (! projectName) return;
       var rawPath = rq.data.params [1] || '/';
 
       if (rq.rawurl) {
          var rawMatch = rq.rawurl.match (/\/static(\/[^?]*)?(\?.*)?$/);
          if (rawMatch) rawPath = rawMatch [1] || '/';
       }
-
-      // Validate project exists
-      var resolved = await resolveProject (rs, projectName);
-      if (! resolved) return;
 
       var filePath = rawPath || '/';
       if (filePath [0] !== '/') filePath = '/' + filePath;
@@ -3426,9 +3587,8 @@ var routes = [
 
       try {
          var fullPath = '/workspace/' + filePath;
-         if (! (await pfs.existsAt (projectName, fullPath))) return reply (rs, 404, {error: 'File not found'});
-
-         var content = await pfs.readFileBinaryAt (projectName, fullPath);
+         var content = await pfs.readFileBinaryAt (projectName, fullPath, rs);
+         if (content === false) return;
 
          // Determine content type from extension
          var ext = Path.extname (filePath).toLowerCase ();
@@ -3456,6 +3616,7 @@ var routes = [
          });
       }
       catch (error) {
+         if (isNoSuchFileError (error)) return reply (rs, 404, {error: 'File not found'});
          if (! rs.headersSent) reply (rs, 500, {error: 'Failed to serve file'});
       }
    }],
@@ -3463,7 +3624,8 @@ var routes = [
    // *** EMBED PROXY ***
 
    ['all', /^\/project\/([^/]+)\/proxy\/(\d+)(\/.*)?$/, async function (rq, rs) {
-      var projectName = decodeURIComponent (rq.data.params [0]);
+      var projectName = validProjectNameOrReply (rs, decodeURIComponent (rq.data.params [0]));
+      if (! projectName) return;
       var port = Number (rq.data.params [1]);
       var proxyPath = rq.data.params [2] || '/';
 
@@ -3478,18 +3640,11 @@ var routes = [
       // Validate port
       if (port < 1 || port > 65535 || isNaN (port)) return reply (rs, 400, {error: 'Invalid port'});
 
-      // Validate project exists
-      try {
-         await getExistingProject (projectName);
-      }
-      catch (error) {
-         return reply (rs, error.message === 'Project not found' ? 404 : 400, {error: error.message});
-      }
-
       // Resolve container IP
       var targetHost;
       try {
-         targetHost = await getContainerIP (projectName);
+         targetHost = await getContainerIP (projectName, rs);
+         if (targetHost === false) return;
       }
       catch (e) {
          return reply (rs, 502, {error: 'Could not resolve container IP: ' + e.message});
@@ -3552,12 +3707,19 @@ process.on ('uncaughtException', function (error, origin) {
 
 // Docker housekeeping: cleanup orphaned containers on startup
 clog ('Cleaning up orphaned project containers...');
-cleanupProjectContainers ();
+cleanupProjectContainers ().catch (function (error) {
+   clog ('Project container cleanup failed: ' + error.message);
+});
 
 // Docker housekeeping: kill project containers on shutdown
-var cleanupAndExit = function (signal) {
+var cleanupAndExit = async function (signal) {
    clog ('Received ' + signal + ', cleaning up...');
-   cleanupProjectContainers ();
+   try {
+      await cleanupProjectContainers ();
+   }
+   catch (error) {
+      clog ('Project container cleanup failed during shutdown: ' + error.message);
+   }
    process.exit (0);
 };
 
@@ -3569,17 +3731,12 @@ var port = 5353;
 // Lean server logs: print req/res without headers or bodies
 cicek.logconsole = function (message) {
    if (message [2] === 'request') {
-      console.log ('-----------');
-      console.log (' REQUEST ' + message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
+      logLine ('  HTTP REQ', message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
    }
    else if (message [2] === 'response') {
-      var code = message [3].code + '';
-      var color = '\033[37m\033[4' + ({1: 6, 2: 2, 3: 4, 4: 3, 5: 1}) [code [0]] + 'm' + code + '\033[0m\033[1m';
-      console.log ('-----------');
-      console.log ('RESPONSE ' + message [3].id, message [3].method.toUpperCase (), message [3].url, color, '(' + message [3].duration + 'ms)');
+      logLine ('  HTTP RES', message [3].id, message [3].method.toUpperCase (), message [3].url, logCodeColor (message [3].code), '(' + message [3].duration + 'ms)');
    }
    else if (message [2] !== 'requestContent') {
-      console.log ('-----------');
       console.log.apply (console, message);
    }
 };

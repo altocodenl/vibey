@@ -270,6 +270,7 @@ Docs sidebar shows an Uploads section at the bottom (always visible when uploads
   - If `status` is set without `prompt`, it is a pure status change (interrupt/mark done). Response: **JSON**.
   - If `prompt` is present, append as `## User` and continue generation **asynchronously**. Response: **JSON** `{dialogId, filename, status: "active"}`.
   - Whenever generation is kicked off on an existing dialog, server first sets status to `active`.
+  - **Per-dialog concurrency**: each dialog has a logical lock. If a PUT arrives while another PUT is already processing the same `dialogId` (or the dialog is already `active`), the server returns **409 Conflict** immediately. First request wins; no racing on file renames.
   - No SSE on PUT — the client connects to the stream endpoint separately.
 
 - `GET /project/:project/dialog/:id/stream` — **SSE** endpoint for live dialog output.
@@ -898,20 +899,22 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 21. `POST /project/:p/dialog/new` (slug `agent-a`) — save dialogId. Status `done`, filename `-done.md`.
 22. `POST /project/:p/dialog/new` (slug `agent-b`) — save dialogId. Status `done`, filename `-done.md`.
 23. Fire agent-a with slow prompt (PUT with `sleep 12` + 200 word essay). Fire agent-b with slow prompt. Both return JSON immediately.
-24. `GET /project/:p/dialog/:id/stream` (agent-a) — connect SSE. Verify chunks are arriving (dialog is active).
-25. Poll `GET /project/:p/dialogs` until agent-a is `active` with filename `-active.md`. Record observed.
-26. `PUT /project/:p/dialog` (agent-a dialogId + new prompt) — **409** rejected.
+24. Poll `GET /project/:p/dialogs` until agent-a is `active` with filename `-active.md`, then immediately `PUT /project/:p/dialog` (agent-a dialogId + new prompt) — **409** rejected.
+25. `GET /project/:p/dialog/:id/stream` (agent-b) — connect SSE. Verify events are arriving (other active dialog is live).
+26. Confirm active status was observed for agent-a before stop.
 27. `PUT /project/:p/dialog` (agent-a dialogId, `status: "done"`) — **200**, stopped.
 28. Poll `GET /project/:p/dialogs` — agent-a is `done`, filename `-done.md`. Confirm active was observed before done.
-29. `DELETE /projects/:p` — delete while agent-b still active. 200.
-30. `GET /projects` — project gone.
-31. `GET /project/:p/dialogs` — **404**.
-32. `GET /project/:p/files` — **404**.
-33. `POST /projects` (same name) — fresh project.
-34. `GET /project/:p/dialogs` — empty array.
-35. `GET /project/:p/files` — only `doc/main.md`.
-36. `DELETE /projects/:p` — cleanup.
-37. `GET /projects` — confirm gone.
+29. Fire two concurrent `PUT /project/:p/dialog` on agent-a (now done) with different prompts. Exactly one returns **200** `{status: "active"}`, the other returns **409**.
+30. `PUT /project/:p/dialog` (agent-a dialogId, `status: "done"`) — stop the newly restarted agent-a.
+31. `DELETE /projects/:p` — delete while agent-b still active. 200.
+32. `GET /projects` — project gone.
+33. `GET /project/:p/dialogs` — **404**.
+34. `GET /project/:p/files` — **404**.
+35. `POST /projects` (same name) — fresh project.
+36. `GET /project/:p/dialogs` — empty array.
+37. `GET /project/:p/files` — only `doc/main.md`.
+38. `DELETE /projects/:p` — cleanup.
+39. `GET /projects` — confirm gone.
 
 **Static app:**
 
@@ -940,11 +943,11 @@ This project is intentionally kept alive so the embedded game remains available.
 
 1. `POST /projects` — create project.
    - Client: Create project via prompt.
-2. `POST /project/:project/file/doc/main.md` — write backend tictactoe constraints (Express on port 4000).
+2. `POST /project/:project/file/doc/main.md` — write backend tictactoe constraints (Express on port 4000, install Express with npm before running).
    - Client: Seed backend-app constraints into `doc/main.md` (current client flow seeds via API).
 3. `POST /project/:project/dialog/new` — create orchestrator draft.
    - Client: Create a new dialog draft in the Dialogs tab.
-4. Fire `"please start"` (non-blocking).
+4. Fire `"please start"` (non-blocking), instructing the agent to install Express with npm, start the server with logs redirected, verify it is running, and then add the embed block.
    - Client: Send `please start` from chat input and continue without waiting for completion.
 5. Poll `GET /project/:project/proxy/4000/` until HTML includes React, `app.js`, and `tictactoe` markers.
    - Client: Verify proxied app route is reachable and contains expected markers.
@@ -979,48 +982,50 @@ Keep this project running intentionally so the embedded backend app stays playab
 
 ### Client implementation
 
-#### State variables (alphabetical, 38 total)
+#### State variables (alphabetical, 40 total)
 
 | # | Key | Type / Purpose |
 |---|-----|----------------|
-| 1 | `chatAutoStick` | `bool` — auto-scroll chat to bottom |
-| 2 | `chatInput` | `string` — current chat textarea value |
-| 3 | `chatModel` | `string` — selected LLM model |
-| 4 | `chatProvider` | `string` — `'claude'` or `'openai'` |
-| 5 | `contextWindow` | `object\|null` — `{used, limit, percent}` from last assistant turn |
-| 6 | `currentFile` | `object\|null` — `{name, content, original}` for open file |
-| 7 | `currentProject` | `string\|null` — slug of open project |
-| 8 | `currentUpload` | `string\|null` — name of selected upload |
-| 9 | `editorPreview` | `bool` — show markdown preview in docs editor |
-| 10 | `files` | `array` — file list for current project |
-| 11 | `hashTarget` | `object\|null` — parsed URL hash target |
-| 12 | `loadingFile` | `bool\|null` — file loading in progress |
-| 13 | `oauthCode` | `string\|null` — OAuth manual code input |
-| 14 | `oauthLoading` | `bool\|null` — OAuth flow in progress |
-| 15 | `oauthStep` | `string\|null` — OAuth flow step |
-| 16 | `optimisticUserMessage` | `string\|null` — optimistic user message shown before server confirms |
-| 17 | `projects` | `array` — project list |
-| 18 | `savingFile` | `bool\|null` — file save in progress |
-| 19 | `savingSettings` | `bool\|null` — settings save in progress |
-| 20 | `settings` | `object` — loaded from server (`GET /settings`) |
-| 21 | `settingsEdits` | `object\|null` — pending settings edits |
-| 22 | `settingsShowMore` | `bool\|null` — show advanced settings |
-| 23 | `snapshots` | `array` — snapshot list |
-| 24 | `streaming` | `bool\|null` — SSE stream active |
-| 25 | `streamingContent` | `string\|null` — accumulated SSE content |
-| 26 | `streamingDialogId` | `string\|null` — dialogId of active stream |
-| 27 | `tab` | `string` — current tab (`projects`, `docs`, `dialogs`, `settings`, `snapshots`) |
-| 28 | `toolMessageExpanded` | `object` — `{key: bool}` toggle state for tool messages |
-| 29 | `uploading` | `bool` — upload in progress |
-| 30 | `uploads` | `array` — upload list for current project |
-| 31 | `viCursor` | `object` — `{line, col}` vi cursor position |
-| 32 | `viMode` | `bool` — vi mode enabled |
-| 33 | `viOverlayChat` | DOM ref — vi cursor overlay for chat input |
-| 34 | `viOverlayEditor` | DOM ref — vi cursor overlay for editor |
-| 35 | `viState` | `object` — `{mode, pending, register, lastSearch, message, commandPrefix, undoStack, redoStack}` |
-| 36 | `voiceActive` | `bool` — voice input active |
-| 37 | `voiceRecognition` | `object\|null` — SpeechRecognition instance |
-| 38 | `voiceSupported` | `bool` — browser supports speech recognition |
+| 1 | `contextWindow` | `object\|null` — `{used, limit, percent}` from last assistant turn |
+| 2 | `currentFile` | `object\|null` — `{name, content, original}` for open file |
+| 3 | `currentProject` | `string\|null` — slug of open project |
+| 4 | `currentUpload` | `string\|null` — name of selected upload |
+| 5 | `dialog` | `object` — dialog/chat UI state container |
+| 6 | `dialog.autoStick` | `bool` — auto-scroll chat to bottom |
+| 7 | `dialog.input` | `string` — current dialog textarea value |
+| 8 | `dialog.model` | `string` — selected LLM model |
+| 9 | `dialog.provider` | `string` — `'claude'` or `'openai'` |
+| 10 | `dialog.voiceActive` | `bool` — voice input active |
+| 11 | `dialog.voiceRecognition` | `object\|null` — SpeechRecognition instance |
+| 12 | `dialog.voiceSupported` | `bool` — browser supports speech recognition |
+| 13 | `editorPreview` | `bool` — show markdown preview in docs editor |
+| 14 | `files` | `array` — file list for current project |
+| 15 | `hashTarget` | `object\|null` — parsed URL hash target |
+| 16 | `loadingFile` | `bool\|null` — file loading in progress |
+| 17 | `oauth` | `object` — OAuth UI state container |
+| 18 | `oauth.code` | `string` — manual OAuth code input (`code#state`) |
+| 19 | `oauth.loading` | `string\|null` — provider currently in OAuth flow (`openai` or `claude`) |
+| 20 | `oauth.step` | `object\|null` — current OAuth UI step, eg `{provider, flow, url}` |
+| 21 | `optimisticUserMessage` | `string\|null` — optimistic user message shown before server confirms |
+| 22 | `projects` | `array` — project list |
+| 23 | `savingFile` | `bool\|null` — file save in progress |
+| 24 | `savingSettings` | `bool\|null` — settings save in progress |
+| 25 | `settings` | `object` — loaded from server (`GET /settings`) |
+| 26 | `settingsEdits` | `object\|null` — pending settings edits |
+| 27 | `settingsShowMore` | `bool\|null` — show advanced settings |
+| 28 | `snapshots` | `array` — snapshot list |
+| 29 | `streaming` | `bool\|null` — SSE stream active |
+| 30 | `streamingContent` | `string\|null` — accumulated SSE content |
+| 31 | `streamingDialogId` | `string\|null` — dialogId of active stream |
+| 32 | `tab` | `string` — current tab (`projects`, `docs`, `dialogs`, `settings`, `snapshots`) |
+| 33 | `toolMessageExpanded` | `object` — `{key: bool}` toggle state for tool messages |
+| 34 | `uploading` | `bool` — upload in progress |
+| 35 | `uploads` | `array` — upload list for current project |
+| 36 | `viCursor` | `object` — `{line, col}` vi cursor position |
+| 37 | `viMode` | `bool` — vi mode enabled |
+| 38 | `viOverlayChat` | DOM ref — vi cursor overlay for chat input |
+| 39 | `viOverlayEditor` | DOM ref — vi cursor overlay for editor |
+| 40 | `viState` | `object` — `{mode, pending, register, lastSearch, message, commandPrefix, undoStack, redoStack}` |
 
 #### Timeouts & intervals (8 total)
 
@@ -1041,9 +1046,9 @@ The two main views have very wide dependency lists, meaning they redraw on almos
 
 1. **Docs sidebar+editor view** (line 2107) — **13 dependencies**: `files`, `currentFile`, `loadingFile`, `savingFile`, `editorPreview`, `currentProject`, `viMode`, `viState`, `viCursor`, `viOverlayEditor`, `uploads`, `currentUpload`, `uploading`.
 
-2. **Dialogs view** (line 2979) — **18 dependencies**: `files`, `currentFile`, `loadingFile`, `chatInput`, `chatProvider`, `chatModel`, `streaming`, `streamingContent`, `optimisticUserMessage`, `toolMessageExpanded`, `voiceActive`, `voiceSupported`, `currentProject`, `viMode`, `viState`, `viOverlayChat`, `settings`, `contextWindow`.
+2. **Dialogs view** (line 2979) — **15 dependencies**: `files`, `currentFile`, `loadingFile`, `dialog`, `streaming`, `streamingContent`, `optimisticUserMessage`, `toolMessageExpanded`, `currentProject`, `viMode`, `viState`, `viOverlayChat`, `settings`, `contextWindow`, `vibeyingSpin`.
 
-These are the main sources of redraw storms. For example, every keystroke in the chat input (`chatInput`) triggers a full redraw of the entire 18-dependency dialogs view. Similarly, every `viState` sub-key change (pending, register, message, etc.) redraws the full docs view.
+These are the main sources of redraw storms. For example, every keystroke in the dialog input (`dialog.input`) triggers a full redraw of the entire dialogs view. Similarly, every `viState` sub-key change (pending, register, message, etc.) redraws the full docs view.
 
 #### What to address
 
@@ -1051,17 +1056,17 @@ Quick wins:
 - The 50ms `setTimeout` calls for vi cursor (lines 1158, 1398) use the same pattern — extract a shared helper.
 
 Bigger refactors:
-- Break up the two mega-views into smaller nested `B.view`s so that e.g. `chatInput` changes only redraw the input area, not the entire dialog view. The B.views can be inline, no need to extract them to a separate variable. Bring state down to where it's needed, instead of up as in react.
+- Break up the two mega-views into smaller nested `B.view`s so that e.g. `dialog.input` changes only redraw the input area, not the entire dialog view. The B.views can be inline, no need to extract them to a separate variable. Bring state down to where it's needed, instead of up as in react.
 - The `setTimeout(fn, 0)` calls for auto-file-select (line 1261) and auto-scroll (line 980) are workarounds for ordering issues — replace with explicit sequencing in responders.
 
 ## TODO
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- Please fix all tests in the client: read the test suite, then fix it in order (fast suites at the beginning, slower ones at the end). You can rebuild vibey. Don't commit any fixes, but make changes. You can only make changes on this folder. You can use the globally installed pupeteer to run the tests, it should just work.
+- Add points 4 and 5 for vibey cloud in the readme.
 - Client: the experience is bad (weird redraws, slow).
+- Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
-
 
 ## Vibey cloud in a nutshell
 
