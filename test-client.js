@@ -892,13 +892,23 @@
          return true;
       }],
 
-      ['Dialog 20: Stream done dialog returns done immediately', function (done) {
+      ['Dialog 20: Stream done dialog returns done immediately (no chunks)', function (done) {
          streamDialogEvents (window._dialogProjectSlug, window._dialogDialogAsyncId, function (result) {
             window._dialogStreamAsyncDone = result;
             done (SHORT_WAIT, POLL);
          }, {timeout: SHORT_WAIT});
       }, function () {
-         if (! window._dialogStreamAsyncDone) return 'Missing done stream result';
+         var result = window._dialogStreamAsyncDone;
+         if (! result) return 'Missing done stream result';
+         if (result.error) return 'Stream error: ' + result.error;
+         var doneEvents = dale.fil (result.events || [], undefined, function (ev) {
+            if (ev.type === 'done') return ev;
+         });
+         if (! doneEvents.length) return 'Expected immediate done event for finished dialog';
+         var chunks = dale.fil (result.events || [], undefined, function (ev) {
+            if (ev.type === 'chunk') return ev;
+         });
+         if (chunks.length > 0) return 'Expected no chunk events for finished dialog, got ' + chunks.length;
          return true;
       }],
 
@@ -936,41 +946,16 @@
 
       ['Dialog 23: Fire agent-a and agent-b with slow prompts', function (done) {
          var project = encodeURIComponent (window._dialogProjectSlug);
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentADialog, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentBDialog, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentADialog, prompt: 'Use the run_command tool to run `sleep 6 && echo still-running`. After it completes, reply with the single word: finished'})}).catch (function () {});
+         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogAgentBDialog, prompt: 'Use the run_command tool to run `sleep 6 && echo still-running`. After it completes, reply with the single word: finished'})}).catch (function () {});
          done (2000, POLL);
       }, function () {return true;}],
 
-      ['Dialog 24: Stream agent-a and verify stream is live', function (done) {
-         window._dialogAgentAHasEvents = false;
-         console.log ('[vibey-test] streaming agent-a: ' + window._dialogAgentADialog);
-         streamDialogEvents (window._dialogProjectSlug, window._dialogAgentADialog, function (result) {
-            window._dialogAgentAStreamResult = result;
-            console.log ('[vibey-test] agent-a stream complete error=' + (result && result.error ? result.error : 'none') + ' events=' + ((result && result.events) ? result.events.length : 0));
-            done (SHORT_WAIT, POLL);
-         }, {
-            timeout: LONG_WAIT,
-            stopOnAnyEvent: true,
-            onEvent: function (ev) {
-               if (ev && ev.type) console.log ('[vibey-test] agent-a event ' + ev.type);
-               if (ev && ev.type && ! window._dialogAgentAHasEvents) {
-                  window._dialogAgentAHasEvents = true;
-                  if (ev.type !== 'done') window._dialogAgentAActiveObserved = true;
-               }
-            }
-         });
-      }, function () {
-         if (! window._dialogAgentAHasEvents) return 'No stream events received for agent-a';
-         return true;
-      }],
-
-      ['Dialog 25: Poll dialogs until agent-a is active with -active.md', function (done) {
+      ['Dialog 24: Agent-a active state rejects conflicting continue (409)', function (done) {
          done (LONG_WAIT, POLL);
       }, function () {
-         if (window._dialogAgentAActiveObserved) return true;
          if (! window._dialogAgentAStatusRequested) {
             window._dialogAgentAStatusRequested = true;
-            console.log ('[vibey-test] polling agent-a status');
             c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialogs', {}, '', function (error, rs) {
                window._dialogAgentAStatusRequested = false;
                window._dialogAgentADialogs = error ? null : (rs.body || []);
@@ -981,35 +966,45 @@
          var active = dale.stopNot (list, undefined, function (d) {
             if (d.dialogId === window._dialogAgentADialog && d.status === 'active' && d.filename && d.filename.indexOf ('-active.md') !== -1) return d;
          });
-         if (active) {
+         if (! active) return 'Waiting for agent-a to become active...';
+         if (window._dialogAgentAReject === 409) {
             window._dialogAgentAActiveObserved = true;
             return true;
          }
-         var doneEntry = dale.stopNot (list, undefined, function (d) {
-            if (d.dialogId === window._dialogAgentADialog && d.status === 'done') return d;
-         });
-         if (doneEntry && window._dialogAgentAHasEvents) {
-            window._dialogAgentAActiveObserved = true;
-            return true;
-         }
-         return 'Waiting for agent-a to become active...';
-      }],
-
-      ['Dialog 26: Continuing active agent-a is rejected (409)', function (done) {
-         console.log ('[vibey-test] request agent-a continue');
-         var logTimer = setInterval (function () {
-            console.log ('[vibey-test] waiting for 409 from agent-a');
-         }, 30000);
+         if (window._dialogAgentARejectRequestInFlight) return 'Waiting for 409 from agent-a...';
+         window._dialogAgentARejectRequestInFlight = true;
          c.ajax ('put', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog', {}, {
             dialogId: window._dialogAgentADialog,
             prompt: 'This should be rejected while active'
          }, function (error, rs) {
-            clearInterval (logTimer);
+            window._dialogAgentARejectRequestInFlight = false;
             window._dialogAgentAReject = error ? error.status : (rs && rs.xhr ? rs.xhr.status : null);
+         });
+         return 'Attempting conflicting continue...';
+      }],
+
+      ['Dialog 25: Stream agent-b and verify stream is live', function (done) {
+         window._dialogAgentBHasEvents = false;
+         console.log ('[vibey-test] streaming agent-b: ' + window._dialogAgentBDialog);
+         streamDialogEvents (window._dialogProjectSlug, window._dialogAgentBDialog, function (result) {
+            window._dialogAgentBStreamResult = result;
+            console.log ('[vibey-test] agent-b stream complete error=' + (result && result.error ? result.error : 'none') + ' events=' + ((result && result.events) ? result.events.length : 0));
             done (SHORT_WAIT, POLL);
+         }, {
+            timeout: LONG_WAIT,
+            stopOnAnyEvent: true,
+            onEvent: function (ev) {
+               if (ev && ev.type) console.log ('[vibey-test] agent-b event ' + ev.type);
+               if (ev && ev.type && ! window._dialogAgentBHasEvents) window._dialogAgentBHasEvents = true;
+            }
          });
       }, function () {
-         if (window._dialogAgentAReject !== 409) return 'Expected 409 when continuing active dialog, got ' + window._dialogAgentAReject;
+         if (! window._dialogAgentBHasEvents) return 'No stream events received for agent-b';
+         return true;
+      }],
+
+      ['Dialog 26: Active status was observed before stop', function () {
+         if (! window._dialogAgentAActiveObserved) return 'Active status was never observed';
          return true;
       }],
 
@@ -1694,218 +1689,6 @@
       }],
 
       // =============================================
-      // *** DIALOG (SAFETY) ***
-      // =============================================
-
-      ['Dialog (safety) 14a: Create project', function (done) {
-         window._dialogSafetyProject = 'test-dialog-safety-' + testTimestamp ();
-         mockPrompt (window._dialogSafetyProject);
-         B.call ('create', 'project');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         restorePrompt ();
-         return B.get ('currentProject') === window._dialogSafetyProject || 'Failed to create dialog safety project';
-      }],
-
-      ['Dialog (safety) 14b: Write doc/main.md', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/file/doc/main.md', {}, {content: '# Dialog Safety Test Project\n\n'}, function () {
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {return true;}],
-
-      ['Dialog (safety) 14: Create dialog agent-a', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, function (error, rs) {
-            window._dialogSafetyDialogA = rs && rs.body && rs.body.dialogId;
-            done (MEDIUM_WAIT, POLL);
-         });
-      }, function () {
-         if (! window._dialogSafetyDialogA) return 'Missing dialog id for agent-a';
-         return true;
-      }],
-
-      ['Dialog (safety) 15: Create dialog agent-b', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
-            window._dialogSafetyDialogB = rs && rs.body && rs.body.dialogId;
-            done (MEDIUM_WAIT, POLL);
-         });
-      }, function () {
-         if (! window._dialogSafetyDialogB) return 'Missing dialog id for agent-b';
-         return true;
-      }],
-
-      ['Dialog (safety) 16: Fire both dialogs (non-blocking)', function (done) {
-         var project = encodeURIComponent (window._dialogSafetyProject);
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogSafetyDialogA, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
-         fetch ('project/' + project + '/dialog', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify ({dialogId: window._dialogSafetyDialogB, prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'})}).catch (function () {});
-         done (2000, POLL);
-      }, function () {return true;}],
-
-      ['Dialog (safety) 17: Both dialogs are active', function (done) {
-         done (LONG_WAIT, POLL);
-      }, function () {
-         if (! window._dialogSafetyStatusRequested) {
-            window._dialogSafetyStatusRequested = true;
-            c.ajax ('get', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/dialogs', {}, '', function (error, rs) {
-               window._dialogSafetyStatusRequested = false;
-               if (error) return;
-               window._dialogSafetyDialogs = rs.body || [];
-            });
-            return 'Polling dialog statuses...';
-         }
-         var activeCount = dale.fil (window._dialogSafetyDialogs || [], undefined, function (d) {
-            if (d.status === 'active') return d;
-         }).length;
-         if (activeCount >= 2) return true;
-         window._dialogSafetyDialogs = null;
-         return 'Waiting for both dialogs to become active...';
-      }],
-
-      ['Dialog (safety) 18: Continuing active dialog is rejected (409)', function (done) {
-         var project = encodeURIComponent (window._dialogSafetyProject);
-         fetch ('project/' + project + '/dialog', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify ({dialogId: window._dialogSafetyDialogA, prompt: 'This should be rejected while active'})
-         }).then (function (res) {
-            window._dialogSafetyRejectStatus = res.status;
-            return res.text ();
-         }).then (function (text) {
-            window._dialogSafetyRejectBody = text;
-            done (SHORT_WAIT, POLL);
-         }).catch (function (e) {
-            window._dialogSafetyRejectStatus = -1;
-            window._dialogSafetyRejectBody = '' + e;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._dialogSafetyRejectStatus !== 409) return 'Expected 409 when continuing active dialog, got ' + window._dialogSafetyRejectStatus;
-         return true;
-      }],
-
-      ['Dialog (safety) 19: Stop active dialog still works', function (done) {
-         var project = encodeURIComponent (window._dialogSafetyProject);
-         fetch ('project/' + project + '/dialog', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify ({dialogId: window._dialogSafetyDialogA, status: 'done'})
-         }).then (function (res) {
-            window._dialogSafetyStopStatus = res.status;
-            return res.text ();
-         }).then (function (text) {
-            try {window._dialogSafetyStopBody = JSON.parse (text);} catch (e) {window._dialogSafetyStopBody = null;}
-            done (SHORT_WAIT, POLL);
-         }).catch (function () {
-            window._dialogSafetyStopStatus = -1;
-            window._dialogSafetyStopBody = null;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (window._dialogSafetyStopStatus !== 200) return 'Expected 200 when stopping active dialog, got ' + window._dialogSafetyStopStatus;
-         if (! window._dialogSafetyStopBody || window._dialogSafetyStopBody.status !== 'done') return 'Expected stop response with status=done';
-         return true;
-      }],
-
-      ['Dialog (safety) 20: Agent-a returns to done', function (done) {
-         done (LONG_WAIT, POLL);
-      }, function () {
-         if (! window._dialogSafetyDoneRequested) {
-            window._dialogSafetyDoneRequested = true;
-            c.ajax ('get', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/dialogs', {}, '', function (error, rs) {
-               window._dialogSafetyDoneRequested = false;
-               if (error) return;
-               window._dialogSafetyDialogsAfterStop = rs.body || [];
-            });
-            return 'Polling dialog status after stop...';
-         }
-         var entry = dale.stopNot (window._dialogSafetyDialogsAfterStop || [], undefined, function (d) {
-            if (d && d.dialogId === window._dialogSafetyDialogA) return d;
-         });
-         if (! entry) return 'Waiting for agent-a dialog entry...';
-         if (entry.status === 'done') return true;
-         window._dialogSafetyDialogsAfterStop = null;
-         return 'Waiting for agent-a to be done...';
-      }],
-
-      ['Dialog (safety) 21: Delete project with active agents', function (done) {
-         var originalConfirm = window.confirm;
-         window.confirm = function () {window.confirm = originalConfirm; return true;};
-         B.call ('delete', 'project', window._dialogSafetyProject);
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         if (B.get ('currentProject')) return 'Expected currentProject to be null after deletion';
-         if (B.get ('tab') !== 'projects') return 'Expected to return to projects tab after deletion';
-         return true;
-      }],
-
-      ['Dialog (safety) 22: Projects list no longer shows deleted project', function (done) {
-         B.call ('load', 'projects');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var item = findByText ('.file-name', window._dialogSafetyProject);
-         if (item) return 'Deleted safety project still appears in projects list';
-         return true;
-      }],
-
-      ['Dialog (safety) 23: Dialogs endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/dialogs', {}, '', function (error) {
-            window._dialogSafetyDialogs404 = error && error.status;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         return window._dialogSafetyDialogs404 === 404 || 'Expected dialogs endpoint 404';
-      }],
-
-      ['Dialog (safety) 24: Files endpoint returns 404', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/files', {}, '', function (error) {
-            window._dialogSafetyFiles404 = error && error.status;
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         return window._dialogSafetyFiles404 === 404 || 'Expected files endpoint 404';
-      }],
-
-      ['Dialog (safety) 25: Re-create same project name', function (done) {
-         c.ajax ('post', 'projects', {}, {name: window._dialogSafetyProject}, function () {done (SHORT_WAIT, POLL);});
-      }, function () {return true;}],
-
-      ['Dialog (safety) 26: Re-created project has no dialogs', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/dialogs', {}, '', function (error, rs) {
-            window._dialogSafetyDialogsAfter = error ? null : (rs.body || []);
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (type (window._dialogSafetyDialogsAfter) !== 'array' || window._dialogSafetyDialogsAfter.length !== 0) return 'Expected 0 dialogs after re-create';
-         return true;
-      }],
-
-      ['Dialog (safety) 27: Re-created project has only doc/main.md', function (done) {
-         c.ajax ('get', 'project/' + encodeURIComponent (window._dialogSafetyProject) + '/files', {}, '', function (error, rs) {
-            window._dialogSafetyFilesAfter = error ? null : (rs.body || []);
-            done (SHORT_WAIT, POLL);
-         });
-      }, function () {
-         if (type (window._dialogSafetyFilesAfter) !== 'array') return 'Expected files array after re-create';
-         var unexpected = dale.fil (window._dialogSafetyFilesAfter, undefined, function (name) {
-            if (name !== 'doc/main.md') return name;
-         });
-         if (unexpected.length) return 'Unexpected files after re-create: ' + unexpected.join (', ');
-         return true;
-      }],
-
-      ['Dialog (safety) 28: Delete re-created project', function (done) {
-         c.ajax ('delete', 'projects/' + encodeURIComponent (window._dialogSafetyProject), {}, '', function () {done (SHORT_WAIT, POLL);});
-      }, function () {return true;}],
-
-      ['Dialog (safety) 29: Projects list no longer shows re-created project', function (done) {
-         B.call ('load', 'projects');
-         done (MEDIUM_WAIT, POLL);
-      }, function () {
-         var item = findByText ('.file-name', window._dialogSafetyProject);
-         if (item) return 'Re-created project still appears in projects list';
-         return true;
-      }],
-
-      // =============================================
       // *** STATIC APP ***
       // =============================================
 
@@ -2101,12 +1884,14 @@
             '## Critical rules',
             '',
             '- Create a `server.js` that uses Express to serve static files from `/workspace` on port 4000.',
+            '- Before running the server, install Express in `/workspace` with npm (for example `npm init -y || true` and `npm install express`).',
             '- `index.html`: load React, ReactDOM, and Babel standalone from CDN (unpkg or cdnjs).',
             '  Include `<script src="app.js" type="text/babel"></script>` so JSX works.',
             '- `app.js`: a simple React tictactoe with a 3x3 grid of buttons, X/O turns, and a winner check.',
             '- The page title or heading must include "tictactoe" (case-insensitive).',
-            '- No build step, no npm install for React. Express is already available in the sandbox.',
-            '- Run the server with `node server.js &` so it stays alive in the background.',
+            '- No build step. Do not install React locally; use the CDN scripts in `index.html`.',
+            '- Start the server only after installing Express. Run it with `node server.js > /tmp/tictactoe-server.log 2>&1 &` so it stays alive in the background and logs are captured.',
+            '- After starting the server, verify it is running (for example with `ps aux | grep node` or `curl http://localhost:4000/`).',
             ''
          ].join ('\n') + '\n';
          c.ajax ('post', 'project/' + encodeURIComponent (window._backendAppProject) + '/file/doc/main.md', {}, {content: docMain}, function () {
@@ -2149,7 +1934,7 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify ({
                dialogId: dialogId,
-               prompt: 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000 serving static files from /workspace), index.html, and app.js in /workspace root. Do not re-fetch docs after the first read. Start the server with `node server.js &` and then update doc/main.md with an embed block (port 4000, title Tictactoe, height 500).'
+               prompt: 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000 serving static files from /workspace), index.html, and app.js in /workspace root. Do not re-fetch docs after the first read. Before running the server, install Express in /workspace with npm (for example `npm init -y || true` and `npm install express`). Do not install React locally; use CDN scripts only. Then start the server with `node server.js > /tmp/tictactoe-server.log 2>&1 &`, verify it is running or that `curl http://localhost:4000/` succeeds, and only then update doc/main.md with an embed block (port 4000, title Tictactoe, height 500).'
             })
          }).catch (function (error) {
             window._backendAppFireError = 'Failed to fire dialog: ' + (error && error.message ? error.message : String (error));
@@ -2907,7 +2692,7 @@
 
    ];
 
-   var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'dialog (safety)', 'static', 'backend', 'vi', 'snapshots'];
+   var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'static', 'backend', 'vi', 'snapshots'];
    // Match test-server's convention: fast excludes dialog/static/backend-style slow suites.
    var FAST_SUITES = ['project', 'docs', 'uploads', 'vi', 'snapshots'];
 

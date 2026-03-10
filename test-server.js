@@ -8,11 +8,12 @@ var type = teishi.type || teishi.t;
 var inc  = teishi.inc;
 
 // Backend integration tests for server.
-// Run:   node test-server.js                (all suites)
-//        node test-server.js --flow=dialog  (dialog suite, includes safety checks)
-//        node test-server.js --flow=uploads (uploads suite)
-//        node test-server.js --flow=autogit (auto-commit suite)
-// Suite names: projects, dialog, docs, uploads, snapshots, autogit, static, backend, vi
+// Run:   node test-server.js              (all suites)
+//        node test-server.js dialog       (dialog suite, includes safety checks)
+//        node test-server.js upload       (uploads suite)
+//        node test-server.js autogit      (auto-commit suite)
+//        node test-server.js fast         (fast suites: project, doc, upload, snapshot, autogit)
+// Suite names: project, doc, upload, snapshot, autogit, dialog, static, backend, vi
 // Assumes server is already running on localhost:5353
 
 // *** TIMESTAMP ***
@@ -728,23 +729,51 @@ var dialogSequence = [
       };
       httpJson ('PUT', '/project/' + DIALOG_PROJECT + '/dialog', {
          dialogId: s.dialogA,
-         prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'
+         prompt: 'Use the run_command tool to run `sleep 6 && echo still-running`. After it completes, reply with the single word: finished'
       }, function () {onFired ();});
       httpJson ('PUT', '/project/' + DIALOG_PROJECT + '/dialog', {
          dialogId: s.dialogB,
-         prompt: 'Use the run_command tool to run `sleep 12`. After it completes, reply with the single word: finished'
+         prompt: 'Use the run_command tool to run `sleep 6 && echo still-running`. After it completes, reply with the single word: finished'
       }, function () {onFired ();});
    }],
 
-   // Test 24: Connect to agent-a's SSE stream, verify chunks arriving
-   ['Dialog 24: SSE stream for agent-a has chunks', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      // Connect briefly to verify the stream is active and producing events
+   // Test 24: Poll until agent-a is active, then immediately verify conflicting continue is rejected (409)
+   ['Dialog 24: Agent-a active state rejects conflicting continue (409)', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      pollUntil (function (done) {
+         httpGet (5353, '/project/' + DIALOG_PROJECT + '/dialogs', function (error, status, body) {
+            if (error || status !== 200) return done (false);
+            try {
+               var dialogs = JSON.parse (body);
+               var entry = dale.stopNot (dialogs, undefined, function (d) {
+                  if (d && d.dialogId === s.dialogA) return d;
+               });
+               if (! entry) return done (false);
+               if (entry.status !== 'active') return done (false);
+               if (entry.filename.indexOf ('-active.md') === -1) return done (false, new Error ('Status active but filename missing -active.md: ' + entry.filename));
+               httpJson ('PUT', '/project/' + DIALOG_PROJECT + '/dialog', {dialogId: s.dialogA, prompt: 'This must be rejected while agent-a is active.'}, function (putError, code, putBody) {
+                  if (putError) return done (false, new Error ('PUT /dialog rejection request failed: ' + putError.message));
+                  if (code !== 409) return done (false, new Error ('Expected 409, got ' + code));
+                  if (! putBody || ! putBody.error) return done (false, new Error ('Expected error payload for 409'));
+                  s.activeObserved = true;
+                  done (true);
+               });
+            }
+            catch (e) {done (false);}
+         });
+      }, 200, 15000, function (error) {
+         if (error) return log ('agent-a active/409 test failed: ' + error.message);
+         next ();
+      });
+   }],
+
+   // Test 25: Connect to agent-b's SSE stream, verify the stream is live
+   ['Dialog 25: SSE stream for agent-b has events', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       var events = [];
       var called = false;
       var req = http.request ({
          hostname: 'localhost',
          port: 5353,
-         path: '/project/' + DIALOG_PROJECT + '/dialog/' + s.dialogA + '/stream',
+         path: '/project/' + DIALOG_PROJECT + '/dialog/' + s.dialogB + '/stream',
          method: 'GET',
          headers: {Accept: 'text/event-stream'}
       }, function (res) {
@@ -760,7 +789,6 @@ var dialogSequence = [
                if (! dataLines.length) return;
                try {events.push (JSON.parse (dataLines.join ('\n')));} catch (e) {}
             });
-            // Once we've seen any event, we know the stream is live
             if (! called && events.length > 0) {
                called = true;
                req.destroy ();
@@ -777,41 +805,10 @@ var dialogSequence = [
       req.end ();
    }],
 
-   // Test 25: Poll until agent-a is active
-   ['Dialog 25: Poll until agent-a is active', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      pollUntil (function (done) {
-         httpGet (5353, '/project/' + DIALOG_PROJECT + '/dialogs', function (error, status, body) {
-            if (error || status !== 200) return done (false);
-            try {
-               var dialogs = JSON.parse (body);
-               var entry = dale.stopNot (dialogs, undefined, function (d) {
-                  if (d && d.dialogId === s.dialogA) return d;
-               });
-               if (! entry) return done (false);
-               if (entry.status === 'active') {
-                  if (entry.filename.indexOf ('-active.md') === -1) return done (false, new Error ('Status active but filename missing -active.md: ' + entry.filename));
-                  s.activeObserved = true;
-                  return done (true);
-               }
-               done (false);
-            }
-            catch (e) {done (false);}
-         });
-      }, 500, 30000, function (error) {
-         if (error) return log ('agent-a never became active: ' + error.message);
-         next ();
-      });
-   }],
-
-   // Test 26: Continuing active agent-a rejected (409)
-   ['Dialog 26: Continuing active agent-a rejected (409)', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      httpJson ('PUT', '/project/' + DIALOG_PROJECT + '/dialog', {dialogId: s.dialogA, prompt: 'This must be rejected while agent-a is active.'}, function (error, code, body) {
-         if (error) console.log (error);
-         if (error) return log ('PUT /dialog rejection request failed: ' + error.message);
-         if (code !== 409) return log ('Expected 409, got ' + code);
-         if (! body || ! body.error) return log ('Expected error payload for 409');
-         next ();
-      });
+   // Test 26: Active status was observed before stop
+   ['Dialog 26: Active status was observed before stop', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      if (! s.activeObserved) return log ('Active status was never observed');
+      next ();
    }],
 
    // Test 27: Stop agent-a
@@ -1494,12 +1491,14 @@ var DOC_MAIN_BACKEND = [
    '## Critical rules',
    '',
    '- Create a `server.js` that uses Express to serve static files from `/workspace` on port 4000.',
+   '- Before running the server, install Express in `/workspace` with npm (for example `npm init -y || true` and `npm install express`).',
    '- `index.html`: load React, ReactDOM, and Babel standalone from CDN (unpkg or cdnjs).',
    '  Include `<script src="app.js" type="text/babel"></script>` so JSX works.',
    '- `app.js`: a simple React tictactoe with a 3x3 grid of buttons, X/O turns, and a winner check.',
    '- The page title or heading must include "tictactoe" (case-insensitive).',
-   '- No build step, no npm install for React. Express is already available in the sandbox.',
-   '- Run the server with `node server.js &` so it stays alive in the background.',
+   '- No build step. Do not install React locally; use the CDN scripts in `index.html`.',
+   '- Start the server only after installing Express. Run it with `node server.js > /tmp/tictactoe-server.log 2>&1 &` so it stays alive in the background and logs are captured.',
+   '- After starting the server, verify it is running (for example with `ps aux | grep node` or `curl http://localhost:4000/`).',
    '',
 ].join ('\n') + '\n';
 
@@ -1524,7 +1523,7 @@ var backendSequence = [
 
    // Fire the orchestrator and let it build the game + start the server
    ['Backend 4: Fire "please start" (non-blocking)', 'get', 'project/' + BACKEND_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (BACKEND_PROJECT, s.backendDialogId, 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000 serving static files from /workspace), index.html, and app.js in /workspace root. Do not re-fetch docs after the first read. Start the server with `node server.js &` and then update doc/main.md with an embed block (port 4000, title Tictactoe, height 500).', function (error) {
+      fireDialog (BACKEND_PROJECT, s.backendDialogId, 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000 serving static files from /workspace), index.html, and app.js in /workspace root. Do not re-fetch docs after the first read. Before running the server, install Express in /workspace with npm (for example `npm init -y || true` and `npm install express`). Do not install React locally; use CDN scripts only. Then start the server with `node server.js > /tmp/tictactoe-server.log 2>&1 &`, verify it is running or that `curl http://localhost:4000/` succeeds, and only then update doc/main.md with an embed block (port 4000, title Tictactoe, height 500).', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
       });
@@ -2163,12 +2162,10 @@ var allSuites = {
 
 var requestedSuites = [];
 dale.go (process.argv.slice (2), function (arg) {
-   var match = arg.match (/^--flow=(.+)$/);
-   if (! match) return;
-   if (match [1] === 'fast') return dale.go (FAST_SUITES, function (name) {
+   if (arg === 'fast') return dale.go (FAST_SUITES, function (name) {
       requestedSuites.push (name);
    });
-   requestedSuites.push (match [1]);
+   if (allSuites [arg]) requestedSuites.push (arg);
 });
 
 if (! requestedSuites.length) requestedSuites = SUITE_ORDER;

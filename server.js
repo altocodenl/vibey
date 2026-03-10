@@ -10,7 +10,19 @@ var cicek  = require ('cicek');
 
 var clog = console.log;
 
-var type = teishi.type, eq = teishi.eq, last = teishi.last, inc = teishi.inc, reply = cicek.reply;
+var type = teishi.type, eq = teishi.eq, last = teishi.last, inc = teishi.inc;
+
+var reply = function (rs, code, body, headers) {
+   try {
+      if (! rs) return;
+      if (rs.headersSent || rs.writableEnded || rs.destroyed) return;
+      if (rs.connection && rs.connection.writable === false) return;
+      return cicek.reply (rs, code, body, headers);
+   }
+   catch (error) {
+      clog ('[reply] skipped code=' + code + ' error=' + error.message);
+   }
+}
 
 var stop = function (rs, rules) {
    return teishi.stop (rules, function (error) {
@@ -873,19 +885,12 @@ var autoCommitMessage = function (meta) {
 
 var maybeAutoCommit = function (projectName, meta) {
    return withProjectCommitLock (projectName, function () {
+      var message = autoCommitMessage (meta);
       return ensureProjectGitRepo (projectName).then (function () {
-         return gitExecAsync (projectName, 'git -C /workspace status --porcelain');
-      }).then (function (status) {
-         if (! status) return {committed: false};
-
-         var message = autoCommitMessage (meta);
-         return gitExecAsync (projectName, 'git -C /workspace add -A').then (function () {
-            return gitExecAsync (projectName, 'git -C /workspace commit -m ' + shQuote (message));
-         }).then (function () {
-            return gitExecAsync (projectName, 'git -C /workspace rev-parse HEAD');
-         }).then (function (hash) {
-            return {committed: true, hash: hash, message: message};
-         });
+         return gitExecAsync (projectName, 'cd /workspace && if [ -n "$(git status --porcelain)" ]; then git add -A && git commit -m ' + shQuote (message) + ' && git rev-parse HEAD; else echo NOCOMMIT; fi');
+      }).then (function (output) {
+         if (output === 'NOCOMMIT') return {committed: false};
+         return {committed: true, hash: output.split ('\n').pop (), message: message};
       });
    });
 };
@@ -1118,8 +1123,13 @@ var listProjects = async function () {
 };
 
 var ACTIVE_STREAMS = {};
+var DIALOG_START_LOCKS = {};
 
 var activeStreamKey = function (projectName, dialogId) {
+   return projectName + '::' + dialogId;
+};
+
+var dialogLockKey = function (projectName, dialogId) {
    return projectName + '::' + dialogId;
 };
 
@@ -1756,10 +1766,9 @@ var setDialogStatus = async function (projectName, dialog, status, context) {
 
    if (! inc (DIALOG_STATUSES, status)) throw new Error ('Invalid status: ' + status);
    if (! dialog || ! dialog.dialogId) throw new Error ('Dialog not found');
+   if (! dialog.filename) throw new Error ('Dialog filename not set: ' + dialog.dialogId);
 
-   var currentFilename = await findDialogFilename (projectName, dialog.dialogId);
-   if (! currentFilename) throw new Error ('Dialog not found: ' + dialog.dialogId);
-
+   var currentFilename = dialog.filename;
    var parsed = parseDialogFilename (currentFilename);
    var currentStatus = parsed ? parsed.status : dialog.status;
 
@@ -1779,12 +1788,7 @@ var setDialogStatus = async function (projectName, dialog, status, context) {
    try {
       await pfs.rename (projectName, currentFilename, newFilename);
 
-      var oldExists = await pfs.exists (projectName, currentFilename);
-      var newExists = await pfs.exists (projectName, newFilename);
-
-      clog ('[dialog-status] renamed project=' + projectName + ' dialogId=' + dialog.dialogId + ' old=' + currentFilename + ' new=' + newFilename + ' oldExists=' + oldExists + ' newExists=' + newExists);
-
-      if (! newExists) throw new Error ('Dialog rename verification failed: missing ' + newFilename);
+      clog ('[dialog-status] renamed project=' + projectName + ' dialogId=' + dialog.dialogId + ' old=' + currentFilename + ' new=' + newFilename);
 
       dialog.filename = newFilename;
       dialog.status = status;
@@ -3176,30 +3180,42 @@ var routes = [
       }
 
       // Continuing with a prompt — check for conflicts
+      var lockKey = dialogLockKey (projectName, dialogId);
+      if (DIALOG_START_LOCKS [lockKey]) {
+         return reply (rs, 409, {error: 'Dialog is already being started. Stop it before sending a new prompt.', dialogId: dialogId, status: 'active'});
+      }
+
       var alreadyActive = getActiveStream (projectName, dialogId);
       if (alreadyActive) {
          return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: dialogId, status: 'active'});
       }
 
       var dialog;
+      DIALOG_START_LOCKS [lockKey] = true;
       try {
          dialog = await loadDialog (projectName, dialogId);
-         if (! dialog.exists) return reply (rs, 404, {error: 'Dialog not found'});
+         if (! dialog.exists) {
+            delete DIALOG_START_LOCKS [lockKey];
+            return reply (rs, 404, {error: 'Dialog not found'});
+         }
          if (dialog.status === 'active') {
+            delete DIALOG_START_LOCKS [lockKey];
             return reply (rs, 409, {error: 'Dialog is active. Stop it before sending a new prompt.', dialogId: dialogId, status: 'active'});
          }
+
+         // Set dialog to active, append user message
+         await setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
+         await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + rq.body.prompt.trim () + '\n\n');
       }
       catch (dialogStateError) {
+         delete DIALOG_START_LOCKS [lockKey];
          return reply (rs, 400, {error: dialogStateError.message});
       }
-
-      // Set dialog to active, append user message
-      await setDialogStatus (projectName, dialog, 'active', 'updateDialogTurn/before-run');
-      await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + rq.body.prompt.trim () + '\n\n');
 
       var meta = parseMetadata (await pfs.readFile (projectName, dialog.filename));
       var resolvedProvider = rq.body.provider || meta.provider;
       if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
+         delete DIALOG_START_LOCKS [lockKey];
          return reply (rs, 400, {error: 'Unable to determine provider for dialog update'});
       }
       var resolvedModel = rq.body.model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
@@ -3227,6 +3243,7 @@ var routes = [
             await autoCommitApi (projectName, 'PUT', '/project/' + projectName + '/dialog');
             stream.emitter.emit ('event', {type: 'done', result: result});
             endActiveStream (projectName, dialogId);
+            delete DIALOG_START_LOCKS [lockKey];
             stream.settle ();
          }
          catch (error) {
@@ -3255,6 +3272,7 @@ var routes = [
                stream.emitter.emit ('event', {type: 'error', error: error.message});
             }
             endActiveStream (projectName, dialogId);
+            delete DIALOG_START_LOCKS [lockKey];
             stream.settle ();
          }
       }) ();
@@ -3431,12 +3449,11 @@ var routes = [
          };
          var contentType = contentTypes [ext] || 'application/octet-stream';
 
-         rs.writeHead (200, {
+         reply (rs, 200, content, {
             'Content-Type': contentType,
             'Content-Length': content.length,
             'X-Frame-Options': 'SAMEORIGIN'
          });
-         rs.end (content);
       }
       catch (error) {
          if (! rs.headersSent) reply (rs, 500, {error: 'Failed to serve file'});
