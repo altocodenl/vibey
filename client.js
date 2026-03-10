@@ -3135,11 +3135,12 @@ views.dialogs = function () {
                   ['span', {style: style ({'font-weight': pct >= 50 ? '600' : 'normal', 'white-space': 'nowrap'})}, pct + '% context']
                ]];
             }) (),
-            // Vibeying gauge (active dialog indicator)
-            (streaming || dialogIsActive) ? ['div', {class: 'vibeying-gauge'}, [
-               ['span', {class: 'vibeying-spinner'}, ['|', '/', '-', '\\'] [vibeyingSpin || 0]],
-               ['span', {class: 'vibeying-label'}, 'Vibeying']
-            ]] : '',
+            // Vibeying gauge / ready placeholder (keeps input area from jumping)
+            ['div', {class: 'vibeying-gauge' + ((streaming || dialogIsActive) ? '' : ' vibeying-gauge-ready')}, [
+               ['span', {class: 'vibeying-spinner'}, (streaming || dialogIsActive) ? ['|', '/', '-', '\\'] [vibeyingSpin || 0] : ' '],
+               ['span', {class: 'vibeying-label'}, (streaming || dialogIsActive) ? 'Vibeying' : 'Ready'],
+               (streaming || dialogIsActive) ? '' : ['span', {class: 'vibeying-cursor'}, '_']
+            ]],
             // Input area
             ['div', {class: 'chat-input-area'}, [
                ['select', {

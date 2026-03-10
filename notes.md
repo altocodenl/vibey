@@ -79,12 +79,6 @@ Please do this in the server
 - Amazing. Please remove the project= prefix on the docker logs. Also put padding space to the left of "HTTP" and "SSE" so that it aligns with the DOCKER logs. Also shorten REQUEST to REQ and RESPONSE to RES
 - Briliant! Now please run and fix the dialog test.
 
-
-
-
-
-
-
 - Dialog concurrency issue: make `PUT /project/:project/dialog` first-come-first-served **per dialog**. If two requests try to continue/start the same dialog concurrently, the first one should win and the other should get **409** instead of racing on dialog file renames. Start with modifying the dialog suite in readme.md, then in test-server.
 - Another agent is working on the server. Could you come up with a patch for fixing the above, but not implement it yet?
 - Can you modify the client so that slug names are shown prettily? Everywhere except the url, I think
@@ -94,6 +88,8 @@ Please do this in the server
 - Please add the details on the nested oauths on the table, i want it all.
 - Can you remove the falsy/null inits in initialize? They are not necessary. If nothing is there, we default to undefined. dale.go calls can take undefined and won't iterate.
 - All the variables named chat..., I'm almost certain they concern dialogs. Please put them inside a dialog object. Including the voice ones. First the docs, then client.js.
+
+- When the client doesn't have the vibeying section, can you add one that says Ready in green, and takes up the same space, and has a cursor appearing and disappearing (a `_`), so that the bottom doesn't move up or down?
 
 ===
 

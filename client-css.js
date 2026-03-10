@@ -665,4 +665,15 @@ window.vibeyCSS = [
       'font-weight': '600',
       'letter-spacing': '0.06em',
    }],
+   ['.vibeying-gauge-ready', {
+      color: '#4ec970',
+   }],
+   ['.vibeying-cursor', {
+      'font-family': 'Monaco, Consolas, monospace',
+      'font-weight': 'bold',
+      'font-size': '14px',
+      width: '1ch',
+      'text-align': 'left',
+      display: 'inline-block',
+   }],
 ];
