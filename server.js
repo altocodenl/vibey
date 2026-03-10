@@ -59,9 +59,7 @@ var reply = function (rs, code, body, headers) {
       if (rs.connection && rs.connection.writable === false) return;
       return cicek.reply (rs, code, body, headers);
    }
-   catch (error) {
-      clog ('[reply] skipped code=' + code + ' error=' + error.message);
-   }
+   catch (error) {}
 }
 
 var stop = function (rs, rules) {
@@ -471,7 +469,6 @@ var getApiKey = async function (provider) {
                cred = config.accounts.claudeOAuth;
             }
             catch (e) {
-               clog ('Anthropic token refresh failed:', e.message);
                return {key: '', type: 'api_key'};
             }
          }
@@ -495,7 +492,6 @@ var getApiKey = async function (provider) {
                cred = config.accounts.openaiOAuth;
             }
             catch (e) {
-               clog ('OpenAI token refresh failed:', e.message);
                return {key: '', type: 'api_key'};
             }
          }
@@ -626,7 +622,6 @@ var cleanupProjectContainers = async function () {
       var ids = (await execA ('docker ps -aq --filter label=vibey=project')).trim ();
       if (ids) {
          await execA ('docker rm -f ' + ids);
-         clog ('Cleaned up orphaned project containers: ' + ids);
       }
    }
    catch (e) {
@@ -641,7 +636,6 @@ var ensureProjectContainer = async function (projectName, options) {
 
    try {
       await execA ('docker start ' + name);
-      clog ('Started existing container: ' + name);
       return true;
    }
    catch (error) {
@@ -672,7 +666,6 @@ var ensureProjectContainer = async function (projectName, options) {
       ' -w /workspace' +
       ' ' + SANDBOX_IMAGE
    );
-   clog ('Created project container: ' + name);
    return true;
 };
 
@@ -711,13 +704,11 @@ var removeProjectContainer = async function (projectName) {
    var removed = false;
    try {
       await execA ('docker rm -f ' + name);
-      clog ('Removed project container: ' + name);
       removed = true;
    }
    catch (e) {}
    try {
       await execA ('docker volume rm ' + vol);
-      clog ('Removed project volume: ' + vol);
       removed = true;
    }
    catch (e) {}
@@ -1509,7 +1500,6 @@ var executeTool = async function (toolName, toolInput, projectName, rs) {
          await maybeAutoCommit (projectName, {kind: 'tool', tool: toolName});
       }
       catch (error) {
-         clog ('Auto-commit failed after tool ' + toolName + ' in ' + projectName + ': ' + error.message);
          return {success: false, error: 'Auto-commit failed after tool ' + toolName + ': ' + error.message};
       }
       return result;
@@ -2612,7 +2602,6 @@ var listUploads = async function (projectName, rs) {
 
 var autoCommitApi = function (projectName, method, path) {
    return maybeAutoCommit (projectName, {kind: 'api', method: method, path: path}).catch (function (error) {
-      clog ('Auto-commit failed for ' + method + ' ' + path + ' in ' + projectName + ': ' + error.message);
       throw error;
    });
 };
@@ -3249,7 +3238,6 @@ var routes = [
             stream.settle ();
          }
          catch (error) {
-            clog ('Chat error (async POST /dialog):', error.message);
             if (error && error.name === 'AbortError') {
                try {
                   var activeAfterAbort = getActiveStream (projectName, dialogId);
@@ -3408,7 +3396,6 @@ var routes = [
                }
                catch (statusError) {
                }
-               clog ('Dialog update error (async PUT /dialog):', error.message);
                stream.emitter.emit ('event', {type: 'error', error: error.message});
             }
             endActiveStream (projectName, dialogId);
@@ -3431,7 +3418,6 @@ var routes = [
          reply (rs, 200, result);
       }
       catch (error) {
-         clog ('Tool execution error:', error.message);
          reply (rs, 500, {success: false, error: error.message});
       }
    }],
@@ -3464,7 +3450,7 @@ var routes = [
       rs.write (':ok\n\n');
 
       var sseStreamId = nextLogId ();
-      logLine ('   SSE REQ', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', rq.connection && rq.connection.remoteAddress ? rq.connection.remoteAddress : '');
+      logLine ('SSE REQ', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', rq.connection && rq.connection.remoteAddress ? rq.connection.remoteAddress : '');
 
       // If dialog is done (no active stream), send done immediately and close
       var activeStream = getActiveStream (projectName, dialogId);
@@ -3473,7 +3459,7 @@ var routes = [
          logStreamEvent ('   SSE STREAM', sseStreamId, projectName, dialogId, 'done', 'bytes=' + Buffer.byteLength (donePayload));
          rs.write ('data: ' + donePayload + '\n\n');
          rs.end ();
-         logLine ('   SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.ok), '(done)');
+         logLine ('SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.ok), '(done)');
          return;
       }
 
@@ -3491,7 +3477,7 @@ var routes = [
          if (event.type === 'done' || event.type === 'error') {
             activeStream.emitter.removeListener ('event', onEvent);
             rs.end ();
-            logLine ('   SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog (event.type === 'error' ? 'FAILED' : 'OK', event.type === 'error' ? LOG_COLORS.failed : LOG_COLORS.ok), '(' + event.type + ')');
+            logLine ('SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog (event.type === 'error' ? 'FAILED' : 'OK', event.type === 'error' ? LOG_COLORS.failed : LOG_COLORS.ok), '(' + event.type + ')');
          }
       };
 
@@ -3502,7 +3488,7 @@ var routes = [
          if (activeStream && activeStream.emitter) {
             activeStream.emitter.removeListener ('event', onEvent);
          }
-         if (! rs.writableEnded) logLine ('   SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.info), '(client-closed)');
+         if (! rs.writableEnded) logLine ('SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.info), '(client-closed)');
       });
    }],
 
@@ -3706,20 +3692,14 @@ process.on ('uncaughtException', function (error, origin) {
 });
 
 // Docker housekeeping: cleanup orphaned containers on startup
-clog ('Cleaning up orphaned project containers...');
-cleanupProjectContainers ().catch (function (error) {
-   clog ('Project container cleanup failed: ' + error.message);
-});
+cleanupProjectContainers ().catch (function (error) {});
 
 // Docker housekeeping: kill project containers on shutdown
 var cleanupAndExit = async function (signal) {
-   clog ('Received ' + signal + ', cleaning up...');
    try {
       await cleanupProjectContainers ();
    }
-   catch (error) {
-      clog ('Project container cleanup failed during shutdown: ' + error.message);
-   }
+   catch (error) {}
    process.exit (0);
 };
 
@@ -3731,13 +3711,10 @@ var port = 5353;
 // Lean server logs: print req/res without headers or bodies
 cicek.logconsole = function (message) {
    if (message [2] === 'request') {
-      logLine ('  HTTP REQ', message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
+      logLine ('HTTP REQ', message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
    }
    else if (message [2] === 'response') {
-      logLine ('  HTTP RES', message [3].id, message [3].method.toUpperCase (), message [3].url, logCodeColor (message [3].code), '(' + message [3].duration + 'ms)');
-   }
-   else if (message [2] !== 'requestContent') {
-      console.log.apply (console, message);
+      logLine ('HTTP RES', message [3].id, message [3].method.toUpperCase (), message [3].url, logCodeColor (message [3].code), '(' + message [3].duration + 'ms)');
    }
 };
 
