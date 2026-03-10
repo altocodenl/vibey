@@ -845,34 +845,70 @@ var dialogSequence = [
       });
    }],
 
-   // Test 29-37: Cleanup
-   ['Dialog 29: Delete project while agent-b active', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
+   // Test 29: Two concurrent PUTs on done agent-a — one wins (200), other gets 409
+   ['Dialog 29: Concurrent PUT race on done dialog', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      var results = [];
+      var finished = 0;
+      var onDone = function () {
+         finished++;
+         if (finished < 2) return;
+         var codes = dale.go (results, function (r) {return r.code;}).sort ();
+         if (codes [0] !== 200 || codes [1] !== 409) return log ('Expected one 200 and one 409, got ' + codes.join (' and '));
+         var winner = dale.stopNot (results, undefined, function (r) {if (r.code === 200) return r;});
+         if (! winner || ! winner.body || winner.body.status !== 'active') return log ('Winner should have status active');
+         var loser = dale.stopNot (results, undefined, function (r) {if (r.code === 409) return r;});
+         if (! loser || ! loser.body || ! loser.body.error) return log ('Loser should have error payload');
+         next ();
+      };
+      httpJson ('PUT', '/project/' + DIALOG_PROJECT + '/dialog', {dialogId: s.dialogA, prompt: 'Concurrent race prompt A: reply with the single word alpha'}, function (error, code, body) {
+         results.push ({code: code, body: body, error: error});
+         onDone ();
+      });
+      httpJson ('PUT', '/project/' + DIALOG_PROJECT + '/dialog', {dialogId: s.dialogA, prompt: 'Concurrent race prompt B: reply with the single word beta'}, function (error, code, body) {
+         results.push ({code: code, body: body, error: error});
+         onDone ();
+      });
+   }],
+
+   // Test 30: Stop agent-a after the concurrent race winner started it
+   ['Dialog 30: Stop agent-a after concurrent race', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('PUT', '/project/' + DIALOG_PROJECT + '/dialog', {dialogId: s.dialogA, status: 'done'}, function (error, code, body) {
+         if (error) return log ('PUT /dialog stop after race failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200 when stopping after race, got ' + code);
+         if (type (body) !== 'object') return log ('Expected object body');
+         if (body.status !== 'done') return log ('Expected status done after stop, got: ' + body.status);
+         next ();
+      });
+   }],
+
+   // Test 31-39: Cleanup
+   ['Dialog 31: Delete project while agent-b active', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
 
-   ['Dialog 30: Project gone from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 32: Project gone from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DIALOG_PROJECT)) return log ('Project still exists after deletion');
       return true;
    }],
 
-   ['Dialog 31: Dialogs endpoint 404', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 404],
+   ['Dialog 33: Dialogs endpoint 404', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 404],
 
-   ['Dialog 32: Files endpoint 404', 'get', 'project/' + DIALOG_PROJECT + '/files', {}, '', 404],
+   ['Dialog 34: Files endpoint 404', 'get', 'project/' + DIALOG_PROJECT + '/files', {}, '', 404],
 
-   ['Dialog 33: Re-create project', 'post', 'projects', {}, {name: DIALOG_PROJECT}, 200, function (s, rq, rs) {
+   ['Dialog 35: Re-create project', 'post', 'projects', {}, {name: DIALOG_PROJECT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Re-creation failed');
       return true;
    }],
 
-   ['Dialog 34: No dialogs in fresh project', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 36: No dialogs in fresh project', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (rs.body.length !== 0) return log ('Expected 0 dialogs, got ' + rs.body.length);
       return true;
    }],
 
-   ['Dialog 35: Only doc/main.md in fresh project', 'get', 'project/' + DIALOG_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 37: Only doc/main.md in fresh project', 'get', 'project/' + DIALOG_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var unexpected = dale.fil (rs.body, undefined, function (name) {
          if (name !== 'doc/main.md') return name;
@@ -881,12 +917,12 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 36: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Dialog 38: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Cleanup deletion failed');
       return true;
    }],
 
-   ['Dialog 37: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 39: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DIALOG_PROJECT)) return log ('Project still exists after final deletion');
       return true;

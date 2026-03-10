@@ -1043,7 +1043,65 @@
          return true;
       }],
 
-      ['Dialog 29: Delete project while agent-b active', function (done) {
+      ['Dialog 29: Concurrent PUT race on done agent-a — one 200, one 409', function (done) {
+         var project = encodeURIComponent (window._dialogProjectSlug);
+         var dialogId = window._dialogAgentADialog;
+         window._dialogConcurrentResults = [];
+         window._dialogConcurrentDone = 0;
+
+         var onResult = function () {
+            window._dialogConcurrentDone++;
+            if (window._dialogConcurrentDone >= 2) done (SHORT_WAIT, POLL);
+         };
+
+         fetch ('project/' + project + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({dialogId: dialogId, prompt: 'Concurrent race prompt A: reply with the single word alpha'})
+         }).then (function (res) {
+            return res.json ().then (function (body) {
+               window._dialogConcurrentResults.push ({code: res.status, body: body});
+               onResult ();
+            });
+         }).catch (function () { onResult (); });
+
+         fetch ('project/' + project + '/dialog', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify ({dialogId: dialogId, prompt: 'Concurrent race prompt B: reply with the single word beta'})
+         }).then (function (res) {
+            return res.json ().then (function (body) {
+               window._dialogConcurrentResults.push ({code: res.status, body: body});
+               onResult ();
+            });
+         }).catch (function () { onResult (); });
+      }, function () {
+         var results = window._dialogConcurrentResults || [];
+         if (results.length < 2) return 'Expected 2 results, got ' + results.length;
+         var codes = dale.go (results, function (r) {return r.code;}).sort ();
+         if (codes [0] !== 200 || codes [1] !== 409) return 'Expected one 200 and one 409, got ' + codes.join (' and ');
+         var winner = dale.stopNot (results, undefined, function (r) {if (r.code === 200) return r;});
+         if (! winner || ! winner.body || winner.body.status !== 'active') return 'Winner should have status active';
+         var loser = dale.stopNot (results, undefined, function (r) {if (r.code === 409) return r;});
+         if (! loser || ! loser.body || ! loser.body.error) return 'Loser should have error payload';
+         return true;
+      }],
+
+      ['Dialog 30: Stop agent-a after concurrent race', function (done) {
+         c.ajax ('put', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog', {}, {
+            dialogId: window._dialogAgentADialog,
+            status: 'done'
+         }, function (error, rs) {
+            window._dialogAgentARaceStop = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._dialogAgentARaceStop || {};
+         if (result.error) return 'Stopping agent-a after race failed';
+         return true;
+      }],
+
+      ['Dialog 31: Delete project while agent-b active', function (done) {
          c.ajax ('delete', 'projects/' + encodeURIComponent (window._dialogProjectSlug), {}, '', function (error, rs) {
             window._dialogDeleteWhileActive = {error: error, rs: rs};
             done (MEDIUM_WAIT, POLL);
@@ -1056,7 +1114,7 @@
          return true;
       }],
 
-      ['Dialog 30: Project gone from /projects list', function (done) {
+      ['Dialog 32: Project gone from /projects list', function (done) {
          c.ajax ('get', 'projects', {}, '', function (error, rs) {
             window._dialogProjectList = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -1070,7 +1128,7 @@
          return true;
       }],
 
-      ['Dialog 31: /dialogs returns 404 after deletion', function (done) {
+      ['Dialog 33: /dialogs returns 404 after deletion', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialogs', {}, '', function (error) {
             window._dialogDialogsMissing = error ? error.status : null;
             done (SHORT_WAIT, POLL);
@@ -1080,7 +1138,7 @@
          return true;
       }],
 
-      ['Dialog 32: /files returns 404 after deletion', function (done) {
+      ['Dialog 34: /files returns 404 after deletion', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/files', {}, '', function (error) {
             window._dialogFilesMissing = error ? error.status : null;
             done (SHORT_WAIT, POLL);
@@ -1090,7 +1148,7 @@
          return true;
       }],
 
-      ['Dialog 33: Recreate project with same name', function (done) {
+      ['Dialog 35: Recreate project with same name', function (done) {
          c.ajax ('post', 'projects', {}, {name: TEST_PROJECT}, function (error, rs) {
             window._dialogProjectRecreate = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -1103,7 +1161,7 @@
          return true;
       }],
 
-      ['Dialog 34: /dialogs returns empty array', function (done) {
+      ['Dialog 36: /dialogs returns empty array', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialogs', {}, '', function (error, rs) {
             window._dialogDialogsEmpty = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -1116,7 +1174,7 @@
          return true;
       }],
 
-      ['Dialog 35: /files returns only doc/main.md', function (done) {
+      ['Dialog 37: /files returns only doc/main.md', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/files', {}, '', function (error, rs) {
             window._dialogFilesList = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -1129,14 +1187,14 @@
          return true;
       }],
 
-      ['Dialog 36: Delete recreated project', function (done) {
+      ['Dialog 38: Delete recreated project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._dialogProjectSlug);
          done (MEDIUM_WAIT, POLL);
       }, function () {return true;}],
 
-      ['Dialog 37: Project gone after cleanup', function (done) {
+      ['Dialog 39: Project gone after cleanup', function (done) {
          c.ajax ('get', 'projects', {}, '', function (error, rs) {
             window._dialogProjectList2 = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
