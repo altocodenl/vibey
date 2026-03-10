@@ -2662,6 +2662,8 @@
 
       ['Snapshots 4: Create snapshot with label "before refactor"', function (done) {
          mockPrompt ('before refactor');
+         window._vibeyExpectedAlerts = window._vibeyExpectedAlerts || [];
+         window._vibeyExpectedAlerts.push ('Snapshot created: before refactor');
          B.call ('create', 'snapshot');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2688,6 +2690,8 @@
 
       ['Snapshots 6: Create second snapshot without label', function (done) {
          mockPrompt ('');
+         window._vibeyExpectedAlerts = window._vibeyExpectedAlerts || [];
+         window._vibeyExpectedAlerts.push (/^Snapshot created: /);
          B.call ('create', 'snapshot');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2904,7 +2908,8 @@
    ];
 
    var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'dialog (safety)', 'static', 'backend', 'vi', 'snapshots'];
-   var FAST_SUITES = ['project', 'dialog', 'docs', 'uploads', 'dialog (safety)', 'static'];
+   // Match test-server's convention: fast excludes dialog/static/backend-style slow suites.
+   var FAST_SUITES = ['project', 'docs', 'uploads', 'vi', 'snapshots'];
 
    var filterValue = suiteFilter.toLowerCase ().trim ();
 
@@ -2933,6 +2938,58 @@
    else {
       filteredTests = testsBySuite [filterValue] || [];
    }
+
+   var originalAlert = window.alert;
+   var unexpectedAlert = null;
+   var testControlledAlertPrefixes = [
+      '❌ No tests found for suite:',
+      '❌ Test FAILED:',
+      '✅ All tests passed!'
+   ];
+
+   var matchesExpectedAlert = function (message, expected) {
+      if (type (expected) === 'string') return message === expected;
+      if (expected && expected.test && type (expected.test) === 'function') return expected.test (message);
+      return false;
+   };
+
+   window._vibeyExpectedAlerts = window._vibeyExpectedAlerts || [];
+
+   window.alert = function (message) {
+      message = '' + message;
+      var isTestControlled = dale.stopNot (testControlledAlertPrefixes, undefined, function (prefix) {
+         if (message.indexOf (prefix) === 0) return true;
+      });
+      if (isTestControlled) return originalAlert.call (window, message);
+
+      var expectedAlerts = window._vibeyExpectedAlerts || [];
+      var expectedIndex = dale.stopNot (expectedAlerts, undefined, function (expected, k) {
+         if (matchesExpectedAlert (message, expected)) return k;
+      });
+      if (expectedIndex !== undefined) {
+         expectedAlerts.splice (expectedIndex, 1);
+         console.log ('[vibey-test] expected alert:', message);
+         return;
+      }
+
+      console.error ('[vibey-test] unexpected alert:', message);
+      if (! unexpectedAlert) unexpectedAlert = message;
+   };
+
+   filteredTests = dale.go (filteredTests, function (test) {
+      var name = test [0];
+      if (test.length < 3) return [name, function () {
+         if (unexpectedAlert) return 'Unexpected alert: ' + unexpectedAlert;
+         return test [1] ();
+      }];
+      return [name, function (done) {
+         if (unexpectedAlert) return done (SHORT_WAIT, POLL);
+         return test [1] (done);
+      }, function () {
+         if (unexpectedAlert) return 'Unexpected alert: ' + unexpectedAlert;
+         return test [2] ();
+      }];
+   });
 
    if (filteredTests.length === 0) {
       alert ('❌ No tests found for suite: ' + suiteFilter);

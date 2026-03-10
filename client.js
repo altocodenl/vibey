@@ -1053,6 +1053,8 @@ B.mrespond ([
             B.call (x, 'set', 'currentProject', null);
             B.call (x, 'set', 'files', []);
             B.call (x, 'set', 'currentFile', null);
+            B.call (x, 'set', 'uploads', []);
+            B.call (x, 'set', 'currentUpload', null);
             B.call (x, 'set', 'streaming', false);
             B.call (x, 'set', 'streamingContent', '');
             B.call (x, 'set', 'optimisticUserMessage', null);
@@ -1561,10 +1563,22 @@ B.mrespond ([
 
    ['load', 'uploads', function (x, project) {
       project = project || B.get ('currentProject');
-      if (! project) return B.call (x, 'set', 'uploads', []);
+      if (! project) {
+         B.call (x, 'set', 'uploads', []);
+         return B.call (x, 'set', 'currentUpload', null);
+      }
 
       B.call (x, 'get', projectPath (project, 'uploads'), {}, '', function (x, error, rs) {
-         if (error) return B.call (x, 'report', 'error', 'Failed to load uploads');
+         // Ignore stale responses after project navigation/deletion.
+         if (project !== B.get ('currentProject')) return;
+
+         if (error) {
+            if (error.status === 404) {
+               B.call (x, 'set', 'uploads', []);
+               return B.call (x, 'set', 'currentUpload', null);
+            }
+            return B.call (x, 'report', 'error', 'Failed to load uploads');
+         }
          var uploads = rs.body || [];
          B.call (x, 'set', 'uploads', uploads);
 
