@@ -294,7 +294,7 @@
       return es;
    };
 
-   var LONG_WAIT    = 240000; // 4 min for LLM responses
+   var LONG_WAIT    = 60000; // 1 min for LLM responses
    var MEDIUM_WAIT  = 15000;
    var SHORT_WAIT   = 3000;
    var POLL         = 200;
@@ -353,6 +353,21 @@
          return true;
       }],
 
+      ['Project 2a: Create another project via API while not on Projects', function (done) {
+         window._projRefreshName = 'test-projects-refresh-' + testTimestamp ();
+         c.ajax ('post', 'projects', {}, {name: window._projRefreshName}, function (error, rs) {
+            window._projRefreshCreate = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._projRefreshCreate || {};
+         if (result.error) return 'Failed to create refresh-check project';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (! body.slug) return 'Missing slug for refresh-check project';
+         window._projRefreshSlug = body.slug;
+         return true;
+      }],
+
       ['Project 3: Projects list shows new project entry', function (done) {
          B.call ('navigate', 'hash', '#/projects');
          done (SHORT_WAIT, POLL);
@@ -361,6 +376,14 @@
          if (tab !== 'projects') return 'Expected tab to be "projects" but got "' + tab + '"';
          var item = findByText ('.file-name', PROJECT_FLOW);
          if (! item) return 'Project entry not found in list for "' + PROJECT_FLOW + '"';
+         return true;
+      }],
+
+      ['Project 3a: Switching back to Projects refreshes the list', function (done) {
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var item = findByText ('.file-name', window._projRefreshName);
+         if (! item) return 'Projects list did not refresh when returning to Projects';
          return true;
       }],
 
@@ -402,6 +425,17 @@
       }, function () {
          if (B.get ('currentProject')) return 'Expected currentProject to remain null after navigating to deleted project';
          if (B.get ('tab') !== 'projects') return 'Expected to remain on projects tab after navigating to deleted project';
+         return true;
+      }],
+
+      ['Project 7a: Cleanup refresh-check project', function (done) {
+         if (! window._projRefreshSlug) return done (SHORT_WAIT, POLL);
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._projRefreshSlug), {}, '', function (error) {
+            window._projRefreshCleanupError = error ? (error.status || error.message || true) : null;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._projRefreshCleanupError) return 'Failed to delete refresh-check project';
          return true;
       }],
 
@@ -662,6 +696,34 @@
             if (d.dialogId === window._dialogDialogId && d.status === 'done') return d;
          });
          if (! found) return 'Dialog draft not found in list';
+         return true;
+      }],
+
+      ['Dialog 4a: Create another dialog while not on Dialogs', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/new', {}, {
+            provider: 'openai',
+            model: 'gpt-5.2-codex',
+            slug: 'refresh-check'
+         }, function (error, rs) {
+            window._dialogRefreshDraft = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._dialogRefreshDraft || {};
+         if (result.error) return 'Refresh-check dialog creation failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (! body.dialogId) return 'Missing dialogId for refresh-check dialog';
+         window._dialogRefreshDialogId = body.dialogId;
+         return true;
+      }],
+
+      ['Dialog 4b: Switching to Dialogs refreshes the list', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialogs');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         if (B.get ('tab') !== 'dialogs') return 'Expected dialogs tab after navigation';
+         var item = findByText ('.dialog-name', 'refresh-check');
+         if (! item) return 'Dialogs list did not refresh when returning to Dialogs';
          return true;
       }],
 
@@ -1071,21 +1133,21 @@
          done (LONG_WAIT, POLL);
       }, function () {
          if (! window._dialogAgentAActiveObserved) return 'Active state was not observed before done';
-         if (! window._dialogAgentADoneRequested) {
-            window._dialogAgentADoneRequested = true;
-            console.log ('[vibey-test] polling agent-a done');
-            c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialogs', {}, '', function (error, rs) {
-               window._dialogAgentADoneRequested = false;
-               window._dialogAgentADialogs = error ? null : (rs.body || []);
-            });
-            return 'Polling dialog statuses...';
-         }
+         // Check list first (may have been updated by a previous ajax callback)
          var list = window._dialogAgentADialogs || [];
          var found = dale.stopNot (list, undefined, function (d) {
             if (d.dialogId === window._dialogAgentADialog && d.status === 'done' && d.filename && d.filename.indexOf ('-done.md') !== -1) return d;
          });
-         if (! found) return 'Waiting for agent-a to become done...';
-         return true;
+         if (found) return true;
+         // Fire a new request if none in flight
+         if (! window._dialogAgentADoneRequested) {
+            window._dialogAgentADoneRequested = true;
+            c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialogs', {}, '', function (error, rs) {
+               window._dialogAgentADoneRequested = false;
+               window._dialogAgentADialogs = error ? null : (rs.body || []);
+            });
+         }
+         return 'Waiting for agent-a to become done...';
       }],
 
       ['Dialog 29: Concurrent PUT race on done agent-a — one 200, one 409', function (done) {
@@ -1341,6 +1403,57 @@
          if (! mainItem) return 'main.md not found in sidebar';
          var notesItem = findByText ('.file-name', 'notes.md');
          if (! notesItem) return 'notes.md not found in sidebar';
+         return true;
+      }],
+
+      ['Docs 8a: Create doc/refresh.md via API while away from Docs', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         c.ajax ('post', 'project/' + encodeURIComponent (window._docsProject) + '/file/doc/refresh.md', {}, {
+            content: '# refresh\n\nCreated while not viewing docs.\n'
+         }, function (error, rs) {
+            window._docsRefreshCreate = {error: error, rs: rs};
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._docsRefreshCreate || {};
+         if (result.error) return 'Failed to create refresh.md while away from Docs';
+         return true;
+      }],
+
+      ['Docs 8b: Switching back to Docs refreshes the sidebar', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var mainItem = findByText ('.file-name', 'main.md');
+         if (! mainItem) return 'main.md not found in sidebar after returning to Docs';
+         var notesItem = findByText ('.file-name', 'notes.md');
+         if (! notesItem) return 'notes.md not found in sidebar after returning to Docs';
+         var refreshItem = findByText ('.file-name', 'refresh.md');
+         if (! refreshItem) return 'Docs sidebar did not refresh when returning to Docs';
+         return true;
+      }],
+
+      ['Docs 8c: Delete doc/refresh.md via API while away from Docs', function (done) {
+         B.call ('navigate', 'hash', '#/projects');
+         c.ajax ('delete', 'project/' + encodeURIComponent (window._docsProject) + '/file/' + encodeURIComponent ('doc/refresh.md'), {}, '', function (error) {
+            window._docsRefreshDeleteError = error ? (error.status || error.message || true) : null;
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         if (window._docsRefreshDeleteError) return 'Failed to delete refresh.md while away from Docs';
+         return true;
+      }],
+
+      ['Docs 8d: Returning to Docs removes deleted refresh.md from the sidebar', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var refreshItem = findByText ('.file-name', 'refresh.md');
+         if (refreshItem) return 'Docs sidebar still shows refresh.md after returning to Docs';
+         var mainItem = findByText ('.file-name', 'main.md');
+         if (! mainItem) return 'main.md missing after returning to Docs';
+         var notesItem = findByText ('.file-name', 'notes.md');
+         if (! notesItem) return 'notes.md missing after returning to Docs';
          return true;
       }],
 
