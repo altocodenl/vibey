@@ -1,5 +1,17 @@
 ## Vibey development notes
 
+### 2026-03-11
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
+
+- Please review all the server logs we do and give me their prefixes, I want to unify things but first I need to see what we have. Also explain what the LLM/SSE prefixes really mean.
+- I want please the following changes: 1) Change REQ and RES to -RQ and -RS respectively; 2) rename DOCKER to DOCK; 3) when the server sends a message to the LLM, log it as LLM-RQ; 4) when the AI provider responds, mark it with LLM-RS; 5) mark the SSE-RQ and SSE-RS (RQ comes from the client, RS is what goes from the server to the client); 6) All three letter prefixes (SSE and LLM) should be prepended with one space to be aligned with the others.
+- Add ISO timestamps.
+- Please debug why we see a lot of LLM-RQ and not enough LLM-RS.
+- Can you split consecutive tool uses in the client so we can see also at what time they were done? Also add timestamps to user messages.
+- Please show the ms on LLM-RS logs.
+- Please bold the ms. Also please pick eight colors and paint each of the eight log prefixes so they can be easily spotted. There's overlap, so let's do just four colors, one for DOCK, one for HTTP, one for SSE and one for LLM.
+
 ### 2026-03-10
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.

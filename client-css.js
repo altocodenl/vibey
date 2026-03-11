@@ -435,7 +435,7 @@ window.vibeyCSS = [
       opacity: '0.85',
    }],
    ['.chat-tool + .chat-tool', {
-      'margin-top': '0',
+      'margin-top': '0.15rem',
    }],
    ['.chat-tool .chat-content', {
       'font-size': '12px',

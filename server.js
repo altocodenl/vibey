@@ -18,9 +18,23 @@ var LOG_COLORS = {
    info: '\033[37m\033[46m'
 };
 
+var LOG_PREFIX_COLORS = {
+   'HTTP-RQ': '\033[36m',       // cyan
+   'HTTP-RS': '\033[36m',
+   'DOCK-RQ': '\033[33m',       // yellow
+   'DOCK-RS': '\033[33m',
+   ' LLM-RQ': '\033[35m',      // magenta
+   ' LLM-RS': '\033[35m',
+   ' SSE-RQ': '\033[32m',      // green
+   ' SSE-RS': '\033[32m',
+};
+
+var BOLD = '\033[1m';
+var RESET = '\033[0m';
+
 var colorLog = function (text, color) {
    color = color || LOG_COLORS.info;
-   return color + text + '\033[0m\033[1m';
+   return color + text + RESET + BOLD;
 };
 
 var logCodeColor = function (code) {
@@ -36,16 +50,21 @@ var nextLogId = function () {
 
 var logLine = function (kind, id) {
    var parts = Array.prototype.slice.call (arguments, 2);
-   console.log ([kind, id].concat (parts).join (' '));
+   var prefixColor = LOG_PREFIX_COLORS [kind] || '';
+   var coloredKind = prefixColor ? prefixColor + BOLD + kind + RESET : kind;
+   var line = [new Date ().toISOString (), coloredKind, id].concat (parts).join (' ');
+   // Bold any (Nms) timing markers
+   line = line.replace (/\((\d+)ms\)/g, BOLD + '($1ms)' + RESET);
+   console.log (line);
 };
 
 var logDockerStart = function (id, project, command) {
-   logLine ('DOCKER REQ', id, project, command.slice (0, 200));
+   logLine ('DOCK-RQ', id, project, command.slice (0, 200));
 };
 
 var logDockerEnd = function (id, project, ok, ms, detail) {
    var status = ok ? colorLog ('OK', LOG_COLORS.ok) : colorLog ('FAILED', LOG_COLORS.failed);
-   logLine ('DOCKER RES', id, project, status, '(' + ms + 'ms)', detail ? detail.slice (0, 200) : '');
+   logLine ('DOCK-RS', id, project, status, '(' + ms + 'ms)', detail ? detail.slice (0, 200) : '');
 };
 
 var logStreamEvent = function (kind, id, projectName, dialogId, eventType, extra) {
@@ -2320,10 +2339,12 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       var writeQueue = Promise.resolve ();
       var queuedWriteError = null;
       var llmStreamId = nextLogId ();
+      var llmStartMs = Date.now ();
+      logLine (' LLM-RQ', llmStreamId, projectName, 'dialog=' + dialog.dialogId, 'provider=' + provider, 'model=' + model, 'messages=' + messages.length);
       var writeChunk = function (chunk) {
          var eventType = type (chunk) === 'string' ? 'chunk' : ((chunk && chunk.type) || 'event');
          var extra = type (chunk) === 'string' ? 'chars=' + chunk.length : '';
-         logStreamEvent ('   LLM STREAM', llmStreamId, projectName, dialog.dialogId, eventType, extra);
+         logStreamEvent (' LLM-RS', llmStreamId, projectName, dialog.dialogId, eventType, extra + ' (' + (Date.now () - llmStartMs) + 'ms)');
          writeQueue = writeQueue.then (function () {
             if (queuedWriteError) return;
             return appendToDialog (projectName, dialog.filename, chunk);
@@ -2339,6 +2360,10 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
             ? await chatWithClaude (projectName, messages, model, writeChunk, abortSignal)
             : await chatWithOpenAI (projectName, messages, model, writeChunk, abortSignal);
 
+         var llmMs = Date.now () - llmStartMs;
+         var toolCount = (result.toolCalls || []).length;
+         logLine (' LLM-RS', llmStreamId, projectName, 'dialog=' + dialog.dialogId, 'content=' + (result.content || '').length + 'ch', 'tools=' + toolCount, '(' + llmMs + 'ms)');
+
          lastContent = result.content || '';
 
          // Wait for all queued chunk writes to complete before continuing
@@ -2346,6 +2371,15 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          if (queuedWriteError) throw queuedWriteError;
          await appendToDialog (projectName, dialog.filename, '\n\n');
          await appendUsageToAssistantSection (projectName, dialog.filename, result.usage);
+
+         // Log + emit helper: logs as LLM-RS and propagates to onChunk (SSE).
+         // Does NOT write to dialog — tool/context blocks are written separately above/below.
+         var emitEvent = function (event) {
+            var eventType = (event && event.type) || 'event';
+            var extra = event.tool ? 'name=' + event.tool.name + ' id=' + event.tool.id : '';
+            logStreamEvent (' LLM-RS', llmStreamId, projectName, dialog.dialogId, eventType, extra + ' (' + (Date.now () - llmStartMs) + 'ms)');
+            if (onChunk) onChunk (event);
+         };
 
          // Compute and emit context window usage
          // result.usage.input already includes the full conversation history for this turn,
@@ -2355,7 +2389,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          var contextUsed = normalized ? normalized.input + normalized.output : 0;
          var contextPercent = contextUsed ? Math.round (contextUsed / contextLimit * 100) : 0;
          await appendToDialog (projectName, dialog.filename, '> Context: used=' + contextUsed + ' limit=' + contextLimit + ' percent=' + contextPercent + '%\n');
-         if (onChunk) onChunk ({type: 'context', context: {used: contextUsed, limit: contextLimit, percent: contextPercent}});
+         emitEvent ({type: 'context', context: {used: contextUsed, limit: contextLimit, percent: contextPercent}});
 
          await appendToolCallsToAssistantSection (projectName, dialog.filename, result.toolCalls);
 
@@ -2363,26 +2397,20 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          var executed = [];
          var toolCalls = result.toolCalls || [];
 
-         if (onChunk && toolCalls.length) {
-            dale.go (toolCalls, function (tc) {
-               onChunk ({type: 'tool_request', tool: {id: tc.id, name: tc.name, input: tc.input}});
-            });
-         }
+         dale.go (toolCalls, function (tc) {
+            emitEvent ({type: 'tool_request', tool: {id: tc.id, name: tc.name, input: tc.input}});
+         });
 
          for (var i = 0; i < toolCalls.length; i++) {
             var tc = toolCalls [i];
             var toolResult = await executeTool (tc.name, tc.input, projectName);
             resultsById [tc.id] = toolResult;
             executed.push ({id: tc.id, name: tc.name, result: toolResult});
+            emitEvent ({type: 'tool_result', tool: {id: tc.id, name: tc.name, result: toolResult}});
          }
 
          if (dale.keys (resultsById).length) await writeToolResults (projectName, dialog.filename, resultsById);
          if (executed.length) autoExecutedAll = autoExecutedAll.concat (executed);
-         if (onChunk && executed.length) {
-            dale.go (executed, function (tc) {
-               onChunk ({type: 'tool_result', tool: {id: tc.id, name: tc.name, result: tc.result}});
-            });
-         }
 
          if (! toolCalls.length) {
             return {
@@ -3450,16 +3478,16 @@ var routes = [
       rs.write (':ok\n\n');
 
       var sseStreamId = nextLogId ();
-      logLine ('SSE REQ', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', rq.connection && rq.connection.remoteAddress ? rq.connection.remoteAddress : '');
+      logLine (' SSE-RQ', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', rq.connection && rq.connection.remoteAddress ? rq.connection.remoteAddress : '');
 
       // If dialog is done (no active stream), send done immediately and close
       var activeStream = getActiveStream (projectName, dialogId);
       if (! activeStream) {
          var donePayload = JSON.stringify ({type: 'done', result: {dialogId: dialogId, filename: dialog.filename, status: dialog.status}});
-         logStreamEvent ('   SSE STREAM', sseStreamId, projectName, dialogId, 'done', 'bytes=' + Buffer.byteLength (donePayload));
+         logStreamEvent (' SSE-RS', sseStreamId, projectName, dialogId, 'done', 'bytes=' + Buffer.byteLength (donePayload));
          rs.write ('data: ' + donePayload + '\n\n');
          rs.end ();
-         logLine ('SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.ok), '(done)');
+         logLine (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.ok), '(done)');
          return;
       }
 
@@ -3467,7 +3495,7 @@ var routes = [
       var onEvent = function (event) {
          try {
             var payload = JSON.stringify (event);
-            logStreamEvent ('   SSE STREAM', sseStreamId, projectName, dialogId, event.type || 'event', 'bytes=' + Buffer.byteLength (payload));
+            logStreamEvent (' SSE-RS', sseStreamId, projectName, dialogId, event.type || 'event', 'bytes=' + Buffer.byteLength (payload));
             rs.write ('data: ' + payload + '\n\n');
             if (rs.flush) rs.flush ();
          }
@@ -3477,7 +3505,7 @@ var routes = [
          if (event.type === 'done' || event.type === 'error') {
             activeStream.emitter.removeListener ('event', onEvent);
             rs.end ();
-            logLine ('SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog (event.type === 'error' ? 'FAILED' : 'OK', event.type === 'error' ? LOG_COLORS.failed : LOG_COLORS.ok), '(' + event.type + ')');
+            logLine (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog (event.type === 'error' ? 'FAILED' : 'OK', event.type === 'error' ? LOG_COLORS.failed : LOG_COLORS.ok), '(' + event.type + ')');
          }
       };
 
@@ -3488,7 +3516,7 @@ var routes = [
          if (activeStream && activeStream.emitter) {
             activeStream.emitter.removeListener ('event', onEvent);
          }
-         if (! rs.writableEnded) logLine ('SSE RES', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.info), '(client-closed)');
+         if (! rs.writableEnded) logLine (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.info), '(client-closed)');
       });
    }],
 
@@ -3595,11 +3623,14 @@ var routes = [
          };
          var contentType = contentTypes [ext] || 'application/octet-stream';
 
-         reply (rs, 200, content, {
+         // Bypass cicek.reply: it JSON-serializes Buffers, producing a body
+         // larger than Content-Length and causing ERR_CONTENT_LENGTH_MISMATCH.
+         rs.writeHead (200, {
             'Content-Type': contentType,
             'Content-Length': content.length,
             'X-Frame-Options': 'SAMEORIGIN'
          });
+         rs.end (content);
       }
       catch (error) {
          if (isNoSuchFileError (error)) return reply (rs, 404, {error: 'File not found'});
@@ -3711,10 +3742,10 @@ var port = 5353;
 // Lean server logs: print req/res without headers or bodies
 cicek.logconsole = function (message) {
    if (message [2] === 'request') {
-      logLine ('HTTP REQ', message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
+      logLine ('HTTP-RQ', message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
    }
    else if (message [2] === 'response') {
-      logLine ('HTTP RES', message [3].id, message [3].method.toUpperCase (), message [3].url, logCodeColor (message [3].code), '(' + message [3].duration + 'ms)');
+      logLine ('HTTP-RS', message [3].id, message [3].method.toUpperCase (), message [3].url, logCodeColor (message [3].code), '(' + message [3].duration + 'ms)');
    }
 };
 

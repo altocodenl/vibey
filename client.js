@@ -3084,8 +3084,27 @@ views.dialogs = function () {
 
                   var isTool = msg.role === 'tool';
 
+                  // Format timestamp for role header (user and tool messages)
+                  var roleTimestamp = '';
+                  if (msg.time) {
+                     var tr = parseTimeRange (msg.time);
+                     if (tr && tr.end && tr.end !== '...') roleTimestamp = formatLocalDateTimeNoMs (tr.end);
+                     else if (tr && tr.start) roleTimestamp = formatLocalDateTimeNoMs (tr.start);
+                     else roleTimestamp = formatLocalDateTimeNoMs (msg.time.replace (/ - .*$/, '').trim ());
+                  }
+
+                  var roleHeader = isTool
+                     ? ['div', {class: 'chat-role'}, [
+                        ['span', msg.toolName || 'tool'],
+                        roleTimestamp ? ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, roleTimestamp] : ''
+                     ]]
+                     : ['div', {class: 'chat-role'}, [
+                        ['span', msg.role],
+                        msg.role === 'user' && roleTimestamp ? ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, roleTimestamp] : ''
+                     ]];
+
                   return ['div', {class: 'chat-message chat-' + msg.role}, [
-                     isTool ? '' : ['div', {class: 'chat-role'}, ['span', msg.role]],
+                     roleHeader,
                      ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject, msg.toolName === 'edit_file' || toolContentView.hasEditFile)],
                      toolContentView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
                         ['button', {
@@ -3104,7 +3123,10 @@ views.dialogs = function () {
                   ]]
                   : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, loadingFile ? 'Loading...' : 'Start typing below to begin a new dialog'],
                optimisticUserMessage ? ['div', {class: 'chat-message chat-user'}, [
-                  ['div', {class: 'chat-role'}, 'user'],
+                  ['div', {class: 'chat-role'}, [
+                     ['span', 'user'],
+                     ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, formatLocalDateTimeNoMs (new Date ().toISOString ())]
+                  ]],
                   ['div', {class: 'chat-content'}, optimisticUserMessage]
                ]] : '',
                streaming ? ['div', {class: 'chat-message chat-assistant'}, [
