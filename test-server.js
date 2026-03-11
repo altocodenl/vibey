@@ -691,6 +691,49 @@ var dialogSequence = [
       });
    }],
 
+   // Test 19b: Verify provider message normalization (no hallucinated tool-call text)
+   ['Dialog 19b: Provider messages have structured tool calls', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('GET', '/project/' + DIALOG_PROJECT + '/dialog/' + s.dialogId + '/messages', null, function (error, code, body) {
+         if (error) return log ('GET messages failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (type (body) !== 'object') return log ('Expected object body');
+
+         // Responses API: no flattened tool-call text
+         var responsesApi = body.responsesApi || [];
+         var hasHallucination = dale.stop (responsesApi, true, function (item) {
+            if (type (item) === 'object' && type (item.content) === 'string' && item.content.indexOf ('[Assistant tool calls]') !== -1) return true;
+         });
+         if (hasHallucination) return log ('responsesApi contains "[Assistant tool calls]" text — tool calls were flattened instead of structured');
+
+         // Responses API: has structured function_call items
+         var hasFunctionCall = dale.stop (responsesApi, true, function (item) {
+            if (item && item.type === 'function_call' && item.name && item.call_id && item.arguments) return true;
+         });
+         if (! hasFunctionCall) return log ('responsesApi missing structured function_call item');
+
+         // Responses API: has function_call_output items
+         var hasFunctionOutput = dale.stop (responsesApi, true, function (item) {
+            if (item && item.type === 'function_call_output' && item.call_id) return true;
+         });
+         if (! hasFunctionOutput) return log ('responsesApi missing function_call_output item');
+
+         // OpenAI Chat Completions: has assistant message with tool_calls array
+         var openai = body.openai || [];
+         var hasToolCalls = dale.stop (openai, true, function (msg) {
+            if (msg && msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) return true;
+         });
+         if (! hasToolCalls) return log ('openai messages missing assistant message with tool_calls');
+
+         // OpenAI Chat Completions: has tool result message
+         var hasToolResult = dale.stop (openai, true, function (msg) {
+            if (msg && msg.role === 'tool' && msg.tool_call_id) return true;
+         });
+         if (! hasToolResult) return log ('openai messages missing tool result message');
+
+         next ();
+      });
+   }],
+
    // Test 20: SSE stream on done dialog returns immediate done
    ['Dialog 20: SSE stream on done dialog returns done immediately', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       collectSSE (DIALOG_PROJECT, s.asyncDialogId, function (error, events) {

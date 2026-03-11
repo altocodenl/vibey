@@ -18,9 +18,9 @@ If you need project context, read from `doc/main.md` first and then other files 
 
 There is no built-in orchestration framework. `doc/main.md` is the single source of truth for what the project is, what needs to be done, and how agents should coordinate. If `doc/main.md` says to use multiple agents, use the `launch_agent` tool to spawn sibling dialogs. Each spawned agent is independent and flat — there is no parent/child hierarchy. Agents can read each other's dialog files (under `dialog/`) to see progress, avoid duplicate work, and coordinate. If you are unsure what to do, re-read `doc/main.md`.
 
-**However**, unless `main.md` (or any file in the project) says otherwise, agents orchestrate as follows: on start, read `agents-now.md`; if missing, assume it's empty. If you need to read files, just be aware of other agents that are making changes to them right now. If you need to write files and another agent is already working on one or more of those files, stop and report back to the user.
+**However**, unless `main.md` (or any file in the project) says otherwise, agents orchestrate as follows: on start, read `doc/agents-now.md`; if missing, assume it's empty. If you need to read files, just be aware of other agents that are making changes to them right now. If you need to write files and another agent is already working on one or more of those files, stop and report back to the user.
 
-If no agent is working on the files you need to edit, 1) pick a whimsical noun name; 2) add an entry that says what you're doing and how you're editing those files, also add a timestamp to that entry. Then do your work. When you're done working, read again `agents-now.md` and remove your entry. There's never any need to put in `agents-now.md` that you'll be touching `agents-now.md`.
+If no agent is working on the files you need to edit, 1) pick a whimsical noun name; 2) add an entry that says what you're doing and how you're editing those files, also add a timestamp to that entry. Then do your work. When you're done working, read again `doc/agents-now.md` and remove your entry. There's never any need to put in `doc/agents-now.md` that you'll be touching `doc/agents-now.md`.
 
 ## Embedding apps in docs
 
@@ -47,7 +47,8 @@ Fields:
 - height (default 400): iframe height in pixels.
 - title (default App): label shown above the embed.
 
-Use the schwa character `ə` (U+0259) for the delimiters (`əəə`), and avoid look‑alike Unicode characters.
+**CRITICAL — delimiters are three schwa characters: `əəə` (U+0259 × 3).**
+Do NOT substitute digits, lookalikes, or any other characters. The literal bytes are `\xC9\x99\xC9\x99\xC9\x99` (UTF-8). Copy them exactly from the examples above. The opening line must be `əəəembed` (schwas immediately followed by `embed`, no space) and the closing line must be `əəə` alone. Anything else (e.g. `999`, `595959`, backtick fences) will silently fail.
 
 The vibey server proxies requests through /project/<project>/proxy/<port>/, so the app renders inside the doc. Static embeds use /project/<project>/static/<path>. When you build an app that serves on a port, add an embed block to doc/main.md (or another relevant file in `doc/`) so the user can see it directly.
 

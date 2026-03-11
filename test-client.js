@@ -892,6 +892,51 @@
          return true;
       }],
 
+      ['Dialog 19b: Provider messages have structured tool calls (no hallucinated text)', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/' + encodeURIComponent (window._dialogDialogId) + '/messages', {}, '', function (error, rs) {
+            window._dialogMessagesCheck = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._dialogMessagesCheck || {};
+         if (result.error) return 'Messages endpoint failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+
+         // Responses API: no flattened tool-call text
+         var responsesApi = body.responsesApi || [];
+         var hasHallucination = dale.stop (responsesApi, true, function (item) {
+            if (teishi.type (item) === 'object' && teishi.type (item.content) === 'string' && item.content.indexOf ('[Assistant tool calls]') !== -1) return true;
+         });
+         if (hasHallucination) return 'responsesApi contains "[Assistant tool calls]" text — tool calls flattened instead of structured';
+
+         // Responses API: has structured function_call items
+         var hasFunctionCall = dale.stop (responsesApi, true, function (item) {
+            if (item && item.type === 'function_call' && item.name && item.call_id && item.arguments) return true;
+         });
+         if (! hasFunctionCall) return 'responsesApi missing structured function_call item';
+
+         // Responses API: has function_call_output items
+         var hasFunctionOutput = dale.stop (responsesApi, true, function (item) {
+            if (item && item.type === 'function_call_output' && item.call_id) return true;
+         });
+         if (! hasFunctionOutput) return 'responsesApi missing function_call_output item';
+
+         // OpenAI Chat Completions: has assistant with tool_calls
+         var openai = body.openai || [];
+         var hasToolCalls = dale.stop (openai, true, function (msg) {
+            if (msg && msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) return true;
+         });
+         if (! hasToolCalls) return 'openai messages missing assistant message with tool_calls';
+
+         // OpenAI Chat Completions: has tool result
+         var hasToolResult = dale.stop (openai, true, function (msg) {
+            if (msg && msg.role === 'tool' && msg.tool_call_id) return true;
+         });
+         if (! hasToolResult) return 'openai messages missing tool result message';
+
+         return true;
+      }],
+
       ['Dialog 20: Stream done dialog returns done immediately (no chunks)', function (done) {
          streamDialogEvents (window._dialogProjectSlug, window._dialogDialogAsyncId, function (result) {
             window._dialogStreamAsyncDone = result;
@@ -1289,7 +1334,9 @@
          return true;
       }],
 
-      ['Docs 8: Files list includes main.md and notes.md', function () {
+      ['Docs 8: Files list includes main.md and notes.md', function (done) {
+         done (SHORT_WAIT, POLL);
+      }, function () {
          var mainItem = findByText ('.file-name', 'main.md');
          if (! mainItem) return 'main.md not found in sidebar';
          var notesItem = findByText ('.file-name', 'notes.md');

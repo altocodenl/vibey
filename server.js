@@ -2107,26 +2107,50 @@ var chatWithClaude = async function (projectName, messages, model, onChunk, abor
 var normalizeMessagesForResponsesApi = function (messages) {
    var normalized = [];
 
+   // Responses API requires function_call IDs prefixed with "fc_"; Chat Completions uses "call_".
+   // Remap consistently so function_call.call_id matches function_call_output.call_id.
+   var remapId = function (id) {
+      if (! id) return 'fc_unknown';
+      if (id.indexOf ('fc_') === 0) return id;
+      if (id.indexOf ('call_') === 0) return 'fc_' + id.slice (5);
+      return 'fc_' + id;
+   };
+
    dale.go (messages || [], function (message) {
       if (! message || type (message) !== 'object') return;
 
+      // Tool results → function_call_output items
       if (message.role === 'tool') {
-         var toolText = '[Tool result ' + (message.tool_call_id || 'unknown') + ']\n' + (message.content || '');
-         normalized.push ({role: 'user', content: toolText});
+         normalized.push ({
+            type: 'function_call_output',
+            call_id: remapId (message.tool_call_id),
+            output: message.content || ''
+         });
          return;
       }
 
       var content = message.content;
       if (content === null || content === undefined) content = '';
-
       if (type (content) !== 'string') {
          try {content = JSON.stringify (content);} catch (error) {content = '' + content;}
       }
 
-      if (message.tool_calls && message.tool_calls.length) {
-         content += (content ? '\n\n' : '') + '[Assistant tool calls]\n' + dale.go (message.tool_calls, function (tc) {
-            return '- ' + ((tc.function && tc.function.name) || tc.name || 'unknown') + ' id=' + (tc.id || 'unknown') + ' args=' + ((tc.function && tc.function.arguments) || tc.arguments || '{}');
-         }).join ('\n');
+      // Assistant messages with tool calls → text item + function_call items
+      if (message.role === 'assistant') {
+         if (content) normalized.push ({role: 'assistant', content: content});
+         if (message.tool_calls && message.tool_calls.length) {
+            dale.go (message.tool_calls, function (tc) {
+               var callId = remapId (tc.id);
+               normalized.push ({
+                  type: 'function_call',
+                  id: callId,
+                  call_id: callId,
+                  name: (tc.function && tc.function.name) || tc.name || 'unknown',
+                  arguments: (tc.function && tc.function.arguments) || tc.arguments || '{}'
+               });
+            });
+         }
+         return;
       }
 
       normalized.push ({role: message.role || 'user', content: content});
@@ -2333,11 +2357,39 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       var assistantStart = new Date ().toISOString ();
       await appendToDialog (projectName, dialog.filename, '## Assistant\n> Model: ' + model + '\n> Time: ' + assistantStart + ' - ...\n\n');
 
-      // writeChunk is called synchronously from the LLM stream handlers.
-      // We queue async writes so they execute sequentially without blocking
-      // the event loop or the stream reader.
-      var writeQueue = Promise.resolve ();
+      // Chunks arrive from the LLM faster than docker exec can write (~50ms each).
+      // We buffer text between writes: at most one docker exec in flight at a time,
+      // carrying everything that arrived since the last flush. SSE (onChunk) fires
+      // immediately so the client never waits.
+      var writeBuf = '';
+      var writeInFlight = false;
       var queuedWriteError = null;
+      // drainResolve is called when buffer is empty and no write is in flight.
+      // Re-created each time we need to wait for a new drain cycle.
+      var drainResolve = null;
+
+      var flushBuf = function () {
+         if (writeInFlight || ! writeBuf || queuedWriteError) return;
+         var toWrite = writeBuf;
+         writeBuf = '';
+         writeInFlight = true;
+         appendToDialog (projectName, dialog.filename, toWrite).then (function () {
+            writeInFlight = false;
+            if (writeBuf) flushBuf ();
+            else if (drainResolve) drainResolve ();
+         }).catch (function (error) {
+            if (abortSignal && abortSignal.aborted) return;
+            queuedWriteError = queuedWriteError || error;
+            writeInFlight = false;
+            if (drainResolve) drainResolve ();
+         });
+      };
+
+      var waitForDrain = function () {
+         if (! writeBuf && ! writeInFlight) return Promise.resolve ();
+         return new Promise (function (resolve) { drainResolve = resolve; });
+      };
+
       var llmStreamId = nextLogId ();
       var llmStartMs = Date.now ();
       logLine (' LLM-RQ', llmStreamId, projectName, 'dialog=' + dialog.dialogId, 'provider=' + provider, 'model=' + model, 'messages=' + messages.length);
@@ -2345,13 +2397,10 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          var eventType = type (chunk) === 'string' ? 'chunk' : ((chunk && chunk.type) || 'event');
          var extra = type (chunk) === 'string' ? 'chars=' + chunk.length : '';
          logStreamEvent (' LLM-RS', llmStreamId, projectName, dialog.dialogId, eventType, extra + ' (' + (Date.now () - llmStartMs) + 'ms)');
-         writeQueue = writeQueue.then (function () {
-            if (queuedWriteError) return;
-            return appendToDialog (projectName, dialog.filename, chunk);
-         }).catch (function (error) {
-            if (abortSignal && abortSignal.aborted) return;
-            queuedWriteError = queuedWriteError || error;
-         });
+         if (type (chunk) === 'string') {
+            writeBuf += chunk;
+            flushBuf ();
+         }
          if (onChunk) onChunk (chunk);
       };
 
@@ -2366,8 +2415,9 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          lastContent = result.content || '';
 
-         // Wait for all queued chunk writes to complete before continuing
-         await writeQueue;
+         // Wait for buffered writes to finish before continuing
+         flushBuf ();
+         await waitForDrain ();
          if (queuedWriteError) throw queuedWriteError;
          await appendToDialog (projectName, dialog.filename, '\n\n');
          await appendUsageToAssistantSection (projectName, dialog.filename, result.usage);
@@ -3447,6 +3497,25 @@ var routes = [
       }
       catch (error) {
          reply (rs, 500, {success: false, error: error.message});
+      }
+   }],
+
+   // Test-only: return normalized messages for a dialog as each provider would see them
+   ['get', 'project/:project/dialog/:id/messages', async function (rq, rs) {
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
+      if (! projectName) return;
+      var dialogId = rq.data.params.id;
+      try {
+         var dialog = await loadDialog (projectName, dialogId, rs);
+         if (dialog === false) return;
+         var markdown = await pfs.readFile (projectName, dialog.filename);
+         var openaiMessages = parseDialogForProvider (markdown, 'openai');
+         var claudeMessages = parseDialogForProvider (markdown, 'claude');
+         var responsesApiInput = normalizeMessagesForResponsesApi (openaiMessages);
+         reply (rs, 200, {openai: openaiMessages, claude: claudeMessages, responsesApi: responsesApiInput});
+      }
+      catch (error) {
+         reply (rs, error.message === 'Project not found' ? 404 : 500, {error: error.message});
       }
    }],
 

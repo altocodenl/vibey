@@ -2405,6 +2405,41 @@ var formatToolResultPreview = function (obj, maxStreamLines) {
    return parts.join ('\n') || (obj.success ? '(ok)' : '(empty)');
 };
 
+// Simple LCS line diff: returns array of '- ...', '+ ...', '  ...' strings
+var lineDiff = function (oldLines, newLines) {
+   var m = oldLines.length, n = newLines.length;
+   // Build LCS table
+   var dp = [];
+   var i, j;
+   for (i = 0; i <= m; i++) {
+      dp [i] = [];
+      for (j = 0; j <= n; j++) {
+         if (i === 0 || j === 0) dp [i] [j] = 0;
+         else if (oldLines [i - 1] === newLines [j - 1]) dp [i] [j] = dp [i - 1] [j - 1] + 1;
+         else dp [i] [j] = dp [i - 1] [j] > dp [i] [j - 1] ? dp [i - 1] [j] : dp [i] [j - 1];
+      }
+   }
+   // Walk back to produce diff
+   var result = [];
+   i = m; j = n;
+   while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && oldLines [i - 1] === newLines [j - 1]) {
+         result.push ('  ' + oldLines [i - 1]);
+         i--; j--;
+      }
+      else if (j > 0 && (i === 0 || dp [i] [j - 1] >= dp [i - 1] [j])) {
+         result.push ('+ ' + newLines [j - 1]);
+         j--;
+      }
+      else {
+         result.push ('- ' + oldLines [i - 1]);
+         i--;
+      }
+   }
+   result.reverse ();
+   return result;
+};
+
 var formatToolInputPreview = function (obj) {
    if (type (obj) !== 'object' || ! obj) return null;
    var keys = dale.keys (obj);
@@ -2413,23 +2448,22 @@ var formatToolInputPreview = function (obj) {
    // run_command: just show the command
    if (obj.command !== undefined && keys.length === 1) return '$ ' + obj.command;
 
-   // write_file: show path + content preview
+   // write_file: show path + content as green diff lines
    if (obj.path !== undefined && obj.content !== undefined) {
       var content = type (obj.content) === 'string' ? obj.content : '';
       var header = '→ ' + obj.path + ' (' + content.length + ' chars)';
       if (! content) return header;
-      return header + '\n' + content;
+      var addLines = dale.go (content.split ('\n'), function (l) { return '+ ' + l; });
+      return header + '\n' + addLines.join ('\n');
    }
 
-   // edit_file: show path + old/new preview
+   // edit_file: show path + unified diff via simple LCS
    if (obj.path !== undefined && obj.old_string !== undefined) {
       var oldStr = type (obj.old_string) === 'string' ? obj.old_string : '';
       var newStr = type (obj.new_string) === 'string' ? obj.new_string : '';
       var editHeader = '✎ ' + obj.path;
-      var diffLines = [];
-      if (oldStr) dale.go (oldStr.split ('\n'), function (l) { diffLines.push ('- ' + l); });
-      if (newStr) dale.go (newStr.split ('\n'), function (l) { diffLines.push ('+ ' + l); });
-      return editHeader + '\n' + diffLines.join ('\n');
+      var unified = lineDiff (oldStr ? oldStr.split ('\n') : [], newStr ? newStr.split ('\n') : []);
+      return editHeader + '\n' + unified.join ('\n');
    }
 
    // launch_agent: show provider/model and prompt summary
@@ -2469,7 +2503,7 @@ var formatToolBlocksForMessage = function (text, compact, meta) {
       var nameMatch = block.match (/^---\nTool request:\s+(\S+)/m);
       var rawName = nameMatch ? nameMatch [1] : 'tool';
       var friendly = toolFriendlyName (rawName);
-      if (meta && rawName === 'edit_file') meta.hasEditFile = true;
+      if (meta && (rawName === 'edit_file' || rawName === 'write_file')) meta.hasEditFile = true;
 
       // Extract input and result payloads
       var sections = block.replace (/^---\n/, '').replace (/\n---$/, '');
@@ -2736,14 +2770,12 @@ var renderChatContent = function (text, project, isDiff) {
       if (isDiff) {
          if (line.length >= 2 && line [0] === '-' && line [1] === ' ') {
             flushBuffer ();
-            if (prefix) result.push (['span', prefix]);
-            result.push (['span', {style: style ({color: '#ff8b94', 'background-color': 'rgba(255,70,70,0.12)', display: 'inline-block', width: 1, 'border-radius': '2px', padding: '0 4px', 'margin-left': '-4px'})}, line]);
+            result.push (['div', {style: style ({color: '#ff8b94', 'background-color': 'rgba(255,70,70,0.12)', 'border-radius': '2px', padding: '0 4px', 'margin-left': '-4px'})}, line]);
             return;
          }
          if (line.length >= 2 && line [0] === '+' && line [1] === ' ') {
             flushBuffer ();
-            if (prefix) result.push (['span', prefix]);
-            result.push (['span', {style: style ({color: '#6ad48a', 'background-color': 'rgba(70,255,70,0.12)', display: 'inline-block', width: 1, 'border-radius': '2px', padding: '0 4px', 'margin-left': '-4px'})}, line]);
+            result.push (['div', {style: style ({color: '#6ad48a', 'background-color': 'rgba(70,255,70,0.12)', 'border-radius': '2px', padding: '0 4px', 'margin-left': '-4px'})}, line]);
             return;
          }
       }
@@ -3098,14 +3130,13 @@ views.dialogs = function () {
                         ['span', msg.toolName || 'tool'],
                         roleTimestamp ? ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, roleTimestamp] : ''
                      ]]
-                     : ['div', {class: 'chat-role'}, [
-                        ['span', msg.role],
-                        msg.role === 'user' && roleTimestamp ? ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, roleTimestamp] : ''
-                     ]];
+                     : ['div', {class: 'chat-role'}, ['span', msg.role]];
+
+                  var isUser = msg.role === 'user';
 
                   return ['div', {class: 'chat-message chat-' + msg.role}, [
                      roleHeader,
-                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject, msg.toolName === 'edit_file' || toolContentView.hasEditFile)],
+                     ['div', {class: 'chat-content'}, renderChatContent (toolContentView.text, currentProject, msg.toolName === 'edit_file' || msg.toolName === 'write_file' || toolContentView.hasEditFile)],
                      toolContentView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
                         ['button', {
                            class: 'btn-small',
@@ -3113,7 +3144,8 @@ views.dialogs = function () {
                            onclick: B.ev ('toggle', 'messageToolContent', expandKey)
                         }, expanded ? 'Less' : 'More']
                      ]] : '',
-                     ! isTool && gauges ? ['div', {class: 'chat-meta'}, gauges] : ''
+                     isUser && roleTimestamp ? ['div', {class: 'chat-meta'}, roleTimestamp] : '',
+                     ! isTool && ! isUser && gauges ? ['div', {class: 'chat-meta'}, gauges] : ''
                   ]];
                }) : noProvider
                   ? ['div', {style: style ({color: '#e67e22', 'font-size': '13px', padding: '1rem'})}, [
@@ -3123,11 +3155,9 @@ views.dialogs = function () {
                   ]]
                   : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, loadingFile ? 'Loading...' : 'Start typing below to begin a new dialog'],
                optimisticUserMessage ? ['div', {class: 'chat-message chat-user'}, [
-                  ['div', {class: 'chat-role'}, [
-                     ['span', 'user'],
-                     ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, formatLocalDateTimeNoMs (new Date ().toISOString ())]
-                  ]],
-                  ['div', {class: 'chat-content'}, optimisticUserMessage]
+                  ['div', {class: 'chat-role'}, ['span', 'user']],
+                  ['div', {class: 'chat-content'}, optimisticUserMessage],
+                  ['div', {class: 'chat-meta'}, formatLocalDateTimeNoMs (new Date ().toISOString ())]
                ]] : '',
                streaming ? ['div', {class: 'chat-message chat-assistant'}, [
                   ['div', {class: 'chat-role'}, 'assistant'],
