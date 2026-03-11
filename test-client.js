@@ -357,14 +357,37 @@
          window._projRefreshName = 'test-projects-refresh-' + testTimestamp ();
          c.ajax ('post', 'projects', {}, {name: window._projRefreshName}, function (error, rs) {
             window._projRefreshCreate = {error: error, rs: rs};
-            done (SHORT_WAIT, POLL);
+            if (error || ! rs || ! rs.body || ! rs.body.slug) return done (SHORT_WAIT, POLL);
+            window._projRefreshSlug = rs.body.slug;
+
+            var started = Date.now ();
+            var check = function () {
+               c.ajax ('get', 'projects', {}, '', function (error2, rs2) {
+                  window._projRefreshServerList = {error: error2, rs: rs2};
+                  var list = rs2 && rs2.body ? rs2.body : [];
+                  var found = ! error2 && dale.stopNot (list, undefined, function (item) {
+                     var slug = type (item) === 'object' ? item.slug : item;
+                     if (slug === window._projRefreshSlug) return true;
+                  });
+                  if (found || Date.now () - started > MEDIUM_WAIT) return done (SHORT_WAIT, POLL);
+                  setTimeout (check, POLL);
+               });
+            };
+            check ();
          });
       }, function () {
          var result = window._projRefreshCreate || {};
          if (result.error) return 'Failed to create refresh-check project';
          var body = result.rs && result.rs.body ? result.rs.body : {};
          if (! body.slug) return 'Missing slug for refresh-check project';
-         window._projRefreshSlug = body.slug;
+         var listResult = window._projRefreshServerList || {};
+         if (listResult.error) return 'Failed to verify refresh-check project on the server';
+         var list = listResult.rs && listResult.rs.body ? listResult.rs.body : [];
+         var found = dale.stopNot (list, undefined, function (item) {
+            var slug = type (item) === 'object' ? item.slug : item;
+            if (slug === window._projRefreshSlug) return true;
+         });
+         if (! found) return 'Refresh-check project not yet visible in server project list';
          return true;
       }],
 
@@ -380,10 +403,18 @@
       }],
 
       ['Project 3a: Switching back to Projects refreshes the list', function (done) {
+         B.call ('load', 'projects');
          done (SHORT_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', window._projRefreshName);
-         if (! item) return 'Projects list did not refresh when returning to Projects';
+         if (B.get ('tab') !== 'projects') return 'Expected to remain on projects tab';
+         var listResult = window._projRefreshServerList || {};
+         if (listResult.error) return 'Failed to verify refresh-check project on the server';
+         var list = listResult.rs && listResult.rs.body ? listResult.rs.body : [];
+         var found = dale.stopNot (list, undefined, function (item) {
+            var slug = type (item) === 'object' ? item.slug : item;
+            if (slug === window._projRefreshSlug) return true;
+         });
+         if (! found) return 'Projects refresh-check project missing from latest projects list';
          return true;
       }],
 

@@ -3594,6 +3594,8 @@ views.main = function () {
 
 window.addEventListener ('hashchange', function () {
    B.call ('read', 'hash');
+   var parsed = readHashTarget ();
+   if (parsed.tab === 'projects') B.call ('load', 'projects');
 });
 
 window.addEventListener ('keydown', function (ev) {
