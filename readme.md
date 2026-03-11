@@ -688,6 +688,24 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 - Search: `/` then `n`/`N`.
 - Commands: `:` enters command mode.
 
+## Running tests
+
+Start the server first, then run the backend integration tests:
+
+- `node test-server.js` — run all suites.
+- `node test-server.js <suite>` — run one suite.
+- `node test-server.js fast` — run the fast subset.
+
+Run the client tests the same way, using `test-client.js` instead:
+
+- `node test-client.js` — run all client flows.
+- `node test-client.js <suite>` — run one client flow.
+- `node test-client.js fast` — run the fast subset.
+
+Note: if you change `test-client.js`, rebuild/restart vibey before running the client tests. The browser loads the test bundle from the running vibey server/container, so local file edits are not enough on their own.
+
+Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialog`, `static`, `backend`, `vi`.
+
 ## Test suites
 
 **Project:**
@@ -698,6 +716,7 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
    - Client: Create project via prompt; navigates to Docs and sets `currentProject`.
 3. `GET /projects` — verify the new project appears with matching slug and display name.
    - Client: Projects list shows the new project entry with the display name.
+   - Client: Switching back to Projects refreshes the list, so projects created while viewing another tab appear.
 4. `POST /projects` same name again — verify it succeeds idempotently (no error, same slug returned).
    - Client: try creating a project with the same name.
 5. `DELETE /projects/:slug` — verify response is `{ok: true}`.
@@ -737,6 +756,7 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
    - Client: Create `doc/notes.md` via prompt and open it.
 8. `GET /project/:p/files` — list includes both docs.
    - Client: Sidebar lists both `main.md` and `notes.md`.
+   - Client: Switching away and back to Docs refreshes the sidebar, so docs created or deleted elsewhere appear correctly.
 9. `GET /project/:p/file/doc/notes.md` — read second doc, verify content.
    - Client: Editor shows initial `notes.md` content.
 10. `DELETE /project/:p/file/doc/notes.md` — delete second doc.
@@ -880,6 +900,7 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 2. `POST /projects` — create project. Client: create via prompt, verify `currentProject` is set and app navigates to Docs tab.
 3. `POST /project/:p/dialog/new` (openai, gpt-5.2-codex, slug `flow1-read-vibey`) — response has `dialogId`, `filename`, `provider`, `model`, `status: done`, filename ends `-done.md`.
 4. `GET /project/:p/dialogs` — draft is listed, status `done`.
+   - Client: Switching away and back to Dialogs refreshes the list, so dialogs created while viewing another tab appear.
 5. `POST /project/:p/tool/execute` (write_file `test-sample.txt`) — seed a file.
 6. `PUT /project/:p/dialog` (prompt: "read test-sample.txt with run_command") — returns **JSON** `{dialogId, filename, status: "active"}`.
 7. `GET /project/:p/dialog/:id/stream` — **SSE** stream. Collect events until `done`. Verify `context` event with valid `percent/used/limit`.
@@ -915,6 +936,12 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 37. `GET /project/:p/files` — only `doc/main.md`.
 38. `DELETE /projects/:p` — cleanup.
 39. `GET /projects` — confirm gone.
+40. After a dialog that used tools (tests 6–11), `GET /project/:p/dialog/:id/messages` returns provider message formats. Verify:
+    - `responsesApi` array contains no string with `[Assistant tool calls]` (tool calls must be structured `function_call` items, not flattened text).
+    - `responsesApi` array contains at least one item with `type: "function_call"` and valid `name`, `call_id`, `arguments` fields.
+    - `responsesApi` array contains at least one item with `type: "function_call_output"` and a `call_id` field.
+    - `openai` array contains at least one message with `role: "assistant"` and a `tool_calls` array.
+    - `openai` array contains at least one message with `role: "tool"` and a `tool_call_id`.
 
 **Static app:**
 
@@ -1066,6 +1093,9 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
 - Add points 4 and 5 for vibey cloud in the readme.
 - Client: the experience is bad (weird redraws, slow).
 - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
+   - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
+   - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
+   - The UI redraws synchronously because of gotoB, so there should be
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
 ## Vibey cloud in a nutshell

@@ -11,6 +11,20 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
 - Can you split consecutive tool uses in the client so we can see also at what time they were done? Also add timestamps to user messages.
 - Please show the ms on LLM-RS logs.
 - Please bold the ms. Also please pick eight colors and paint each of the eight log prefixes so they can be easily spotted. There's overlap, so let's do just four colors, one for DOCK, one for HTTP, one for SSE and one for LLM.
+- Can you improve the look and feel of the write file tool, so that new lines are broken down, and we see them as green when they are added? On the client.
+- Is there something being batched at the end of a long LLM response? Or maybe we stop streaming data at some point? There's a long delay at the end that seems unjustified. I want everything to be flowing, everything to flow to the .md as soon as we get it, and the client getting the updated chunks. No batches. Please review.
+- It's ok to have a docker delay. And it's ok to batch writes to the .md but on the latency. You can have a buffer for everything that arrives between saves. Catch my drift?
+- Nice! Please change the prompt to say that agents-now.md should be in the docs folder, so it's user editable.
+- Please remove the extra spaces in the diffs between - or + lines.
+- Is there any way we can use gotoB's B.diff to do a proper line diff, so we don't see a bunch of - and then a bunch of +s?
+- The dropdown for model selection stopped working.
+- Please add a section on how to run the tests just above their spec, on readme.md.
+- Please fix the frontend tests, first run the fast ones. Then the dialog. Then the static. Then the backend.
+- Every time we switch views, refresh what we see: either the list of projects, the list of docs or the list of dialogs. Please first add the assertions to the test suite in readme.md (client only). Then add tests for it, in each relevant suite. Don't run them.
+- Now please make those tests by fixing the client.
+- When we're streaming tool uses, we don't see timestamps or tokens in/out. Are we getting different data than if we were refreshing the page?
+- Why can't we make the SSE and the .md to be equivalent in the data being sent?
+- Absolutely, make the SSE emit something indistinguishable from the .md, and let the client reconstruct it.
 
 ### 2026-03-10
 
