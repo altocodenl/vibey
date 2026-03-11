@@ -258,6 +258,24 @@ var isChatNearBottom = function (node) {
 
 var activeDialogStream = null;
 
+var applyStreamingMarkdownEvent = function (markdown, event) {
+   markdown = type (markdown) === 'string' ? markdown : '';
+   event = event || {};
+
+   if (event.type === 'snapshot') return type (event.markdown) === 'string' ? event.markdown : '';
+   if (event.type === 'markdown_append') return markdown + (event.content || '');
+   if (event.type === 'markdown_replace') {
+      var oldText = type (event.oldText) === 'string' ? event.oldText : '';
+      var newText = type (event.newText) === 'string' ? event.newText : '';
+      if (! oldText) return markdown;
+      var index = markdown.lastIndexOf (oldText);
+      if (index === -1) return markdown;
+      return markdown.slice (0, index) + newText + markdown.slice (index + oldText.length);
+   }
+
+   return markdown;
+};
+
 // *** VI CONTROLLER ***
 
 var viController = {};
@@ -1082,6 +1100,7 @@ B.mrespond ([
             B.call (x, 'set', 'currentUpload', null);
             B.call (x, 'set', 'streaming', false);
             B.call (x, 'set', 'streamingContent', '');
+            B.call (x, 'set', 'streamingMarkdown', null);
             B.call (x, 'set', 'optimisticUserMessage', null);
             B.call (x, 'reset', 'chatInput');
             B.call (x, 'navigate', 'hash', '#/projects');
@@ -1244,6 +1263,7 @@ B.mrespond ([
                B.call (x, 'set', 'currentFile', null);
                B.call (x, 'set', 'streaming', false);
                B.call (x, 'set', 'streamingContent', '');
+               B.call (x, 'set', 'streamingMarkdown', null);
                B.call (x, 'set', 'optimisticUserMessage', null);
                B.call (x, 'reset', 'chatInput');
                return B.call (x, 'navigate', 'hash', '#/projects');
@@ -1303,6 +1323,7 @@ B.mrespond ([
 
       // Clear stale streaming context when switching files
       B.call (x, 'set', 'contextWindow', null);
+      B.call (x, 'set', 'streamingMarkdown', null);
 
       // This is now an explicit file-load intent; clear any stale hash target
       // so delayed file-list refreshes don't bounce back to an older target.
@@ -1693,6 +1714,7 @@ B.mrespond ([
 
          B.call (x, 'set', 'streaming', false);
          B.call (x, 'set', 'streamingContent', '');
+         B.call (x, 'set', 'streamingMarkdown', null);
          B.call (x, 'set', 'optimisticUserMessage', null);
          B.call (x, 'set', ['dialog', 'input'], '');
 
@@ -1841,6 +1863,13 @@ B.mrespond ([
       if (resumeContent) B.call (x, 'set', 'streamingContent', resumeContent);
       else if (previousDialogId !== dialogId) B.call (x, 'set', 'streamingContent', '');
       else B.call (x, 'set', 'streamingContent', B.get ('streamingContent') || '');
+      var baseMarkdown = '';
+      var currentFile = B.get ('currentFile');
+      if (currentFile && currentFile.name) {
+         var parsedCurrent = parseDialogFilename (currentFile.name);
+         if (parsedCurrent && parsedCurrent.dialogId === dialogId) baseMarkdown = currentFile.content || '';
+      }
+      B.call (x, 'set', 'streamingMarkdown', baseMarkdown);
 
       var targetFilename = filename;
       var receivedContent = false;
@@ -1850,6 +1879,7 @@ B.mrespond ([
          B.call (x, 'set', 'streamingDialogId', null);
          B.call (x, 'set', 'streaming', false);
          B.call (x, 'set', 'optimisticUserMessage', null);
+         B.call (x, 'set', 'streamingMarkdown', null);
          // Only reload if the stream actually produced content; otherwise we'd
          // loop endlessly on dialogs stuck with -active.md status but no
          // generation running on the server.
@@ -1890,7 +1920,14 @@ B.mrespond ([
 
                   try {
                      var data = JSON.parse (line.slice (6));
-                     if (data.type === 'chunk') {
+                     if (data.type === 'snapshot' || data.type === 'markdown_append' || data.type === 'markdown_replace') {
+                        receivedContent = true;
+                        var currentMarkdown = B.get ('streamingMarkdown') || '';
+                        B.call (x, 'set', 'streamingMarkdown', applyStreamingMarkdownEvent (currentMarkdown, data));
+                        B.call (x, 'set', 'optimisticUserMessage', null);
+                        if (data.result && data.result.filename) targetFilename = data.result.filename;
+                     }
+                     else if (data.type === 'chunk') {
                         receivedContent = true;
                         var current = B.get ('streamingContent') || '';
                         B.call (x, 'set', 'streamingContent', current + data.content);
@@ -1976,6 +2013,7 @@ B.mrespond ([
          return response.json ().then (function () {
             B.call (x, 'set', 'streaming', false);
             B.call (x, 'set', 'streamingContent', '');
+            B.call (x, 'set', 'streamingMarkdown', null);
             B.call (x, 'set', 'optimisticUserMessage', null);
 
             fetch (projectPath (B.get ('currentProject'), 'dialogs')).then (function (rs) {
@@ -3044,7 +3082,7 @@ var formatMessageGauges = function (msg) {
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['streamingMarkdown'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, streamingMarkdown, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin) {
 
       dialog = dialog || {};
       var input = dialog.input;
@@ -3060,17 +3098,8 @@ views.dialogs = function () {
       var isDialog = currentFile && isDialogFile (currentFile.name);
       var currentDialogParsed = isDialog ? (parseDialogFilename (currentFile.name) || {}) : {};
       var dialogIsActive = isDialog && currentDialogParsed.status === 'active';
-      var messages = isDialog ? parseDialogContent (currentFile.content) : [];
-
-      // On mid-stream reconnect (streaming but no optimistic user message), the
-      // last assistant turn was seeded into streamingContent.  Remove it from the
-      // parsed messages so it doesn't render twice.
-      if (streaming && ! optimisticUserMessage && messages.length) {
-         var cut = messages.length;
-         while (cut > 0 && messages [cut - 1].role === 'tool') cut--;
-         if (cut > 0 && messages [cut - 1].role === 'assistant') cut--;
-         if (cut < messages.length) messages = messages.slice (0, cut);
-      }
+      var effectiveDialogContent = isDialog ? ((streaming && streamingMarkdown) ? streamingMarkdown : currentFile.content) : '';
+      var messages = isDialog ? parseDialogContent (effectiveDialogContent) : [];
 
       viMode = !! viMode;
       viState = viState || {};
@@ -3159,7 +3188,7 @@ views.dialogs = function () {
                   ['div', {class: 'chat-content'}, optimisticUserMessage],
                   ['div', {class: 'chat-meta'}, formatLocalDateTimeNoMs (new Date ().toISOString ())]
                ]] : '',
-               streaming ? ['div', {class: 'chat-message chat-assistant'}, [
+               (streaming && ! streamingMarkdown && streamingContent) ? ['div', {class: 'chat-message chat-assistant'}, [
                   ['div', {class: 'chat-role'}, 'assistant'],
                   ['div', {class: 'chat-content'}, (streamingContent || '') + '▊']
                ]] : ''

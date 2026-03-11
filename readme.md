@@ -1091,7 +1091,8 @@ Bigger refactors:
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
 - Add points 4 and 5 for vibey cloud in the readme.
-- Client: the experience is bad (weird redraws, slow).
+- Ensure that .md and SSE stream look the exact same. Test that with live dialogs and refresh.
+- Long pause at the end of some LLM work. Are we sending one more unnecessary message?
 - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
    - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
    - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.

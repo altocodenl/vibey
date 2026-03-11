@@ -1728,9 +1728,9 @@ var appendToDialog = async function (projectName, filename, text) {
    await pfs.appendFile (projectName, filename, text);
 };
 
-var appendUsageToAssistantSection = async function (projectName, filename, usage) {
+var appendUsageToAssistantSection = async function (projectName, filename, usage, onAppend) {
    var normalized = parseUsageNumbers (usage);
-   if (! normalized) return;
+   if (! normalized) return null;
 
    var cumulative = await getLastCumulativeUsage (projectName, filename);
    // Input tokens already include the full conversation history each turn,
@@ -1740,20 +1740,25 @@ var appendUsageToAssistantSection = async function (projectName, filename, usage
    cumulative.output += normalized.output;
    cumulative.total = normalized.input + cumulative.output;
 
-   await appendToDialog (projectName, filename,
+   var text =
       '> Usage: input=' + normalized.input + ' output=' + normalized.output + ' total=' + normalized.total + '\n' +
-      '> Usage cumulative: input=' + cumulative.input + ' output=' + cumulative.output + ' total=' + cumulative.total + '\n\n'
-   );
+      '> Usage cumulative: input=' + cumulative.input + ' output=' + cumulative.output + ' total=' + cumulative.total + '\n\n';
+
+   await appendToDialog (projectName, filename, text);
+   if (onAppend) onAppend (text);
+   return {usage: normalized, cumulative: cumulative, text: text};
 };
 
-var finalizeAssistantTime = async function (projectName, filename, startIso, endIso) {
+var finalizeAssistantTime = async function (projectName, filename, startIso, endIso, onReplace) {
    var marker = '> Time: ' + startIso + ' - ...';
    var replacement = '> Time: ' + startIso + ' - ' + endIso;
    var text = await pfs.readFile (projectName, filename);
    var index = text.lastIndexOf (marker);
-   if (index < 0) return;
+   if (index < 0) return false;
    text = text.slice (0, index) + replacement + text.slice (index + marker.length);
    await pfs.writeFile (projectName, filename, text);
+   if (onReplace) onReplace (marker, replacement);
+   return true;
 };
 
 var parseDialogForProvider = function (markdown, provider) {
@@ -1970,7 +1975,7 @@ var ensureDialogFile = async function (projectName, dialog, provider, model) {
    dialog.markdown = await pfs.readFile (projectName, dialog.filename);
 };
 
-var writeToolResults = async function (projectName, filename, resultsById) {
+var writeToolResults = async function (projectName, filename, resultsById, onReplace) {
    var markdown = await pfs.readFile (projectName, filename);
    var toolCalls = parseToolCalls (markdown, true);
 
@@ -1979,7 +1984,7 @@ var writeToolResults = async function (projectName, filename, resultsById) {
       if (tc.result) return;
       var result = resultsById [tc.id];
       if (! result) return;
-      return {start: tc.start, end: tc.end, text: buildToolBlock (tc, result)};
+      return {start: tc.start, end: tc.end, oldText: tc.raw, text: buildToolBlock (tc, result)};
    });
 
    replacements.reverse ();
@@ -1988,6 +1993,9 @@ var writeToolResults = async function (projectName, filename, resultsById) {
    });
 
    await pfs.writeFile (projectName, filename, markdown);
+   if (onReplace) dale.go (replacements, function (r) {
+      onReplace (r.oldText, r.text);
+   });
 };
 
 // Implementation function for Claude (streaming with tool support)
@@ -2338,10 +2346,12 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
    };
 };
 
-var appendToolCallsToAssistantSection = async function (projectName, filename, toolCalls) {
+var appendToolCallsToAssistantSection = async function (projectName, filename, toolCalls, onAppend) {
    if (! toolCalls || ! toolCalls.length) return;
    for (var i = 0; i < toolCalls.length; i++) {
-      await appendToDialog (projectName, filename, buildToolBlock (toolCalls [i]) + '\n\n');
+      var text = buildToolBlock (toolCalls [i]) + '\n\n';
+      await appendToDialog (projectName, filename, text);
+      if (onAppend) onAppend (text);
    }
 };
 
@@ -2355,7 +2365,15 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       var messages = parseDialogForProvider (markdown, provider);
 
       var assistantStart = new Date ().toISOString ();
-      await appendToDialog (projectName, dialog.filename, '## Assistant\n> Model: ' + model + '\n> Time: ' + assistantStart + ' - ...\n\n');
+      var appendMarkdown = function (text) {
+         if (onChunk) onChunk ({type: 'markdown_append', content: text});
+      };
+      var replaceMarkdown = function (oldText, newText) {
+         if (onChunk) onChunk ({type: 'markdown_replace', oldText: oldText, newText: newText});
+      };
+      var assistantHeader = '## Assistant\n> Model: ' + model + '\n> Time: ' + assistantStart + ' - ...\n\n';
+      await appendToDialog (projectName, dialog.filename, assistantHeader);
+      appendMarkdown (assistantHeader);
 
       // Chunks arrive from the LLM faster than docker exec can write (~50ms each).
       // We buffer text between writes: at most one docker exec in flight at a time,
@@ -2400,6 +2418,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          if (type (chunk) === 'string') {
             writeBuf += chunk;
             flushBuf ();
+            appendMarkdown (chunk);
          }
          if (onChunk) onChunk (chunk);
       };
@@ -2420,7 +2439,8 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          await waitForDrain ();
          if (queuedWriteError) throw queuedWriteError;
          await appendToDialog (projectName, dialog.filename, '\n\n');
-         await appendUsageToAssistantSection (projectName, dialog.filename, result.usage);
+         appendMarkdown ('\n\n');
+         await appendUsageToAssistantSection (projectName, dialog.filename, result.usage, appendMarkdown);
 
          // Log + emit helper: logs as LLM-RS and propagates to onChunk (SSE).
          // Does NOT write to dialog — tool/context blocks are written separately above/below.
@@ -2438,10 +2458,12 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          var normalized = parseUsageNumbers (result.usage);
          var contextUsed = normalized ? normalized.input + normalized.output : 0;
          var contextPercent = contextUsed ? Math.round (contextUsed / contextLimit * 100) : 0;
-         await appendToDialog (projectName, dialog.filename, '> Context: used=' + contextUsed + ' limit=' + contextLimit + ' percent=' + contextPercent + '%\n');
+         var contextLine = '> Context: used=' + contextUsed + ' limit=' + contextLimit + ' percent=' + contextPercent + '%\n';
+         await appendToDialog (projectName, dialog.filename, contextLine);
+         appendMarkdown (contextLine);
          emitEvent ({type: 'context', context: {used: contextUsed, limit: contextLimit, percent: contextPercent}});
 
-         await appendToolCallsToAssistantSection (projectName, dialog.filename, result.toolCalls);
+         await appendToolCallsToAssistantSection (projectName, dialog.filename, result.toolCalls, appendMarkdown);
 
          var resultsById = {};
          var executed = [];
@@ -2459,7 +2481,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
             emitEvent ({type: 'tool_result', tool: {id: tc.id, name: tc.name, result: toolResult}});
          }
 
-         if (dale.keys (resultsById).length) await writeToolResults (projectName, dialog.filename, resultsById);
+         if (dale.keys (resultsById).length) await writeToolResults (projectName, dialog.filename, resultsById, replaceMarkdown);
          if (executed.length) autoExecutedAll = autoExecutedAll.concat (executed);
 
          if (! toolCalls.length) {
@@ -2476,7 +2498,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
       }
       finally {
          try {
-            await finalizeAssistantTime (projectName, dialog.filename, assistantStart, new Date ().toISOString ());
+            await finalizeAssistantTime (projectName, dialog.filename, assistantStart, new Date ().toISOString (), replaceMarkdown);
          }
          catch (error) {}
       }
@@ -3559,6 +3581,14 @@ var routes = [
          logLine (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.ok), '(done)');
          return;
       }
+
+      try {
+         var snapshotMarkdown = dialog.markdown || await pfs.readFile (projectName, dialog.filename);
+         var snapshotPayload = JSON.stringify ({type: 'snapshot', markdown: snapshotMarkdown, result: {dialogId: dialogId, filename: dialog.filename, status: dialog.status}});
+         logStreamEvent (' SSE-RS', sseStreamId, projectName, dialogId, 'snapshot', 'bytes=' + Buffer.byteLength (snapshotPayload));
+         rs.write ('data: ' + snapshotPayload + '\n\n');
+      }
+      catch (error) {}
 
       // Subscribe to the active stream's emitter
       var onEvent = function (event) {
