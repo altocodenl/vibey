@@ -2,83 +2,26 @@
 
 var fs    = require ('fs');
 var Path  = require ('path');
+var crypto = require ('crypto');
+var http   = require ('http');
+var EventEmitter = require ('events');
 
 var dale   = require ('dale');
 var teishi = require ('teishi');
 var lith   = require ('lith');
 var cicek  = require ('cicek');
 
+var CONFIG = require ('./secret.json');
+
 var clog = console.log;
 
 var type = teishi.type, eq = teishi.eq, last = teishi.last, inc = teishi.inc;
 
-var LOG_COLORS = {
-   ok: '\033[37m\033[42m',
-   failed: '\033[37m\033[41m',
-   info: '\033[37m\033[46m'
-};
-
-var LOG_PREFIX_COLORS = {
-   'HTTP-RQ': '\033[36m',       // cyan
-   'HTTP-RS': '\033[36m',
-   'DOCK-RQ': '\033[33m',       // yellow
-   'DOCK-RS': '\033[33m',
-   ' LLM-RQ': '\033[35m',      // magenta
-   ' LLM-RS': '\033[35m',
-   ' SSE-RQ': '\033[32m',      // green
-   ' SSE-RS': '\033[32m',
-};
-
-var BOLD = '\033[1m';
-var RESET = '\033[0m';
-
-var colorLog = function (text, color) {
-   color = color || LOG_COLORS.info;
-   return color + text + RESET + BOLD;
-};
-
-var logCodeColor = function (code) {
-   code = String (code || '0');
-   return colorLog (code, '\033[37m\033[4' + ({1: 6, 2: 2, 3: 4, 4: 3, 5: 1}) [code [0] || '5'] + 'm');
-};
-
-var logSeq = 0;
-var nextLogId = function () {
-   logSeq++;
-   return logSeq.toString (16).padStart (12, '0');
-};
-
-var logLine = function (kind, id) {
-   var parts = Array.prototype.slice.call (arguments, 2);
-   var prefixColor = LOG_PREFIX_COLORS [kind] || '';
-   var coloredKind = prefixColor ? prefixColor + BOLD + kind + RESET : kind;
-   var line = [new Date ().toISOString (), coloredKind, id].concat (parts).join (' ');
-   // Bold any (Nms) timing markers
-   line = line.replace (/\((\d+)ms\)/g, BOLD + '($1ms)' + RESET);
-   console.log (line);
-};
-
-var logDockerStart = function (id, project, command) {
-   logLine ('DOCK-RQ', id, project, command.slice (0, 200));
-};
-
-var logDockerEnd = function (id, project, ok, ms, detail) {
-   var status = ok ? colorLog ('OK', LOG_COLORS.ok) : colorLog ('FAILED', LOG_COLORS.failed);
-   logLine ('DOCK-RS', id, project, status, '(' + ms + 'ms)', detail ? detail.slice (0, 200) : '');
-};
-
-var logStreamEvent = function (kind, id, projectName, dialogId, eventType, extra) {
-   logLine (kind, id, projectName, 'dialog=' + dialogId, 'type=' + eventType, extra || '');
-};
-
 var reply = function (rs, code, body, headers) {
-   try {
-      if (! rs) return;
-      if (rs.headersSent || rs.writableEnded || rs.destroyed) return;
-      if (rs.connection && rs.connection.writable === false) return;
-      return cicek.reply (rs, code, body, headers);
-   }
-   catch (error) {}
+   if (! rs) return;
+   if (rs.headersSent || rs.writableEnded || rs.destroyed) return;
+   if (rs.connection && rs.connection.writable === false) return;
+   return cicek.reply (rs, code, body, headers);
 }
 
 var stop = function (rs, rules) {
@@ -87,41 +30,97 @@ var stop = function (rs, rules) {
    }, true);
 }
 
-// *** HELPERS ***
-
-var crypto = require ('crypto');
-var http   = require ('http');
-var EventEmitter = require ('events');
+var log = {
+   style: {
+      ok:        {background: 'green'},
+      failed:    {background: 'red'},
+      info:      {background: 'cyan'},
+      'HTTP-RQ': {color: 'cyan'},
+      'HTTP-RS': {color: 'cyan'},
+      'DOCK-RQ': {color: 'yellow'},
+      'DOCK-RS': {color: 'yellow'},
+      ' LLM-RQ': {color: 'magenta'},
+      ' LLM-RS': {color: 'magenta'},
+      ' SSE-RQ': {color: 'green'},
+      ' SSE-RS': {color: 'green'},
+      '1xx':     {background: 'cyan'},
+      '2xx':     {background: 'green'},
+      '3xx':     {background: 'blue'},
+      '4xx':     {background: 'yellow'},
+      '5xx':     {background: 'red'}
+   },
+   color: function (text, options) {
+      options = options || {};
+      var codes = [];
+      var colorCodes = {
+         black: 30,
+         red: 31,
+         green: 32,
+         yellow: 33,
+         blue: 34,
+         magenta: 35,
+         cyan: 36,
+         white: 37,
+         gray: 90
+      };
+      if (options.color === undefined) options.color = 'white';
+      if (options.bold  === undefined) options.bold  = true;
+      if (options.color      !== undefined && colorCodes [options.color]      !== undefined) codes.push (colorCodes [options.color]);
+      if (options.background !== undefined && colorCodes [options.background] !== undefined) codes.push (colorCodes [options.background] + 10);
+      if (options.bold) codes.push (1);
+      return codes.length ? '\u001b[' + codes.join (';') + 'm' + text + '\u001b[0m' : text;
+   },
+   code: function (code) {
+      code = String (code || '0');
+      return log.color (code, log.style [(code [0] || '5') + 'xx']);
+   },
+   logId: function (length) {
+      return cicek.pseudorandom (length);
+   },
+   line: function (kind, id) {
+      var parts = Array.prototype.slice.call (arguments, 2);
+      var coloredKind = log.style [kind] ? log.color (kind, log.style [kind]) : kind;
+      var line = [new Date ().toISOString (), coloredKind, id].concat (parts).join (' ');
+      line = line.replace (/\((\d+)ms\)/g, function (match) {
+         return log.color (match);
+      });
+      console.log (line);
+   },
+   docker: {
+      start: function (id, project, command) {
+         log.line ('DOCK-RQ', id, project, command.slice (0, 200));
+      },
+      end: function (id, project, ok, ms, detail) {
+         var status = ok ? log.color ('OK', log.style.ok) : log.color ('FAILED', log.style.failed);
+         log.line ('DOCK-RS', id, project, status, '(' + ms + 'ms)', detail ? detail.slice (0, 200) : '');
+      }
+   },
+   stream: function (kind, id, projectName, dialogId, eventType, extra) {
+      log.line (kind, id, projectName, 'dialog=' + dialogId, 'type=' + eventType, extra || '');
+   }
+};
 
 // *** PROMPTS ***
 
 var PROMPTS_PATH = Path.join (__dirname, 'prompt.md');
 
-var loadSystemPrompt = function () {
+var loadInjectedPrompt = async function (projectName) {
+   var prompt = 'You are a helpful assistant with access to local system tools.';
    try {
       var md = fs.readFileSync (PROMPTS_PATH, 'utf8');
       var match = md.match (/```\n([\s\S]*?)\n```/);
-      return match ? match [1].trim () : '';
+      prompt = match ? match [1].trim () : '';
    }
-   catch (e) {
-      return 'You are a helpful assistant with access to local system tools.';
-   }
+   catch (e) {}
+   var docMain = await getDocMainContent (projectName);
+   if (! docMain) return prompt;
+   return prompt + '\n\nProject instructions (' + docMain.name + '):\n\n' + docMain.content;
 };
 
 // *** SECRET.JSON ***
 
-var CONFIG_JSON_PATH = Path.join (__dirname, 'secret.json');
-
-var loadConfigJson = function () {
-   try {
-      if (fs.existsSync (CONFIG_JSON_PATH)) return JSON.parse (fs.readFileSync (CONFIG_JSON_PATH, 'utf8'));
-   }
-   catch (e) {}
-   return {};
-};
-
-var saveConfigJson = function (config) {
-   fs.writeFileSync (CONFIG_JSON_PATH, JSON.stringify (config, null, 2), 'utf8');
+var saveConfigJson = function () {
+   fs.writeFileSync (Path.join (__dirname, 'secret.json'), JSON.stringify (CONFIG, null, 2), 'utf8');
 };
 
 var maskApiKey = function (key) {
@@ -204,15 +203,14 @@ var completeAnthropicLogin = async function (authCode) {
    var tokenData = await response.json ();
    var expiresAt = Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000;
 
-   var config = loadConfigJson ();
-   if (! config.accounts) config.accounts = {};
-   config.accounts.claudeOAuth = {
+   if (! CONFIG.accounts) CONFIG.accounts = {};
+   CONFIG.accounts.claudeOAuth = {
       type: 'oauth',
       access: tokenData.access_token,
       refresh: tokenData.refresh_token,
       expires: expiresAt
    };
-   saveConfigJson (config);
+   saveConfigJson ();
    return {ok: true};
 };
 
@@ -427,16 +425,15 @@ var completeOpenAILogin = async function (manualCode) {
    var accountId = extractOpenAIAccountId (tokenData.access_token);
    if (! accountId) throw new Error ('Failed to extract accountId from token');
 
-   var config = loadConfigJson ();
-   if (! config.accounts) config.accounts = {};
-   config.accounts.openaiOAuth = {
+   if (! CONFIG.accounts) CONFIG.accounts = {};
+   CONFIG.accounts.openaiOAuth = {
       type: 'oauth',
       access: tokenData.access_token,
       refresh: tokenData.refresh_token,
       expires: Date.now () + tokenData.expires_in * 1000,
       accountId: accountId
    };
-   saveConfigJson (config);
+   saveConfigJson ();
    return {ok: true};
 };
 
@@ -473,8 +470,8 @@ var refreshOpenAIToken = async function (cred) {
 // *** API KEY RESOLUTION (API key from secret.json > OAuth token) ***
 
 var getApiKey = async function (provider) {
-   var config = loadConfigJson ();
-   var accounts = config.accounts || {};
+   if (! CONFIG.accounts) CONFIG.accounts = {};
+   var accounts = CONFIG.accounts || {};
 
    if (provider === 'claude') {
       // 1. OAuth subscription (preferred)
@@ -483,9 +480,9 @@ var getApiKey = async function (provider) {
          if (Date.now () >= cred.expires) {
             try {
                var refreshed = await refreshAnthropicToken (cred);
-               config.accounts.claudeOAuth = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires};
-               saveConfigJson (config);
-               cred = config.accounts.claudeOAuth;
+               CONFIG.accounts.claudeOAuth = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires};
+               saveConfigJson ();
+               cred = CONFIG.accounts.claudeOAuth;
             }
             catch (e) {
                return {key: '', type: 'api_key'};
@@ -506,9 +503,9 @@ var getApiKey = async function (provider) {
          if (Date.now () >= cred.expires) {
             try {
                var refreshed = await refreshOpenAIToken (cred);
-               config.accounts.openaiOAuth = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires, accountId: refreshed.accountId};
-               saveConfigJson (config);
-               cred = config.accounts.openaiOAuth;
+               CONFIG.accounts.openaiOAuth = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires, accountId: refreshed.accountId};
+               saveConfigJson ();
+               cred = CONFIG.accounts.openaiOAuth;
             }
             catch (e) {
                return {key: '', type: 'api_key'};
@@ -538,21 +535,21 @@ var dockerProject = function (command) {
    return match ? match [1] : 'system';
 };
 var execA = function (command, options) {
-   var id = nextLogId ();
+   var id = log.logId ();
    dockerCmdId++;
    var project = dockerProject (command);
-   logDockerStart (id, project, command);
+   log.docker.start (id, project, command);
    var t = Date.now ();
    return new Promise (function (resolve, reject) {
       exec (command, options || {encoding: 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) {
             error.stdout = stdout;
             error.stderr = stderr;
-            logDockerEnd (id, project, false, Date.now () - t, error.message || '');
+            log.docker.end (id, project, false, Date.now () - t, error.message || '');
             reject (error);
          }
          else {
-            logDockerEnd (id, project, true, Date.now () - t);
+            log.docker.end (id, project, true, Date.now () - t);
             resolve ((stdout || '').toString ());
          }
       });
@@ -561,21 +558,21 @@ var execA = function (command, options) {
 
 // Promisified exec that returns a Buffer (for binary reads)
 var execABuf = function (command, options) {
-   var id = nextLogId ();
+   var id = log.logId ();
    dockerCmdId++;
    var project = dockerProject (command);
-   logDockerStart (id, project, command);
+   log.docker.start (id, project, command);
    var t = Date.now ();
    return new Promise (function (resolve, reject) {
       exec (command, options || {encoding: 'buffer', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) {
             error.stdout = stdout;
             error.stderr = stderr;
-            logDockerEnd (id, project, false, Date.now () - t, error.message || '');
+            log.docker.end (id, project, false, Date.now () - t, error.message || '');
             reject (error);
          }
          else {
-            logDockerEnd (id, project, true, Date.now () - t);
+            log.docker.end (id, project, true, Date.now () - t);
             resolve (stdout);
          }
       });
@@ -584,21 +581,21 @@ var execABuf = function (command, options) {
 
 // Promisified exec with stdin piped in (for writes)
 var execAWithInput = function (command, input, encoding) {
-   var id = nextLogId ();
+   var id = log.logId ();
    dockerCmdId++;
    var project = dockerProject (command);
-   logDockerStart (id, project, command);
+   log.docker.start (id, project, command);
    var t = Date.now ();
    return new Promise (function (resolve, reject) {
       var child = exec (command, {encoding: encoding || 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) {
             error.stdout = stdout;
             error.stderr = stderr;
-            logDockerEnd (id, project, false, Date.now () - t, error.message || '');
+            log.docker.end (id, project, false, Date.now () - t, error.message || '');
             reject (error);
          }
          else {
-            logDockerEnd (id, project, true, Date.now () - t);
+            log.docker.end (id, project, true, Date.now () - t);
             resolve ((stdout || '').toString ());
          }
       });
@@ -1337,12 +1334,6 @@ var getDocMainContent = async function (projectName) {
    }
 };
 
-var getDocMainInjection = async function (projectName) {
-   var docMain = await getDocMainContent (projectName);
-   if (! docMain) return '';
-   return '\n\nProject instructions (' + docMain.name + '):\n\n' + docMain.content;
-};
-
 var upsertDocMainContextBlock = async function (projectName, filename) {
    var markdown;
    try {
@@ -2002,7 +1993,7 @@ var writeToolResults = async function (projectName, filename, resultsById, onRep
 var chatWithClaude = async function (projectName, messages, model, onChunk, abortSignal) {
    model = model || 'claude-sonnet-4-6';
 
-   var systemPrompt = loadSystemPrompt () + getDocMainInjection (projectName);
+   var systemPrompt = await loadInjectedPrompt (projectName);
 
    var requestBody = {
       model: model,
@@ -2075,12 +2066,14 @@ var chatWithClaude = async function (projectName, messages, model, onChunk, abor
                      name: parsed.content_block.name,
                      input: ''
                   };
+                  if (onChunk) onChunk ('\n\n---\nTool request: ' + currentToolUse.name + ' [' + currentToolUse.id + ']\n\n');
                }
 
                // Tool use input delta
                if (parsed.type === 'content_block_delta' && parsed.delta && parsed.delta.type === 'input_json_delta') {
                   if (currentToolUse) {
                      currentToolUse.input += parsed.delta.partial_json;
+                     if (onChunk) onChunk (parsed.delta.partial_json);
                   }
                }
 
@@ -2088,6 +2081,7 @@ var chatWithClaude = async function (projectName, messages, model, onChunk, abor
 
                // Tool use stop
                if (parsed.type === 'content_block_stop' && currentToolUse) {
+                  if (onChunk) onChunk ('\n\n---');
                   try {
                      currentToolUse.input = JSON.parse (currentToolUse.input);
                   }
@@ -2171,7 +2165,7 @@ var normalizeMessagesForResponsesApi = function (messages) {
 var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal) {
    model = model || 'gpt-5.4';
 
-   var systemPrompt = loadSystemPrompt () + getDocMainInjection (projectName);
+   var systemPrompt = await loadInjectedPrompt (projectName);
 
    var requestBody = {
       model: model,
@@ -2263,6 +2257,9 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
                      name: parsed.item.name || '',
                      arguments: parsed.item.arguments || ''
                   };
+                  var tcName = parsed.item.name || '';
+                  var tcId = parsed.item.call_id || parsed.item.id;
+                  if (onChunk) onChunk ('\n\n---\nTool request: ' + tcName + ' [' + tcId + ']\n\n');
                }
 
                // Tool args deltas
@@ -2271,6 +2268,7 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
                      responseToolCalls [parsed.item_id] = {id: parsed.item_id, name: '', arguments: ''};
                   }
                   responseToolCalls [parsed.item_id].arguments += parsed.delta || '';
+                  if (onChunk && parsed.delta) onChunk (parsed.delta);
                }
 
                if (parsed.type === 'response.function_call_arguments.done') {
@@ -2278,6 +2276,7 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
                      responseToolCalls [parsed.item_id] = {id: parsed.item_id, name: '', arguments: ''};
                   }
                   if (type (parsed.arguments) === 'string') responseToolCalls [parsed.item_id].arguments = parsed.arguments;
+                  if (onChunk) onChunk ('\n\n---');
                }
 
                // Final tool item data (name/call_id/arguments)
@@ -2306,16 +2305,32 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
             if (delta.tool_calls) {
                dale.go (delta.tool_calls, function (tc) {
                   var idx = tc.index;
-                  if (! toolCallsInProgress [idx]) toolCallsInProgress [idx] = {id: tc.id, name: '', arguments: ''};
+                  if (! toolCallsInProgress [idx]) {
+                     toolCallsInProgress [idx] = {id: tc.id, name: '', arguments: '', headerEmitted: false};
+                  }
                   if (tc.id) toolCallsInProgress [idx].id = tc.id;
                   if (tc.function && tc.function.name) toolCallsInProgress [idx].name += tc.function.name;
                   if (tc.function && tc.function.arguments) toolCallsInProgress [idx].arguments += tc.function.arguments;
+                  // Emit header once we have both id and name
+                  if (! toolCallsInProgress [idx].headerEmitted && toolCallsInProgress [idx].id && toolCallsInProgress [idx].name) {
+                     toolCallsInProgress [idx].headerEmitted = true;
+                     if (onChunk) onChunk ('\n\n---\nTool request: ' + toolCallsInProgress [idx].name + ' [' + toolCallsInProgress [idx].id + ']\n\n');
+                  }
+                  // Emit argument deltas
+                  if (toolCallsInProgress [idx].headerEmitted && tc.function && tc.function.arguments) {
+                     if (onChunk) onChunk (tc.function.arguments);
+                  }
                });
             }
          }
          catch (e) {}
       });
    }
+
+   // Close streamed tool blocks (chat completions)
+   dale.go (toolCallsInProgress, function (tc) {
+      if (tc.headerEmitted && onChunk) onChunk ('\n\n---');
+   });
 
    // Convert in-progress tool calls to final format (chat completions)
    dale.go (toolCallsInProgress, function (tc) {
@@ -2408,13 +2423,13 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          return new Promise (function (resolve) { drainResolve = resolve; });
       };
 
-      var llmStreamId = nextLogId ();
+      var llmStreamId = log.logId ();
       var llmStartMs = Date.now ();
-      logLine (' LLM-RQ', llmStreamId, projectName, 'dialog=' + dialog.dialogId, 'provider=' + provider, 'model=' + model, 'messages=' + messages.length);
+      log.line (' LLM-RQ', llmStreamId, projectName, 'dialog=' + dialog.dialogId, 'provider=' + provider, 'model=' + model, 'messages=' + messages.length);
       var writeChunk = function (chunk) {
          var eventType = type (chunk) === 'string' ? 'chunk' : ((chunk && chunk.type) || 'event');
          var extra = type (chunk) === 'string' ? 'chars=' + chunk.length : '';
-         logStreamEvent (' LLM-RS', llmStreamId, projectName, dialog.dialogId, eventType, extra + ' (' + (Date.now () - llmStartMs) + 'ms)');
+         log.stream (' LLM-RS', llmStreamId, projectName, dialog.dialogId, eventType, extra + ' (' + (Date.now () - llmStartMs) + 'ms)');
          if (type (chunk) === 'string') {
             writeBuf += chunk;
             flushBuf ();
@@ -2430,7 +2445,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          var llmMs = Date.now () - llmStartMs;
          var toolCount = (result.toolCalls || []).length;
-         logLine (' LLM-RS', llmStreamId, projectName, 'dialog=' + dialog.dialogId, 'content=' + (result.content || '').length + 'ch', 'tools=' + toolCount, '(' + llmMs + 'ms)');
+         log.line (' LLM-RS', llmStreamId, projectName, 'dialog=' + dialog.dialogId, 'content=' + (result.content || '').length + 'ch', 'tools=' + toolCount, '(' + llmMs + 'ms)');
 
          lastContent = result.content || '';
 
@@ -2447,7 +2462,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          var emitEvent = function (event) {
             var eventType = (event && event.type) || 'event';
             var extra = event.tool ? 'name=' + event.tool.name + ' id=' + event.tool.id : '';
-            logStreamEvent (' LLM-RS', llmStreamId, projectName, dialog.dialogId, eventType, extra + ' (' + (Date.now () - llmStartMs) + 'ms)');
+            log.stream (' LLM-RS', llmStreamId, projectName, dialog.dialogId, eventType, extra + ' (' + (Date.now () - llmStartMs) + 'ms)');
             if (onChunk) onChunk (event);
          };
 
@@ -2463,7 +2478,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          appendMarkdown (contextLine);
          emitEvent ({type: 'context', context: {used: contextUsed, limit: contextLimit, percent: contextPercent}});
 
-         await appendToolCallsToAssistantSection (projectName, dialog.filename, result.toolCalls, appendMarkdown);
+         // Tool call blocks are already in the .md from streaming deltas — no need to append again.
 
          var resultsById = {};
          var executed = [];
@@ -2791,14 +2806,12 @@ var routes = [
    // *** SETTINGS ***
 
    ['get', 'settings', function (rq, rs) {
-      var config = loadConfigJson ();
-      reply (rs, 200, buildSettingsResponse (config));
+      reply (rs, 200, buildSettingsResponse (CONFIG));
    }],
 
    ['post', 'settings', function (rq, rs) {
-      var config = loadConfigJson ();
-      config = applySettingsUpdate (config, rq.body);
-      saveConfigJson (config);
+      applySettingsUpdate (CONFIG, rq.body);
+      saveConfigJson ();
       reply (rs, 200, {ok: true});
    }],
 
@@ -2849,32 +2862,29 @@ var routes = [
    // OAuth logout
    ['post', 'settings/logout/:provider', function (rq, rs) {
       var provider = rq.data.params.provider;
-      var config = loadConfigJson ();
-      if (! config.accounts) config.accounts = {};
+      if (! CONFIG.accounts) CONFIG.accounts = {};
 
       if (provider === 'claude') {
-         delete config.accounts.claudeOAuth;
+         delete CONFIG.accounts.claudeOAuth;
       }
       else if (provider === 'openai') {
-         delete config.accounts.openaiOAuth;
+         delete CONFIG.accounts.openaiOAuth;
       }
       else {
          return reply (rs, 400, {error: 'Unknown provider: ' + provider});
       }
 
-      saveConfigJson (config);
+      saveConfigJson ();
       reply (rs, 200, {ok: true});
    }],
 
    // Backward-compatible accounts routes
    ['get', 'accounts', function (rq, rs) {
-      var config = loadConfigJson ();
-      reply (rs, 200, buildSettingsResponse (config));
+      reply (rs, 200, buildSettingsResponse (CONFIG));
    }],
    ['post', 'accounts', function (rq, rs) {
-      var config = loadConfigJson ();
-      config = applySettingsUpdate (config, rq.body);
-      saveConfigJson (config);
+      applySettingsUpdate (CONFIG, rq.body);
+      saveConfigJson ();
       reply (rs, 200, {ok: true});
    }],
    ['post', 'accounts/login/:provider', async function (rq, rs) {
@@ -2918,20 +2928,19 @@ var routes = [
    }],
    ['post', 'accounts/logout/:provider', function (rq, rs) {
       var provider = rq.data.params.provider;
-      var config = loadConfigJson ();
-      if (! config.accounts) config.accounts = {};
+      if (! CONFIG.accounts) CONFIG.accounts = {};
 
       if (provider === 'claude') {
-         delete config.accounts.claudeOAuth;
+         delete CONFIG.accounts.claudeOAuth;
       }
       else if (provider === 'openai') {
-         delete config.accounts.openaiOAuth;
+         delete CONFIG.accounts.openaiOAuth;
       }
       else {
          return reply (rs, 400, {error: 'Unknown provider: ' + provider});
       }
 
-      saveConfigJson (config);
+      saveConfigJson ();
       reply (rs, 200, {ok: true});
    }],
 
@@ -3568,24 +3577,24 @@ var routes = [
       if (rs.flushHeaders) rs.flushHeaders ();
       rs.write (':ok\n\n');
 
-      var sseStreamId = nextLogId ();
-      logLine (' SSE-RQ', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', rq.connection && rq.connection.remoteAddress ? rq.connection.remoteAddress : '');
+      var sseStreamId = log.logId ();
+      log.line (' SSE-RQ', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', rq.connection && rq.connection.remoteAddress ? rq.connection.remoteAddress : '');
 
       // If dialog is done (no active stream), send done immediately and close
       var activeStream = getActiveStream (projectName, dialogId);
       if (! activeStream) {
          var donePayload = JSON.stringify ({type: 'done', result: {dialogId: dialogId, filename: dialog.filename, status: dialog.status}});
-         logStreamEvent (' SSE-RS', sseStreamId, projectName, dialogId, 'done', 'bytes=' + Buffer.byteLength (donePayload));
+         log.stream (' SSE-RS', sseStreamId, projectName, dialogId, 'done', 'bytes=' + Buffer.byteLength (donePayload));
          rs.write ('data: ' + donePayload + '\n\n');
          rs.end ();
-         logLine (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.ok), '(done)');
+         log.line (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', log.color ('OK', log.style.ok), '(done)');
          return;
       }
 
       try {
          var snapshotMarkdown = dialog.markdown || await pfs.readFile (projectName, dialog.filename);
          var snapshotPayload = JSON.stringify ({type: 'snapshot', markdown: snapshotMarkdown, result: {dialogId: dialogId, filename: dialog.filename, status: dialog.status}});
-         logStreamEvent (' SSE-RS', sseStreamId, projectName, dialogId, 'snapshot', 'bytes=' + Buffer.byteLength (snapshotPayload));
+         log.stream (' SSE-RS', sseStreamId, projectName, dialogId, 'snapshot', 'bytes=' + Buffer.byteLength (snapshotPayload));
          rs.write ('data: ' + snapshotPayload + '\n\n');
       }
       catch (error) {}
@@ -3594,7 +3603,7 @@ var routes = [
       var onEvent = function (event) {
          try {
             var payload = JSON.stringify (event);
-            logStreamEvent (' SSE-RS', sseStreamId, projectName, dialogId, event.type || 'event', 'bytes=' + Buffer.byteLength (payload));
+            log.stream (' SSE-RS', sseStreamId, projectName, dialogId, event.type || 'event', 'bytes=' + Buffer.byteLength (payload));
             rs.write ('data: ' + payload + '\n\n');
             if (rs.flush) rs.flush ();
          }
@@ -3604,7 +3613,7 @@ var routes = [
          if (event.type === 'done' || event.type === 'error') {
             activeStream.emitter.removeListener ('event', onEvent);
             rs.end ();
-            logLine (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog (event.type === 'error' ? 'FAILED' : 'OK', event.type === 'error' ? LOG_COLORS.failed : LOG_COLORS.ok), '(' + event.type + ')');
+            log.line (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', log.color (event.type === 'error' ? 'FAILED' : 'OK', event.type === 'error' ? log.style.failed : log.style.ok), '(' + event.type + ')');
          }
       };
 
@@ -3615,7 +3624,7 @@ var routes = [
          if (activeStream && activeStream.emitter) {
             activeStream.emitter.removeListener ('event', onEvent);
          }
-         if (! rs.writableEnded) logLine (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', colorLog ('OK', LOG_COLORS.info), '(client-closed)');
+         if (! rs.writableEnded) log.line (' SSE-RS', sseStreamId, 'GET', rq.url || rq.rawurl || '/project/' + projectName + '/dialog/' + dialogId + '/stream', log.color ('OK', log.style.info), '(client-closed)');
       });
    }],
 
@@ -3841,10 +3850,10 @@ var port = 5353;
 // Lean server logs: print req/res without headers or bodies
 cicek.logconsole = function (message) {
    if (message [2] === 'request') {
-      logLine ('HTTP-RQ', message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
+      log.line ('HTTP-RQ', message [3].id, message [3].method.toUpperCase (), message [3].url, message [3].origin);
    }
    else if (message [2] === 'response') {
-      logLine ('HTTP-RS', message [3].id, message [3].method.toUpperCase (), message [3].url, logCodeColor (message [3].code), '(' + message [3].duration + 'ms)');
+      log.line ('HTTP-RS', message [3].id, message [3].method.toUpperCase (), message [3].url, log.code (message [3].code), '(' + message [3].duration + 'ms)');
    }
 };
 

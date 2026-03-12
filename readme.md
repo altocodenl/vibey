@@ -1,10 +1,14 @@
-# Vibey (codename)
+# Vibey
 
-An agentic interface for those who love text.
+Build your ideas with your words.
 
-Build with ideas, not code.
+## Vibey in a nutshell
 
-I'm currently recording myself while building vibey. You can check out [the Youtube channel here](https://www.youtube.com/channel/UCEcfQSep8KzW7H2S0HBNj8g). The channel is from [cell](https://github.com/altocodenl/cell) but Vibey hijacked the channel starting on season 5.
+1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. There is no database.
+2. **Everything in your browser**: your documents are not only text: use images, audio, and embed small apps in your documents. No terminal or dedicated native app required.
+3. **Safe YOLO**: the agents don't ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
+
+For the students of humanities stranded in the digital age: this is your chance to build a world with your words. Not cryptic commands, without the tens of hours of practice that are required to figure out misplaced semicolons. Describe your world and see it come to life.
 
 ## Installation
 
@@ -44,14 +48,6 @@ docker compose down
 ```bash
 docker compose down -v
 ```
-
-## Vibey in a nutshell
-
-1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. There is no database.
-2. **Everything in your browser**: your documents are not only text: use images, audio, and even embed small apps in your documents. No terminal or dedicated native app required.
-3. **Safe YOLO**: the agents don't ask for permission, they just run the commands that they deem useful for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
-
-For the students of humanities stranded in the digital age: this is your chance to build a world with your words. Not cryptic commands, without the tens of hours of practice that are required to figure out misplaced semicolons. Describe your world and see it come to life.
 
 ## The concept
 
@@ -240,7 +236,7 @@ All files live inside `/workspace/` in the project container. All file I/O goes 
 
 ### Client: files
 
-Left sidebar lists all files with + New and × delete. Right side is a textarea editor. Cmd+S saves. Tracks dirty state, warns on close with unsaved changes. Deleting the currently open file clears the editor immediately. Loading a file that no longer exists silently deselects it.
+Left sidebar lists all files with + New and × delete. The `.md` extension is hidden in the sidebar and editor header (e.g. `doc/main.md` displays as `main`). When no file is selected and the Docs tab loads, `doc/main.md` is auto-selected if it exists (otherwise the first doc file). Right side is a textarea editor. Cmd+S saves. Tracks dirty state, warns on close with unsaved changes. Deleting the currently open file clears the editor immediately. Loading a file that no longer exists silently deselects it.
 
 ### Server: uploads
 
@@ -284,7 +280,7 @@ Docs sidebar shows an Uploads section at the bottom (always visible when uploads
 
 SSE event types: `chunk`, `tool`, `done`, `error`.
 
-### Dialog markdown: canonical convention
+### Dialog markdown format
 
 Dialogs are files named:
 
@@ -292,75 +288,119 @@ Dialogs are files named:
 
 Where `<status>` is one of: `active`, `done`.
 
-Canonical section shape (for `User`, `Assistant`, `Tool Request`, `Tool Result`):
-
-```md
-## <Role>
-> Id: <id>
-> Time: <start_iso> - <end_iso>
-> Resources: in=<n> out=<n> total=<n> tools=<n> ms=<n>
-
-əəə<type>
-<payload>
-əəə
-```
-
-Rules:
-- Markdown remains source of truth.
-- All parseable payloads use schwa wrappers.
-- `Resources` is always present. If provider usage is unavailable, use zeros.
-- For one-shot user input, `start == end`.
-
-Canonical dialog header:
+#### Dialog header
 
 ```md
 # Dialog
-> DialogId: 20260216-201100-read-vibey
+
 > Provider: openai
 > Model: gpt-5
-> Status: done
 > Started: 2026-02-16T20:11:00Z
 ```
 
-Canonical user input:
+#### Doc context block
+
+Injected after the header, before the first user message. Contains a compacted snapshot of `doc/main.md` so the LLM has project context on every turn.
+
+```md
+<!-- DOC_MAIN_CONTEXT_START -->
+> Prompt context: doc/main.md (1234 chars, compacted)
+
+    # My Project
+
+    Description of the project...
+<!-- DOC_MAIN_CONTEXT_END -->
+```
+
+This block is updated in place before each LLM call.
+
+#### User section
 
 ```md
 ## User
-> Id: msg_20260216_201100_u1
-> Time: 2026-02-16T20:11:00Z - 2026-02-16T20:11:00Z
-> Resources: in=0 out=0 total=0 tools=0 ms=0
+> Time: 2026-02-16T20:11:00Z
 
-əəəinput/markdown
 Please read readme.md and summarize it.
-əəə
 ```
 
-If UI sends structured input, use JSON instead:
-
-```md
-əəəinput/json
-{"text":"Please read readme.md and summarize it."}
-əəə
-```
-
-Canonical assistant output:
+#### Assistant section
 
 ```md
 ## Assistant
-> Id: msg_20260216_201101_a1
+> Model: gpt-5
 > Time: 2026-02-16T20:11:01Z - 2026-02-16T20:11:14Z
-> Resources: in=123 out=456 total=579 tools=1 ms=12982
 
-əəəoutput/markdown
-Summary goes here.
-əəə
+Here is the summary.
+
+> Usage: input=1453 output=183 total=1636
+> Usage cumulative: input=1453 output=183 total=1636
+
+> Context: used=1636 limit=272000 percent=1%
 ```
 
-Optional cumulative line (if desired):
+- `> Time:` end is `...` while the assistant is still generating; replaced with the actual timestamp when done.
+- `> Usage:` is this turn's token counts.
+- `> Usage cumulative:` tracks cumulative output tokens across the dialog (input is per-turn since it includes the full conversation each time).
+- `> Context:` shows how much of the model's context window is used.
+
+#### Tool blocks (inline in assistant sections)
+
+Tool calls are **not** separate `## Tool Request` / `## Tool Result` sections. They live inside the `## Assistant` section as fenced blocks delimited by `---`:
 
 ```md
-> Resources cumulative: in=1200 out=3400 total=4600 tools=14 ms=248392
+---
+Tool request: run_command [call_abc123]
+
+    {
+      "command": "ls /workspace"
+    }
+
+Result:
+
+    {
+      "success": true,
+      "stdout": "file1.txt\nfile2.txt",
+      "stderr": ""
+    }
+
+---
 ```
+
+Format:
+- Opens with `---` on its own line.
+- `Tool request: <name> [<id>]` — tool name and provider-assigned call ID.
+- Input JSON is 4-space indented and pretty-printed.
+- `Result:` section is appended after execution, also 4-space indented.
+- Closes with `---` on its own line.
+
+**Why no schwa wrappers?** JSON payloads are always `JSON.stringify`'d, which escapes newlines within string values as `\n`. Combined with the 4-space indentation, a raw `\n---` at column 0 can never appear inside a tool block's JSON payload. The `---` delimiters are therefore unambiguous without additional wrappers.
+
+Multiple tool calls in one assistant turn produce multiple `---...---` blocks in sequence.
+
+A tool block without a `Result:` section means execution hasn't completed yet (the block is still streaming or the dialog was interrupted).
+
+#### Tool block streaming
+
+Tool argument deltas from the LLM stream into both the `.md` file and SSE through the same write buffer as regular text chunks. The block builds up incrementally:
+
+1. Tool call starts → `---\nTool request: name [id]\n\n` is written.
+2. Argument JSON fragments arrive → written as raw (unindented) partial JSON.
+3. Tool call ends → `\n\n---` closes the block.
+4. Tool executes → `writeToolResults` reads the `.md`, finds the raw block, and replaces it with the pretty-printed version (4-space indented JSON + Result section).
+
+The SSE `markdown_append` and `markdown_replace` events mirror these writes exactly, so a client reconstructing markdown from SSE events produces a byte-for-byte match with the on-disk file.
+
+#### Parsing rules
+
+`parseSections` splits the dialog on `## User` and `## Assistant` headings. Each section's content is everything up to the next heading.
+
+`parseToolCalls` finds `---\nTool request:...\n---` blocks within a section using a regex. It extracts the tool name, ID, input JSON, and optional result JSON.
+
+`parseDialogForProvider` reconstructs the provider-specific message array from parsed sections — assistant text becomes text messages, tool blocks become `tool_use`/`tool_calls` entries, results become `tool_result`/`tool` messages.
+
+`stripSectionMetadata` removes `> Time:`, `> Model:`, `> Usage:`, `> Context:`, etc. lines before sending content to the LLM, so the model only sees the actual text and tool blocks.
+
+Markdown is the source of truth. No server-side state. Restart-safe by design.
 
 ### Server: tools for dialogs
 
@@ -375,61 +415,15 @@ Tool definitions are written once and converted to both Claude and OpenAI format
 
 **No server-side state.** All tool-call state lives in dialog markdown. The server reconstructs tool history by parsing markdown each request.
 
-#### Tool request/result canonical blocks
-
-Tool calls execute immediately (YOLO). The server records both the request and the result in markdown.
-
-Tool request:
-
-```md
-## Tool Request
-> Id: toolu_abc123
-> Parent: msg_20260216_201101_a1
-> Time: 2026-02-16T20:11:02Z - 2026-02-16T20:11:02Z
-> Resources: in=0 out=0 total=0 tools=0 ms=0
-> Tool: run_command
-> Status: requested
-
-əəətool/input/json
-{"command":"ls"}
-əəə
-```
-
-Tool result:
-
-```md
-## Tool Result
-> Id: toolu_abc123
-> Parent: msg_20260216_201101_a1
-> Time: 2026-02-16T20:11:03Z - 2026-02-16T20:11:04Z
-> Resources: in=0 out=0 total=0 tools=1 ms=812
-> Tool: run_command
-> Status: executed
-
-əəətool/result/json
-{"success":true,"stdout":"file1.txt"}
-əəə
-```
-
-Status values: `requested | executed | error`.
-
 #### Tool-call flow
 
-1. LLM emits tool calls. Server writes `Tool Request` sections.
-2. Server executes each tool immediately.
-3. Results are written as `Tool Result` sections and fed back to the LLM.
-4. Stream continues; there are no tool approvals or pause states for tool calls.
+1. LLM streams tool call arguments. Server writes the tool block header and argument deltas to the `.md` and SSE in real time.
+2. Tool call completes. Server closes the `---` block.
+3. Server executes the tool immediately (YOLO).
+4. `writeToolResults` replaces the raw block in the `.md` with the pretty-printed version including the `Result:` section. A `markdown_replace` SSE event mirrors this.
+5. The loop continues — if the LLM emits more tool calls or text, they stream through the same mechanism.
 
-No separate tool-execution endpoint is needed in normal flow.
-
-#### Parsing dialog for provider messages
-
-`parseDialog` reconstructs API history from markdown:
-- `## User` / `## Assistant` sections become text messages.
-- `## Tool Request` sections become assistant `tool_use`/`tool_calls` entries.
-- `## Tool Result` sections become `tool_result`/`tool` messages.
-
-Markdown is the source of truth. Restart-safe by design.
+No separate tool-execution endpoint is needed in normal flow. No tool approvals or pause states.
 
 ### Client: dialogs
 
@@ -507,7 +501,7 @@ Behavior:
 
 #### Embed markdown syntax
 
-Embed blocks use schwa wrappers, consistent with the rest of the dialog/doc conventions. Use the schwa character `ə` (U+0259) — avoid look‑alikes like Arabic `ە` (U+06D5).
+Embed blocks use schwa wrappers. Use the schwa character `ə` (U+0259) — avoid look‑alikes like Arabic `ە` (U+06D5).
 
 ```md
 əəəembed
@@ -747,7 +741,10 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 3. `GET /project/:p/file/doc/main.md` — read back, verify exact round-trip.
    - Client: Reload `main.md` and verify editor content matches.
 4. `GET /project/:p/files` — list includes `doc/main.md`.
-   - Client: Sidebar lists `main.md`.
+   - Client: Sidebar lists `main` (`.md` extension hidden).
+   - Client: Sidebar hides `.md` extension from all doc filenames.
+   - Client: Editor header shows `main` (no `.md` extension).
+   - Client: When no file is selected, `doc/main.md` is auto-selected (not just the first file).
 5. `POST /project/:p/file/doc/main.md` — overwrite with updated content.
    - Client: Edit content, verify dirty state, then save.
 6. `GET /project/:p/file/doc/main.md` — verify updated content.
@@ -755,7 +752,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 7. `POST /project/:p/file/doc/notes.md` — write a second doc.
    - Client: Create `doc/notes.md` via prompt and open it.
 8. `GET /project/:p/files` — list includes both docs.
-   - Client: Sidebar lists both `main.md` and `notes.md`.
+   - Client: Sidebar lists both `main` and `notes` (`.md` hidden).
    - Client: Switching away and back to Docs refreshes the sidebar, so docs created or deleted elsewhere appear correctly.
 9. `GET /project/:p/file/doc/notes.md` — read second doc, verify content.
    - Client: Editor shows initial `notes.md` content.
@@ -942,6 +939,32 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
     - `responsesApi` array contains at least one item with `type: "function_call_output"` and a `call_id` field.
     - `openai` array contains at least one message with `role: "assistant"` and a `tool_calls` array.
     - `openai` array contains at least one message with `role: "tool"` and a `tool_call_id`.
+41. **Streaming tool deltas — `write_file`**: `POST /project/:p/dialog` (prompt: "create a file called streamed.txt with write_file containing at least 200 words of prose"). Connect to `GET /project/:p/dialog/:id/stream`. Collect all SSE events. Verify:
+    - At least one `tool_delta` event is received before the `tool_request` event for the same tool call id.
+    - Each `tool_delta` event has `{type: "tool_delta", tool: {id, name, delta}}` where `delta` is a string (partial JSON fragment).
+    - Concatenating all `tool_delta` deltas for a given tool id produces valid JSON when parsed.
+    - The parsed JSON contains `path` and `content` fields matching the final `tool_request` input.
+    - A `tool_request` event is still emitted with the complete input after all deltas.
+    - A `tool_result` event follows with `success: true`.
+42. **Streaming tool deltas — `edit_file`**: seed a file via `POST /project/:p/tool/execute` (`write_file` a 10-line file). Then `PUT /project/:p/dialog` (prompt: "use edit_file to replace line 5 of the file"). Connect to stream. Verify:
+    - At least one `tool_delta` event arrives for the `edit_file` call before its `tool_request`.
+    - The final `tool_request` input contains `path`, `old_string`, and `new_string`.
+43. **Streaming tool deltas — `run_command`**: `PUT /project/:p/dialog` (prompt: "list files with run_command"). Connect to stream. Verify:
+    - `tool_delta` events arrive for the `run_command` call (even though arguments are small, deltas are still emitted).
+    - `tool_request` and `tool_result` events follow as before.
+44. **No tool deltas for text-only responses**: `PUT /project/:p/dialog` (prompt: "say hello, do not use any tools"). Connect to stream. Verify:
+    - Zero `tool_delta` events are received.
+    - At least one `chunk` event is received.
+    - Stream ends with `done`.
+45. **Multiple tool calls in one turn — deltas interleaved correctly**: `PUT /project/:p/dialog` (prompt: "create two files: alpha.txt and beta.txt, both with write_file, each with at least 100 words"). Connect to stream. Verify:
+    - `tool_delta` events arrive for two distinct tool ids.
+    - Each tool id's concatenated deltas parse to valid JSON with distinct `path` values.
+    - Two `tool_request` events and two `tool_result` events follow.
+46. **Client rendering of streamed tool deltas**: (Client test) During a `write_file` dialog with streaming tool deltas:
+    - Client: As `tool_delta` events arrive, the tool call bubble shows a live preview of the file content being generated.
+    - Client: The preview updates incrementally (not blank until complete).
+    - Client: Once `tool_request` arrives, the bubble shows the final complete tool call.
+    - Client: `tool_result` renders inline as before.
 
 **Static app:**
 
@@ -1090,14 +1113,15 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- Add points 4 and 5 for vibey cloud in the readme.
-- Ensure that .md and SSE stream look the exact same. Test that with live dialogs and refresh.
-- Long pause at the end of some LLM work. Are we sending one more unnecessary message?
+- Add points 4 and 5 for vibey cloud in the readme: 4) always running, even when you close your computer; 5) available from anywhere, and by anyone you want.
+
+- Long pause at the end of some LLM work. Are we sending one more unnecessary final message?
 - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
    - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
    - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
    - The UI redraws synchronously because of gotoB, so there should be
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
+
 
 ## Vibey cloud in a nutshell
 

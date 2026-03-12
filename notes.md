@@ -1,5 +1,66 @@
 ## Vibey development notes
 
+### 2026-03-12
+
+
+- Write file doesn't stream, why is that? Can we stream partial tool calls?
+- First write the spec of the tests within the dialog suite.
+- My question is: are these deltas also being pushed to the .md as they happen?
+- So we were writing the tool deltas to .md, but not to sse?
+- Then please make the deltas go to both the md and the sse through the same mechanism that we do with normal text.
+- Ensure that .md and SSE stream look exactly the same. Test that with live dialogs and refresh. Make sure that this is documented in readme.md.
+- Is readme.md up to date with these alignments between md and SSE? Do we nail the description of the actual markdown?
+- Hide the .md extensions from the list of docs on the client. Also, if no file is selected, go to main.md instead of the first one.
+- Please tigthen the spec of the client tests and also the implementation of the tests to cover this.
+
+
+
+- Please take the example of cell's annotated code and start annotating server.js into server.md. Do small batches of lines and explain. Start with the first 100.
+- Amazing! Please unify in both readme and code the LOG_COLORS and LOG_ANSI_COLORS to be LOG_COLORS, use just one object. For each color, clarify what it is in a comment.
+- Let's refactor all colors into a `color` function that takes text and options and returns the ansi sequence, with something that reverts it all. The function uses the unicode (not octal) escapes. The options are an object with possible keys `bold: bool`, `color: yellow|magenta|<whatever is supported>`, `background: '<one of the possible colors`. Use it everywhere. Then update the annotated source code up to where it was done already.
+- The options object should be an object. keys are color, background, bold.
+- Let's make bold the default, and also white color as default.
+- The remove the defaults you pass around. Also, add the colors of 1xx 2xx 3xx 4xx 5xx to that object and use it below.
+- Make a `log` object that has all the data and methods for logging inside. Like log.color, log.style (not styles), docker: {start: ..., end: ...}, ...
+- How do we generate ids for HTTP requests? I want the same random mechanism for the other log ids.
+- Yes, please use cicek's function and put it in the log helper, and stop using the increments everywhere else
+- Please remove the try/catch from reply. Move reply and stop above the log stuff. Then refactor loadSystemPrompt and the other prompt helper to a single function that returns the prompt to be injected (not just prompt.md but also doc/main.md).
+- Add a further 100 lines of annotated code in this style.
+- Alright. Please now put near the top, after the libraries, a var CONFIG = require ('secret.json') and get rid of all the nonsense that loads the config everywhere.
+
+# ### Ideas from Claude for vibey demos
+
+ Instantly visual:
+ 1. Personal portfolio site — describe yourself in 3 sentences, get a styled single-page site with sections, embedded in your doc
+ 2. Interactive solar system — "a 3D solar system I can rotate and zoom" → Canvas/Three.js app embedded in the doc
+ 3. Pixel art editor — "a simple pixel art editor with a color palette and export to PNG"
+ 4. Synth keyboard — "a piano keyboard I can play with my computer keys, with reverb" → Web Audio API
+
+ Useful in 30 seconds:
+ 5. Expense tracker — "a table where I add expenses with category and amount, shows totals by category, persists in localStorage"
+ 6. Pomodoro timer — "a 25/5 pomodoro timer with sound and a session counter"
+ 7. Flashcard app — paste 10 vocabulary words, get a flip-card quiz app
+ 8. Meal planner — "a weekly meal planner grid I can drag dishes between days"
+
+ Fun/shareable:
+ 9. "Would you rather" game — type 10 dilemmas, get a swipeable game with score tracking
+ 10. Drum machine — "an 8-step drum machine with kick, snare, hihat, and tempo slider"
+ 11. Generative art — "a canvas that draws flowing particles that follow my mouse, in neon colors on black"
+ 12. Snake game — the classic, playable immediately inside the doc
+
+ The "humanities student" angle:
+ 13. Timeline visualizer — "a visual timeline of the French Revolution, 1789-1799, with key events I can click to expand"
+ 14. Essay outliner — "a drag-and-drop outline builder where I can nest ideas and export to markdown"
+ 15. Character relationship map — "an interactive graph of characters in Hamlet with their relationships as labeled edges"
+
+ For a 30-second demo video, I'd pick one where the input is very short and the output is very visual. The synth keyboard, the generative art, or the solar system would all pop on screen. The flow would be:
+
+ 1. Type 1-2 sentences into a new dialog (~5s)
+ 2. Agent works, time-lapse (~10s)
+ 3. Embedded app appears in the doc, interact with it (~15s)
+
+ The drum machine or pixel art editor might be the sweet spot — they're interactive, visually obvious, and nobody expects to build one by typing a sentence.
+
 ### 2026-03-11
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.

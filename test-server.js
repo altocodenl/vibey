@@ -960,12 +960,165 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 38: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
+   // Tests 38-43: Streaming tool deltas
+   // The project was recreated fresh in test 35.
+
+   // Test 38: Create a dialog and fire a write_file prompt with large content
+   ['Dialog 38: Fire write_file for streaming deltas', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
+         provider: 'openai',
+         model: 'gpt-5.2-codex',
+         prompt: 'Use write_file to create a file called streamed.txt containing at least 200 words of prose about the history of computing. Do only this one tool call, nothing else.',
+         slug: 'stream-delta-test'
+      }, function (error, code, body) {
+         if (error) return log ('POST /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (! body || ! body.dialogId) return log ('Missing dialogId');
+         s.streamDeltaDialogId = body.dialogId;
+         next ();
+      });
+   }],
+
+   // Test 39: Collect SSE stream and verify tool block content arrives as chunk events
+   ['Dialog 39: SSE stream has tool block chunks before tool_request', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      var started = Date.now ();
+      log ('[dialog-39] stream start ' + s.streamDeltaDialogId);
+      collectSSE (DIALOG_PROJECT, s.streamDeltaDialogId, function (error, events) {
+         var elapsed = Math.round ((Date.now () - started) / 1000);
+         log ('[dialog-39] stream complete in ' + elapsed + 's, events=' + events.length);
+         if (error) return log ('SSE stream error: ' + error.message);
+         if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+
+         // Collect all chunk events and tool_request events
+         var chunkEvents = getEventsByType (events, 'chunk');
+         var toolRequestEvents = getEventsByType (events, 'tool_request');
+
+         if (! toolRequestEvents.length) return log ('Expected at least one tool_request event');
+
+         // Find chunk events that contain tool block header markers
+         var toolHeaderChunks = dale.fil (chunkEvents, undefined, function (ev) {
+            if (ev.content && ev.content.indexOf ('Tool request:') !== -1) return ev;
+         });
+         if (! toolHeaderChunks.length) return log ('Expected chunk events containing "Tool request:" header (tool blocks should stream as chunks)');
+
+         // Verify that chunk events contain JSON argument fragments
+         // Concatenate all chunk content and check for the tool block pattern
+         var allChunkContent = dale.go (chunkEvents, function (ev) {return ev.content || '';}).join ('');
+         if (allChunkContent.indexOf ('---\nTool request: write_file') === -1) return log ('Chunk stream missing tool block header for write_file');
+         if (allChunkContent.indexOf ('streamed.txt') === -1) return log ('Chunk stream missing file path in tool arguments');
+         if (allChunkContent.indexOf ('\n---') === -1) return log ('Chunk stream missing tool block closer');
+
+         log ('[dialog-39] tool block streamed via chunks: header found, arguments found, closer found');
+         next ();
+      }, {
+         heartbeatMs: 15000,
+         onHeartbeat: function (events) {
+            var elapsed = Math.round ((Date.now () - started) / 1000);
+            log ('[dialog-39] streaming... ' + elapsed + 's events=' + events.length);
+         }
+      });
+   }],
+
+   // Test 40: Verify the markdown on disk has the tool block with result (writeToolResults replaced it)
+   ['Dialog 40: Markdown has write_file with result after streaming', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fetchDialogMarkdown (DIALOG_PROJECT, s.streamDeltaDialogId, function (error, md) {
+         if (error) return log ('Could not fetch dialog: ' + error.message);
+         if (! hasToolMention (md, 'write_file')) return log ('Missing write_file in dialog markdown');
+         if (! hasResultMarker (md)) return log ('write_file block missing Result section');
+         if (md.indexOf ('streamed.txt') === -1) return log ('Missing streamed.txt path in markdown');
+         next ();
+      });
+   }],
+
+   // Test 41: Verify the file was actually created
+   ['Dialog 41: streamed.txt exists via tool/execute', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + DIALOG_PROJECT + '/tool/execute', {
+         toolName: 'run_command', toolInput: {command: 'wc -w /workspace/streamed.txt'}
+      }, function (error, code, body) {
+         if (error) return log ('tool/execute failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (! body || ! body.success) return log ('run_command failed: ' + JSON.stringify (body));
+         // Parse word count — should be >= 200
+         var wc = parseInt ((body.stdout || '').trim ());
+         if (isNaN (wc) || wc < 100) return log ('Expected at least 100 words in streamed.txt, got ' + wc);
+         log ('[dialog-41] streamed.txt has ' + wc + ' words');
+         next ();
+      });
+   }],
+
+   // Test 42: Text-only response produces no tool block chunks
+   ['Dialog 42: Text-only response has no tool block chunks', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
+         provider: 'openai',
+         model: 'gpt-5.2-codex',
+         prompt: 'Say hello and nothing else. Do not use any tools.',
+         slug: 'no-tool-test'
+      }, function (error, code, body) {
+         if (error) return log ('POST /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         s.noToolDialogId = body.dialogId;
+
+         collectSSE (DIALOG_PROJECT, body.dialogId, function (error, events) {
+            if (error) return log ('SSE stream error: ' + error.message);
+            if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+
+            var chunkEvents = getEventsByType (events, 'chunk');
+            var allChunkContent = dale.go (chunkEvents, function (ev) {return ev.content || '';}).join ('');
+            if (allChunkContent.indexOf ('Tool request:') !== -1) return log ('Text-only response should not contain tool block markers in chunks');
+            if (getEventsByType (events, 'tool_request').length) return log ('Text-only response should have no tool_request events');
+
+            log ('[dialog-42] text-only response confirmed: no tool block content in chunks');
+            next ();
+         });
+      });
+   }],
+
+   // Test 43: edit_file streams deltas too
+   ['Dialog 43: edit_file streams tool block as chunks', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      // First seed a file to edit
+      httpJson ('POST', '/project/' + DIALOG_PROJECT + '/tool/execute', {
+         toolName: 'write_file', toolInput: {path: '/workspace/to-edit.txt', content: 'line 1\nline 2\nline 3\nline 4\nline 5 replace me\nline 6\nline 7\nline 8\nline 9\nline 10\n'}
+      }, function (error, code, body) {
+         if (error) return log ('Seed write_file failed: ' + error.message);
+
+         httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
+            provider: 'openai',
+            model: 'gpt-5.2-codex',
+            prompt: 'Use edit_file to replace "line 5 replace me" with "line 5 replaced" in to-edit.txt. Do only this one tool call, nothing else.',
+            slug: 'edit-delta-test'
+         }, function (error, code, body) {
+            if (error) return log ('POST /dialog failed: ' + error.message);
+            if (code !== 200) return log ('Expected 200, got ' + code);
+
+            collectSSE (DIALOG_PROJECT, body.dialogId, function (error, events) {
+               if (error) return log ('SSE stream error: ' + error.message);
+               if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+
+               var chunkEvents = getEventsByType (events, 'chunk');
+               var allChunkContent = dale.go (chunkEvents, function (ev) {return ev.content || '';}).join ('');
+               if (allChunkContent.indexOf ('Tool request: edit_file') === -1) return log ('Expected edit_file tool block header in chunks');
+               if (allChunkContent.indexOf ('to-edit.txt') === -1) return log ('Expected file path in chunk content');
+
+               var toolRequestEvents = getEventsByType (events, 'tool_request');
+               var editRequest = dale.fil (toolRequestEvents, undefined, function (ev) {
+                  if (ev.tool && ev.tool.name === 'edit_file') return ev;
+               });
+               if (! editRequest.length) return log ('Expected tool_request event for edit_file');
+
+               log ('[dialog-43] edit_file tool block streamed via chunks');
+               next ();
+            });
+         });
+      });
+   }],
+
+   // Cleanup
+   ['Dialog 44: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Cleanup deletion failed');
       return true;
    }],
 
-   ['Dialog 39: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 45: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DIALOG_PROJECT)) return log ('Project still exists after final deletion');
       return true;

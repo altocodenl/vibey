@@ -99,14 +99,15 @@ var hasAnyProvider = function (settings) {
 var normalizeDocFilename = function (name) {
    name = (name || '').trim ();
    if (! name) return '';
-   if (name === 'main.md') return DOC_DIR + 'main.md';
    if (name.indexOf (DOC_DIR) === 0) return name;
+   if (name.slice (-3) !== '.md') name = name + '.md';
    return DOC_DIR + name;
 };
 
 var docDisplayName = function (name) {
    if (type (name) !== 'string') return name;
-   if (name.indexOf (DOC_DIR) === 0) return name.slice (DOC_DIR.length);
+   if (name.indexOf (DOC_DIR) === 0) name = name.slice (DOC_DIR.length);
+   if (name.slice (-3) === '.md') name = name.slice (0, -3);
    return name;
 };
 
@@ -1302,7 +1303,9 @@ B.mrespond ([
             var files = rs.body || [];
             var next = null;
             if (tab === 'docs') {
-               next = dale.stopNot (files, undefined, function (name) {
+               // Prefer doc/main.md, fall back to first doc file
+               if (files.indexOf (DOC_DIR + 'main.md') !== -1) next = DOC_DIR + 'main.md';
+               else next = dale.stopNot (files, undefined, function (name) {
                   if (isDocFile (name)) return name;
                });
             }

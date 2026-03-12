@@ -294,8 +294,8 @@ var page = ['html', {lang: 'en'}, [
    ['head', [
       ['meta', {charset: 'utf-8'}],
       ['meta', {name: 'viewport', content: 'width=device-width, initial-scale=1'}],
-      ['title', 'Vibey — Build with ideas, not code.'],
-      ['meta', {name: 'description', content: 'Build with ideas, not code. An agentic interface where everything is a document, everything runs in your browser, and agents work at full speed inside safe containers.'}],
+      ['title', 'Vibey — Build your ideas with your words.'],
+      ['meta', {name: 'description', content: 'Build your ideas with your words. An agentic interface where everything is a document, everything runs in your browser, and agents work at full speed inside safe containers.'}],
       ['link', {rel: 'preconnect', href: 'https://fonts.googleapis.com'}],
       ['link', {rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: ''}],
       ['link', {rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap'}],
@@ -307,8 +307,7 @@ var page = ['html', {lang: 'en'}, [
       ['div', {class: 'wrap'}, [
          ['div', {class: 'hero'}, [
             ['h1', ['LITERAL', '<em>Vibey</em>']],
-            ['p', {class: 'tagline'}, 'An agentic interface for those who love text.'],
-            ['p', {class: 'tagline'}, 'Build with ideas, not code.'],
+            ['p', {class: 'tagline'}, 'Build your ideas with your words.'],
          ]],
 
          // *** PILLARS ***
@@ -317,10 +316,10 @@ var page = ['html', {lang: 'en'}, [
                'Your description of what you\'re building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. <strong>There is no database.</strong>'),
 
             pillar (2, 'Everything in your browser',
-               'Your documents are not only text: use images, audio, and even embed small apps in your documents. No terminal or dedicated native app required.'),
+               'Your documents are not only text: use images, audio, and embed small apps in your documents. No terminal or dedicated native app required.'),
 
             pillar (3, 'Safe YOLO',
-               'The agents don\'t ask for permission, they just run the commands that they deem useful for the task you give them, so they work at full speed. <strong>But</strong> each project is fully isolated in its own container and volume. A rogue agent\'s blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.'),
+               'The agents don\'t ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. <strong>But</strong> each project is fully isolated in its own container and volume. A rogue agent\'s blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.'),
 
 
          ]],

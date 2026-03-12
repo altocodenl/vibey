@@ -1347,6 +1347,159 @@
       }],
 
       // =============================================
+      // *** STREAMING TOOL DELTAS (Dialog 40-45) ***
+      // =============================================
+
+      ['Dialog 40: Create project for streaming delta tests', function (done) {
+         window._streamDeltaProject = 'test-stream-delta-' + testTimestamp ();
+         c.ajax ('post', 'projects', {}, {name: window._streamDeltaProject}, function (error, rs) {
+            window._streamDeltaCreate = {error: error, rs: rs};
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._streamDeltaCreate || {};
+         if (result.error) return 'Project creation failed';
+         var body = result.rs && result.rs.body ? result.rs.body : {};
+         if (! body.slug) return 'Missing slug';
+         window._streamDeltaSlug = body.slug;
+         return true;
+      }],
+
+      ['Dialog 41: Fire write_file dialog and collect SSE events', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._streamDeltaSlug) + '/dialog', {}, {
+            provider: 'openai',
+            model: 'gpt-5.2-codex',
+            prompt: 'Use write_file to create a file called streamed.txt containing at least 200 words of prose about the history of computing. Do only this one tool call, nothing else.',
+            slug: 'stream-delta-client'
+         }, function (error, rs) {
+            if (error || ! rs || ! rs.body || ! rs.body.dialogId) {
+               window._streamDeltaResult = {error: error || 'missing dialogId'};
+               done (SHORT_WAIT, POLL);
+               return;
+            }
+            window._streamDeltaDialogId = rs.body.dialogId;
+
+            // Collect all SSE events
+            streamDialogEvents (window._streamDeltaSlug, rs.body.dialogId, function (result) {
+               window._streamDeltaResult = result;
+               done (SHORT_WAIT, POLL);
+            }, {timeout: LONG_WAIT});
+         });
+      }, function () {
+         var result = window._streamDeltaResult || {};
+         if (result.error) return 'Stream failed: ' + result.error;
+         var events = result.events || [];
+
+         // Verify chunk events contain tool block content
+         var chunkEvents = dale.fil (events, undefined, function (ev) {
+            if (ev.type === 'chunk') return ev;
+         });
+         var allChunkContent = dale.go (chunkEvents, function (ev) {return ev.content || '';}).join ('');
+
+         if (allChunkContent.indexOf ('Tool request: write_file') === -1) return 'Chunk stream missing tool block header for write_file';
+         if (allChunkContent.indexOf ('streamed.txt') === -1) return 'Chunk stream missing file path in tool arguments';
+         if (allChunkContent.indexOf ('\n---') === -1) return 'Chunk stream missing tool block closer';
+
+         // Verify tool_request event still fires
+         var toolRequests = dale.fil (events, undefined, function (ev) {
+            if (ev.type === 'tool_request') return ev;
+         });
+         if (! toolRequests.length) return 'Expected at least one tool_request event';
+
+         // Verify tool_result event fires
+         var toolResults = dale.fil (events, undefined, function (ev) {
+            if (ev.type === 'tool_result') return ev;
+         });
+         if (! toolResults.length) return 'Expected at least one tool_result event';
+
+         // Verify markdown_append events carry the tool block content too
+         var appendEvents = dale.fil (events, undefined, function (ev) {
+            if (ev.type === 'markdown_append') return ev;
+         });
+         var allAppendContent = dale.go (appendEvents, function (ev) {return ev.content || '';}).join ('');
+         if (allAppendContent.indexOf ('Tool request: write_file') === -1) return 'markdown_append stream missing tool block header';
+
+         return true;
+      }],
+
+      ['Dialog 42: Verify markdown has formatted tool block with result', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._streamDeltaSlug) + '/dialog/' + encodeURIComponent (window._streamDeltaDialogId), {}, '', function (error, rs) {
+            window._streamDeltaMd = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._streamDeltaMd || {};
+         if (result.error) return 'Failed to fetch dialog';
+         var md = result.rs && result.rs.body ? (result.rs.body.markdown || result.rs.body.content || '') : '';
+         if (md.indexOf ('Tool request: write_file') === -1) return 'Missing write_file in dialog markdown';
+         if (md.indexOf ('Result:') === -1) return 'Missing Result section (writeToolResults should have replaced the block)';
+         if (md.indexOf ('streamed.txt') === -1) return 'Missing streamed.txt path in markdown';
+         return true;
+      }],
+
+      ['Dialog 43: Text-only response has no tool block in chunks', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._streamDeltaSlug) + '/dialog', {}, {
+            provider: 'openai',
+            model: 'gpt-5.2-codex',
+            prompt: 'Say hello and nothing else. Do not use any tools.',
+            slug: 'no-tool-client'
+         }, function (error, rs) {
+            if (error || ! rs || ! rs.body || ! rs.body.dialogId) {
+               window._noToolResult = {error: error || 'missing dialogId'};
+               done (SHORT_WAIT, POLL);
+               return;
+            }
+            streamDialogEvents (window._streamDeltaSlug, rs.body.dialogId, function (result) {
+               window._noToolResult = result;
+               done (SHORT_WAIT, POLL);
+            }, {timeout: LONG_WAIT});
+         });
+      }, function () {
+         var result = window._noToolResult || {};
+         if (result.error) return 'Stream failed: ' + result.error;
+         var events = result.events || [];
+
+         var chunkEvents = dale.fil (events, undefined, function (ev) {
+            if (ev.type === 'chunk') return ev;
+         });
+         var allChunkContent = dale.go (chunkEvents, function (ev) {return ev.content || '';}).join ('');
+         if (allChunkContent.indexOf ('Tool request:') !== -1) return 'Text-only response should not contain tool block markers';
+         if (! chunkEvents.length) return 'Expected at least one chunk event for text response';
+
+         var toolRequests = dale.fil (events, undefined, function (ev) {
+            if (ev.type === 'tool_request') return ev;
+         });
+         if (toolRequests.length) return 'Text-only response should have no tool_request events';
+
+         return true;
+      }],
+
+      ['Dialog 44: Delete streaming delta project', function (done) {
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._streamDeltaSlug), {}, '', function (error, rs) {
+            window._streamDeltaDeleted = {error: error, rs: rs};
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._streamDeltaDeleted || {};
+         if (result.error) return 'Deletion failed';
+         return true;
+      }],
+
+      ['Dialog 45: Streaming delta project gone', function (done) {
+         c.ajax ('get', 'projects', {}, '', function (error, rs) {
+            window._streamDeltaGone = error ? null : (rs.body || []);
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         var list = window._streamDeltaGone || [];
+         var found = dale.stopNot (list, undefined, function (p) {
+            if (p && p.slug === window._streamDeltaSlug) return p;
+         });
+         if (found) return 'Stream delta project still listed after deletion';
+         return true;
+      }],
+
+      // =============================================
       // *** DOCS ***
       // =============================================
 
@@ -1388,8 +1541,38 @@
       }],
 
       ['Docs 4: Files list includes doc/main.md', function () {
-         var item = findByText ('.file-name', 'main.md');
-         if (! item) return 'main.md not found in sidebar';
+         var item = findByText ('.file-name', 'main');
+         if (! item) return 'main not found in sidebar';
+         return true;
+      }],
+
+      ['Docs 4a: Sidebar hides .md extension', function () {
+         var items = document.querySelectorAll ('.file-name');
+         for (var i = 0; i < items.length; i++) {
+            var text = (items [i].textContent || '').trim ();
+            if (text.slice (-3) === '.md') return 'Sidebar item "' + text + '" still shows .md extension';
+         }
+         return true;
+      }],
+
+      ['Docs 4b: Editor header hides .md extension', function () {
+         var header = document.querySelector ('.editor-filename');
+         if (! header) return 'No editor-filename element found';
+         var text = (header.textContent || '').trim ();
+         if (text.slice (-3) === '.md') return 'Editor header "' + text + '" still shows .md extension';
+         if (text !== 'main') return 'Expected editor header "main", got "' + text + '"';
+         return true;
+      }],
+
+      ['Docs 4c: Default file selection is doc/main.md', function (done) {
+         // Clear currentFile and reload files — should auto-select main.md
+         B.call ('set', 'currentFile', null);
+         B.call ('load', 'files');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file) return 'No file auto-selected';
+         if (file.name !== 'doc/main.md') return 'Expected doc/main.md auto-selected, got "' + file.name + '"';
          return true;
       }],
 
@@ -1430,10 +1613,10 @@
       ['Docs 8: Files list includes main.md and notes.md', function (done) {
          done (SHORT_WAIT, POLL);
       }, function () {
-         var mainItem = findByText ('.file-name', 'main.md');
-         if (! mainItem) return 'main.md not found in sidebar';
-         var notesItem = findByText ('.file-name', 'notes.md');
-         if (! notesItem) return 'notes.md not found in sidebar';
+         var mainItem = findByText ('.file-name', 'main');
+         if (! mainItem) return 'main not found in sidebar';
+         var notesItem = findByText ('.file-name', 'notes');
+         if (! notesItem) return 'notes not found in sidebar';
          return true;
       }],
 
@@ -1455,11 +1638,11 @@
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var mainItem = findByText ('.file-name', 'main.md');
-         if (! mainItem) return 'main.md not found in sidebar after returning to Docs';
-         var notesItem = findByText ('.file-name', 'notes.md');
-         if (! notesItem) return 'notes.md not found in sidebar after returning to Docs';
-         var refreshItem = findByText ('.file-name', 'refresh.md');
+         var mainItem = findByText ('.file-name', 'main');
+         if (! mainItem) return 'main not found in sidebar after returning to Docs';
+         var notesItem = findByText ('.file-name', 'notes');
+         if (! notesItem) return 'notes not found in sidebar after returning to Docs';
+         var refreshItem = findByText ('.file-name', 'refresh');
          if (! refreshItem) return 'Docs sidebar did not refresh when returning to Docs';
          return true;
       }],
@@ -1479,12 +1662,12 @@
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var refreshItem = findByText ('.file-name', 'refresh.md');
-         if (refreshItem) return 'Docs sidebar still shows refresh.md after returning to Docs';
-         var mainItem = findByText ('.file-name', 'main.md');
-         if (! mainItem) return 'main.md missing after returning to Docs';
-         var notesItem = findByText ('.file-name', 'notes.md');
-         if (! notesItem) return 'notes.md missing after returning to Docs';
+         var refreshItem = findByText ('.file-name', 'refresh');
+         if (refreshItem) return 'Docs sidebar still shows refresh after returning to Docs';
+         var mainItem = findByText ('.file-name', 'main');
+         if (! mainItem) return 'main missing after returning to Docs';
+         var notesItem = findByText ('.file-name', 'notes');
+         if (! notesItem) return 'notes missing after returning to Docs';
          return true;
       }],
 
@@ -1504,16 +1687,16 @@
          B.call ('delete', 'file', 'doc/notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var notesItem = findByText ('.file-name', 'notes.md');
-         if (notesItem) return 'notes.md still in sidebar after deletion';
+         var notesItem = findByText ('.file-name', 'notes');
+         if (notesItem) return 'notes still in sidebar after deletion';
          return true;
       }],
 
       ['Docs 11: Files list shows main.md only', function () {
-         var notesItem = findByText ('.file-name', 'notes.md');
-         if (notesItem) return 'notes.md still in sidebar after deletion';
-         var mainItem = findByText ('.file-name', 'main.md');
-         if (! mainItem) return 'main.md missing from sidebar';
+         var notesItem = findByText ('.file-name', 'notes');
+         if (notesItem) return 'notes still in sidebar after deletion';
+         var mainItem = findByText ('.file-name', 'main');
+         if (! mainItem) return 'main missing from sidebar';
          return true;
       }],
 
@@ -2102,7 +2285,7 @@
          });
       }, function () {
          var content = window._staticAppEmbedContent || '';
-         if (content.indexOf ('əəəembed') === -1) return 'doc/main.md missing əəəembed block';
+         if (content.indexOf ('əəəembed') === -1) return 'doc/main missing əəəembed block';
          if (content.indexOf ('port static') === -1) return 'doc/main.md embed missing port static';
          return true;
       }],
@@ -2286,7 +2469,7 @@
          });
       }, function () {
          var content = window._backendAppEmbedContent || '';
-         if (content.indexOf ('əəəembed') === -1) return 'doc/main.md missing əəəembed block';
+         if (content.indexOf ('əəəembed') === -1) return 'doc/main missing əəəembed block';
          if (content.indexOf ('port 4000') === -1) return 'doc/main.md embed missing port 4000';
          return true;
       }],
