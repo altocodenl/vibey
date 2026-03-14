@@ -1394,12 +1394,16 @@ var TOOLS = [
       input_schema: {
          type: 'object',
          properties: {
+            description: {
+               type: 'string',
+               description: 'A brief human-readable description of what this tool call does and why (e.g. "List project files to check structure")'
+            },
             command: {
                type: 'string',
                description: 'The shell command to execute'
             }
          },
-         required: ['command']
+         required: ['description', 'command']
       }
    },
    {
@@ -1408,6 +1412,10 @@ var TOOLS = [
       input_schema: {
          type: 'object',
          properties: {
+            description: {
+               type: 'string',
+               description: 'A brief human-readable description of what this tool call does and why (e.g. "Create the main entry point for the web server")'
+            },
             path: {
                type: 'string',
                description: 'The file path to write to (relative to /workspace)'
@@ -1417,7 +1425,7 @@ var TOOLS = [
                description: 'The full content to write'
             }
          },
-         required: ['path', 'content']
+         required: ['description', 'path', 'content']
       }
    },
    {
@@ -1426,6 +1434,10 @@ var TOOLS = [
       input_schema: {
          type: 'object',
          properties: {
+            description: {
+               type: 'string',
+               description: 'A brief human-readable description of what this tool call does and why (e.g. "Fix the off-by-one error in the loop counter")'
+            },
             path: {
                type: 'string',
                description: 'The file path to edit (relative to /workspace)'
@@ -1439,7 +1451,7 @@ var TOOLS = [
                description: 'The replacement text'
             }
          },
-         required: ['path', 'old_string', 'new_string']
+         required: ['description', 'path', 'old_string', 'new_string']
       }
    },
    {
@@ -1448,6 +1460,10 @@ var TOOLS = [
       input_schema: {
          type: 'object',
          properties: {
+            description: {
+               type: 'string',
+               description: 'A brief human-readable description of what this tool call does and why (e.g. "Spawn a frontend agent to build the UI")'
+            },
             provider: {
                type: 'string',
                description: 'claude or openai'
@@ -1465,7 +1481,7 @@ var TOOLS = [
                description: 'Optional dialog slug'
             }
          },
-         required: ['provider', 'model', 'prompt']
+         required: ['description', 'provider', 'model', 'prompt']
       }
    }
 ];
@@ -1498,6 +1514,10 @@ var sanitizeToolPath = function (path) {
 
 // Execute a tool inside the project container
 var executeTool = async function (toolName, toolInput, projectName, rs) {
+   // Strip description from input — it's metadata for the UI, not a tool parameter
+   toolInput = teishi.copy (toolInput || {});
+   delete toolInput.description;
+
    try {
       projectName = validateProjectName (projectName);
    }
@@ -1610,13 +1630,14 @@ var parseMetadata = function (markdown) {
 
 var parseToolCalls = function (text, includePositions) {
    var toolCalls = [];
-   var re = /---\nTool request:\s+([^\n\[]+?)(?:\s+\[([^\]]+)\])?\n\n([\s\S]*?)\n---/g;
+   var re = /---\nTool request:\s+([^\n\[]+?)(?:\s+\[([^\]]+)\])?\n(?:> Description:\s*([^\n]*)\n)?\n([\s\S]*?)\n---/g;
    var match;
    while ((match = re.exec (text)) !== null) {
       var full = match [0];
       var name = match [1].trim ();
       var id = (match [2] || '').trim ();
-      var body = match [3];
+      var description = (match [3] || '').trim () || null;
+      var body = match [4];
       var inputText = body;
       var result = null;
       var resultMatch = body.match (/\nResult:\n\n([\s\S]*)$/);
@@ -1630,6 +1651,7 @@ var parseToolCalls = function (text, includePositions) {
       var parsed = {
          id: id || null,
          name: name,
+         description: description,
          input: parsedInput,
          result: result
       };
@@ -1645,8 +1667,15 @@ var parseToolCalls = function (text, includePositions) {
 
 var buildToolBlock = function (toolCall, result) {
    var block = '---\n';
-   block += 'Tool request: ' + toolCall.name + ' [' + toolCall.id + ']\n\n';
-   block += '    ' + JSON.stringify (toolCall.input || {}, null, 2).split ('\n').join ('\n    ') + '\n\n';
+   block += 'Tool request: ' + toolCall.name + ' [' + toolCall.id + ']\n';
+   // Include description if present in tool input
+   var desc = (toolCall.input || {}).description;
+   if (desc) block += '> Description: ' + desc + '\n';
+   block += '\n';
+   // Strip description from the stored input JSON (it's metadata, not a tool parameter)
+   var inputForDisplay = teishi.copy (toolCall.input || {});
+   delete inputForDisplay.description;
+   block += '    ' + JSON.stringify (inputForDisplay, null, 2).split ('\n').join ('\n    ') + '\n\n';
    if (result) {
       block += 'Result:\n\n';
       block += '    ' + JSON.stringify (result, null, 2).split ('\n').join ('\n    ') + '\n\n';
@@ -1762,7 +1791,7 @@ var parseDialogForProvider = function (markdown, provider) {
       }
 
       var toolCalls = parseToolCalls (section.content, false);
-      var assistantText = section.content.replace (/---\nTool request:\s+[^\n\[]+?(?:\s+\[[^\]]+\])?\n\n[\s\S]*?\n---/g, '');
+      var assistantText = section.content.replace (/---\nTool request:\s+[^\n\[]+?(?:\s+\[[^\]]+\])?\n(?:> Description:\s*[^\n]*\n)?\n[\s\S]*?\n---/g, '');
       assistantText = stripSectionMetadata (assistantText);
 
       if (! toolCalls.length) {

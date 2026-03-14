@@ -8,7 +8,15 @@ Build your ideas with your words.
 2. **Everything in your browser**: your documents are not only text: use images, audio, and embed small apps in your documents. No terminal or dedicated native app required.
 3. **Safe YOLO**: the agents don't ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
 
-For the students of humanities stranded in the digital age: this is your chance to build a world with your words. Not cryptic commands, without the tens of hours of practice that are required to figure out misplaced semicolons. Describe your world and see it come to life.
+## Vibey is for
+
+- **Students of humanities** stranded in the digital age: bring your ideas for tools, games or small apps just by using your words.
+
+- **Researchers** who need custom software to explore data, run analyses, and generate visualizations.
+
+- **Teachers** who want to create interactive learning materials.
+
+- **Founders** who want to explore or quickly iterate a product idea.
 
 ## Installation
 
@@ -350,6 +358,7 @@ Tool calls are **not** separate `## Tool Request` / `## Tool Result` sections. T
 ```md
 ---
 Tool request: run_command [call_abc123]
+> Description: List project files to check structure
 
     {
       "command": "ls /workspace"
@@ -369,7 +378,8 @@ Result:
 Format:
 - Opens with `---` on its own line.
 - `Tool request: <name> [<id>]` — tool name and provider-assigned call ID.
-- Input JSON is 4-space indented and pretty-printed.
+- `> Description: <text>` — LLM-generated description of what this tool call does. This line is optional but always produced by current tool definitions (the `description` parameter is required in each tool's input schema). The description is stripped from the input JSON displayed below.
+- Input JSON is 4-space indented and pretty-printed (with the `description` field removed since it's shown above).
 - `Result:` section is appended after execution, also 4-space indented.
 - Closes with `---` on its own line.
 
@@ -406,10 +416,12 @@ Markdown is the source of truth. No server-side state. Restart-safe by design.
 
 The LLM always receives four tools:
 
-- `run_command` - run a shell command (30s timeout, 1MB max output). Use for reading files (`cat`), listing directories (`ls`), HTTP requests (`curl`), git, and anything else the shell can do.
-- `write_file` - create or overwrite a file. Takes `{path, content}`. Bypasses the shell so content with quotes, backticks, template literals, etc. is written cleanly.
-- `edit_file` - surgical find-and-replace. Takes `{path, old_string, new_string}`. `old_string` must appear exactly once in the file; if it appears zero times or more than once, the tool returns an error asking for more context. The LLM should read the file first (`cat` via `run_command`) before editing.
-- `launch_agent` - spawn another top-level dialog (flat structure, no subagent tree). Takes `{provider, model, prompt, slug?}` and is equivalent to `POST /project/:project/dialog`.
+- `run_command` - run a shell command (30s timeout, 1MB max output). Use for reading files (`cat`), listing directories (`ls`), HTTP requests (`curl`), git, and anything else the shell can do. Takes `{description, command}`.
+- `write_file` - create or overwrite a file. Takes `{description, path, content}`. Bypasses the shell so content with quotes, backticks, template literals, etc. is written cleanly.
+- `edit_file` - surgical find-and-replace. Takes `{description, path, old_string, new_string}`. `old_string` must appear exactly once in the file; if it appears zero times or more than once, the tool returns an error asking for more context. The LLM should read the file first (`cat` via `run_command`) before editing.
+- `launch_agent` - spawn another top-level dialog (flat structure, no subagent tree). Takes `{description, provider, model, prompt, slug?}` and is equivalent to `POST /project/:project/dialog`.
+
+All tools require a `description` parameter — a brief LLM-generated summary of what the call does (e.g. "List project files to check structure"). This description is stored as metadata in the tool block (`> Description: <text>`) and displayed as the primary label in the client UI.
 
 Tool definitions are written once and converted to both Claude and OpenAI formats.
 
@@ -429,7 +441,11 @@ No separate tool-execution endpoint is needed in normal flow. No tool approvals 
 
 Left sidebar lists dialog files (those under `dialog/`). Right side is a chat view: messages parsed from the file, rendered as bubbles.
 
+Bubbles are labeled **You** and **Agent** (never raw `user`/`assistant` labels). While the agent is streaming, there must never be an empty-looking agent bubble: if the current assistant section has no visible content yet, the client shows a friendly live placeholder instead of a blank message.
+
 Input area: provider select (Claude/OpenAI), textarea (Cmd+Enter to send), Send button. During streaming, partial response shown with block cursor. Input is disabled while streaming.
+
+At the top right of the dialog area, arrow buttons jump to the previous/next message inside the scroll area.
 
 User messages are rendered optimistically (shown immediately when sent).
 
@@ -446,6 +462,14 @@ Message resources/tokens are shown from each section's `> Resources:` metadata l
 ### Client: tools for dialogs
 
 All tool calls execute immediately (YOLO) — there is no approval/denial UI. Tool requests and results are displayed inline in the chat view as they happen.
+
+#### Tool call descriptions
+
+Each tool call includes a `description` parameter — a brief LLM-generated summary of what the call does and why (e.g. "List project files to check structure"). This description is:
+- Stored in the tool block markdown as `> Description: <text>` after the tool request header line.
+- Stripped from the input JSON displayed in the block.
+- Shown in the client as the primary label: the compact (collapsed) view shows only the tool type icon and the description.
+- Expanding ("More") reveals a readable presentation of the input and output, with line breaks preserved and common tool payloads rendered without raw JSON clutter where possible.
 
 #### Diff rendering for `edit_file`
 
@@ -531,7 +555,7 @@ Fields:
 | `height` | `400`    | Iframe height in px                                                  |
 | `title`  | `App`    | Shown in a small header bar above the embed                          |
 
-One embed = one port + path. Multiple embeds are multiple blocks.
+One embed = one port + path. Multiple embeds are done by using multiple blocks.
 
 Parsing rules: ignore blank lines, ignore lines starting with `#`, each line is `key value`.
 
@@ -583,12 +607,6 @@ When rendering markdown (doc preview or dialog view), the client detects `əəə
 
 `sandbox` keeps the embedded app from navigating the top frame; `allow-same-origin` lets it talk to the proxy (same origin as vibey).
 
-#### Not in scope (yet)
-
-- **WebSocket proxying**: can add `Upgrade` handling later.
-- **Hot reload**: iframe is static; user refreshes or a reload button is added to the embed chrome.
-- **Absolute path rewriting**: deferred; agents can be told to use relative paths.
-
 ## Dockerization
 
 ### Architecture: full container isolation
@@ -602,7 +620,7 @@ Every project runs in its own Docker container with its own named volume. Vibey 
 │  - projectFS: reads/writes via docker    │
 │  - reverse-proxies to container IPs      │
 │  - manages container lifecycle           │
-│  - NO volume mounts to project data      │
+│                                          │
 └────────┬─────────────────────────────────┘
          │ docker network (vibey-net)
     ┌────┴────┐    ┌────┴────┐
@@ -647,7 +665,7 @@ Latency per `docker exec` call is ~20-50ms. For human-speed UI operations (loadi
 | Vibey startup | Remove any leftover project containers from previous runs. Volumes survive — projects whose volumes still exist appear in `GET /projects` as usual. |
 | Project accessed (any API call) | If the volume exists but the container is gone (normal state after a restart/rebuild), a fresh container is created and attached to the existing volume. This happens lazily on first access, not eagerly at startup. All project data (code, docs, dialogs, uploads) is intact because it lives on the volume. |
 
-### Embed proxy (updated for isolation)
+### Embed proxy
 
 The proxy route `ALL /project/:project/proxy/:port/*` resolves the project container's IP on `vibey-net` and proxies to `http://<container-ip>:<port>/<path>`. No host port exposure needed for project containers.
 
@@ -655,14 +673,14 @@ The static route `GET /project/:project/static/*` reads the file from the projec
 
 Agent prompt says: *"Your working directory is /workspace. If you run a server, listen on port 4000. Embeds use `port 4000`."* The agent never knows or cares about host ports or container IPs.
 
-### Tool execution (updated for isolation)
+### Tool execution
 
 - `run_command`: already runs via `docker exec` in the project container. No change needed.
 - `write_file`: goes through `projectFS.writeFile` (pipes content into the container).
 - `edit_file`: `projectFS.readFile` → find/replace in vibey's memory → `projectFS.writeFile`.
 - `launch_agent`: spawns a new dialog in the same project container (same container, new dialog file).
 
-### Vi mode
+### Vi mode [TODO]
 
 Vi mode is available for the docs editor and the chat input. Toggle it in **Settings → Editor → Vi mode**. The setting is persisted in `secret.json` under `editor.viMode` and loaded via `GET /settings`.
 
@@ -965,6 +983,22 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
     - Client: The preview updates incrementally (not blank until complete).
     - Client: Once `tool_request` arrives, the bubble shows the final complete tool call.
     - Client: `tool_result` renders inline as before.
+47. **Tool call description in markdown**: `POST /project/:p/dialog` (prompt: "use run_command to run `echo hello`"). After completion, `GET /project/:p/dialog/:id` — markdown has `> Description:` line after `Tool request:` header, description is non-empty, and `description` field is stripped from the input JSON in the block.
+    - Client: Tool block in markdown contains `> Description:` line. `formatToolBlocksForMessage` shows the description in both compact and expanded views.
+    - Client: Compact tool rendering shows only the tool type/icon + description (no command/output preview until expanded).
+    - Client: Expanded tool rendering shows readable input/output text with preserved line breaks.
+48. **tool_request event still has description in input**: `POST /project/:p/dialog` (prompt: "use write_file to create a file"). Collect SSE. The `tool_request` event's `tool.input` object contains a `description` field (the raw LLM output before stripping).
+49. **tool/execute strips description from input**: `POST /project/:p/tool/execute` with `toolInput` including a `description` field. Verify the tool executes successfully (description does not interfere).
+50. **Friendly dialog labels + no blank streaming bubble**:
+    - Client: chat bubbles are labeled `You` and `Agent`.
+    - Client: there is no visible raw `user` / `assistant` role label in the dialog UI.
+    - Client: during streaming, if the agent has not emitted visible content yet, a non-empty friendly placeholder is shown instead of a blank agent bubble.
+51. **Streaming tool bubble can expand while streaming**:
+    - Client: while a tool call is still streaming, the live agent bubble stays compact by default and shows only the tool type/icon + description.
+    - Client: expanding the live bubble reveals the in-progress detailed input/output text available so far.
+52. **Previous/next message navigation buttons**:
+    - Client: dialog header shows previous/next arrow buttons.
+    - Client: clicking them scrolls the dialog area to the previous/next message.
 
 **Static app:**
 
@@ -1113,27 +1147,33 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- Add points 4 and 5 for vibey cloud in the readme: 4) always running, even when you close your computer; 5) available from anywhere, and by anyone you want.
-
-- Long pause at the end of some LLM work. Are we sending one more unnecessary final message?
+- Literate clanking: server.md & client.md
 - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
    - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
    - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
    - The UI redraws synchronously because of gotoB, so there should be
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
-
 ## Vibey cloud in a nutshell
 
-*WARNING: vaporware, will only build if Vibey itself makes sense*
+*WARNING: vaporware, will only build if Vibey itself is useful*
 
-1. **Automatic infra**: accessible anywhere with a browser; put projects (containers) onto servers, proxy traffic from/to your apps, HTTPS (bring your DNS record), receive emails, vibey session cookies.
+Why use Vibey cloud and not locally?
+
+1. **Always running**: your agents can work while your away and while your computer is closed.
+2. **Available from any device**.
+3. **You can share your projects with others**.
+
+How does it work?
+
+1. **Automatic infra**: accessible anywhere with a browser; put projects (containers) onto engines (servers), proxy traffic from/to your apps, HTTPS (bring your DNS record), receive emails, vibey session cookies.
 2. **Aligned pricing**: An annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
 3. **Zero lock-in**: the whole thing being open source, so you can always run the same thing yourself elsewhere, also in the cloud.
 
 All you need is an AI provider, no need to install anything.
 
-## TODO vibey cloud
+### TODO vibey cloud
 
-- Make a document public
+- DB for users.
 - For hosted vibey on Ubuntu, Docker-in-Docker or sibling containers via the Docker socket. Same architecture — each project is a container with a volume, vibey proxies to container IPs. The transition from local to hosted is: add DNS, TLS, and session cookies. The container topology stays the same.
+- Make a document public

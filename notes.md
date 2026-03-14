@@ -1,7 +1,29 @@
 ## Vibey development notes
 
+### 2026-03-13
+
+Thinking in Alexandrian terms, when modifying a system, we can either strengthen or weaken the existing structure. Tests can be seen as a executable structure preservation. They cannot tell ou if you're weakening the system or not in a subtle way, but they can tell you if you break it.
+
+Can we use coding agents to create software that is more alive, rather than more dead?
+
+== Prompts
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. Use agents-now.md to coordinate. For pupeteer, use the global pupeteer, don't install it.
+
+- Make the experience of using agents be more beautiful and friendly:
+   - Say "You" and "Agent" instead of "USER" and "ASSISTANT"
+   - On top of each tool call, after the tool type and the id, add a description section that is an LLM description of what the tool does. This should be passed as a parameter when the LLM makes the tool call. Do this for all the tools. In the client, show only the tool call type and the description, and expand to see the entire output (which you can also compact). Modify the test suite to cover this.
+   - Show descriptions only, click to expand and see the output.
+   - No moments where you see "Assistant" and nothing below, that looks like a bug where we don't stream what's happening.
+   - When you expand it, the output should look more readable and beautiful (no {...} in the command, break new lines also when you stream)
+   - Allow to jump up to the previous message with arrow buttons that are at the top right of the dialog area, to scroll to the prev/next message.
+   - When streaming the dialog, also hide the details (with the option to show them) and see the description instead.
+   - Make it possible to expand the output while streaming.
+- How to work on this: 1) one feature at a time; 2) add tests (first spec in readme.md, then server & client fully aligned), 3) implementation (you can rebuild vibey), 4) run tests and make them pass. Do not commit.
+
 ### 2026-03-12
 
+Prompts:
 
 - Write file doesn't stream, why is that? Can we stream partial tool calls?
 - First write the spec of the tests within the dialog suite.
@@ -13,7 +35,7 @@
 - Hide the .md extensions from the list of docs on the client. Also, if no file is selected, go to main.md instead of the first one.
 - Please tigthen the spec of the client tests and also the implementation of the tests to cover this.
 
-
+-----
 
 - Please take the example of cell's annotated code and start annotating server.js into server.md. Do small batches of lines and explain. Start with the first 100.
 - Amazing! Please unify in both readme and code the LOG_COLORS and LOG_ANSI_COLORS to be LOG_COLORS, use just one object. For each color, clarify what it is in a comment.

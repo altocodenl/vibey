@@ -1499,6 +1499,146 @@
          return true;
       }],
 
+      // Test 46: Tool block description appears in markdown and client renders it
+      ['Dialog 46: Create project for description test', function (done) {
+         window._descProject = 'test-desc-' + testTimestamp ();
+         c.ajax ('post', 'projects', {}, {name: window._descProject}, function (error, rs) {
+            window._descProjectCreated = ! error && rs.body && rs.body.ok;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (! window._descProjectCreated) return 'Failed to create description test project';
+         return true;
+      }],
+
+      ['Dialog 47: Fire dialog with run_command to verify description in markdown', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._descProject) + '/dialog', {},
+            {provider: 'openai', model: 'gpt-5.2-codex', prompt: 'Use run_command to run `echo desc-client-test`. Do only this one tool call.', slug: 'desc-client'},
+            function (error, rs) {
+               if (error) {window._descDialogError = true; return done (SHORT_WAIT, POLL);}
+               window._descDialogId = rs.body.dialogId;
+               // Collect SSE stream
+               var events = [];
+               var es = new EventSource ('/project/' + encodeURIComponent (window._descProject) + '/dialog/' + rs.body.dialogId + '/stream');
+               es.onmessage = function (ev) {
+                  try {events.push (JSON.parse (ev.data));} catch (e) {}
+                  if (ev.data.indexOf ('"type":"done"') !== -1) {
+                     es.close ();
+                     window._descEvents = events;
+                     done (SHORT_WAIT, POLL);
+                  }
+               };
+               es.onerror = function () {
+                  es.close ();
+                  window._descEvents = events;
+                  done (SHORT_WAIT, POLL);
+               };
+            });
+      }, function () {
+         if (window._descDialogError) return 'POST /dialog failed for description test';
+         if (! window._descEvents) return 'No events collected';
+         var doneEvts = dale.fil (window._descEvents, undefined, function (ev) {if (ev.type === 'done') return ev;});
+         if (! doneEvts.length) return 'Expected done event';
+         return true;
+      }],
+
+      ['Dialog 48: Tool block markdown has > Description: line', function (done) {
+         var started = Date.now ();
+         var pollMarkdown = function () {
+            c.ajax ('get', 'project/' + encodeURIComponent (window._descProject) + '/dialog/' + window._descDialogId, {}, '', function (error, rs) {
+               window._descMarkdown = (rs && rs.body && (rs.body.markdown || rs.body.content)) || '';
+               if (window._descMarkdown || Date.now () - started > 5000) return done (SHORT_WAIT, POLL);
+               setTimeout (pollMarkdown, 150);
+            });
+         };
+         pollMarkdown ();
+      }, function () {
+         var md = window._descMarkdown;
+         if (! md) return 'No markdown content';
+         if (md.indexOf ('> Description:') === -1) return 'Missing > Description: line in tool block';
+         var match = md.match (/---\nTool request:\s+run_command\s+\[[^\]]+\]\n> Description:\s*(.+)\n/);
+         if (! match) return 'Description line not in expected position';
+         if (! match [1].trim ()) return 'Description is empty';
+         return true;
+      }],
+
+      ['Dialog 49: Client formatToolBlocksForMessage shows compact header + expanded details', function () {
+         var sampleBlock = '---\nTool request: run_command [call_123]\n> Description: List workspace files\n\n    {\n      "command": "ls /workspace"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "file.txt\nfile-2.txt"\n    }\n\n---';
+         var compact = formatToolBlocksForMessage (sampleBlock, true, {});
+         var full = formatToolBlocksForMessage (sampleBlock, false, {});
+
+         if (compact.indexOf ('List workspace files') === -1) return 'Compact view missing description text';
+         if (compact.indexOf ('ls /workspace') !== -1) return 'Compact view should not show command details before expanding';
+         if (compact.indexOf ('file.txt') !== -1) return 'Compact view should not show output before expanding';
+         if (full.indexOf ('List workspace files') === -1) return 'Full view missing description text';
+         if (full.indexOf ('$ ls /workspace') === -1) return 'Expanded view missing readable command rendering';
+         if (full.indexOf ('file.txt\nfile-2.txt') === -1) return 'Expanded view missing readable output rendering';
+         return true;
+      }],
+
+      ['Dialog 50: Dialog UI uses You/Agent labels', function (done) {
+         window.location.hash = '#/project/' + encodeURIComponent (window._descProject) + '/dialogs/' + encodeURIComponent (window._descDialogId);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var roles = dale.go (document.querySelectorAll ('.chat-role'), function (node) {
+            return (node.textContent || '').trim ();
+         }).join ('\n');
+         if (roles.indexOf ('You') === -1) return 'Missing You role label';
+         if (roles.indexOf ('Agent') === -1) return 'Missing Agent role label';
+         if (/\buser\b/i.test (roles)) return 'Raw user label still visible';
+         if (/\bassistant\b/i.test (roles)) return 'Raw assistant label still visible';
+         return true;
+      }],
+
+      ['Dialog 51: Streaming bubble can expand while streaming', function () {
+         var compact = getStreamingMessageView (
+            '# Dialog\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:00Z - ...\n\n---\nTool request: run_command [call_live]\n> Description: List files\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---\n',
+            '⏳ Run command — List files',
+            false
+         );
+         var full = getStreamingMessageView (
+            '# Dialog\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:00Z - ...\n\n---\nTool request: run_command [call_live]\n> Description: List files\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---\n',
+            '⏳ Run command — List files',
+            true
+         );
+         if (! compact.compactable) return 'Streaming view should be expandable';
+         if (compact.text.indexOf ('List files') === -1) return 'Compact streaming view missing description';
+         if (compact.text.indexOf ('"command": "ls"') !== -1) return 'Compact streaming view should hide details';
+         if (full.text.indexOf ('"command": "ls"') === -1) return 'Expanded streaming view should show input details';
+         if (full.text.indexOf ('"stdout": "a\\nb"') === -1) return 'Expanded streaming view should show output details';
+         return true;
+      }],
+
+      ['Dialog 52: Dialog navigation buttons scroll between messages', function (done) {
+         var node = document.querySelector ('.chat-messages');
+         var prev = document.querySelector ('button[title="Previous message"]');
+         var next = document.querySelector ('button[title="Next message"]');
+         if (! node || ! prev || ! next) {
+            window._dialogNavStart = null;
+            return done (SHORT_WAIT, POLL);
+         }
+         node.scrollTop = Math.max (0, node.scrollHeight - node.clientHeight);
+         window._dialogNavStart = node.scrollTop;
+         next.click ();
+         prev.click ();
+         window._dialogNavEnd = node.scrollTop;
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         if (window._dialogNavStart === null) return 'Dialog navigation controls not found';
+         if (window._dialogNavEnd >= window._dialogNavStart) return 'Previous message button did not scroll upward';
+         return true;
+      }],
+
+      ['Dialog 53: Delete description test project', function (done) {
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._descProject), {}, '', function (error, rs) {
+            window._descDeleted = ! error;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (! window._descDeleted) return 'Deletion failed';
+         return true;
+      }],
+
       // =============================================
       // *** DOCS ***
       // =============================================

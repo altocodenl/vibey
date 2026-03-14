@@ -240,6 +240,30 @@ var styles = css ([
       'font-style': 'italic'
    }],
 
+   // *** AUDIENCE ***
+   ['.audience', {
+      'padding-bottom': '60px'
+   }],
+   ['.audience h2', {
+      'font-size': '1.8rem',
+      'font-weight': '700',
+      'letter-spacing': '-0.02em',
+      'margin-bottom': '20px'
+   }],
+   ['.audience ul', {
+      margin: 0,
+      padding: 0,
+      'padding-left': '1.2rem'
+   }],
+   ['.audience li', {
+      color: C.textDim,
+      'margin-bottom': '14px'
+   }],
+   ['.audience strong', {
+      color: C.text,
+      'font-weight': '600'
+   }],
+
 ]);
 
 // media query handled manually
@@ -324,9 +348,15 @@ var page = ['html', {lang: 'en'}, [
 
          ]],
 
-         // *** HUMANITY ***
-         ['div', {class: 'humanity'}, [
-            ['p', 'For the students of humanities stranded in the digital age: this is your chance to build a world with your words. Not cryptic commands, without the tens of hours of practice that are required to figure out misplaced semicolons. Describe your world and see it come to life.']
+         // *** AUDIENCE ***
+         ['div', {class: 'audience'}, [
+            ['h2', 'Vibey is for'],
+            ['ul', [
+               ['li', ['LITERAL', '<strong>Students of humanities</strong> stranded in the digital age: bring your ideas for tools, games or small apps just by using your words.']],
+               ['li', ['LITERAL', '<strong>Researchers</strong> who need custom software to explore data, run analyses, and generate visualizations.']],
+               ['li', ['LITERAL', '<strong>Teachers</strong> who want to create interactive learning materials.']],
+               ['li', ['LITERAL', '<strong>Founders</strong> who want to explore or quickly iterate a product idea.']]
+            ]]
          ]],
 
          // *** INSTALL ***

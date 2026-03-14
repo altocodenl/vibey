@@ -259,6 +259,34 @@ var isChatNearBottom = function (node) {
 
 var activeDialogStream = null;
 
+var scrollChatToMessage = function (direction) {
+   var node = getChatMessagesNode ();
+   if (! node) return;
+
+   var messages = node.querySelectorAll ('.chat-message');
+   if (! messages.length) return;
+
+   var firstVisible = 0;
+   var scrollTop = node.scrollTop || 0;
+
+   for (var i = 0; i < messages.length; i++) {
+      var top = messages [i].offsetTop || 0;
+      var height = messages [i].offsetHeight || 0;
+      if ((top + height) > (scrollTop + 8)) {
+         firstVisible = i;
+         break;
+      }
+   }
+
+   var targetIndex = firstVisible + (direction > 0 ? 1 : -1);
+   if (targetIndex < 0) targetIndex = 0;
+   if (targetIndex >= messages.length) targetIndex = messages.length - 1;
+
+   var target = messages [targetIndex];
+   if (! target) return;
+   node.scrollTop = Math.max (0, (target.offsetTop || 0) - 8);
+};
+
 var applyStreamingMarkdownEvent = function (markdown, event) {
    markdown = type (markdown) === 'string' ? markdown : '';
    event = event || {};
@@ -987,6 +1015,12 @@ B.mrespond ([
    ['track', 'chatScroll', function (x, ev) {
       var node = ev && ev.target ? ev.target : getChatMessagesNode ();
       B.call (x, 'set', ['dialog', 'autoStick'], isChatNearBottom (node));
+   }],
+
+   ['jump', 'chatMessage', function (x, direction, ev) {
+      if (ev && ev.preventDefault) ev.preventDefault ();
+      scrollChatToMessage (direction === 'prev' ? -1 : 1);
+      B.call (x, 'track', 'chatScroll');
    }],
 
    ['maybe', 'autoscrollChat', function (x) {
@@ -1876,6 +1910,8 @@ B.mrespond ([
 
       var targetFilename = filename;
       var receivedContent = false;
+      var streamingToolChunk = false;
+      var streamingToolDescriptions = {};
 
       var finalize = function () {
          if (activeDialogStream && activeDialogStream.dialogId === dialogId) activeDialogStream = null;
@@ -1932,8 +1968,22 @@ B.mrespond ([
                      }
                      else if (data.type === 'chunk') {
                         receivedContent = true;
+                        var piece = data.content || '';
                         var current = B.get ('streamingContent') || '';
-                        B.call (x, 'set', 'streamingContent', current + data.content);
+
+                        if (streamingToolChunk) {
+                           if (piece.indexOf ('\n\n---') !== -1) streamingToolChunk = false;
+                        }
+                        else {
+                           var toolStart = piece.indexOf ('---\nTool request:');
+                           if (toolStart === -1) toolStart = piece.indexOf ('\n\n---\nTool request:');
+                           if (toolStart !== -1) {
+                              var textBeforeTool = piece.slice (0, toolStart);
+                              if (textBeforeTool) B.call (x, 'set', 'streamingContent', current + textBeforeTool);
+                              streamingToolChunk = piece.indexOf ('\n\n---', toolStart + 1) === -1;
+                           }
+                           else B.call (x, 'set', 'streamingContent', current + piece);
+                        }
                      }
                      else if (data.type === 'context') {
                         receivedContent = true;
@@ -1943,19 +1993,20 @@ B.mrespond ([
                         receivedContent = true;
                         var tool = data.tool || {};
                         var friendly = toolFriendlyName (tool.name || 'tool');
-                        var inputSummary = formatToolInputPreview (tool.input || {}) || '';
+                        var description = ((tool.input || {}).description || '').trim ();
+                        if (tool.id) streamingToolDescriptions [tool.id] = description;
                         var currentReq = B.get ('streamingContent') || '';
-                        B.call (x, 'set', 'streamingContent', currentReq + '\n\n⏳ ' + friendly + '\n' + inputSummary + '\n');
+                        B.call (x, 'set', 'streamingContent', currentReq + '\n\n⏳ ' + friendly + (description ? (' — ' + description) : '') + '\n');
                      }
                      else if (data.type === 'tool_result') {
                         receivedContent = true;
                         var tool = data.tool || {};
                         var friendly = toolFriendlyName (tool.name || 'tool');
+                        var description = ((streamingToolDescriptions [tool.id] || '') + '').trim ();
                         var resultObj = tool.result || {};
                         var icon = (resultObj.success === false || resultObj.error) ? '✗' : '✓';
-                        var resultPreview = formatToolResultPreview (resultObj, 3) || '(ok)';
                         var currentRes = B.get ('streamingContent') || '';
-                        B.call (x, 'set', 'streamingContent', currentRes + icon + ' ' + friendly + '\n' + resultPreview + '\n');
+                        B.call (x, 'set', 'streamingContent', currentRes + icon + ' ' + friendly + (description ? (' — ' + description) : '') + '\n');
                      }
                      else if (data.type === 'done') {
                         if (data.result && data.result.filename) targetFilename = data.result.filename;
@@ -2419,6 +2470,13 @@ var toolFriendlyName = function (name) {
    return map [name] || name;
 };
 
+var roleDisplayName = function (role) {
+   if (role === 'user') return 'You';
+   if (role === 'assistant') return 'Agent';
+   if (role === 'tool') return 'Tool';
+   return role;
+};
+
 var formatToolResultPreview = function (obj, maxStreamLines) {
    if (type (obj) !== 'object' || ! obj) return null;
    if (obj.stdout === undefined && obj.stderr === undefined && obj.success === undefined && obj.message === undefined && obj.error === undefined) return null;
@@ -2540,74 +2598,51 @@ var formatToolBlocksForMessage = function (text, compact, meta) {
    if (type (text) !== 'string' || text.indexOf ('Tool request:') === -1) return text;
 
    return text.replace (/---\nTool request:[\s\S]*?\n---/g, function (block) {
-      // Extract tool name (strip ID)
       var nameMatch = block.match (/^---\nTool request:\s+(\S+)/m);
       var rawName = nameMatch ? nameMatch [1] : 'tool';
       var friendly = toolFriendlyName (rawName);
       if (meta && (rawName === 'edit_file' || rawName === 'write_file')) meta.hasEditFile = true;
 
-      // Extract input and result payloads
+      var descMatch = block.match (/^> Description:\s*(.+)$/m);
+      var description = descMatch ? descMatch [1].trim () : '';
+
       var sections = block.replace (/^---\n/, '').replace (/\n---$/, '');
       var resultSplit = sections.split (/\nResult:\n/);
       var inputSection = resultSplit [0] || '';
       var resultSection = resultSplit [1] || '';
 
-      // Parse input JSON
-      var inputText = inputSection.replace (/^Tool request:.*\n\n?/, '').replace (/^ {4}/gm, '').trim ();
+      var inputText = inputSection.replace (/^Tool request:.*\n/, '').replace (/^> Description:.*\n/, '').replace (/^\n/, '').replace (/^ {4}/gm, '').trim ();
       var inputParsed = null;
       try {inputParsed = JSON.parse (inputText);} catch (e) {}
 
-      // Build input summary line
-      var inputSummary = '';
-      if (inputParsed) {
-         inputSummary = formatToolInputPreview (inputParsed) || '';
-      }
-
-      // Parse result JSON
       var resultText = (resultSection || '').replace (/^ {4}/gm, '').trim ();
       var resultParsed = null;
       try {resultParsed = JSON.parse (resultText);} catch (e) {}
 
-      // Build result output
+      var inputSummary = inputParsed ? (formatToolInputPreview (inputParsed) || JSON.stringify (normalizeToolPreviewValue (inputParsed), null, 2)) : '';
       var resultOutput = '';
-      if (resultParsed) {
-         resultOutput = formatToolResultPreview (resultParsed) || JSON.stringify (normalizeToolPreviewValue (resultParsed), null, 2);
-      }
-      else if (resultText) {
-         resultOutput = resultText;
-      }
+      if (resultParsed) resultOutput = formatToolResultPreview (resultParsed) || JSON.stringify (normalizeToolPreviewValue (resultParsed), null, 2);
+      else if (resultText) resultOutput = resultText;
 
-      // Icon based on result status
       var icon = '⚙';
       if (resultParsed) {
          if (resultParsed.success === false || resultParsed.error) icon = '✗';
-         else if (resultParsed.success === true || resultParsed.message) icon = '✓';
+         else if (resultParsed.success === true || resultParsed.message || resultParsed.launched) icon = '✓';
       }
-      else if (! resultSection) {
-         icon = '⏳';
-      }
+      else if (! resultSection) icon = '⏳';
 
-      // Header line
       var header = icon + ' ' + friendly;
+      if (description) header += ' — ' + description;
+      if (compact) return header;
 
-      // Build the output
       var parts = [header];
-      if (inputSummary) parts.push (inputSummary);
-
-      if (resultOutput && ! compact) {
+      if (inputSummary) {
+         parts.push ('───input───');
+         parts.push (inputSummary);
+      }
+      if (resultOutput) {
          parts.push ('───output───');
          parts.push (resultOutput);
-      }
-      else if (resultOutput && compact) {
-         // Show just the first few lines of output in compact mode
-         var resultLines = resultOutput.split ('\n');
-         if (resultLines.length > 3) {
-            parts.push (resultLines.slice (0, 3).join ('\n'));
-            parts.push ('... [' + (resultLines.length - 3) + ' more lines]');
-         }
-         else {
-            parts.push (resultOutput);
-         }
       }
 
       return parts.join ('\n');
@@ -2692,8 +2727,30 @@ var getMessageToolContentView = function (content, expanded) {
    var compactable = compact !== full;
    return {
       text: expanded ? full : compact,
+      compactText: compact,
+      fullText: full,
       compactable: compactable,
       hasEditFile: meta.hasEditFile
+   };
+};
+
+var getStreamingMessageView = function (streamingMarkdown, streamingContent, expanded) {
+   var compactText = ((streamingContent || '').trim ()) || 'Thinking…';
+   var fullText = compactText;
+
+   if (type (streamingMarkdown) === 'string' && streamingMarkdown.trim ()) {
+      var messages = parseDialogContent (streamingMarkdown);
+      var lastAssistant = dale.stopNot ((messages || []).slice ().reverse (), undefined, function (msg) {
+         if (msg && msg.role === 'assistant') return msg;
+      });
+      if (lastAssistant && type (lastAssistant.content) === 'string' && lastAssistant.content.trim ()) fullText = lastAssistant.content;
+   }
+
+   return {
+      text: expanded ? fullText : compactText,
+      compactText: compactText,
+      fullText: fullText,
+      compactable: compactText !== fullText
    };
 };
 
@@ -3103,6 +3160,17 @@ views.dialogs = function () {
       var dialogIsActive = isDialog && currentDialogParsed.status === 'active';
       var effectiveDialogContent = isDialog ? ((streaming && streamingMarkdown) ? streamingMarkdown : currentFile.content) : '';
       var messages = isDialog ? parseDialogContent (effectiveDialogContent) : [];
+      var liveStreamingMessage = streaming ? (((streamingContent || '').trim ()) || 'Thinking…') : '';
+      var visibleMessages = messages;
+      if (streaming && messages.length) {
+         var lastMessage = messages [messages.length - 1];
+         var timeRange = lastMessage && parseTimeRange (lastMessage.time);
+         var isLiveAssistant = lastMessage && lastMessage.role === 'assistant' && timeRange && timeRange.end === '...';
+         if (isLiveAssistant) visibleMessages = messages.slice (0, -1);
+      }
+      var streamingExpandKey = 'streaming_' + (B.get ('streamingDialogId') || 'current');
+      var streamingExpanded = !! ((toolMessageExpanded || {}) [streamingExpandKey]);
+      var streamingView = getStreamingMessageView (streamingMarkdown, liveStreamingMessage, streamingExpanded);
 
       viMode = !! viMode;
       viState = viState || {};
@@ -3136,10 +3204,22 @@ views.dialogs = function () {
          // Chat area
          ['div', {class: 'chat-container'}, [
             ['div', {class: 'editor-header'}, [
-               ['span', {class: 'editor-filename'}, isDialog ? (statusIcon ((parseDialogFilename (currentFile.name) || {}).status) + ' ' + dialogDisplayLabel (currentFile.name)) : 'New dialog']
+               ['span', {class: 'editor-filename'}, isDialog ? (statusIcon ((parseDialogFilename (currentFile.name) || {}).status) + ' ' + dialogDisplayLabel (currentFile.name)) : 'New dialog'],
+               ['div', {style: style ({display: 'flex', gap: '0.45rem', 'margin-left': 'auto'})}, [
+                  ['button', {
+                     class: 'btn-small',
+                     title: 'Previous message',
+                     onclick: B.ev ('jump', 'chatMessage', 'prev', {raw: 'event'})
+                  }, '↑'],
+                  ['button', {
+                     class: 'btn-small',
+                     title: 'Next message',
+                     onclick: B.ev ('jump', 'chatMessage', 'next', {raw: 'event'})
+                  }, '↓']
+               ]]
             ]],
             ['div', {class: 'chat-messages', onscroll: B.ev ('track', 'chatScroll', {raw: 'event'})}, [
-               messages.length ? dale.go (messages, function (msg, msgIndex) {
+               visibleMessages.length ? dale.go (visibleMessages, function (msg, msgIndex) {
                   var gauges = formatMessageGauges (msg);
                   var parsed = parseDialogFilename ((currentFile || {}).name || '') || {};
                   var expandKey = messageToolExpansionKey (parsed.dialogId, msgIndex, msg.content);
@@ -3162,7 +3242,7 @@ views.dialogs = function () {
                         ['span', msg.toolName || 'tool'],
                         roleTimestamp ? ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, roleTimestamp] : ''
                      ]]
-                     : ['div', {class: 'chat-role'}, ['span', msg.role]];
+                     : ['div', {class: 'chat-role'}, ['span', roleDisplayName (msg.role)]];
 
                   var isUser = msg.role === 'user';
 
@@ -3185,15 +3265,24 @@ views.dialogs = function () {
                      ['a', {href: '#/settings', style: style ({color: '#b07aff', 'text-decoration': 'underline', cursor: 'pointer'})}, 'Go to Settings'],
                      ['span', ' to add an API key or log in with OAuth.']
                   ]]
-                  : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, loadingFile ? 'Loading...' : 'Start typing below to begin a new dialog'],
+                  : streaming
+                     ? ''
+                     : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, loadingFile ? 'Loading...' : 'Start typing below to begin a new dialog'],
                optimisticUserMessage ? ['div', {class: 'chat-message chat-user'}, [
-                  ['div', {class: 'chat-role'}, ['span', 'user']],
+                  ['div', {class: 'chat-role'}, ['span', roleDisplayName ('user')]],
                   ['div', {class: 'chat-content'}, optimisticUserMessage],
                   ['div', {class: 'chat-meta'}, formatLocalDateTimeNoMs (new Date ().toISOString ())]
                ]] : '',
-               (streaming && ! streamingMarkdown && streamingContent) ? ['div', {class: 'chat-message chat-assistant'}, [
-                  ['div', {class: 'chat-role'}, 'assistant'],
-                  ['div', {class: 'chat-content'}, (streamingContent || '') + '▊']
+               streaming ? ['div', {class: 'chat-message chat-assistant'}, [
+                  ['div', {class: 'chat-role'}, roleDisplayName ('assistant')],
+                  ['div', {class: 'chat-content'}, renderChatContent (streamingView.text + '▊', currentProject, false)],
+                  streamingView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
+                     ['button', {
+                        class: 'btn-small',
+                        style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
+                        onclick: B.ev ('toggle', 'messageToolContent', streamingExpandKey)
+                     }, streamingExpanded ? 'Less' : 'More']
+                  ]] : ''
                ]] : ''
             ]],
             // Context window indicator

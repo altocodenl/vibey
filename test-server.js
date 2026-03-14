@@ -1112,13 +1112,99 @@ var dialogSequence = [
       });
    }],
 
+   // Test 44: Tool call description appears in markdown
+   ['Dialog 44: Tool call description in markdown', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
+         provider: 'openai',
+         model: 'gpt-5.2-codex',
+         prompt: 'Use run_command to run `echo hello-description-test`. Do only this one tool call, nothing else.',
+         slug: 'desc-test'
+      }, function (error, code, body) {
+         if (error) return log ('POST /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         s.descDialogId = body.dialogId;
+
+         collectSSE (DIALOG_PROJECT, body.dialogId, function (error, events) {
+            if (error) return log ('SSE stream error: ' + error.message);
+            if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+
+            fetchDialogMarkdown (DIALOG_PROJECT, body.dialogId, function (error, md) {
+               if (error) return log ('Could not fetch dialog: ' + error.message);
+
+               // Verify the > Description: line exists in the tool block
+               if (md.indexOf ('> Description:') === -1) return log ('Missing > Description: line in tool block markdown');
+
+               // Verify description appears after Tool request header
+               var toolBlockMatch = md.match (/---\nTool request:\s+run_command\s+\[[^\]]+\]\n> Description:\s*(.+)\n/);
+               if (! toolBlockMatch) return log ('Description line not in expected position (after Tool request header)');
+               if (! toolBlockMatch [1].trim ()) return log ('Description is empty');
+
+               // Verify the description field is NOT in the input JSON
+               var inputJsonMatch = md.match (/Tool request:.*\n> Description:.*\n\n([\s\S]*?)\n\nResult:/);
+               if (inputJsonMatch) {
+                  var inputText = inputJsonMatch [1].replace (/^ {4}/gm, '').trim ();
+                  try {
+                     var inputParsed = JSON.parse (inputText);
+                     if (inputParsed.description) return log ('description field should be stripped from input JSON but found: ' + inputParsed.description);
+                  }
+                  catch (e) {}
+               }
+
+               log ('[dialog-44] tool block has > Description: line with non-empty description, stripped from input JSON');
+               next ();
+            });
+         });
+      });
+   }],
+
+   // Test 45: SSE tool_request event still has description in input
+   ['Dialog 45: tool_request event has description in input', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
+         provider: 'openai',
+         model: 'gpt-5.2-codex',
+         prompt: 'Use write_file to create a file called desc-test-file.txt with content "hello". Do only this one tool call.',
+         slug: 'desc-event-test'
+      }, function (error, code, body) {
+         if (error) return log ('POST /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+
+         collectSSE (DIALOG_PROJECT, body.dialogId, function (error, events) {
+            if (error) return log ('SSE stream error: ' + error.message);
+            if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+
+            var toolRequestEvents = getEventsByType (events, 'tool_request');
+            if (! toolRequestEvents.length) return log ('Expected at least one tool_request event');
+
+            var writeFileReq = dale.fil (toolRequestEvents, undefined, function (ev) {
+               if (ev.tool && ev.tool.name === 'write_file') return ev;
+            });
+            if (! writeFileReq.length) return log ('Expected tool_request event for write_file');
+
+            // The tool_request event's input should still have description (it's the raw LLM output)
+            var input = writeFileReq [0].tool.input;
+            if (! input || ! input.description) return log ('Expected description in tool_request event input');
+
+            log ('[dialog-45] tool_request event has description: ' + JSON.stringify (input.description).slice (0, 80));
+            next ();
+         });
+      });
+   }],
+
+   // Test 46: tool/execute strips description from input
+   ['Dialog 46: tool/execute strips description from input', 'post', 'project/' + DIALOG_PROJECT + '/tool/execute', {}, {toolName: 'run_command', toolInput: {description: 'Test that description is stripped', command: 'echo desc-stripped-ok'}}, 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object' || ! rs.body.success) return log ('run_command failed: ' + JSON.stringify (rs.body));
+      if ((rs.body.stdout || '').indexOf ('desc-stripped-ok') === -1) return log ('Expected stdout to contain desc-stripped-ok');
+      // If we got here, the tool executed successfully despite the extra description field
+      return true;
+   }],
+
    // Cleanup
-   ['Dialog 44: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Dialog 47: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Cleanup deletion failed');
       return true;
    }],
 
-   ['Dialog 45: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 48: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DIALOG_PROJECT)) return log ('Project still exists after final deletion');
       return true;
