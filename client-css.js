@@ -40,6 +40,70 @@ window.vibeyCSS = [
       'align-items': 'center',
       'margin-bottom': '1rem',
    }],
+   ['.modal-backdrop', {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      'background-color': 'rgba(5, 8, 18, 0.72)',
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'center',
+      padding: '1.5rem',
+      'z-index': 1000,
+      'backdrop-filter': 'blur(10px)'
+   }],
+   ['.modal-card', {
+      width: '100%',
+      'max-width': '540px',
+      'background': 'linear-gradient(180deg, #1e2748 0%, #141b31 100%)',
+      border: '1px solid rgba(148, 184, 255, 0.22)',
+      'border-radius': '22px',
+      'box-shadow': '0 24px 80px rgba(0, 0, 0, 0.45)',
+      padding: '1.5rem'
+   }],
+   ['.project-modal-kicker', {
+      color: '#9aa4bf',
+      'font-size': '0.9rem',
+      'letter-spacing': '0.04em',
+      'margin-bottom': '0.6rem'
+   }],
+   ['.project-modal-title', {
+      color: '#f5f7ff',
+      'font-size': '2rem',
+      'font-weight': '700',
+      'line-height': 1.1,
+      'margin-bottom': '0.65rem'
+   }],
+   ['.project-modal-subtitle', {
+      color: '#bac4e2',
+      'font-size': '1rem',
+      'line-height': 1.5,
+      'margin-bottom': '1.1rem'
+   }],
+   ['.project-modal-input', {
+      width: '100%',
+      padding: '1rem 1.1rem',
+      'font-size': '1.35rem',
+      'font-weight': '600',
+      color: '#f5f7ff',
+      'background-color': '#0f1530',
+      border: '1px solid rgba(148, 184, 255, 0.24)',
+      'border-radius': '14px',
+      outline: 'none',
+      'box-sizing': 'border-box'
+   }],
+   ['.project-modal-input:focus', {
+      border: '1px solid #7ea6ff',
+      'box-shadow': '0 0 0 4px rgba(126, 166, 255, 0.16)'
+   }],
+   ['.modal-actions', {
+      display: 'flex',
+      'justify-content': 'flex-end',
+      gap: '0.75rem',
+      'margin-top': '1.1rem'
+   }],
    // Tabs
    ['.tabs', {
       display: 'flex',
@@ -443,9 +507,9 @@ window.vibeyCSS = [
    }],
    ['.chat-role', {
       'font-size': '11px',
-      'text-transform': 'uppercase',
+      'text-transform': 'none',
       color: '#666',
-      'margin-bottom': '0.25rem',
+      'margin-bottom': '0.45rem',
       display: 'flex',
       'justify-content': 'space-between',
       gap: '0.75rem'
@@ -457,6 +521,14 @@ window.vibeyCSS = [
       display: 'block',
       'margin-top': '0.5rem',
       'text-align': 'right'
+   }],
+   ['.chat-link', {
+      color: '#8db4ff',
+      'text-decoration': 'underline',
+      'text-underline-offset': '2px'
+   }],
+   ['.chat-link:hover', {
+      color: '#b8d0ff'
    }],
    ['.chat-content', {
       'white-space': 'pre-wrap',

@@ -9,6 +9,8 @@ You are a helpful assistant with access to local system tools. When the user ask
 
 When searching code or files from the shell, prefer `rg` (ripgrep) over `grep` when possible.
 
+When you mention a URL or path the user may want to open from a dialog, include it explicitly as a clickable link when possible (for example markdown like `[Open app](/project/my-project/static/)` or the raw URL `/project/my-project/static/`). Dialog links render clickable and open in a new tab.
+
 Project structure convention:
 - Docs live under `doc/` (for example `doc/main.md`).
 - Dialog files live under `dialog/`.

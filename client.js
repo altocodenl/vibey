@@ -1066,6 +1066,10 @@ B.mrespond ([
             voiceSupported: !! (window.SpeechRecognition || window.webkitSpeechRecognition)
          },
          editorPreview: true,
+         projectModal: {
+            open: false,
+            name: ''
+         },
          tab: 'projects',
          uploads: [],
          viCursor: {line: 1, col: 1},
@@ -1271,13 +1275,32 @@ B.mrespond ([
    }],
 
    ['create', 'project', function (x) {
-      var name = prompt ('Project name:');
-      if (! name || ! name.trim ()) return;
-      B.call (x, 'post', 'projects', {}, {name: name.trim ()}, function (x, error, rs) {
+      B.call (x, 'set', 'projectModal', {open: true, name: ''});
+      setTimeout (function () {
+         var input = document.querySelector ('.project-modal-input');
+         if (input) input.focus ();
+      }, 0);
+   }],
+
+   ['close', 'projectModal', function (x) {
+      B.call (x, 'set', 'projectModal', {open: false, name: ''});
+   }],
+
+   ['maybe', 'submitProjectModalOnEnter', function (x, ev) {
+      if (! ev || ev.key !== 'Enter') return;
+      if (ev.preventDefault) ev.preventDefault ();
+      B.call (x, 'submit', 'projectModal');
+   }],
+
+   ['submit', 'projectModal', function (x) {
+      var name = ((B.get ('projectModal', 'name') || '') + '').trim ();
+      if (! name) return;
+      B.call (x, 'post', 'projects', {}, {name: name}, function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to create project');
-         var slug = rs.body && rs.body.slug ? rs.body.slug : name.trim ();
+         var slug = rs.body && rs.body.slug ? rs.body.slug : name;
          B.call (x, 'load', 'projects');
-         B.call (x, 'navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs');
+         B.call (x, 'close', 'projectModal');
+         B.call (x, 'navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/dialogs');
       });
    }],
 
@@ -2115,8 +2138,9 @@ B.mrespond ([
                      if (data.type === 'snapshot' || data.type === 'markdown_append' || data.type === 'markdown_replace') {
                         receivedContent = true;
                         var currentMarkdown = B.get ('streamingMarkdown') || '';
-                        B.call (x, 'set', 'streamingMarkdown', applyStreamingMarkdownEvent (currentMarkdown, data));
-                        B.call (x, 'set', 'optimisticUserMessage', null);
+                        var nextMarkdown = applyStreamingMarkdownEvent (currentMarkdown, data);
+                        B.call (x, 'set', 'streamingMarkdown', nextMarkdown);
+                        if (! originalInput || nextMarkdown.indexOf (originalInput) !== -1) B.call (x, 'set', 'optimisticUserMessage', null);
                         if (data.result && data.result.filename) targetFilename = data.result.filename;
                      }
                      else if (data.type === 'chunk') {
@@ -2911,6 +2935,36 @@ var getStreamingMessageView = function (streamingMarkdown, streamingContent, exp
    };
 };
 
+var linkifyTextNodes = function (text) {
+   text = type (text) === 'string' ? text : '';
+   if (! text) return [];
+
+   var result = [];
+   var re = /(\[[^\]]+\]\((https?:\/\/[^\s)]+|\/[^\s)]+)\))|(https?:\/\/[^\s<]+|\/project\/[^\s<]+)/g;
+   var lastIndex = 0;
+   var match;
+
+   while ((match = re.exec (text))) {
+      if (match.index > lastIndex) result.push (['span', text.slice (lastIndex, match.index)]);
+
+      if (match [1]) {
+         var md = match [1].match(/^\[([^\]]+)\]\((.+)\)$/);
+         var label = md ? md [1] : match [1];
+         var href = md ? md [2] : '';
+         result.push (['a', {href: href, target: '_blank', rel: 'noopener noreferrer', class: 'chat-link'}, label]);
+      }
+      else {
+         var url = match [3] || match [0];
+         result.push (['a', {href: url, target: '_blank', rel: 'noopener noreferrer', class: 'chat-link'}, url]);
+      }
+
+      lastIndex = re.lastIndex;
+   }
+
+   if (lastIndex < text.length) result.push (['span', text.slice (lastIndex)]);
+   return result;
+};
+
 var renderChatContent = function (text, project, isDiff) {
    if (type (text) !== 'string' || ! text) return '';
 
@@ -2923,7 +2977,7 @@ var renderChatContent = function (text, project, isDiff) {
 
    var flushBuffer = function () {
       if (buffer) {
-         result.push (['span', buffer]);
+         dale.go (linkifyTextNodes (buffer), function (node) { result.push (node); });
          buffer = '';
       }
    };
@@ -3413,12 +3467,9 @@ views.dialogs = function () {
                      else roleTimestamp = formatLocalDateTimeNoMs (msg.time.replace (/ - .*$/, '').trim ());
                   }
 
-                  var roleHeader = isTool
-                     ? ['div', {class: 'chat-role'}, [
-                        ['span', toolFriendlyName (msg.toolName || 'tool')],
-                        roleTimestamp ? ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, roleTimestamp] : ''
-                     ]]
-                     : ['div', {class: 'chat-role'}, ['span', roleDisplayName (msg.role)]];
+                  var roleHeader = ['div', {class: 'chat-role'}, [
+                     ['span', roleDisplayName (isTool ? 'assistant' : msg.role)]
+                  ]];
 
                   var isUser = msg.role === 'user';
 
@@ -3841,7 +3892,8 @@ views.snapshots = function () {
 };
 
 views.main = function () {
-   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton']], function (tab, currentProject, testButton) {
+   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton'], ['projectModal']], function (tab, currentProject, testButton, projectModal) {
+      projectModal = projectModal || {open: false, name: ''};
       return ['div', {class: 'container'}, [
          ['style', window.vibeyCSS],
 
@@ -3882,7 +3934,27 @@ views.main = function () {
             }, 'Dialogs'],
          ]] : '',
 
-         tab === 'settings' ? views.settings () : (tab === 'snapshots' ? views.snapshots () : (! currentProject || tab === 'projects' ? views.projects () : (tab === 'docs' ? views.files () : views.dialogs ())))
+         tab === 'settings' ? views.settings () : (tab === 'snapshots' ? views.snapshots () : (! currentProject || tab === 'projects' ? views.projects () : (tab === 'docs' ? views.files () : views.dialogs ()))),
+
+         projectModal.open ? ['div', {class: 'modal-backdrop', onclick: B.ev ('close', 'projectModal')}, [
+            ['div', {class: 'modal-card project-modal-card', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'project-modal-kicker'}, 'New project'],
+               ['div', {class: 'project-modal-title'}, 'Name your next world'],
+               ['div', {class: 'project-modal-subtitle'}, 'Create a project and jump straight into a dialog.'],
+               ['input', {
+                  class: 'project-modal-input',
+                  type: 'text',
+                  placeholder: 'I have this idea',
+                  value: projectModal.name || '',
+                  oninput: B.ev ('set', ['projectModal', 'name']),
+                  onkeydown: B.ev ('maybe', 'submitProjectModalOnEnter', {raw: 'event'})
+               }],
+               ['div', {class: 'modal-actions'}, [
+                  ['button', {class: 'btn-small', onclick: B.ev ('close', 'projectModal')}, 'Cancel'],
+                  ['button', {class: 'primary', onclick: B.ev ('submit', 'projectModal'), disabled: ! ((projectModal.name || '').trim ())}, 'Create project']
+               ]]
+            ]]
+         ]] : ''
       ]];
    });
 };

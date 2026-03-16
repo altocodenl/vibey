@@ -1,5 +1,19 @@
 ## Vibey development notes
 
+### 2026-03-16
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. Use agents-now.md to coordinate. For pupeteer, use the global pupeteer, don't install it.
+
+- When in a dialog, please work on full alignment between refreshing the page and SSE mode (splitting of tool calls, seeing the "Thinking..."). I notice a lot of inconsistencies. Each tool call should be separate from contiguous ones, the "thinking" status should be always seen, when streaming a write you should see it's happening but with the output omitted unless you write it. Please also tighten the test spec and the client tests.
+- Looks great! But sometimes I still see joined tool calls into one when streaming (not when I refresh).
+- Don't say TOOL CALL, just say Agent on the top left. Also, "Agent", not "AGENT". Same with "You" instead of "YOU". Also leave a bit more of space between that top left text and the beginning of the context.
+- Go straight from new project to dialog instead of the docs.
+- There are unnecessary timestamps on the top left of each bubble, can you remove them?
+- Please add now a nicer way (not a prompt) to input the project name, a modal with bigger and nicer letters.
+- Show links in dialogs so you can click and auto open in new tab (`_blank`): tell this in the prompt to the agent.
+- My initial message gets "swallowed" when the dialog starts, it disappears.
+- The expansion of a streamed write_file doesn't look nice, with a per line diff with green, neither when streaming straight or on refresh while it still streams.
+
 ### 2026-03-13
 
 Thinking in Alexandrian terms, when modifying a system, we can either strengthen or weaken the existing structure. Tests can be seen as a executable structure preservation. They cannot tell ou if you're weakening the system or not in a subtle way, but they can tell you if you break it.

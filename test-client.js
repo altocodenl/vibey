@@ -148,6 +148,12 @@
       queuedPromptValues = [];
    };
 
+   var createProjectThroughModal = function (name) {
+      B.call ('create', 'project');
+      B.call ('set', ['projectModal', 'name'], name);
+      B.call ('submit', 'projectModal');
+   };
+
    var findByText = function (selector, text) {
       return dale.stopNot (Array.prototype.slice.call (document.querySelectorAll (selector)), undefined, function (el) {
          if (el.textContent.indexOf (text) !== -1) return el;
@@ -340,14 +346,25 @@
          return true;
       }],
 
-      ['Project 2: Create project "' + PROJECT_FLOW + '" via prompt', function (done) {
-         mockPrompt (PROJECT_FLOW);
+      ['Project 1a: New project opens name modal', function (done) {
          B.call ('create', 'project');
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var modal = document.querySelector ('.project-modal-card');
+         var input = document.querySelector ('.project-modal-input');
+         if (! modal) return 'Project modal not found after clicking create';
+         if (! input) return 'Project modal input not found';
+         B.call ('close', 'projectModal');
+         return true;
+      }],
+
+      ['Project 2: Create project "' + PROJECT_FLOW + '" via modal', function (done) {
+         createProjectThroughModal (PROJECT_FLOW);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var tab = B.get ('tab');
-         if (tab !== 'docs') return 'Expected to land on "docs" tab after project creation, got "' + tab + '"';
+         if (tab !== 'dialogs') return 'Expected to land on "dialogs" tab after project creation, got "' + tab + '"';
          var project = B.get ('currentProject');
          if (project !== PROJECT_FLOW) return 'Expected currentProject to be "' + PROJECT_FLOW + '" but got "' + project + '"';
          return true;
@@ -419,13 +436,12 @@
       }],
 
       ['Project 4: Idempotent create with same name succeeds', function (done) {
-         mockPrompt (PROJECT_FLOW);
-         B.call ('create', 'project');
+         createProjectThroughModal (PROJECT_FLOW);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var tab = B.get ('tab');
-         if (tab !== 'docs') return 'Expected to land on "docs" tab after idempotent create, got "' + tab + '"';
+         if (tab !== 'dialogs') return 'Expected to land on "dialogs" tab after idempotent create, got "' + tab + '"';
          var project = B.get ('currentProject');
          if (project !== PROJECT_FLOW) return 'Expected currentProject to remain "' + PROJECT_FLOW + '" after idempotent create, got "' + project + '"';
          return true;
@@ -474,41 +490,42 @@
          return true;
       }],
 
-      ['Project 9: Empty project name prompt is ignored', function (done) {
+      ['Project 9: Empty project name leaves modal open and does not create', function (done) {
          window._projListCount = (B.get ('projects') || []).length;
-         mockPrompt ('');
          B.call ('create', 'project');
+         B.call ('set', ['projectModal', 'name'], '');
+         B.call ('submit', 'projectModal');
          done (SHORT_WAIT, POLL);
       }, function () {
-         restorePrompt ();
          var count = (B.get ('projects') || []).length;
-         if (count !== window._projListCount) return 'Projects list length changed after empty prompt';
-         if (B.get ('currentProject')) return 'currentProject should remain null after empty prompt';
+         if (count !== window._projListCount) return 'Projects list length changed after empty project modal submit';
+         if (B.get ('currentProject')) return 'currentProject should remain null after empty project modal submit';
+         if (! B.get ('projectModal', 'open')) return 'Project modal should stay open on empty submit';
          return true;
       }],
 
-      ['Project 10: Whitespace-only project name prompt is ignored', function (done) {
+      ['Project 10: Whitespace-only project name leaves modal open and does not create', function (done) {
          window._projListCount = (B.get ('projects') || []).length;
-         mockPrompt ('   ');
-         B.call ('create', 'project');
+         B.call ('set', ['projectModal', 'name'], '   ');
+         B.call ('submit', 'projectModal');
          done (SHORT_WAIT, POLL);
       }, function () {
-         restorePrompt ();
          var count = (B.get ('projects') || []).length;
-         if (count !== window._projListCount) return 'Projects list length changed after whitespace prompt';
-         if (B.get ('currentProject')) return 'currentProject should remain null after whitespace prompt';
+         if (count !== window._projListCount) return 'Projects list length changed after whitespace project modal submit';
+         if (B.get ('currentProject')) return 'currentProject should remain null after whitespace project modal submit';
+         if (! B.get ('projectModal', 'open')) return 'Project modal should stay open on whitespace submit';
+         B.call ('close', 'projectModal');
          return true;
       }],
 
       ['Project 11a: Create project "My Cool Project"', function (done) {
-         mockPrompt ('My Cool Project');
-         B.call ('create', 'project');
+         createProjectThroughModal ('My Cool Project');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var slug = B.get ('currentProject');
          if (! slug) return 'Expected currentProject to be set after creating "My Cool Project"';
-         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "My Cool Project"';
+         if (B.get ('tab') !== 'dialogs') return 'Expected to land on "dialogs" tab after creating "My Cool Project"';
          window._projSpecialSlug1 = slug;
          return true;
       }],
@@ -535,14 +552,13 @@
       }],
 
       ['Project 11d: Create project "🚀 Rocket App"', function (done) {
-         mockPrompt ('🚀 Rocket App');
-         B.call ('create', 'project');
+         createProjectThroughModal ('🚀 Rocket App');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var slug = B.get ('currentProject');
          if (! slug) return 'Expected currentProject to be set after creating "🚀 Rocket App"';
-         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "🚀 Rocket App"';
+         if (B.get ('tab') !== 'dialogs') return 'Expected to land on "dialogs" tab after creating "🚀 Rocket App"';
          window._projSpecialSlug2 = slug;
          return true;
       }],
@@ -569,14 +585,13 @@
       }],
 
       ['Project 11g: Create project "café étude"', function (done) {
-         mockPrompt ('café étude');
-         B.call ('create', 'project');
+         createProjectThroughModal ('café étude');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var slug = B.get ('currentProject');
          if (! slug) return 'Expected currentProject to be set after creating "café étude"';
-         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "café étude"';
+         if (B.get ('tab') !== 'dialogs') return 'Expected to land on "dialogs" tab after creating "café étude"';
          window._projSpecialSlug3 = slug;
          return true;
       }],
@@ -603,14 +618,13 @@
       }],
 
       ['Project 11j: Create project "hello—world & friends!"', function (done) {
-         mockPrompt ('hello—world & friends!');
-         B.call ('create', 'project');
+         createProjectThroughModal ('hello—world & friends!');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var slug = B.get ('currentProject');
          if (! slug) return 'Expected currentProject to be set after creating "hello—world & friends!"';
-         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "hello—world & friends!"';
+         if (B.get ('tab') !== 'dialogs') return 'Expected to land on "dialogs" tab after creating "hello—world & friends!"';
          window._projSpecialSlug4 = slug;
          return true;
       }],
@@ -637,14 +651,13 @@
       }],
 
       ['Project 11m: Create project "日本語プロジェクト"', function (done) {
-         mockPrompt ('日本語プロジェクト');
-         B.call ('create', 'project');
+         createProjectThroughModal ('日本語プロジェクト');
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var slug = B.get ('currentProject');
          if (! slug) return 'Expected currentProject to be set after creating "日本語プロジェクト"';
-         if (B.get ('tab') !== 'docs') return 'Expected to land on "docs" tab after creating "日本語プロジェクト"';
+         if (B.get ('tab') !== 'dialogs') return 'Expected to land on "dialogs" tab after creating "日本語プロジェクト"';
          window._projSpecialSlug5 = slug;
          return true;
       }],
@@ -678,8 +691,7 @@
       }],
 
       ['Dialog 2: Create project via prompt and navigate into it', function (done) {
-         mockPrompt (TEST_PROJECT);
-         B.call ('create', 'project');
+         createProjectThroughModal (TEST_PROJECT);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
@@ -688,7 +700,7 @@
          window._dialogProjectSlug = project;
          window._dialogProjectName = TEST_PROJECT;
          var tab = B.get ('tab');
-         if (tab !== 'docs') return 'Expected docs tab after project creation, got "' + tab + '"';
+         if (tab !== 'dialogs') return 'Expected dialogs tab after project creation, got "' + tab + '"';
          return true;
       }],
 
@@ -1642,6 +1654,34 @@
          return true;
       }],
 
+      ['Dialog 50a: Dialog content auto-linkifies URLs and opens in new tab', function () {
+         var rendered = renderChatContent ('Open /project/solar/static/ and [Docs](/project/solar/docs/main).', 'solar', false);
+         var anchors = dale.fil (rendered, undefined, function (node) {
+            if (type (node) === 'array' && node [0] === 'a') return node;
+         });
+         if (anchors.length < 2) return 'Expected two rendered links in dialog content';
+         if ((anchors [0] [1] || {}).href !== '/project/solar/static/') return 'Raw URL was not linkified correctly';
+         if ((anchors [0] [1] || {}).target !== '_blank') return 'Raw URL link should open in new tab';
+         if ((anchors [1] [1] || {}).href !== '/project/solar/docs/main') return 'Markdown link was not rendered correctly';
+         if ((anchors [1] [1] || {}).target !== '_blank') return 'Markdown link should open in new tab';
+         return true;
+      }],
+
+      ['Dialog 50b: Optimistic initial user message stays visible until markdown contains it', function () {
+         B.call ('set', 'streamingMarkdown', '');
+         B.call ('set', 'optimisticUserMessage', 'Hello from optimistic test');
+         var currentFile = B.get ('currentFile');
+         var project = B.get ('currentProject') || 'synthetic';
+         var rendered = views.dialogs () (B.get ('files'), currentFile, B.get ('loadingFile'), B.get ('dialog'), true, B.get ('streamingContent'), B.get ('streamingMarkdown'), B.get ('optimisticUserMessage'), B.get ('toolMessageExpanded'), project, B.get ('viMode'), B.get ('viState'), B.get ('viOverlayChat'), B.get ('settings'), B.get ('contextWindow'), B.get ('vibeyingSpin'));
+         var html = lith.g (rendered);
+         if (html.indexOf ('Hello from optimistic test') === -1) return 'Optimistic user message should still render before markdown catches up';
+         var md = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\nHello from optimistic test\n';
+         B.call ('set', 'streamingMarkdown', md);
+         if (md.indexOf ('Hello from optimistic test') === -1) return 'Sanity check failed';
+         B.call ('set', 'optimisticUserMessage', null);
+         return true;
+      }],
+
       ['Dialog 51: Streaming bubble can expand while streaming', function () {
          var compact = getStreamingMessageView (
             '# Dialog\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:00Z - ...\n\n---\nTool request: run_command [call_live]\n> Description: List files\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---\n',
@@ -1765,15 +1805,23 @@
 
       ['Docs 1: Create project for docs editing', function (done) {
          window._docsProject = 'test-docs-' + testTimestamp ();
-         mockPrompt (window._docsProject);
-         B.call ('create', 'project');
+         createProjectThroughModal (window._docsProject);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
          var project = B.get ('currentProject');
          if (project !== window._docsProject) return 'Expected project "' + window._docsProject + '", got "' + project + '"';
          var tab = B.get ('tab');
-         if (tab !== 'docs') return 'Expected docs tab after project creation, got "' + tab + '"';
+         if (tab !== 'dialogs') return 'Expected dialogs tab after project creation, got "' + tab + '"';
+         return true;
+      }],
+
+      ['Docs 1a: Navigate to docs after project creation', function (done) {
+         B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var tab = B.get ('tab');
+         if (tab !== 'docs') return 'Expected docs tab after navigation, got "' + tab + '"';
          return true;
       }],
 
@@ -2100,8 +2148,7 @@
 
       ['Uploads 1: Create project for uploads', function (done) {
          window._uploadsProject = 'test-uploads-' + testTimestamp ();
-         mockPrompt (window._uploadsProject);
-         B.call ('create', 'project');
+         createProjectThroughModal (window._uploadsProject);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
@@ -2386,8 +2433,7 @@
 
       ['Static 1: Create project', function (done) {
          window._staticAppProject = 'test-static-app-' + testTimestamp ();
-         mockPrompt (window._staticAppProject);
-         B.call ('create', 'project');
+         createProjectThroughModal (window._staticAppProject);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
@@ -2558,8 +2604,7 @@
 
       ['Backend 1: Create project', function (done) {
          window._backendAppProject = 'test-backend-app-' + testTimestamp ();
-         mockPrompt (window._backendAppProject);
-         B.call ('create', 'project');
+         createProjectThroughModal (window._backendAppProject);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
@@ -2787,8 +2832,7 @@
             'golf hotel india',
             'juliet kilo lima'
          ].join ('\n');
-         mockPrompt (window._viModeProject);
-         B.call ('create', 'project');
+         createProjectThroughModal (window._viModeProject);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();
@@ -3117,8 +3161,7 @@
 
       ['Snapshots 1: Create project for snapshots', function (done) {
          window._snapshotsProject = 'test-snapshots-' + testTimestamp ();
-         mockPrompt (window._snapshotsProject);
-         B.call ('create', 'project');
+         createProjectThroughModal (window._snapshotsProject);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          restorePrompt ();

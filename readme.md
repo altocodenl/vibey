@@ -131,6 +131,9 @@ Each project is a container (`vibey-proj-<name>`) with its own named volume (`vi
 Projects tab lists all projects with + New and × delete.
 
 - Clicking a project opens its Docs tab.
+- `+ New project` opens a centered modal with a large project-name input and explicit create/cancel actions.
+- Submitting a non-empty name creates the project and opens its Dialogs tab.
+- Empty or whitespace-only names do not submit; the modal stays open.
 - Deleting asks for confirmation and removes the project from disk.
 - If the deleted project is currently open, client state resets and navigation returns to `#/projects`.
 
@@ -286,7 +289,7 @@ Docs sidebar shows an Uploads section at the bottom (always visible when uploads
 - `GET /project/:project/dialogs` — list dialog files with `{dialogId, status, filename, mtime}` (filenames live under `dialog/`).
 - `GET /project/:project/dialog/:id` — load one dialog. Always returns the current markdown from disk (full content, regardless of whether the dialog is active or done).
 
-SSE event types: `chunk`, `tool`, `done`, `error`.
+SSE event types: `snapshot`, `markdown_append`, `markdown_replace`, `chunk`, `tool_request`, `tool_result`, `context`, `done`, `error`.
 
 ### Dialog markdown format
 
@@ -441,7 +444,7 @@ No separate tool-execution endpoint is needed in normal flow. No tool approvals 
 
 Left sidebar lists dialog files (those under `dialog/`). Right side is a chat view: messages parsed from the file, rendered as bubbles.
 
-Bubbles are labeled **You** and **Agent** (never raw `user`/`assistant` labels). While the agent is streaming, there must never be an empty-looking agent bubble: if the current assistant section has no visible content yet, the client shows a friendly live placeholder instead of a blank message.
+Bubbles are labeled **You** and **Agent** (never raw `user`/`assistant` labels). Tool calls render as their own separate bubbles in the chat view — even when multiple tool blocks are contiguous inside a single `## Assistant` section in markdown. URLs and markdown links in dialog content are clickable and open in a new tab (`target="_blank"`). While the agent is streaming, there must never be an empty-looking agent bubble: if the current assistant section has no visible content yet, the client shows a friendly live placeholder instead of a blank message.
 
 Input area: provider select (Claude/OpenAI), textarea (Cmd+Enter to send), Send button. During streaming, partial response shown with block cursor. Input is disabled while streaming.
 
@@ -725,7 +728,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 1. `GET /projects` — verify it returns an array (may be empty or contain pre-existing projects).
    - Client: Projects tab loads and renders a list (may be empty).
 2. `POST /projects` body `{name: "test-proj"}` — verify response has `{ok: true, slug, name}` and slug matches expected value.
-   - Client: Create project via prompt; navigates to Docs and sets `currentProject`.
+   - Client: Create project via modal; navigates to Dialogs and sets `currentProject`.
 3. `GET /projects` — verify the new project appears with matching slug and display name.
    - Client: Projects list shows the new project entry with the display name.
    - Client: Switching back to Projects refreshes the list, so projects created while viewing another tab appear.
@@ -739,9 +742,9 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
    - Client: Navigating to a deleted project returns to Projects (no file/dialog view).
 8. `DELETE /projects/nonexistent` — **404**.
 9. `POST /projects` with empty name `""` — **400**.
-   - Client: UI ignores empty prompt (no request sent).
+   - Client: Empty project name leaves the modal open and sends no request.
 10. `POST /projects` with whitespace-only name `"   "` — **400**.
-   - Client: UI ignores whitespace-only prompt (no request sent).
+   - Client: Whitespace-only project name leaves the modal open and sends no request.
 11. For each of the following names, verify create → list (display name round-trips) → file write/read via slug → delete → gone from list:
     - `My Cool Project` (spaces; slug has no spaces, base64url-encoded between dots).
     - `🚀 Rocket App` (emoji).
@@ -753,7 +756,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 **Doc:**
 
 1. `POST /projects` — create project.
-   - Client: Create project via prompt and land on Docs tab.
+   - Client: Create project via modal and land on Dialogs tab.
 2. `POST /project/:p/file/doc/main.md` — write initial content.
    - Client: Create `main.md` via + New file prompt (stored as `doc/main.md`).
 3. `GET /project/:p/file/doc/main.md` — read back, verify exact round-trip.
@@ -804,7 +807,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 **Upload:**
 
 1. `POST /projects` — create a project.
-   - Client: Create project via prompt and land on Docs tab.
+   - Client: Create project via modal and land on Dialogs tab.
 2. `POST /project/:project/upload` — upload an image via data URL with `{name, content, contentType}` (`test-image.png`, `image/png`). Verify response includes `name`, `size`, `mtime`, `contentType`, and `url`.
    - Client: Upload image via API; uploads section becomes visible.
 3. `GET /project/:project/uploads` — list includes `test-image.png` with matching metadata.
@@ -848,7 +851,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 **Snapshot:**
 
 1. `POST /projects` — create project.
-   - Client: Create project via prompt.
+   - Client: Create project via modal.
 2. `POST /project/:project/file/doc/main.md` — write snapshot content.
    - Client: Seed `doc/main.md` content (currently via API in client flow).
 3. `POST /project/:project/file/doc/notes.md` — write extra file.
@@ -912,17 +915,19 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 **Dialog:**
 
 1. `GET /` — confirm HTML shell loads `client.js`.
-2. `POST /projects` — create project. Client: create via prompt, verify `currentProject` is set and app navigates to Docs tab.
+2. `POST /projects` — create project. Client: create via modal, verify `currentProject` is set and app navigates to Dialogs tab.
 3. `POST /project/:p/dialog/new` (openai, gpt-5.2-codex, slug `flow1-read-vibey`) — response has `dialogId`, `filename`, `provider`, `model`, `status: done`, filename ends `-done.md`.
 4. `GET /project/:p/dialogs` — draft is listed, status `done`.
    - Client: Switching away and back to Dialogs refreshes the list, so dialogs created while viewing another tab appear.
 5. `POST /project/:p/tool/execute` (write_file `test-sample.txt`) — seed a file.
 6. `PUT /project/:p/dialog` (prompt: "read test-sample.txt with run_command") — returns **JSON** `{dialogId, filename, status: "active"}`.
-7. `GET /project/:p/dialog/:id/stream` — **SSE** stream. Collect events until `done`. Verify `context` event with valid `percent/used/limit`.
+7. `GET /project/:p/dialog/:id/stream` — **SSE** stream. Collect events until `done`. Verify the first event is `snapshot`, and verify a `context` event with valid `percent/used/limit`.
 8. `GET /project/:p/dialog/:id` — markdown has `> Time:`, `> Context:`, `run_command` tool request + result.
 9. `PUT /project/:p/dialog` (same dialogId, prompt: "create dummy.js with write_file") — returns **JSON** with `status: "active"`.
-10. `GET /project/:p/dialog/:id/stream` — SSE stream. Collect events until `done`.
+10. `GET /project/:p/dialog/:id/stream` — SSE stream. Collect events until `done`. Verify streamed tool-block header/content is present in `chunk` and `markdown_append` events.
 11. `GET /project/:p/dialog/:id` — markdown has `write_file` tool request + result.
+12. Client: contiguous tool calls inside one assistant turn render as separate chat bubbles, not merged into one bubble.
+13. Client: reconnect/page refresh resumes the live bubble from compact status text (for example a `write_file` shows the action/description, not raw file contents).
 12. `POST /project/:p/tool/execute` (run_command `cat dummy.js`) — stdout contains `console.log`.
 13. `PUT /project/:p/dialog` (same dialogId, prompt: "continue without provider", no provider field) — returns JSON (provider/model resolved from multi-line header).
 14. `GET /project/:p/dialog/:id/stream` — SSE stream finishes with `done`.
@@ -996,6 +1001,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 51. **Streaming tool bubble can expand while streaming**:
     - Client: while a tool call is still streaming, the live agent bubble stays compact by default and shows only the tool type/icon + description.
     - Client: expanding the live bubble reveals the in-progress detailed input/output text available so far.
+    - Client: if one tool call in the active turn is already complete and a second tool call is still in progress, the completed call remains its own tool bubble and the in-progress call stays in a separate live bubble.
 52. **Previous/next message navigation buttons**:
     - Client: dialog header shows previous/next arrow buttons.
     - Client: clicking them scrolls the dialog area to the previous/next message.
@@ -1003,7 +1009,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 **Static app:**
 
 1. `POST /projects` — create project.
-   - Client: Create project via prompt.
+   - Client: Create project via modal.
 2. `POST /project/:project/file/doc/main.md` — write constraints for a static-only React tictactoe (no backend process).
    - Client: Seed static-app constraints into `doc/main.md` (current client flow seeds via API).
 3. `POST /project/:project/dialog/new` — create orchestrator draft.
@@ -1026,7 +1032,7 @@ This project is intentionally kept alive so the embedded game remains available.
 **App with backend:**
 
 1. `POST /projects` — create project.
-   - Client: Create project via prompt.
+   - Client: Create project via modal.
 2. `POST /project/:project/file/doc/main.md` — write backend tictactoe constraints (Express on port 4000, install Express with npm before running).
    - Client: Seed backend-app constraints into `doc/main.md` (current client flow seeds via API).
 3. `POST /project/:project/dialog/new` — create orchestrator draft.
@@ -1146,6 +1152,12 @@ Bigger refactors:
 ## TODO
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
+
+
+- Demo videos
+   - A 3D solar system I can rotate and zoom
+   - A quick expense tracker
+   - A visual timeline of the French Revolution, with key events I can click to expand
 
 - Literate clanking: server.md & client.md
 - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
