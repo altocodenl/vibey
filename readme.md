@@ -986,7 +986,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 46. **Client rendering of streamed tool deltas**: (Client test) During a `write_file` dialog with streaming tool deltas:
     - Client: As `tool_delta` events arrive, the tool call bubble shows a live preview of the file content being generated.
     - Client: The preview updates incrementally (not blank until complete).
-    - Client: Once `tool_request` arrives, the bubble shows the final complete tool call.
+    - Client: Once the streamed `write_file` block is parseable, expanding it shows the same friendly added-lines diff used for normal `write_file` tool bubbles (green `+` lines, not raw JSON clutter).
     - Client: `tool_result` renders inline as before.
 47. **Tool call description in markdown**: `POST /project/:p/dialog` (prompt: "use run_command to run `echo hello`"). After completion, `GET /project/:p/dialog/:id` — markdown has `> Description:` line after `Tool request:` header, description is non-empty, and `description` field is stripped from the input JSON in the block.
     - Client: Tool block in markdown contains `> Description:` line. `formatToolBlocksForMessage` shows the description in both compact and expanded views.
@@ -1001,6 +1001,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 51. **Streaming tool bubble can expand while streaming**:
     - Client: while a tool call is still streaming, the live agent bubble stays compact by default and shows only the tool type/icon + description.
     - Client: expanding the live bubble reveals the in-progress detailed input/output text available so far.
+    - Client: for `write_file`, the expanded live bubble renders the friendly added-lines diff view (green `+` lines) both during direct streaming and after a page refresh while the dialog is still active.
     - Client: if one tool call in the active turn is already complete and a second tool call is still in progress, the completed call remains its own tool bubble and the in-progress call stays in a separate live bubble.
 52. **Previous/next message navigation buttons**:
     - Client: dialog header shows previous/next arrow buttons.
@@ -1153,7 +1154,7 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-
+- The expansion of a streamed write_file doesn't look nice, with a per line diff with green, neither when streaming straight or on refresh while it still streams.
 - Demo videos
    - A 3D solar system I can rotate and zoom
    - A quick expense tracker

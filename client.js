@@ -2915,23 +2915,35 @@ var getMessageToolContentView = function (content, expanded) {
    };
 };
 
+var toolContentUsesDiff = function (toolName, content, hasEditFile) {
+   if (toolName === 'edit_file' || toolName === 'write_file' || hasEditFile) return true;
+   var inferred = toolName || toolNameFromBlock (content || '');
+   return inferred === 'edit_file' || inferred === 'write_file';
+};
+
 var getStreamingMessageView = function (streamingMarkdown, streamingContent, expanded) {
    var compactText = ((streamingContent || '').trim ()) || 'Thinking…';
    var fullText = compactText;
+   var usesDiff = false;
 
    if (type (streamingMarkdown) === 'string' && streamingMarkdown.trim ()) {
       var messages = parseDialogContent (streamingMarkdown);
       var lastAssistant = dale.stopNot ((messages || []).slice ().reverse (), undefined, function (msg) {
          if (msg && msg.role === 'assistant') return msg;
       });
-      if (lastAssistant && type (lastAssistant.content) === 'string' && lastAssistant.content.trim ()) fullText = lastAssistant.content;
+      if (lastAssistant && type (lastAssistant.content) === 'string' && lastAssistant.content.trim ()) {
+         var toolView = getMessageToolContentView (lastAssistant.content, true);
+         fullText = toolView.fullText || lastAssistant.content;
+         usesDiff = toolContentUsesDiff (lastAssistant.toolName, lastAssistant.content, toolView.hasEditFile);
+      }
    }
 
    return {
       text: expanded ? fullText : compactText,
       compactText: compactText,
       fullText: fullText,
-      compactable: compactText !== fullText
+      compactable: compactText !== fullText,
+      usesDiff: usesDiff
    };
 };
 
@@ -3502,7 +3514,7 @@ views.dialogs = function () {
                ]] : '',
                showStreamingBubble ? ['div', {class: 'chat-message chat-assistant'}, [
                   ['div', {class: 'chat-role'}, roleDisplayName ('assistant')],
-                  ['div', {class: 'chat-content'}, renderChatContent (streamingView.text + '▊', currentProject, false)],
+                  ['div', {class: 'chat-content'}, renderChatContent (streamingView.text + '▊', currentProject, streamingView.usesDiff)],
                   streamingView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [
                      ['button', {
                         class: 'btn-small',

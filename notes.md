@@ -12,7 +12,12 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
 - Please add now a nicer way (not a prompt) to input the project name, a modal with bigger and nicer letters.
 - Show links in dialogs so you can click and auto open in new tab (`_blank`): tell this in the prompt to the agent.
 - My initial message gets "swallowed" when the dialog starts, it disappears.
-- The expansion of a streamed write_file doesn't look nice, with a per line diff with green, neither when streaming straight or on refresh while it still streams.
+
+### First post
+
+Hi vibe coders! I built vibey, a tool to build your ideas with your words. What makes it different is that: 1) everything's a document (even your dialogs with AI); 2) it runs in your browser; 3) full YOLO, but inside a per-project Docker container.
+
+You can read more at buildwithvibey.com
 
 ### 2026-03-13
 

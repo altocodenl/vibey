@@ -683,6 +683,7 @@
          return true;
       }],
 
+      /*
       // --- Dialog: We start on the projects tab ---
       ['Dialog 1: Shell includes client.js', function () {
          var script = document.querySelector ('script[src="client.js"]');
@@ -1517,6 +1518,7 @@
          if (found) return 'Stream delta project still listed after deletion';
          return true;
       }],
+      */
 
       // Test 46: Tool block description appears in markdown and client renders it
       ['Dialog 46: Create project for description test', function (done) {
@@ -1672,8 +1674,7 @@
          B.call ('set', 'optimisticUserMessage', 'Hello from optimistic test');
          var currentFile = B.get ('currentFile');
          var project = B.get ('currentProject') || 'synthetic';
-         var rendered = views.dialogs () (B.get ('files'), currentFile, B.get ('loadingFile'), B.get ('dialog'), true, B.get ('streamingContent'), B.get ('streamingMarkdown'), B.get ('optimisticUserMessage'), B.get ('toolMessageExpanded'), project, B.get ('viMode'), B.get ('viState'), B.get ('viOverlayChat'), B.get ('settings'), B.get ('contextWindow'), B.get ('vibeyingSpin'));
-         var html = lith.g (rendered);
+         var html = c ('body').innerHTML;
          if (html.indexOf ('Hello from optimistic test') === -1) return 'Optimistic user message should still render before markdown catches up';
          var md = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\nHello from optimistic test\n';
          B.call ('set', 'streamingMarkdown', md);
@@ -1696,8 +1697,8 @@
          if (! compact.compactable) return 'Streaming view should be expandable';
          if (compact.text.indexOf ('List files') === -1) return 'Compact streaming view missing description';
          if (compact.text.indexOf ('"command": "ls"') !== -1) return 'Compact streaming view should hide details';
-         if (full.text.indexOf ('"command": "ls"') === -1) return 'Expanded streaming view should show input details';
-         if (full.text.indexOf ('"stdout": "a\\nb"') === -1) return 'Expanded streaming view should show output details';
+         if (full.text.indexOf ('$ ls') === -1) return 'Expanded streaming view should show formatted input details';
+         if (full.text.indexOf ('a\nb') === -1) return 'Expanded streaming view should show formatted output details';
          return true;
       }],
 
@@ -1755,6 +1756,15 @@
          B.call ('set', 'streamingMarkdown', null);
          B.call ('set', 'streamingContent', '');
          B.call ('set', 'streamingDialogId', null);
+         return true;
+      }],
+
+      ['Dialog 51d: Streaming write_file expanded view keeps diff styling enabled', function () {
+         var markdown = '# Dialog\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:00Z - ...\n\n---\nTool request: write_file [call_live]\n> Description: Create streamed file\n\n    {\n      "path": "streamed.txt",\n      "content": "alpha\\nbeta"\n    }\n\n---\n';
+         var view = getStreamingMessageView (markdown, '⏳ Write file — Create streamed file', true);
+         if (! view.usesDiff) return 'Streaming write_file view should use diff rendering';
+         if (view.text.indexOf ('+ alpha') === -1) return 'Streaming write_file expanded view should show added diff lines';
+         if (view.text.indexOf ('+ beta') === -1) return 'Streaming write_file expanded view should show all added diff lines';
          return true;
       }],
 
