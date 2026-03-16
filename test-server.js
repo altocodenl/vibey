@@ -988,6 +988,8 @@ var dialogSequence = [
          log ('[dialog-39] stream complete in ' + elapsed + 's, events=' + events.length);
          if (error) return log ('SSE stream error: ' + error.message);
          if (! getEventsByType (events, 'done').length) return log ('Expected done event');
+         if (! events.length) return log ('Expected at least one SSE event');
+         if ((events [0] || {}).type !== 'snapshot') return log ('Active dialog SSE should begin with a snapshot event');
 
          // Collect all chunk events and tool_request events
          var chunkEvents = getEventsByType (events, 'chunk');
@@ -1008,7 +1010,7 @@ var dialogSequence = [
          if (allChunkContent.indexOf ('streamed.txt') === -1) return log ('Chunk stream missing file path in tool arguments');
          if (allChunkContent.indexOf ('\n---') === -1) return log ('Chunk stream missing tool block closer');
 
-         log ('[dialog-39] tool block streamed via chunks: header found, arguments found, closer found');
+         log ('[dialog-39] snapshot came first and tool header streamed through chunk events');
          next ();
       }, {
          heartbeatMs: 15000,

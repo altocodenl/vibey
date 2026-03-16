@@ -305,6 +305,166 @@ var applyStreamingMarkdownEvent = function (markdown, event) {
    return markdown;
 };
 
+var appendStreamingStatusLine = function (current, line) {
+   current = type (current) === 'string' ? current.replace (/\s+$/, '') : '';
+   line = type (line) === 'string' ? line.trim () : '';
+   if (! line) return current;
+   if (! current) return line;
+   return current + '\n\n' + line;
+};
+
+var replaceLastStreamingStatusLine = function (current, oldLine, newLine) {
+   current = type (current) === 'string' ? current : '';
+   oldLine = type (oldLine) === 'string' ? oldLine.trim () : '';
+   newLine = type (newLine) === 'string' ? newLine.trim () : '';
+   if (! oldLine) return appendStreamingStatusLine (current, newLine);
+   var index = current.lastIndexOf (oldLine);
+   if (index === -1) return appendStreamingStatusLine (current, newLine);
+   return current.slice (0, index) + newLine + current.slice (index + oldLine.length);
+};
+
+var parseStreamingToolHeader = function (text) {
+   text = type (text) === 'string' ? text : '';
+   var match = text.match (/---\nTool request:\s+([^\n\[]+?)(?:\s+\[([^\]]+)\])?\n/);
+   if (! match) return null;
+   return {
+      name: (match [1] || '').trim (),
+      id: match [2] || null
+   };
+};
+
+var consumeStreamingChunk = function (piece, state) {
+   piece = type (piece) === 'string' ? piece : '';
+   state = state || {};
+
+   var visibleText = '';
+   var toolStarts = [];
+   var remaining = piece;
+
+   while (remaining) {
+      if (state.inToolChunk) {
+         var closeIndex = remaining.indexOf ('\n\n---');
+         if (closeIndex === -1) return {text: visibleText, toolStarts: toolStarts};
+         state.inToolChunk = false;
+         remaining = remaining.slice (closeIndex + 5);
+         continue;
+      }
+
+      var toolIndex = remaining.indexOf ('---\nTool request:');
+      if (toolIndex === -1) {
+         visibleText += remaining;
+         break;
+      }
+
+      visibleText += remaining.slice (0, toolIndex);
+      var toolChunk = remaining.slice (toolIndex);
+      var header = parseStreamingToolHeader (toolChunk);
+      if (header) toolStarts.push (header);
+
+      var toolCloseIndex = toolChunk.indexOf ('\n\n---');
+      if (toolCloseIndex === -1) {
+         state.inToolChunk = true;
+         break;
+      }
+
+      remaining = toolChunk.slice (toolCloseIndex + 5);
+   }
+
+   return {text: visibleText, toolStarts: toolStarts};
+};
+
+var getStreamingResumeContent = function (markdown) {
+   if (type (markdown) !== 'string' || ! markdown.trim ()) return '';
+
+   var messages = parseDialogContent (markdown);
+   if (! messages.length) return '';
+
+   var lastAssistant = dale.stopNot (messages.slice ().reverse (), undefined, function (msg) {
+      if (msg && msg.role === 'assistant') return msg;
+   });
+   if (! lastAssistant || type (lastAssistant.content) !== 'string') return '';
+
+   var compact = getMessageToolContentView (lastAssistant.content, false).compactText || '';
+   return compact.trim ();
+};
+
+var splitAssistantContentBlocks = function (content) {
+   content = type (content) === 'string' ? content : '';
+   if (! content || content.indexOf ('Tool request:') === -1) return [{role: 'assistant', content: content}];
+
+   var parts = [];
+   var re = /---\nTool request:[\s\S]*?\n---/g;
+   var lastIndex = 0;
+   var match;
+
+   while ((match = re.exec (content))) {
+      if (match.index > lastIndex) {
+         var textPart = content.slice (lastIndex, match.index);
+         if (textPart.replace (/\s+/g, '')) parts.push ({role: 'assistant', content: textPart.replace (/^\n+|\n+$/g, '')});
+      }
+      parts.push ({role: 'tool', content: match [0]});
+      lastIndex = match.index + match [0].length;
+   }
+
+   if (lastIndex < content.length) {
+      var tail = content.slice (lastIndex);
+      if (tail.replace (/\s+/g, '')) parts.push ({role: 'assistant', content: tail.replace (/^\n+|\n+$/g, '')});
+   }
+
+   return parts.length ? parts : [{role: 'assistant', content: content}];
+};
+
+var toolNameFromBlock = function (content) {
+   content = type (content) === 'string' ? content : '';
+   var match = content.match (/^---\nTool request:\s+(\S+)/m);
+   return match ? match [1] : null;
+};
+
+var expandDisplayMessages = function (messages) {
+   messages = type (messages) === 'array' ? messages : [];
+   var expanded = [];
+
+   dale.go (messages, function (msg, msgIndex) {
+      if (! msg || msg.role !== 'assistant' || type (msg.content) !== 'string' || msg.content.indexOf ('Tool request:') === -1) {
+         if (msg) {
+            var plain = teishi.copy (msg);
+            plain.turnIndex = msgIndex;
+            plain.segmentIndex = 0;
+            expanded.push (plain);
+         }
+         return;
+      }
+
+      var parts = splitAssistantContentBlocks (msg.content);
+      if (! parts.length) {
+         var fallback = teishi.copy (msg);
+         fallback.turnIndex = msgIndex;
+         fallback.segmentIndex = 0;
+         expanded.push (fallback);
+         return;
+      }
+
+      dale.go (parts, function (part, partIndex) {
+         var piece = {
+            role: part.role,
+            content: part.content,
+            time: msg.time,
+            usage: partIndex === parts.length - 1 ? msg.usage : null,
+            usageCumulative: partIndex === parts.length - 1 ? msg.usageCumulative : null,
+            resourcesMs: partIndex === parts.length - 1 ? msg.resourcesMs : null,
+            context: partIndex === parts.length - 1 ? msg.context : null,
+            toolName: part.role === 'tool' ? toolNameFromBlock (part.content) : null,
+            model: msg.model || null,
+            turnIndex: msgIndex,
+            segmentIndex: partIndex
+         };
+         expanded.push (piece);
+      });
+   });
+
+   return expanded;
+};
+
 // *** VI CONTROLLER ***
 
 var viController = {};
@@ -1441,24 +1601,9 @@ B.mrespond ([
                         B.call (x, 'set', ['currentFile', 'name'], data.filename);
                      }
                      if (data.status === 'active') {
-                        // Extract the last assistant turn's content from the loaded
-                        // file so the streaming bubble can continue it seamlessly.
-                        // The SSE stream only sends forward-looking events, so without
-                        // this seed the pre-refresh text would be lost.
-                        var resumeMessages = parseDialogContent (rs.body.content);
-                        var resumeContent = '';
-                        if (resumeMessages.length) {
-                           // Collect trailing assistant + tool messages (the in-progress turn)
-                           var ri = resumeMessages.length - 1;
-                           while (ri >= 0 && resumeMessages [ri].role === 'tool') ri--;
-                           if (ri >= 0 && resumeMessages [ri].role === 'assistant') {
-                              var parts = [];
-                              for (var rj = ri; rj < resumeMessages.length; rj++) {
-                                 parts.push (resumeMessages [rj].content);
-                              }
-                              resumeContent = parts.join ('\n\n');
-                           }
-                        }
+                        // Seed the live bubble from the on-disk markdown so refresh/reopen
+                        // matches the compact SSE view instead of exposing raw tool payloads.
+                        var resumeContent = getStreamingResumeContent (rs.body.content);
                         B.call (x, 'start', 'dialogStream', parsedDialog.dialogId, data.filename || rs.body.name, undefined, resumeContent || undefined);
                      }
                   }).catch (function () {});
@@ -1910,8 +2055,9 @@ B.mrespond ([
 
       var targetFilename = filename;
       var receivedContent = false;
-      var streamingToolChunk = false;
+      var streamingChunkState = {inToolChunk: false};
       var streamingToolDescriptions = {};
+      var streamingToolStatusLines = {};
 
       var finalize = function () {
          if (activeDialogStream && activeDialogStream.dialogId === dialogId) activeDialogStream = null;
@@ -1970,20 +2116,18 @@ B.mrespond ([
                         receivedContent = true;
                         var piece = data.content || '';
                         var current = B.get ('streamingContent') || '';
+                        var consumed = consumeStreamingChunk (piece, streamingChunkState);
 
-                        if (streamingToolChunk) {
-                           if (piece.indexOf ('\n\n---') !== -1) streamingToolChunk = false;
-                        }
-                        else {
-                           var toolStart = piece.indexOf ('---\nTool request:');
-                           if (toolStart === -1) toolStart = piece.indexOf ('\n\n---\nTool request:');
-                           if (toolStart !== -1) {
-                              var textBeforeTool = piece.slice (0, toolStart);
-                              if (textBeforeTool) B.call (x, 'set', 'streamingContent', current + textBeforeTool);
-                              streamingToolChunk = piece.indexOf ('\n\n---', toolStart + 1) === -1;
-                           }
-                           else B.call (x, 'set', 'streamingContent', current + piece);
-                        }
+                        if (consumed.text) current += consumed.text;
+
+                        dale.go (consumed.toolStarts, function (toolStart) {
+                           var friendly = toolFriendlyName (toolStart.name || 'tool');
+                           var line = '⏳ ' + friendly;
+                           current = appendStreamingStatusLine (current, line);
+                           if (toolStart.id) streamingToolStatusLines [toolStart.id] = line;
+                        });
+
+                        B.call (x, 'set', 'streamingContent', current);
                      }
                      else if (data.type === 'context') {
                         receivedContent = true;
@@ -1994,9 +2138,13 @@ B.mrespond ([
                         var tool = data.tool || {};
                         var friendly = toolFriendlyName (tool.name || 'tool');
                         var description = ((tool.input || {}).description || '').trim ();
+                        var requestLine = '⏳ ' + friendly + (description ? (' — ' + description) : '');
                         if (tool.id) streamingToolDescriptions [tool.id] = description;
                         var currentReq = B.get ('streamingContent') || '';
-                        B.call (x, 'set', 'streamingContent', currentReq + '\n\n⏳ ' + friendly + (description ? (' — ' + description) : '') + '\n');
+                        var previousLine = tool.id ? streamingToolStatusLines [tool.id] : null;
+                        currentReq = replaceLastStreamingStatusLine (currentReq, previousLine, requestLine);
+                        if (tool.id) streamingToolStatusLines [tool.id] = requestLine;
+                        B.call (x, 'set', 'streamingContent', currentReq);
                      }
                      else if (data.type === 'tool_result') {
                         receivedContent = true;
@@ -2005,8 +2153,10 @@ B.mrespond ([
                         var description = ((streamingToolDescriptions [tool.id] || '') + '').trim ();
                         var resultObj = tool.result || {};
                         var icon = (resultObj.success === false || resultObj.error) ? '✗' : '✓';
+                        var resultLine = icon + ' ' + friendly + (description ? (' — ' + description) : '');
                         var currentRes = B.get ('streamingContent') || '';
-                        B.call (x, 'set', 'streamingContent', currentRes + icon + ' ' + friendly + (description ? (' — ' + description) : '') + '\n');
+                        currentRes = appendStreamingStatusLine (currentRes, resultLine);
+                        B.call (x, 'set', 'streamingContent', currentRes);
                      }
                      else if (data.type === 'done') {
                         if (data.result && data.result.filename) targetFilename = data.result.filename;
@@ -3159,14 +3309,20 @@ views.dialogs = function () {
       var currentDialogParsed = isDialog ? (parseDialogFilename (currentFile.name) || {}) : {};
       var dialogIsActive = isDialog && currentDialogParsed.status === 'active';
       var effectiveDialogContent = isDialog ? ((streaming && streamingMarkdown) ? streamingMarkdown : currentFile.content) : '';
-      var messages = isDialog ? parseDialogContent (effectiveDialogContent) : [];
+      var parsedMessages = isDialog ? parseDialogContent (effectiveDialogContent) : [];
+      var messages = expandDisplayMessages (parsedMessages);
       var liveStreamingMessage = streaming ? (((streamingContent || '').trim ()) || 'Thinking…') : '';
       var visibleMessages = messages;
       if (streaming && messages.length) {
          var lastMessage = messages [messages.length - 1];
          var timeRange = lastMessage && parseTimeRange (lastMessage.time);
-         var isLiveAssistant = lastMessage && lastMessage.role === 'assistant' && timeRange && timeRange.end === '...';
-         if (isLiveAssistant) visibleMessages = messages.slice (0, -1);
+         var isLiveAssistant = lastMessage && timeRange && timeRange.end === '...';
+         if (isLiveAssistant) {
+            var liveTurnIndex = lastMessage.turnIndex;
+            visibleMessages = dale.fil (messages, undefined, function (msg) {
+               if (msg.turnIndex !== liveTurnIndex) return msg;
+            });
+         }
       }
       var streamingExpandKey = 'streaming_' + (B.get ('streamingDialogId') || 'current');
       var streamingExpanded = !! ((toolMessageExpanded || {}) [streamingExpandKey]);
@@ -3239,7 +3395,7 @@ views.dialogs = function () {
 
                   var roleHeader = isTool
                      ? ['div', {class: 'chat-role'}, [
-                        ['span', msg.toolName || 'tool'],
+                        ['span', toolFriendlyName (msg.toolName || 'tool')],
                         roleTimestamp ? ['span', {style: style ({color: '#666', 'font-weight': 'normal'})}, roleTimestamp] : ''
                      ]]
                      : ['div', {class: 'chat-role'}, ['span', roleDisplayName (msg.role)]];
@@ -3257,7 +3413,7 @@ views.dialogs = function () {
                         }, expanded ? 'Less' : 'More']
                      ]] : '',
                      isUser && roleTimestamp ? ['div', {class: 'chat-meta'}, roleTimestamp] : '',
-                     ! isTool && ! isUser && gauges ? ['div', {class: 'chat-meta'}, gauges] : ''
+                     ! isUser && gauges ? ['div', {class: 'chat-meta'}, gauges] : ''
                   ]];
                }) : noProvider
                   ? ['div', {style: style ({color: '#e67e22', 'font-size': '13px', padding: '1rem'})}, [

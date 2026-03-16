@@ -1389,6 +1389,8 @@
          var result = window._streamDeltaResult || {};
          if (result.error) return 'Stream failed: ' + result.error;
          var events = result.events || [];
+         if (! events.length) return 'Expected at least one SSE event';
+         if ((events [0] || {}).type !== 'snapshot') return 'Active dialog stream should begin with a snapshot event';
 
          // Verify chunk events contain tool block content
          var chunkEvents = dale.fil (events, undefined, function (ev) {
@@ -1411,6 +1413,11 @@
             if (ev.type === 'tool_result') return ev;
          });
          if (! toolResults.length) return 'Expected at least one tool_result event';
+
+         var firstChunkWithTool = dale.stopNot (events, undefined, function (ev, idx) {
+            if (ev.type === 'chunk' && (ev.content || '').indexOf ('Tool request: write_file') !== -1) return idx;
+         });
+         if (firstChunkWithTool === undefined) return 'Missing chunk event with write_file tool header';
 
          // Verify markdown_append events carry the tool block content too
          var appendEvents = dale.fil (events, undefined, function (ev) {
@@ -1576,6 +1583,51 @@
          return true;
       }],
 
+      ['Dialog 49a: expandDisplayMessages splits contiguous tool calls into separate bubbles', function () {
+         var messages = expandDisplayMessages ([{
+            role: 'assistant',
+            content: '---\nTool request: run_command [call_a]\n> Description: First\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_b]\n> Description: Second\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---',
+            time: '2026-03-13T20:00:00Z - 2026-03-13T20:00:05Z',
+            usage: {input: 10, output: 20, total: 30},
+            usageCumulative: {input: 10, output: 20, total: 30},
+            context: {used: 30, limit: 1000, percent: 3},
+            model: 'gpt-5'
+         }]);
+         if (messages.length !== 2) return 'Expected two display messages, got ' + messages.length;
+         if (messages [0].role !== 'tool' || messages [1].role !== 'tool') return 'Expected both split messages to be tool bubbles';
+         if (messages [0].content.indexOf ('Description: First') === -1) return 'First tool bubble missing first tool block';
+         if (messages [0].content.indexOf ('Description: Second') !== -1) return 'First tool bubble should not contain second tool block';
+         if (messages [1].content.indexOf ('Description: Second') === -1) return 'Second tool bubble missing second tool block';
+         if (! messages [1].context || messages [1].context.percent !== 3) return 'Last split bubble should retain assistant metadata/context';
+         return true;
+      }],
+
+      ['Dialog 49b: Dialog UI renders two contiguous tool calls as two chat bubbles', function (done) {
+         window._displaySplitProject = 'test-display-split-' + testTimestamp ();
+         c.ajax ('post', 'projects', {}, {name: window._displaySplitProject}, function (error, rs) {
+            if (error || ! rs || ! rs.body || ! rs.body.slug) {
+               window._displaySplitSetup = {error: true};
+               return done (SHORT_WAIT, POLL);
+            }
+            window._displaySplitSlug = rs.body.slug;
+            var markdown = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\nplease inspect\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:01Z - 2026-03-13T20:00:05Z\n\n---\nTool request: run_command [call_a]\n> Description: First tool\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_b]\n> Description: Second tool\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---\n\n> Usage: input=10 output=20 total=30\n> Usage cumulative: input=10 output=20 total=30\n\n> Context: used=30 limit=1000 percent=3%\n';
+            c.ajax ('post', 'project/' + encodeURIComponent (window._displaySplitSlug) + '/file/' + encodeURIComponent ('dialog/20260313-200000-split-done.md'), {}, {content: markdown}, function (error2) {
+               window._displaySplitSetup = {error: !! error2};
+               if (! error2) window.location.hash = '#/project/' + encodeURIComponent (window._displaySplitSlug) + '/dialogs/' + encodeURIComponent ('20260313-200000-split');
+               done (MEDIUM_WAIT, POLL);
+            });
+         });
+      }, function () {
+         if (! window._displaySplitSetup || window._displaySplitSetup.error) return 'Failed to set up split-display dialog';
+         var toolHeaders = dale.go (document.querySelectorAll ('.chat-message.chat-tool .chat-content .tool-header'), function (node) {
+            return (node.textContent || '').trim ();
+         });
+         if (toolHeaders.length < 2) return 'Expected at least two rendered tool bubbles, got ' + toolHeaders.length;
+         if (toolHeaders [0].indexOf ('First tool') === -1) return 'First rendered tool bubble missing first description';
+         if (toolHeaders [1].indexOf ('Second tool') === -1) return 'Second rendered tool bubble missing second description';
+         return true;
+      }],
+
       ['Dialog 50: Dialog UI uses You/Agent labels', function (done) {
          window.location.hash = '#/project/' + encodeURIComponent (window._descProject) + '/dialogs/' + encodeURIComponent (window._descDialogId);
          done (MEDIUM_WAIT, POLL);
@@ -1609,6 +1661,32 @@
          return true;
       }],
 
+      ['Dialog 51a: Resume content from markdown stays compact for write_file', function () {
+         var markdown = '# Dialog\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:00Z - ...\n\n---\nTool request: write_file [call_live]\n> Description: Create streamed file\n\n    {\n      "path": "streamed.txt",\n      "content": "SECRET BODY THAT SHOULD STAY HIDDEN"\n    }\n\n---\n';
+         var resume = getStreamingResumeContent (markdown);
+         if (resume.indexOf ('Write file') === -1) return 'Resume summary missing tool name';
+         if (resume.indexOf ('Create streamed file') === -1) return 'Resume summary missing description';
+         if (resume.indexOf ('SECRET BODY') !== -1) return 'Resume summary should not expose streamed write_file content';
+         if (resume.indexOf ('"content"') !== -1) return 'Resume summary should not expose raw write_file JSON';
+         return true;
+      }],
+
+      ['Dialog 51b: Chunk parser keeps contiguous tool calls separate and preserves trailing text', function () {
+         var state = {inToolChunk: false};
+         var first = consumeStreamingChunk (
+            'Before\n\n---\nTool request: write_file [call_a]\n\n{"path":"a.txt","content":"aaa"}\n\n---\nMiddle\n\n---\nTool request: run_command [call_b]\n\n{"command":"ls"}',
+            state
+         );
+         if (first.text.indexOf ('Before') === -1) return 'Chunk parser lost leading assistant text';
+         if (first.text.indexOf ('Middle') === -1) return 'Chunk parser lost text after first tool block';
+         if (first.toolStarts.length !== 2) return 'Expected two separate tool starts from contiguous tool calls';
+         if (! state.inToolChunk) return 'Chunk parser should remain inside the unfinished second tool block';
+         var second = consumeStreamingChunk ('\n\n---\nAfter', state);
+         if (state.inToolChunk) return 'Chunk parser should exit tool mode after receiving the closer';
+         if (second.text !== '\nAfter' && second.text !== 'After') return 'Chunk parser should preserve trailing text after the tool closer';
+         return true;
+      }],
+
       ['Dialog 52: Dialog navigation buttons scroll between messages', function (done) {
          var node = document.querySelector ('.chat-messages');
          var prev = document.querySelector ('button[title="Previous message"]');
@@ -1636,6 +1714,17 @@
          });
       }, function () {
          if (! window._descDeleted) return 'Deletion failed';
+         return true;
+      }],
+
+      ['Dialog 53a: Delete split-display test project', function (done) {
+         if (! window._displaySplitSlug) return done (SHORT_WAIT, POLL);
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._displaySplitSlug), {}, '', function (error) {
+            window._displaySplitDeleted = ! error;
+            done (SHORT_WAIT, POLL);
+         });
+      }, function () {
+         if (window._displaySplitSlug && ! window._displaySplitDeleted) return 'Failed to delete split-display test project';
          return true;
       }],
 
