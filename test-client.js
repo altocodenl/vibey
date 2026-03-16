@@ -683,7 +683,6 @@
          return true;
       }],
 
-      /*
       // --- Dialog: We start on the projects tab ---
       ['Dialog 1: Shell includes client.js', function () {
          var script = document.querySelector ('script[src="client.js"]');
@@ -1518,7 +1517,6 @@
          if (found) return 'Stream delta project still listed after deletion';
          return true;
       }],
-      */
 
       // Test 46: Tool block description appears in markdown and client renders it
       ['Dialog 46: Create project for description test', function (done) {
