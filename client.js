@@ -420,6 +420,13 @@ var toolNameFromBlock = function (content) {
    return match ? match [1] : null;
 };
 
+var hasOpenToolBlock = function (content) {
+   content = type (content) === 'string' ? content : '';
+   if (content.indexOf ('Tool request:') === -1) return false;
+   var delimiters = content.match (/^---$/gm) || [];
+   return delimiters.length % 2 === 1;
+};
+
 var expandDisplayMessages = function (messages) {
    messages = type (messages) === 'array' ? messages : [];
    var expanded = [];
@@ -3312,18 +3319,31 @@ views.dialogs = function () {
       var parsedMessages = isDialog ? parseDialogContent (effectiveDialogContent) : [];
       var messages = expandDisplayMessages (parsedMessages);
       var liveStreamingMessage = streaming ? (((streamingContent || '').trim ()) || 'Thinking…') : '';
-      var visibleMessages = messages;
-      if (streaming && messages.length) {
-         var lastMessage = messages [messages.length - 1];
-         var timeRange = lastMessage && parseTimeRange (lastMessage.time);
-         var isLiveAssistant = lastMessage && timeRange && timeRange.end === '...';
-         if (isLiveAssistant) {
-            var liveTurnIndex = lastMessage.turnIndex;
-            visibleMessages = dale.fil (messages, undefined, function (msg) {
-               if (msg.turnIndex !== liveTurnIndex) return msg;
-            });
+      var liveRawMessage = null;
+      var liveTurnIndex = null;
+      if (streaming && parsedMessages.length) {
+         for (var lmi = parsedMessages.length - 1; lmi >= 0; lmi--) {
+            var candidate = parsedMessages [lmi];
+            var candidateRange = candidate && parseTimeRange (candidate.time);
+            if (candidate && candidate.role === 'assistant' && candidateRange && candidateRange.end === '...') {
+               liveRawMessage = candidate;
+               liveTurnIndex = lmi;
+               break;
+            }
          }
       }
+      var visibleMessages = streaming && liveTurnIndex !== null ? dale.fil (messages, undefined, function (msg) {
+         if (msg.turnIndex !== liveTurnIndex) return msg;
+         if (msg.role === 'tool') return msg;
+         var text = type (msg.content) === 'string' ? msg.content.trim () : '';
+         if (! text) return;
+         if (msg.role === 'assistant' && msg.content.indexOf ('Tool request:') !== -1) return;
+         return msg;
+      }) : messages;
+      var hasVisibleLiveTurnMessages = streaming && liveTurnIndex !== null && dale.stopNot (visibleMessages, undefined, function (msg) {
+         if (msg.turnIndex === liveTurnIndex) return true;
+      }) === true;
+      var showStreamingBubble = !! (streaming && (! hasVisibleLiveTurnMessages || (liveRawMessage && hasOpenToolBlock (liveRawMessage.content || ''))));
       var streamingExpandKey = 'streaming_' + (B.get ('streamingDialogId') || 'current');
       var streamingExpanded = !! ((toolMessageExpanded || {}) [streamingExpandKey]);
       var streamingView = getStreamingMessageView (streamingMarkdown, liveStreamingMessage, streamingExpanded);
@@ -3429,7 +3449,7 @@ views.dialogs = function () {
                   ['div', {class: 'chat-content'}, optimisticUserMessage],
                   ['div', {class: 'chat-meta'}, formatLocalDateTimeNoMs (new Date ().toISOString ())]
                ]] : '',
-               streaming ? ['div', {class: 'chat-message chat-assistant'}, [
+               showStreamingBubble ? ['div', {class: 'chat-message chat-assistant'}, [
                   ['div', {class: 'chat-role'}, roleDisplayName ('assistant')],
                   ['div', {class: 'chat-content'}, renderChatContent (streamingView.text + '▊', currentProject, false)],
                   streamingView.compactable ? ['div', {style: style ({display: 'flex', 'justify-content': 'flex-end', 'margin-top': '0.35rem'})}, [

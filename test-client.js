@@ -1687,6 +1687,37 @@
          return true;
       }],
 
+      ['Dialog 51c: Live streaming keeps completed tool bubble separate from next in-progress tool', function (done) {
+         var activeMarkdown = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\ninspect\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:01Z - ...\n\n---\nTool request: run_command [call_done]\n> Description: First finished tool\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_open]\n';
+         B.call ('set', 'tab', 'dialogs');
+         B.call ('set', 'currentProject', 'synthetic-live');
+         B.call ('set', 'files', ['dialog/20260313-200000-live-active.md']);
+         B.call ('set', 'currentFile', {name: 'dialog/20260313-200000-live-active.md', content: activeMarkdown, original: activeMarkdown});
+         B.call ('set', ['dialog', 'provider'], 'openai');
+         B.call ('set', ['dialog', 'model'], 'gpt-5.4');
+         B.call ('set', 'streamingDialogId', '20260313-200000-live');
+         B.call ('set', 'streaming', true);
+         B.call ('set', 'streamingMarkdown', activeMarkdown);
+         B.call ('set', 'streamingContent', '⏳ Run command — Second in-progress tool');
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var toolHeaders = dale.go (document.querySelectorAll ('.chat-message.chat-tool .chat-content .tool-header'), function (node) {
+            return (node.textContent || '').trim ();
+         });
+         var streamingBubble = document.querySelector ('.chat-message.chat-assistant:last-child .chat-content');
+         if (! toolHeaders.length) return 'Expected a completed tool bubble during live streaming';
+         if (toolHeaders [0].indexOf ('First finished tool') === -1) return 'Completed tool bubble missing first tool description';
+         if (! streamingBubble) return 'Expected a separate live streaming bubble for the next in-progress tool';
+         var streamingText = (streamingBubble.textContent || '').trim ();
+         if (streamingText.indexOf ('Second in-progress tool') === -1) return 'Live streaming bubble missing second in-progress tool description';
+         if (toolHeaders [0].indexOf ('Second in-progress tool') !== -1) return 'Completed tool bubble should not absorb the next in-progress tool';
+         B.call ('set', 'streaming', false);
+         B.call ('set', 'streamingMarkdown', null);
+         B.call ('set', 'streamingContent', '');
+         B.call ('set', 'streamingDialogId', null);
+         return true;
+      }],
+
       ['Dialog 52: Dialog navigation buttons scroll between messages', function (done) {
          var node = document.querySelector ('.chat-messages');
          var prev = document.querySelector ('button[title="Previous message"]');
