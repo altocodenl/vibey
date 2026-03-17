@@ -112,6 +112,9 @@ var loadInjectedPrompt = async function (projectName) {
       prompt = match ? match [1].trim () : '';
    }
    catch (e) {}
+   // Replace <project> placeholders with the actual project slug so agents
+   // generate correct proxy URLs instead of guessing (e.g. using "workspace").
+   prompt = prompt.replace (/<project>/g, projectName);
    var docMain = await getDocMainContent (projectName);
    if (! docMain) return prompt;
    return prompt + '\n\nProject instructions (' + docMain.name + '):\n\n' + docMain.content;
@@ -1628,7 +1631,42 @@ var parseMetadata = function (markdown) {
    };
 };
 
+var sanitizeToolMarkdown = function (text) {
+   text = type (text) === 'string' ? text : '';
+   if (text.indexOf ('Tool request:') === -1) return text;
+
+   var startRe = /---\nTool request:/g;
+   var starts = [];
+   var m;
+   while ((m = startRe.exec (text)) !== null) starts.push (m.index);
+   if (! starts.length) return text;
+
+   var out = '';
+   var cursor = 0;
+
+   dale.go (starts, function (start, i) {
+      // Include text before this tool block
+      if (cursor < start) out += text.slice (cursor, start);
+      // Find the closing \n--- after the opening ---\nTool request: header line
+      var headerEnd = text.indexOf ('\n', start + 4);
+      var afterHeader = headerEnd !== -1 ? headerEnd : start + 4;
+      var closeIndex = text.indexOf ('\n---', afterHeader);
+      if (closeIndex !== -1) {
+         // Block is complete (has closing \n---): include it plus the closing ---
+         out += text.slice (start, closeIndex + 4);
+         cursor = closeIndex + 4;
+      } else {
+         // Block is incomplete (no closing ---): strip it
+         cursor = text.length;
+      }
+   });
+
+   if (cursor < text.length) out += text.slice (cursor);
+   return out;
+};
+
 var parseToolCalls = function (text, includePositions) {
+   text = sanitizeToolMarkdown (text);
    var toolCalls = [];
    var re = /---\nTool request:\s+([^\n\[]+?)(?:\s+\[([^\]]+)\])?\n(?:> Description:\s*([^\n]*)\n)?\n([\s\S]*?)\n---/g;
    var match;
@@ -1790,8 +1828,11 @@ var parseDialogForProvider = function (markdown, provider) {
          return;
       }
 
-      var toolCalls = parseToolCalls (section.content, false);
-      var assistantText = section.content.replace (/---\nTool request:\s+[^\n\[]+?(?:\s+\[[^\]]+\])?\n(?:> Description:\s*[^\n]*\n)?\n[\s\S]*?\n---/g, '');
+      var cleanSectionContent = sanitizeToolMarkdown (section.content);
+      var toolCalls = parseToolCalls (cleanSectionContent, false);
+      var assistantText = cleanSectionContent
+         .replace (/---\nTool request:\s+[^\n\[]+?(?:\s+\[[^\]]+\])?\n(?:> Description:\s*[^\n]*\n)?\n[\s\S]*?\n---/g, '')
+         .replace (/---\nTool request:\s+[^\n\[]+?(?:\s+\[[^\]]+\])?\n(?:> Description:\s*[^\n]*\n)?\n[\s\S]*$/g, '');
       assistantText = stripSectionMetadata (assistantText);
 
       if (! toolCalls.length) {
@@ -1799,10 +1840,14 @@ var parseDialogForProvider = function (markdown, provider) {
          return;
       }
 
+      var toolCallsWithResults = dale.fil (toolCalls, undefined, function (tc) {
+         if (tc.result !== null && tc.result !== undefined) return tc;
+      });
+
       if (provider === 'claude') {
          var assistantContent = [];
          if (assistantText) assistantContent.push ({type: 'text', text: assistantText});
-         dale.go (toolCalls, function (tc) {
+         dale.go (toolCallsWithResults, function (tc) {
             assistantContent.push ({
                type: 'tool_use',
                id: tc.id,
@@ -1812,11 +1857,8 @@ var parseDialogForProvider = function (markdown, provider) {
          });
          messages.push ({role: 'assistant', content: assistantContent});
 
-         var withResults = dale.fil (toolCalls, undefined, function (tc) {
-            if (tc.result) return tc;
-         });
-         if (withResults.length) {
-            messages.push ({role: 'user', content: dale.go (withResults, function (tc) {
+         if (toolCallsWithResults.length) {
+            messages.push ({role: 'user', content: dale.go (toolCallsWithResults, function (tc) {
                return {
                   type: 'tool_result',
                   tool_use_id: tc.id,
@@ -1829,7 +1871,7 @@ var parseDialogForProvider = function (markdown, provider) {
          messages.push ({
             role: 'assistant',
             content: assistantText || null,
-            tool_calls: dale.go (toolCalls, function (tc) {
+            tool_calls: dale.go (toolCallsWithResults, function (tc) {
                return {
                   id: tc.id,
                   type: 'function',
@@ -1841,8 +1883,7 @@ var parseDialogForProvider = function (markdown, provider) {
             })
          });
 
-         dale.go (toolCalls, function (tc) {
-            if (! tc.result) return;
+         dale.go (toolCallsWithResults, function (tc) {
             messages.push ({
                role: 'tool',
                tool_call_id: tc.id,

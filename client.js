@@ -9,6 +9,30 @@ var type = teishi.type;
 var inc = teishi.inc;
 var style = lith.css.style;
 
+var projectNameColor = function (name) {
+   var hash = 0;
+   for (var i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt (i)) | 0;
+   var hue = ((hash % 360) + 360) % 360;
+   var sat = 55, lit = 45;
+   var bg = 'hsl(' + hue + ', ' + sat + '%, ' + lit + '%)';
+   // HSL to RGB to compute WCAG relative luminance
+   var s = sat / 100, l = lit / 100;
+   var c = (1 - Math.abs (2 * l - 1)) * s;
+   var x = c * (1 - Math.abs ((hue / 60) % 2 - 1));
+   var m = l - c / 2;
+   var r1, g1, b1;
+   if      (hue < 60)  { r1 = c; g1 = x; b1 = 0; }
+   else if (hue < 120) { r1 = x; g1 = c; b1 = 0; }
+   else if (hue < 180) { r1 = 0; g1 = c; b1 = x; }
+   else if (hue < 240) { r1 = 0; g1 = x; b1 = c; }
+   else if (hue < 300) { r1 = x; g1 = 0; b1 = c; }
+   else                { r1 = c; g1 = 0; b1 = x; }
+   var toLinear = function (v) { return v <= 0.03928 ? v / 12.92 : Math.pow ((v + 0.055) / 1.055, 2.4); };
+   var luminance = 0.2126 * toLinear (r1 + m) + 0.7152 * toLinear (g1 + m) + 0.0722 * toLinear (b1 + m);
+   var textColor = luminance > 0.35 ? '#1a1a2e' : '#f5f7ff';
+   return {bg: bg, text: textColor};
+};
+
 var DOC_DIR = 'doc/';
 var DIALOG_DIR = 'dialog/';
 
@@ -136,7 +160,7 @@ var parseEmbedBlock = function (body) {
    return result;
 };
 
-var EMBED_RE = /əəəembed\n([\s\S]*?)əəə/g;
+var EMBED_RE = /əəə?embed\n([\s\S]*?)əəə?/g;
 
 var renderMarkdownWithEmbeds = function (markdown, project) {
    if (type (markdown) !== 'string') return '';
@@ -1207,8 +1231,18 @@ B.mrespond ([
       B.call (x, 'maybe', 'autoscrollChat');
    }],
 
-   ['change', 'streaming', {match: B.changeResponder}, function (x, streaming) {
-      if (streaming) {
+   ['change', 'streaming', {match: B.changeResponder}, function (x) {
+      B.call (x, 'sync', 'vibeyingSpinner');
+   }],
+
+   ['sync', 'vibeyingSpinner', function (x) {
+      var streaming = B.get ('streaming');
+      var currentFile = B.get ('currentFile');
+      var parsed = currentFile && currentFile.name ? parseDialogFilename (currentFile.name) : null;
+      var dialogIsActive = parsed && parsed.status === 'active';
+      var shouldSpin = streaming || dialogIsActive;
+
+      if (shouldSpin) {
          if (window.vibeyingInterval) return;
          B.call (x, 'set', 'vibeyingSpin', 0);
          window.vibeyingInterval = setInterval (function () {
@@ -1225,6 +1259,7 @@ B.mrespond ([
 
    ['change', 'currentFile', {match: B.changeResponder}, function (x) {
       B.call (x, 'maybe', 'autoscrollChat');
+      B.call (x, 'sync', 'vibeyingSpinner');
    }],
 
 
@@ -1551,6 +1586,12 @@ B.mrespond ([
       // Clear stale streaming context when switching files
       B.call (x, 'set', 'contextWindow', null);
       B.call (x, 'set', 'streamingMarkdown', null);
+      B.call (x, 'set', 'streaming', false);
+      B.call (x, 'set', 'streamingContent', '');
+      if (activeDialogStream && activeDialogStream.abort) {
+         try {activeDialogStream.abort ();} catch (e) {}
+         activeDialogStream = null;
+      }
 
       // This is now an explicit file-load intent; clear any stale hash target
       // so delayed file-list refreshes don't bounce back to an older target.
@@ -1619,7 +1660,8 @@ B.mrespond ([
                   }
                }
 
-               // If dialog is active, attach to the SSE stream
+               // If dialog is active, attach to the SSE stream — but only if this
+               // dialog is still the one currently selected when the status check returns.
                var parsedDialog = parseDialogFilename (rs.body.name) || {};
                if (parsedDialog.dialogId) {
                   fetch (projectPath (project, 'dialog/' + encodeURIComponent (parsedDialog.dialogId))).then (function (resp) {
@@ -1627,6 +1669,11 @@ B.mrespond ([
                      return resp.json ();
                   }).then (function (data) {
                      if (! data) return;
+
+                     var latestFile = B.get ('currentFile');
+                     var latestParsed = latestFile && latestFile.name ? parseDialogFilename (latestFile.name) : null;
+                     if (! latestParsed || latestParsed.dialogId !== parsedDialog.dialogId) return;
+
                      if (data.filename && data.filename !== rs.body.name) {
                         B.call (x, 'set', ['currentFile', 'name'], data.filename);
                      }
@@ -2099,7 +2146,9 @@ B.mrespond ([
          // loop endlessly on dialogs stuck with -active.md status but no
          // generation running on the server.
          if (receivedContent) {
-            if (targetFilename) B.call (x, 'load', 'file', targetFilename);
+            var latestFile = B.get ('currentFile');
+            var latestParsed = latestFile && latestFile.name ? parseDialogFilename (latestFile.name) : null;
+            if (targetFilename && latestParsed && latestParsed.dialogId === dialogId) B.call (x, 'load', 'file', targetFilename);
             B.call (x, 'load', 'files');
          }
       };
@@ -2418,7 +2467,7 @@ views.files = function () {
          if (isDocFile (name)) return name;
       });
       var isDirty = currentFile && currentFile.content !== currentFile.original;
-      var hasEmbeds = currentFile && type (currentFile.content) === 'string' && currentFile.content.indexOf ('əəəembed') !== -1;
+      var hasEmbeds = currentFile && type (currentFile.content) === 'string' && currentFile.content.indexOf ('əəembed') !== -1;
       viMode = !! viMode;
       viState = viState || {};
       viCursor = viCursor || {line: 1, col: 1};
@@ -2875,7 +2924,7 @@ var formatCanonicalToolSection = function (text, compact) {
    var friendly = toolFriendlyName (rawName);
    var status = statusMatch ? statusMatch [1].trim () : '';
 
-   var blockMatch = text.match (/əəə([^\n]+)\n([\s\S]*?)\nəəə/);
+   var blockMatch = text.match (/əəə?([^\n]+)\n([\s\S]*?)\nəəə?/);
    if (! blockMatch) return text;
 
    var payloadType = (blockMatch [1] || '').trim ();
@@ -2936,7 +2985,7 @@ var getMessageToolContentView = function (content, expanded) {
    var full = formatToolBlocksForMessage (content, false, meta);
 
    // Canonical tool sections (## Tool Request / ## Tool Result with schwa payloads)
-   if (compact === content && full === content && type (content) === 'string' && content.indexOf ('əəətool/') !== -1) {
+   if (compact === content && full === content && type (content) === 'string' && content.indexOf ('əətool/') !== -1) {
       compact = formatCanonicalToolSection (content, true);
       full = formatCanonicalToolSection (content, false);
    }
@@ -3039,7 +3088,7 @@ var renderChatContent = function (text, project, isDiff) {
       var trimmed = line.trim ();
 
       // Detect embed block start
-      if (! inEmbed && trimmed === 'əəəembed') {
+      if (! inEmbed && (trimmed === 'əəembed' || trimmed === 'əəəembed')) {
          flushBuffer ();
          inEmbed = true;
          embedBody = '';
@@ -3047,7 +3096,7 @@ var renderChatContent = function (text, project, isDiff) {
       }
 
       // Detect embed block end
-      if (inEmbed && trimmed === 'əəə') {
+      if (inEmbed && (trimmed === 'əə' || trimmed === 'əəə')) {
          inEmbed = false;
          var embed = parseEmbedBlock (embedBody);
          if (embed && project) {
@@ -3595,11 +3644,21 @@ views.dialogs = function () {
                   class: 'provider-select',
                   onchange: B.ev ('change', 'chatProviderModel'),
                   disabled: noProvider || streaming || dialogIsActive
-               }, dale.go (MODEL_OPTIONS, function (opt) {
-                  var key = modelOptionKey (opt);
+               }, (function () {
+                  var s = settings || {};
+                  var openaiOk  = (s.openai || {}).hasKey || ((s.openaiOAuth || {}).loggedIn && ! (s.openaiOAuth || {}).expired);
+                  var claudeOk  = (s.claude || {}).hasKey || ((s.claudeOAuth || {}).loggedIn && ! (s.claudeOAuth || {}).expired);
+                  var available = dale.fil (MODEL_OPTIONS, undefined, function (opt) {
+                     if (opt.provider === 'openai' && openaiOk) return opt;
+                     if (opt.provider === 'claude' && claudeOk) return opt;
+                  });
+                  if (! available.length) available = MODEL_OPTIONS;
                   var currentKey = (provider || 'openai') + ':' + (model || defaultModelForProvider (provider || 'openai'));
-                  return ['option', {value: key, selected: key === currentKey}, opt.label];
-               })],
+                  return dale.go (available, function (opt) {
+                     var key = modelOptionKey (opt);
+                     return ['option', {value: key, selected: key === currentKey}, opt.label];
+                  });
+               }) ()],
                ['div', {class: 'vi-textarea-wrap', style: style ({flex: 1})}, [
                   ['textarea', {
                      class: 'chat-input' + (viMode ? (' vi-active' + (viState.mode === 'insert' ? ' vi-insert' : '')) : ''),
@@ -3668,8 +3727,10 @@ views.projects = function () {
                ? ['div', {class: 'projects-list'}, dale.go (projects, function (project) {
                   var slug = type (project) === 'object' ? project.slug : project;
                   var displayName = type (project) === 'object' ? project.name : project;
+                  var pcolor = projectNameColor (displayName);
                   return ['div', {
                      class: 'project-card',
+                     style: style ({'background-color': pcolor.bg, color: pcolor.text, border: 'none'}),
                      onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
                   }, [
                      ['span', {class: 'project-card-name'}, displayName],

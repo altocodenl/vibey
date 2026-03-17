@@ -152,19 +152,19 @@ window.vibeyCSS = [
       transition: 'transform 0.15s, background-color 0.2s, border-color 0.2s'
    }],
    ['.project-card:hover', {
-      'background-color': '#1a2a4a',
-      'border-color': 'rgba(148, 184, 255, 0.26)',
+      filter: 'brightness(1.15)',
       transform: 'translateY(-1px)'
    }],
    ['.project-card-name', {
       'font-size': '1.1rem',
       'font-weight': '600',
-      color: '#f5f7ff',
+      color: 'inherit',
       'line-height': 1.35,
       'word-break': 'break-word'
    }],
    ['.project-card-delete', {
-      color: '#ff8b94',
+      color: 'inherit',
+      opacity: '0.7',
       cursor: 'pointer',
       'font-size': '1.5rem',
       'line-height': 1,
@@ -173,7 +173,8 @@ window.vibeyCSS = [
       transition: 'background-color 0.2s'
    }],
    ['.project-card-delete:hover', {
-      'background-color': 'rgba(255, 139, 148, 0.12)'
+      opacity: '1',
+      'background-color': 'rgba(0, 0, 0, 0.15)'
    }],
    ['.projects-empty', {
       color: '#9aa4bf',

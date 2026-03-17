@@ -2602,7 +2602,7 @@
             c.ajax ('get', 'project/' + encodeURIComponent (window._staticAppProject) + '/file/doc/main.md', {}, '', function (error, rs) {
                if (! error && rs && rs.body && type (rs.body.content) === 'string') {
                   var content = rs.body.content;
-                  if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port static') !== -1) return done (SHORT_WAIT, POLL);
+                  if (content.indexOf ('əəembed') !== -1 && content.indexOf ('port static') !== -1) return done (SHORT_WAIT, POLL);
                }
                setTimeout (attempt, 3000);
             });
@@ -2619,7 +2619,7 @@
          });
       }, function () {
          var content = window._staticAppEmbedContent || '';
-         if (content.indexOf ('əəəembed') === -1) return 'doc/main missing əəəembed block';
+         if (content.indexOf ('əəembed') === -1) return 'doc/main missing əəembed block';
          if (content.indexOf ('port static') === -1) return 'doc/main.md embed missing port static';
          return true;
       }],
@@ -2785,7 +2785,7 @@
             c.ajax ('get', 'project/' + encodeURIComponent (window._backendAppProject) + '/file/doc/main.md', {}, '', function (error, rs) {
                if (! error && rs && rs.body && type (rs.body.content) === 'string') {
                   var content = rs.body.content;
-                  if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (SHORT_WAIT, POLL);
+                  if (content.indexOf ('əəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (SHORT_WAIT, POLL);
                }
                setTimeout (attempt, 3000);
             });
@@ -2802,7 +2802,7 @@
          });
       }, function () {
          var content = window._backendAppEmbedContent || '';
-         if (content.indexOf ('əəəembed') === -1) return 'doc/main missing əəəembed block';
+         if (content.indexOf ('əəembed') === -1) return 'doc/main missing əəembed block';
          if (content.indexOf ('port 4000') === -1) return 'doc/main.md embed missing port 4000';
          return true;
       }],

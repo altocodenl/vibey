@@ -528,25 +528,25 @@ Behavior:
 
 #### Embed markdown syntax
 
-Embed blocks use schwa wrappers. Use the schwa character `ə` (U+0259) — avoid look‑alikes like Arabic `ە` (U+06D5).
+Embed blocks use schwa wrappers. Use the schwa character `ə` (U+0259) — avoid look‑alikes like Arabic `ە` (U+06D5). The canonical delimiter is two schwas (`əə`). Three schwas (`əəə`) are also accepted for backward compatibility.
 
 ```md
-əəəembed
+əəembed
 port 4000
 height 500
 title Tictactoe
-əəə
+əə
 ```
 
 Static embed (no backend):
 
 ```md
-əəəembed
+əəembed
 port static
 path /
 height 500
 title Static app
-əəə
+əə
 ```
 
 Fields:
@@ -569,20 +569,20 @@ Example inside a doc:
 
 Here's the running game:
 
-əəəembed
+əəembed
 port 4000
 title Tictactoe
 height 500
-əəə
+əə
 
 Here's a static app:
 
-əəəembed
+əəembed
 port static
 path /
 title Static app
 height 500
-əəə
+əə
 
 ## Architecture
 ...
@@ -590,7 +590,7 @@ height 500
 
 ### Client: embed rendering
 
-When rendering markdown (doc preview or dialog view), the client detects `əəəembed ... əəə` blocks and replaces them with an iframe:
+When rendering markdown (doc preview or dialog view), the client detects `əəembed ... əə` blocks (or `əəəembed ... əəə` for backward compatibility) and replaces them with an iframe:
 
 ```html
 <!-- port number -->
@@ -1023,7 +1023,7 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
    - Client: Trigger `run_command` from dialog/tool flow and validate `index.html` references.
 7. `GET /project/:project/static/app.js` — verify board/cell/square/grid logic exists.
    - Client: Verify static `app.js` is served and contains game logic markers.
-8. Poll `GET /project/:project/file/doc/main.md` until an `əəəembed` block appears with `port static`.
+8. Poll `GET /project/:project/file/doc/main.md` until an `əəembed` block appears with `port static`.
    - Client: Wait for `doc/main.md` to include an embed block for static mode.
 9. `GET /project/:project/file/doc/main.md` — verify embed block contains `port static`.
    - Client: Open `doc/main.md` and confirm `port static` embed syntax.
@@ -1048,7 +1048,7 @@ This project is intentionally kept alive so the embedded game remains available.
    - Client: Confirm proxied `app.js` contains game logic markers.
 8. `POST /project/:project/tool/execute` (`run_command: ps aux | grep node || true`) — verify `server.js` process is running.
    - Client: Trigger `run_command` from dialog/tool flow and verify Node backend process is present.
-9. Poll `GET /project/:project/file/doc/main.md` until `əəəembed` block appears with `port 4000`.
+9. Poll `GET /project/:project/file/doc/main.md` until `əəembed` block appears with `port 4000`.
    - Client: Wait for `doc/main.md` to include an embed block targeting port 4000.
 10. `GET /project/:project/file/doc/main.md` — verify embed block includes `port 4000`.
    - Client: Open `doc/main.md` and confirm `port 4000` embed syntax.
@@ -1158,12 +1158,12 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
    - A 3D solar system I can rotate and zoom
    - A quick expense tracker
    - A visual timeline of the French Revolution, with key events I can click to expand
-
+- Guidelines: write & inject them into the beginning prompt
 - Literate clanking: server.md & client.md
-- Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
-   - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
-   - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
-   - The UI redraws synchronously because of gotoB, so there should be
+   - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
+      - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
+      - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
+      - The UI redraws synchronously because of gotoB, so there should be
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
 ## Vibey cloud in a nutshell
@@ -1189,3 +1189,5 @@ All you need is an AI provider, no need to install anything.
 - DB for users.
 - For hosted vibey on Ubuntu, Docker-in-Docker or sibling containers via the Docker socket. Same architecture — each project is a container with a volume, vibey proxies to container IPs. The transition from local to hosted is: add DNS, TLS, and session cookies. The container topology stays the same.
 - Make a document public
+- Choose your own adventure website: local vs cloud
+

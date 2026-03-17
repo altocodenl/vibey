@@ -1777,7 +1777,7 @@ var staticSequence = [
             try {
                var parsed = JSON.parse (body);
                var content = parsed.content || '';
-               if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port static') !== -1) return done (true);
+               if (content.indexOf ('əəembed') !== -1 && content.indexOf ('port static') !== -1) return done (true);
             }
             catch (e) {}
             done (false);
@@ -1790,7 +1790,7 @@ var staticSequence = [
 
    ['Static 9: Verify embed block in doc/main.md', 'get', 'project/' + STATIC_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       var content = rs.body.content || '';
-      if (content.indexOf ('əəəembed') === -1) return log ('doc/main.md missing əəəembed block');
+      if (content.indexOf ('əəembed') === -1) return log ('doc/main.md missing əəembed block');
       if (content.indexOf ('port static') === -1) return log ('doc/main.md embed missing port static');
       return true;
    }]
@@ -1899,7 +1899,7 @@ var backendSequence = [
             try {
                var parsed = JSON.parse (body);
                var content = parsed.content || '';
-               if (content.indexOf ('əəəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (true);
+               if (content.indexOf ('əəembed') !== -1 && content.indexOf ('port 4000') !== -1) return done (true);
             }
             catch (e) {}
             done (false);
@@ -1912,7 +1912,7 @@ var backendSequence = [
 
    ['Backend 10: Verify embed block in doc/main.md', 'get', 'project/' + BACKEND_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       var content = rs.body.content || '';
-      if (content.indexOf ('əəəembed') === -1) return log ('doc/main.md missing əəəembed block');
+      if (content.indexOf ('əəembed') === -1) return log ('doc/main.md missing əəembed block');
       if (content.indexOf ('port 4000') === -1) return log ('doc/main.md embed missing port 4000');
       return true;
    }]

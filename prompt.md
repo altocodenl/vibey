@@ -28,20 +28,20 @@ If no agent is working on the files you need to edit, 1) pick a whimsical noun n
 
 When a project has a running app (e.g. a web server on a port), you can embed it in any .md doc so the user sees it live. Use this syntax:
 
-əəəembed
+əəembed
 port 4000
 title My App
 height 500
-əəə
+əə
 
 Static-only projects (no backend) can use the static proxy:
 
-əəəembed
+əəembed
 port static
 path /
 title My Static App
 height 500
-əəə
+əə
 
 Fields:
 - port (required): the port the app listens on, or `static` to serve files from the project folder.
@@ -49,10 +49,12 @@ Fields:
 - height (default 400): iframe height in pixels.
 - title (default App): label shown above the embed.
 
-**CRITICAL — delimiters are three schwa characters: `əəə` (U+0259 × 3).**
-Do NOT substitute digits, lookalikes, or any other characters. The literal bytes are `\xC9\x99\xC9\x99\xC9\x99` (UTF-8). Copy them exactly from the examples above. The opening line must be `əəəembed` (schwas immediately followed by `embed`, no space) and the closing line must be `əəə` alone. Anything else (e.g. `999`, `595959`, backtick fences) will silently fail.
+**CRITICAL — delimiters are two schwa characters: `əə` (U+0259 × 2).**
+Do NOT substitute digits, lookalikes, or any other characters. The literal bytes are `\xC9\x99\xC9\x99` (UTF-8). Copy them exactly from the examples above. The opening line must be `əəembed` (schwas immediately followed by `embed`, no space) and the closing line must be `əə` alone. Anything else (e.g. `99`, `595959`, backtick fences) will silently fail.
 
 The vibey server proxies requests through /project/<project>/proxy/<port>/, so the app renders inside the doc. Static embeds use /project/<project>/static/<path>. When you build an app that serves on a port, add an embed block to doc/main.md (or another relevant file in `doc/`) so the user can see it directly.
+
+**IMPORTANT — no direct localhost access.** Each project runs in its own Docker container. The user's browser cannot reach `localhost:4000` (or any port) inside the container. All access goes through vibey's reverse proxy. When linking to a running app, always use the proxy URL `/project/<project>/proxy/<port>/` — never `http://localhost:<port>`. For static files, use `/project/<project>/static/<path>`. These proxy URLs work as clickable links in dialogs and as iframe sources in embed blocks.
 
 ## Autogit
 

@@ -1,5 +1,59 @@
 ## Vibey development notes
 
+### 2026-03-17
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. Use agents-now.md to coordinate. For pupeteer, use the global pupeteer, don't install it.
+
+- I see an interrupted tool call being shown uglily.
+- Make the new project button be much bigger and centered. Make the existing project entries also bigger.
+- Do we have a last modified timestamp already existing for projects?
+- When I have two dialogs active, the UI oscillates between both
+- When I go from an in progress dialog to one that is ready, please switch the "Vibeying" to "Ready" and viceversa
+- Please come up with a random color that's a pure function of the project name, and paint the box of the project in the projects section with it. I want the whole thing with a background, not just the left part. Also make the font color conditional to the background (white for dark, black for light)
+- Please make the model selector conditional on the settings, more precisely on the live oauth subscriptions that there are. Lower the state to that particular component rather than adding another dependency to the big B.view above.
+- Please fix prompt.md to let the agents know that localhost:4000 (or its equivalent) isn't available, and that the links should go through the proxy mechanism.
+- Embeddings: switch to double (instead of triple) schwas. If there's three, also accept it and discard the extra ones. readme.md, server, client, tests.
+
+== [Reddit thread](https://www.reddit.com/r/vibecoding/comments/1rvzy3f/ask_rvibecoding_whats_working_for_you_and_what/):
+
+Hi, Earthlings! I'm curious to hear what tools you're using to vibe code. What features are working for you. What things get in the way of what you want to do.
+I'm building a vibe coding tool myself (buildwithvibey.com) and I want to better understand how others are approaching vibe coding, beyond my immediate circle of friends and acquaintances.
+Hope this thread can be useful to the community and tool builders.
+
+Thanks!
+
+== Guidelines
+
+How to solve the pitfalls of setting up your own API, your own database? You can provide them as a service. But that goes against the principle of having your own engine.
+
+What we could have are good prompts that can be defaults. Completely overridable. But these base prompts can cover most pitfalls concerning:
+- Databases.
+- Servers.
+- Clients.
+- Testing.
+
+For example:
+- The DB should only be exposed locally, so that only the server accesses it.
+- No direct DB access.
+- Serve the client with static assets that are locally hosted.
+- What security HTTP headers to use.
+
+These are the *guidelines*. They condense a good set of practices. They are searchable in an endpoint in vibey. We can start with a single guidelines.md and later serve it partially if it becomes too big.
+
+== What's different about vibey that's not captured in the first three points?
+
+- BYOAI: bring your own AI and use it through vibey.
+- Local/cloud switch is as seamless as possible.
+- Even the cloud version is open source.
+
+Claude:
+"Your real differentiators vs. every competitor:
+ - Everything is a document — full auditability, no black box
+ - Safe YOLO with container isolation — no other tool does per-project sandboxing this cleanly
+ - BYOAI — no margin on tokens, use your own keys
+ - Open source, self-hosted — data never leaves your machine
+The market where ALL of these matter simultaneously: privacy-conscious technical teams at companies/universities who can't send code to Replit/Bolt/Cursor's cloud."
+
 ### 2026-03-16
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. Use agents-now.md to coordinate. For pupeteer, use the global pupeteer, don't install it.
