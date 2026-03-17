@@ -98,6 +98,89 @@ window.vibeyCSS = [
       border: '1px solid #7ea6ff',
       'box-shadow': '0 0 0 4px rgba(126, 166, 255, 0.16)'
    }],
+   ['.projects-view', {
+      display: 'flex',
+      'justify-content': 'center',
+      'align-items': 'flex-start',
+      width: '100%',
+      padding: '2.25rem 1rem'
+   }],
+   ['.projects-shell', {
+      width: '100%',
+      'max-width': '880px'
+   }],
+   ['.projects-header', {
+      display: 'flex',
+      'justify-content': 'center',
+      'align-items': 'center',
+      'margin-bottom': '1rem'
+   }],
+   ['.projects-title', {
+      'font-size': '2rem',
+      'font-weight': '700',
+      color: '#f5f7ff',
+      'text-align': 'center'
+   }],
+   ['.projects-new-wrap', {
+      display: 'flex',
+      'justify-content': 'center',
+      'margin-bottom': '1.5rem'
+   }],
+   ['.projects-new-button', {
+      'font-size': '1.2rem',
+      padding: '1rem 2.5rem',
+      'border-radius': '16px',
+      'min-width': '320px',
+      'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'
+   }],
+   ['.projects-list', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '0.85rem'
+   }],
+   ['.project-card', {
+      display: 'flex',
+      'justify-content': 'space-between',
+      'align-items': 'center',
+      gap: '1rem',
+      padding: '1.1rem 1.25rem',
+      'border-radius': '16px',
+      cursor: 'pointer',
+      'background-color': '#16213e',
+      border: '1px solid rgba(148, 184, 255, 0.12)',
+      'box-shadow': '0 8px 24px rgba(0, 0, 0, 0.18)',
+      transition: 'transform 0.15s, background-color 0.2s, border-color 0.2s'
+   }],
+   ['.project-card:hover', {
+      'background-color': '#1a2a4a',
+      'border-color': 'rgba(148, 184, 255, 0.26)',
+      transform: 'translateY(-1px)'
+   }],
+   ['.project-card-name', {
+      'font-size': '1.1rem',
+      'font-weight': '600',
+      color: '#f5f7ff',
+      'line-height': 1.35,
+      'word-break': 'break-word'
+   }],
+   ['.project-card-delete', {
+      color: '#ff8b94',
+      cursor: 'pointer',
+      'font-size': '1.5rem',
+      'line-height': 1,
+      padding: '0.15rem 0.35rem',
+      'border-radius': '10px',
+      transition: 'background-color 0.2s'
+   }],
+   ['.project-card-delete:hover', {
+      'background-color': 'rgba(255, 139, 148, 0.12)'
+   }],
+   ['.projects-empty', {
+      color: '#9aa4bf',
+      'font-size': '1.05rem',
+      'text-align': 'center',
+      padding: '1rem 0'
+   }],
    ['.modal-actions', {
       display: 'flex',
       'justify-content': 'flex-end',

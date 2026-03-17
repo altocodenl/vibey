@@ -1726,6 +1726,26 @@
          return true;
       }],
 
+      ['Dialog 51b2: Interrupted write_file tool block still renders as a tool bubble with diff preview', function () {
+         var content = '---\nTool request: write_file [call_live]\n> Description: Create pretty timeline\n\n{"description":"Create pretty timeline","path":"doc/main.md","content":"alpha\\nbeta"}';
+         var split = splitAssistantContentBlocks (content);
+         if (split.length !== 1 || split [0].role !== 'tool') return 'Interrupted tool block should stay a tool bubble';
+         var view = getMessageToolContentView (content, true);
+         if (view.fullText.indexOf ('+ alpha') === -1) return 'Interrupted write_file should still show diff preview';
+         if (view.fullText.indexOf ('+ beta') === -1) return 'Interrupted write_file should preserve newline splitting';
+         if (view.compactText.indexOf ('Create pretty timeline') === -1) return 'Interrupted write_file compact view missing description';
+         return true;
+      }],
+
+      ['Dialog 51b3: Partial interrupted write_file still pretty-prints content lines', function () {
+         var content = '---\nTool request: write_file [call_live]\n> Description: Keep formatting while streaming\n\n{"path":"doc/main.md","content":"alpha\\nbeta\\ngamma';
+         var view = getMessageToolContentView (content, true);
+         if (view.fullText.indexOf ('+ alpha') === -1) return 'Partial interrupted write_file should show first line';
+         if (view.fullText.indexOf ('+ beta') === -1) return 'Partial interrupted write_file should split escaped newlines';
+         if (view.fullText.indexOf ('+ gamma') === -1) return 'Partial interrupted write_file should show trailing partial line';
+         return true;
+      }],
+
       ['Dialog 51c: Live streaming keeps completed tool bubble separate from next in-progress tool', function (done) {
          var activeMarkdown = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\ninspect\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:01Z - ...\n\n---\nTool request: run_command [call_done]\n> Description: First finished tool\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_open]\n';
          B.call ('set', 'tab', 'dialogs');

@@ -393,7 +393,7 @@ var splitAssistantContentBlocks = function (content) {
    if (! content || content.indexOf ('Tool request:') === -1) return [{role: 'assistant', content: content}];
 
    var parts = [];
-   var re = /---\nTool request:[\s\S]*?\n---/g;
+   var re = /---\nTool request:[\s\S]*?(?:\n---(?=\n|$)|$)/g;
    var lastIndex = 0;
    var match;
 
@@ -2775,10 +2775,44 @@ var formatIndentedToolPayload = function (payload, compact) {
    return '    ' + shown.split ('\n').join ('\n    ') + '\n';
 };
 
+var decodePartialJsonString = function (text) {
+   text = type (text) === 'string' ? text : '';
+   return text
+      .replace (/\\n/g, '\n')
+      .replace (/\\r/g, '\r')
+      .replace (/\\t/g, '\t')
+      .replace (/\\"/g, '"')
+      .replace (/\\\\/g, '\\');
+};
+
+var formatPartialToolInputPreview = function (rawName, inputText) {
+   rawName = rawName || 'tool';
+   inputText = type (inputText) === 'string' ? inputText.trim () : '';
+   if (! inputText) return '';
+
+   if (rawName === 'write_file') {
+      var pathMatch = inputText.match (/"path"\s*:\s*"((?:\\.|[^"])*)"/);
+      var contentMatch = inputText.match (/"content"\s*:\s*"([\s\S]*)$/);
+      var path = pathMatch ? decodePartialJsonString (pathMatch [1]) : '';
+      var content = contentMatch ? contentMatch [1] : '';
+      content = content.replace (/"\s*}?\s*$/, '');
+      content = decodePartialJsonString (content);
+      if (path || content) {
+         var header = '→ ' + (path || '[pending path]') + (content ? ' (' + content.length + ' chars so far)' : '');
+         if (! content) return header;
+         return header + '\n' + dale.go (content.split ('\n'), function (line) {
+            return '+ ' + line;
+         }).join ('\n');
+      }
+   }
+
+   return wrapLongLines (inputText, 90);
+};
+
 var formatToolBlocksForMessage = function (text, compact, meta) {
    if (type (text) !== 'string' || text.indexOf ('Tool request:') === -1) return text;
 
-   return text.replace (/---\nTool request:[\s\S]*?\n---/g, function (block) {
+   return text.replace (/---\nTool request:[\s\S]*?(?:\n---(?=\n|$)|$)/g, function (block) {
       var nameMatch = block.match (/^---\nTool request:\s+(\S+)/m);
       var rawName = nameMatch ? nameMatch [1] : 'tool';
       var friendly = toolFriendlyName (rawName);
@@ -2786,8 +2820,10 @@ var formatToolBlocksForMessage = function (text, compact, meta) {
 
       var descMatch = block.match (/^> Description:\s*(.+)$/m);
       var description = descMatch ? descMatch [1].trim () : '';
+      var isClosed = /\n---$/.test (block);
 
-      var sections = block.replace (/^---\n/, '').replace (/\n---$/, '');
+      var sections = block.replace (/^---\n/, '');
+      if (isClosed) sections = sections.replace (/\n---$/, '');
       var resultSplit = sections.split (/\nResult:\n/);
       var inputSection = resultSplit [0] || '';
       var resultSection = resultSplit [1] || '';
@@ -2800,7 +2836,7 @@ var formatToolBlocksForMessage = function (text, compact, meta) {
       var resultParsed = null;
       try {resultParsed = JSON.parse (resultText);} catch (e) {}
 
-      var inputSummary = inputParsed ? (formatToolInputPreview (inputParsed) || JSON.stringify (normalizeToolPreviewValue (inputParsed), null, 2)) : '';
+      var inputSummary = inputParsed ? (formatToolInputPreview (inputParsed) || JSON.stringify (normalizeToolPreviewValue (inputParsed), null, 2)) : (compact ? '' : formatPartialToolInputPreview (rawName, inputText));
       var resultOutput = '';
       if (resultParsed) resultOutput = formatToolResultPreview (resultParsed) || JSON.stringify (normalizeToolPreviewValue (resultParsed), null, 2);
       else if (resultText) resultOutput = resultText;
@@ -3620,28 +3656,30 @@ views.dialogs = function () {
 
 views.projects = function () {
    return B.view ([['projects']], function (projects) {
-      return ['div', {class: 'editor-empty'}, [
-         ['div', {style: style ({width: '100%', 'max-width': '640px'})}, [
-            ['div', {class: 'editor-header'}, [
-               ['span', {class: 'editor-filename'}, 'Projects'],
-               ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'project')}, '+ New project']
+      return ['div', {class: 'projects-view'}, [
+         ['div', {class: 'projects-shell'}, [
+            ['div', {class: 'projects-header'}, [
+               ['div', {class: 'projects-title'}, 'Projects']
+            ]],
+            ['div', {class: 'projects-new-wrap'}, [
+               ['button', {class: 'primary projects-new-button', onclick: B.ev ('create', 'project')}, '+ New project']
             ]],
             (projects && projects.length)
-               ? ['div', {class: 'file-list', style: style ({width: '100%'})}, dale.go (projects, function (project) {
+               ? ['div', {class: 'projects-list'}, dale.go (projects, function (project) {
                   var slug = type (project) === 'object' ? project.slug : project;
                   var displayName = type (project) === 'object' ? project.name : project;
                   return ['div', {
-                     class: 'file-item',
+                     class: 'project-card',
                      onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
                   }, [
-                     ['span', {class: 'file-name'}, displayName],
+                     ['span', {class: 'project-card-name'}, displayName],
                      ['span', {
-                        class: 'file-delete',
+                        class: 'project-card-delete',
                         onclick: B.ev ('delete', 'project', slug, {raw: 'event'})
                      }, '×']
                   ]];
                })]
-               : ['div', {style: style ({color: '#888'})}, 'No projects yet']
+               : ['div', {class: 'projects-empty'}, 'No projects yet']
          ]]
       ]];
    });

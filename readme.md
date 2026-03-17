@@ -1154,7 +1154,6 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
-- The expansion of a streamed write_file doesn't look nice, with a per line diff with green, neither when streaming straight or on refresh while it still streams.
 - Demo videos
    - A 3D solar system I can rotate and zoom
    - A quick expense tracker
