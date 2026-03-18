@@ -14,14 +14,6 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
 - Please fix prompt.md to let the agents know that localhost:4000 (or its equivalent) isn't available, and that the links should go through the proxy mechanism.
 - Embeddings: switch to double (instead of triple) schwas. If there's three, also accept it and discard the extra ones. readme.md, server, client, tests.
 
-== [Reddit thread](https://www.reddit.com/r/vibecoding/comments/1rvzy3f/ask_rvibecoding_whats_working_for_you_and_what/):
-
-Hi, Earthlings! I'm curious to hear what tools you're using to vibe code. What features are working for you. What things get in the way of what you want to do.
-I'm building a vibe coding tool myself (buildwithvibey.com) and I want to better understand how others are approaching vibe coding, beyond my immediate circle of friends and acquaintances.
-Hope this thread can be useful to the community and tool builders.
-
-Thanks!
-
 == Guidelines
 
 How to solve the pitfalls of setting up your own API, your own database? You can provide them as a service. But that goes against the principle of having your own engine.

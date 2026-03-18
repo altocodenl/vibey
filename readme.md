@@ -1154,11 +1154,11 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
 
+- Guidelines: write & inject them into the beginning prompt. Make them editable in the advanced section of settings (also prompt.md).
 - Demo videos
    - A 3D solar system I can rotate and zoom
    - A quick expense tracker
    - A visual timeline of the French Revolution, with key events I can click to expand
-- Guidelines: write & inject them into the beginning prompt
 - Literate clanking: server.md & client.md
    - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
       - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
