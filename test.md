@@ -16,7 +16,7 @@ Run the client tests the same way, using `test-client.js` instead:
 
 Note: if you change `test-client.js`, rebuild/restart vibey before running the client tests. The browser loads the test bundle from the running vibey server/container, so local file edits are not enough on their own.
 
-Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialog`, `static`, `backend`, `vi`.
+Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialog`, `static`, `backend`, `vi`, `auth`, `admin`, `access`.
 
 ## Test suites
 
@@ -49,6 +49,12 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
     - `hello—world & friends!` (mixed special characters).
     - `日本語プロジェクト` (non-Latin only).
    - Client: ensure the names look like we expect them even with special characters.
+12. **Cloud mode — unauthenticated gatekeeping**: `GET /projects` without session cookie — **403**.
+13. **Cloud mode — CSRF required on mutations**: `POST /projects` body `{name: "no-csrf"}` with valid session cookie but without CSRF token — **403**.
+14. **Cloud mode — project scoping by user**: Log in as user A, create project `"scoped-proj"`. Log in as user B, `GET /projects` — user A's project does not appear. `DELETE /projects/:slugOfUserA` — **404** (can't see or delete another user's project). Clean up both users.
+15. **Cloud mode — container naming**: After creating a project in cloud mode, verify the Docker container name is prefixed with the user id (`vibey-proj-<userId>-<slug>`) so there are no collisions between users.
+16. **Local mode — no auth needed**: `GET /csrf` returns body `"LOCAL"`. All project endpoints work without cookies.
+   - Client: In local mode, no login view is shown; the app loads directly into Projects tab.
 
 **Doc:**
 
@@ -100,6 +106,10 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
    - Client: Delete project via UI returns to Projects tab and clears state.
 19. `GET /projects` — confirm gone.
    - Client: Projects list no longer shows deleted project.
+20. **Cloud mode — unauthenticated file access**: `GET /project/:p/file/doc/main.md` without session cookie — **403**.
+21. **Cloud mode — cross-user file access**: Log in as user B, `GET /project/:userA-project/file/doc/main.md` — **404** (project not visible to user B).
+22. **Cloud mode — public doc access**: Log in as user A, create project, write `doc/main.md`, publish it via `POST /access` with `{project: slug, path: "doc/main.md", visibility: "ALL"}`. Then without any session cookie, `GET /public/<userA-id>/<slug>/doc/main.md` — **200**, returns rendered HTML page with markdown content and working embeds. Verify `X-Frame-Options` is set.
+23. **Cloud mode — unpublished doc stays private**: `GET /public/<userA-id>/<slug>/doc/notes.md` (not published) — **404**.
 
 **Upload:**
 
@@ -194,6 +204,9 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
    - Client: Delete remaining snapshot from snapshots view.
 25. `GET /snapshots` — no leftover entries for this flow.
    - Client: Reload snapshots and verify none remain for this flow.
+26. **Cloud mode — snapshot user scoping**: Log in as user A, create project and snapshot. Log in as user B, `GET /snapshots` — user A's snapshot does not appear. `POST /snapshots/:userA-snapshot-id/restore` — **404** (can't restore another user's snapshot). `DELETE /snapshots/:userA-snapshot-id` — **404**.
+27. **Cloud mode — snapshot id prefix**: In cloud mode, verify snapshot `id` is prefixed with the user id so snapshots from different users never collide on disk.
+28. **Cloud mode — unauthenticated snapshot access**: `GET /snapshots` without session cookie — **403**. `POST /project/:p/snapshot` without session cookie — **403**.
 
 **Autogit:**
 
@@ -208,6 +221,12 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 9. Two concurrent `POST /project/:project/file/doc/concurrent-*.md` writes — both succeed; commit count increases by exactly 2; `git fsck --no-progress` passes; no `.git/index.lock` remains.
 10. `DELETE /projects/:project` — delete project.
 11. `GET /projects` — confirm project gone.
+
+**Settings (cloud mode):**
+
+1. **Cloud mode — settings stored in Redis**: In cloud mode, `GET /settings` reads from `user:<id>` `settings` field in Redis (not `secret.json`). `POST /settings` writes to Redis. Verify round-trip.
+2. **Cloud mode — settings per user**: User A saves `{editor: {viMode: true}}`. User B's `GET /settings` does not include user A's vi mode setting.
+3. **Local mode — settings in secret.json**: In local mode, `GET /settings` reads from `secret.json`. `POST /settings` writes to `secret.json`. Unchanged from current behavior.
 
 **Dialog:**
 
@@ -291,6 +310,8 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
     - Client: Expanded tool rendering shows readable input/output text with preserved line breaks.
 48. **tool_request event still has description in input**: `POST /project/:p/dialog` (prompt: "use write_file to create a file"). Collect SSE. The `tool_request` event's `tool.input` object contains a `description` field (the raw LLM output before stripping).
 49. **tool/execute strips description from input**: `POST /project/:p/tool/execute` with `toolInput` including a `description` field. Verify the tool executes successfully (description does not interfere).
+49b. **Cloud mode — unauthenticated dialog access**: `POST /project/:p/dialog` without session cookie — **403**. `GET /project/:p/dialogs` without session cookie — **403**. `GET /project/:p/dialog/:id/stream` without session cookie — **403**.
+49c. **Cloud mode — cross-user dialog access**: Log in as user B, `POST /project/:userA-project/dialog` — **404** (project not visible). `GET /project/:userA-project/dialogs` — **404**.
 50. **Friendly dialog labels + no blank streaming bubble**:
     - Client: chat bubbles are labeled `You` and `Agent`.
     - Client: there is no visible raw `user` / `assistant` role label in the dialog UI.
@@ -327,6 +348,9 @@ Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `dialo
 
 This project is intentionally kept alive so the embedded game remains available.
 
+10. **Cloud mode — public static app**: Publish the static app route via `POST /access` with `{project: slug, path: "static/", visibility: "ALL"}`. Then without session cookie, `GET /public/<userId>/<slug>/static/` — **200**, returns the game HTML. `GET /public/<userId>/<slug>/static/app.js` — **200**. Verify sub-paths under a published prefix are also accessible.
+11. **Cloud mode — unpublished static route**: Without publishing, `GET /public/<userId>/<slug>/static/secret.html` — **404** (not published).
+
 **App with backend:**
 
 1. `POST /projects` — create project.
@@ -351,6 +375,65 @@ This project is intentionally kept alive so the embedded game remains available.
    - Client: Open `doc/main.md` and confirm `port 4000` embed syntax.
 
 Keep this project running intentionally so the embedded backend app stays playable.
+
+11. **Cloud mode — public proxy app**: Publish the proxied app via `POST /access` with `{project: slug, path: "proxy/4000/", visibility: "ALL"}`. Without session cookie, `GET /public/<userId>/<slug>/proxy/4000/` — **200**, returns game HTML. `POST /public/<userId>/<slug>/proxy/4000/api/move` (if the app supports it) — **200** (mutating requests through published proxy are allowed; blast radius is limited to the project).
+12. **Cloud mode — unpublished proxy route**: `GET /public/<userId>/<slug>/proxy/4000/admin` where only `/` was published — returns **200** (sub-paths under a published prefix are accessible). `GET /public/<userId>/<slug>/proxy/5000/` (different port, not published) — **404**.
+13. **Cloud mode — public route with session cookie**: `GET /public/<userId>/<slug>/proxy/4000/` with a valid session cookie — **200** (session is identified but does not block public access).
+
+**Auth (signup, login, logout, CSRF):** [CLOUD MODE ONLY]
+
+1. `GET /csrf` in local mode — returns body `"LOCAL"` (string, not JSON).
+2. `GET /csrf` in cloud mode without session — returns **403**.
+3. `POST /auth/signup` body `{email: "newuser@test.com"}` — **200** `{ok: true}`. Stores signup request. Sends admin notification email.
+4. `POST /auth/signup` with invalid email (no `@`) — **400**.
+5. `POST /auth/signup` with empty email `""` — **400**.
+6. `POST /auth/signup` with already-existing user email — **400** (or idempotent 200, depending on design; verify consistent behavior).
+7. **Full OTP login flow**: Admin creates user via `POST /admin/createUser` body `{email: "otpuser@test.com"}`. `POST /auth/login` body `{email: "otpuser@test.com"}` — **200**, OTP is generated and stored in Redis (`otp:<userId>`), email is sent. Simulate OTP verification (read OTP from Redis or test hook): `POST /auth/login` body `{email: "otpuser@test.com", code: "<otp>"}` — **200**, response sets `Set-Cookie` with httponly session cookie. Cookie `Expires` is set far in the future (server controls expiry via Redis SETEX, not cookie age).
+8. `GET /csrf` with valid session cookie — **200**, returns CSRF token string. Verify token is stored in Redis as `csrf:<token>` → `<sessionId>`.
+9. CSRF token lasts exactly as long as the session it's bound to. Verify: after session expiry (or manual deletion from Redis), `GET /csrf` with the old session cookie — **403**. The CSRF token key is also gone from Redis.
+10. `POST /auth/logout` with valid session cookie + CSRF token — **200** `{ok: true}`. Session and CSRF entries removed from Redis. Subsequent `GET /csrf` with same cookie — **403**.
+11. `POST /auth/logout` without session cookie — **403**.
+12. `POST /auth/login` with non-existent email — **400** (no such user).
+13. `POST /auth/login` with wrong OTP code — **403** (or **400**; verify the code is checked and rejected).
+14. **Session expiry**: Create session via login. Verify Redis key has TTL (7 days). Wait or manually expire the key. `GET /csrf` — **403**. All authenticated endpoints return **403** with the expired cookie.
+15. **Cookie attributes**: After login, verify the `Set-Cookie` header includes `HttpOnly`, `Path=/`, and `SameSite=Lax` (or `Strict`). Verify no `Secure` flag in local dev (or `Secure` in production/HTTPS).
+   - Client: In cloud mode, landing without a session shows the login view. After login, navigates to Projects tab. Logout button is visible. Clicking logout returns to login view.
+   - Client: In local mode, no login/logout UI is shown.
+
+**Admin (signups, user management):** [CLOUD MODE ONLY]
+
+1. `GET /admin/signups` without admin session — **403**.
+2. `GET /admin/signups` with non-admin user session — **403**.
+3. `POST /auth/signup` body `{email: "pending@test.com"}` — **200**. Then `GET /admin/signups` with admin session — list includes `pending@test.com` with timestamp.
+4. `POST /admin/createUser` body `{email: "pending@test.com"}` with admin session — **200** `{ok: true, userId}`. Creates `user:<id>` hash in Redis with `email`, `createdAt`, `admin: 0`. Sends welcome OTP email to the new user.
+5. `GET /admin/signups` — `pending@test.com` is no longer in the pending list (approved and removed).
+6. `POST /admin/createUser` with non-admin session — **403**.
+7. `POST /admin/createUser` without session — **403**.
+8. `POST /admin/createUser` body `{email: "pending@test.com"}` again (already created) — **400** (user already exists).
+9. `POST /admin/createUser` body `{email: ""}` — **400**.
+10. **Admin flag**: Verify admin user has `admin: 1` in their Redis hash. Non-admin users have `admin: 0` (or field absent).
+11. **User Redis structure**: After creating a user, verify `user:<id>` hash contains `id`, `email`, `createdAt`, `lastActive`. Verify `settings` field stores what `secret.json` stores in local mode (provider keys, editor preferences).
+    - Client: Admin tab is visible only to admin users. It lists pending signups with an "Approve" button per entry. Approving calls `POST /admin/createUser` and removes the entry from the list.
+    - Client: Non-admin users do not see the Admin tab.
+
+**Access & Public routes:** [CLOUD MODE ONLY]
+
+1. `GET /access` with valid session — **200**, returns access rules for the logged-in user (initially empty `{}`).
+2. `POST /access` body `{rules: {"my-project:static/": "ALL"}}` — **200**. Overwrites all access rules for the user. `GET /access` — returns the new rules.
+3. `POST /access` body `{rules: {"my-project:doc/main.md": "ALL", "my-project:proxy/4000/": "ALL"}}` — **200**. Complete overwrite (previous `static/` rule is gone). `GET /access` — returns only the two new rules.
+4. `POST /access` without session — **403**.
+5. `GET /access` without session — **403**.
+6. **Redis structure**: After `POST /access`, verify `access:<userId>` hash in Redis has keys like `<project-slug>:<path>` with values `ALL` or a JSON array of user ids.
+7. **Public static route**: Publish `static/` for a project. `GET /public/<userId>/<projectSlug>/static/` without session — **200**. `GET /public/<userId>/<projectSlug>/static/app.js` — **200** (sub-path under published prefix).
+8. **Public proxy route**: Publish `proxy/4000/` for a project with a running app. `GET /public/<userId>/<projectSlug>/proxy/4000/` without session — **200**. `POST /public/<userId>/<projectSlug>/proxy/4000/api/data` — **200** (POST allowed through public proxy).
+9. **Public doc route**: Publish `doc/main.md`. `GET /public/<userId>/<projectSlug>/doc/main.md` — **200**, returns a static HTML page (generated with lith) with rendered markdown and working embed iframes. Verify embeds in the page point to the corresponding public proxy/static URLs.
+10. **Unpublished path — 404**: `GET /public/<userId>/<projectSlug>/doc/secret.md` (not in access rules) — **404**.
+11. **Non-existent user/project in public route**: `GET /public/nonexistent-user/nonexistent-proj/static/` — **404**.
+12. **Public route with session cookie present**: `GET /public/<userId>/<projectSlug>/static/` with a valid session cookie — **200**. The session cookie is used to identify the caller (e.g., for analytics) but does not block access.
+13. **Public route with session cookie of a different user**: `GET /public/<userId>/<projectSlug>/static/` with user B's session cookie — **200** (public is public regardless of who's asking).
+14. **Selective publishing — only listed paths**: Publish only `static/` for a project. `GET /public/<userId>/<projectSlug>/proxy/4000/` — **404** (proxy not published). `GET /public/<userId>/<projectSlug>/doc/main.md` — **404** (doc not published).
+15. **Revoke access**: `POST /access` body `{rules: {}}` (empty rules). All previously public paths now return **404** via `/public/`.
+16. **User-scoped publishing**: User A publishes `static/`. User B publishes `static/` on a different project. Both public URLs work independently. Deleting user A's rules does not affect user B's public URLs.
 
 **Vi mode:** [COMMENTED OUT, BROKEN]
 

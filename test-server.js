@@ -177,29 +177,74 @@ var httpGet = function (port, path, cb) {
    req.end ();
 };
 
-var httpJson = function (method, path, payload, cb) {
+var httpJson = function (method, path, payload, cb, headers) {
    var body = payload === undefined ? '' : JSON.stringify (payload);
+   var requestHeaders = {};
+   dale.go (headers || {}, function (value, key) {
+      requestHeaders [key] = value;
+   });
+   requestHeaders ['Content-Type'] = 'application/json';
+   requestHeaders ['Content-Length'] = Buffer.byteLength (body);
    var req = http.request ({
       hostname: 'localhost',
       port: 5353,
       path: path,
       method: method,
-      headers: {
-         'Content-Type': 'application/json',
-         'Content-Length': Buffer.byteLength (body)
-      }
+      headers: requestHeaders
    }, function (res) {
       var text = '';
       res.on ('data', function (chunk) {text += chunk;});
       res.on ('end', function () {
          var parsed = null;
          try {parsed = text ? JSON.parse (text) : null;} catch (error) {}
-         cb (null, res.statusCode, parsed, text);
+         cb (null, res.statusCode, parsed, text, res.headers);
       });
    });
    req.on ('error', cb);
    if (body) req.write (body);
    req.end ();
+};
+
+var httpRequest = function (method, path, body, headers, cb) {
+   headers = headers || {};
+   var payload = body || '';
+   var req = http.request ({
+      hostname: 'localhost',
+      port: 5353,
+      path: path,
+      method: method,
+      headers: headers
+   }, function (res) {
+      var text = '';
+      res.on ('data', function (chunk) {text += chunk;});
+      res.on ('end', function () {
+         cb (null, res.statusCode, text, res.headers);
+      });
+   });
+   req.on ('error', cb);
+   if (payload) req.write (payload);
+   req.end ();
+};
+
+var cookieJarFromSetCookie = function (setCookie) {
+   setCookie = setCookie || [];
+   if (type (setCookie) === 'string') setCookie = [setCookie];
+   return dale.obj (setCookie, function (cookieLine) {
+      var first = (cookieLine || '').split (';') [0] || '';
+      var eqIndex = first.indexOf ('=');
+      if (eqIndex === -1) return;
+      var key = first.slice (0, eqIndex);
+      var value = first.slice (eqIndex + 1).replace (/^"|"$/g, '');
+      return [key, value];
+   });
+};
+
+var cookieHeader = function (jar) {
+   jar = jar || {};
+   return dale.fil (jar, undefined, function (value, key) {
+      if (value === undefined || value === '') return;
+      return key + '="' + value + '"';
+   }).join ('; ');
 };
 
 // *** PROJECTS ***
@@ -2029,6 +2074,136 @@ var viSequence = [
    }]
 ];
 
+// *** CLOUD AUTH ***
+
+var cloudSequence = [
+
+   ['Cloud 1: Force cloud mode off before the suite starts', 'post', 'settings', {}, {cloud: {enabled: false}}, 200, function (s, rq, rs) {
+      s.cloudAdminEmail = 'admin+' + testTimestamp () + '@example.com';
+      s.cloudUserEmail  = 'member+' + testTimestamp () + '@example.com';
+      if (! rs.body || rs.body.ok !== true) return log ('Failed to disable cloud mode before suite');
+      return true;
+   }],
+
+   ['Cloud 2: GET /auth/csrf returns LOCAL while cloud mode is off', 'get', 'auth/csrf', {}, '', 200, function (s, rq, rs) {
+      if (rs.body !== 'LOCAL') return log ('Expected LOCAL, got: ' + JSON.stringify (rs.body));
+      return true;
+   }],
+
+   ['Cloud 3: Enable cloud mode from settings', 'post', 'settings', {}, {cloud: {enabled: true}}, 200, function (s, rq, rs) {
+      if (! rs.body || rs.body.ok !== true) return log ('Failed to enable cloud mode');
+      return true;
+   }],
+
+   ['Cloud 3: GET /settings reports cloud enabled', 'get', 'settings', {}, '', 200, function (s, rq, rs) {
+      if (! rs.body.cloud || rs.body.cloud.enabled !== true) return log ('Expected cloud enabled in settings response');
+      return true;
+   }],
+
+   ['Cloud 4: GET /auth/csrf requires login in cloud mode', 'get', 'auth/csrf', {}, '', 403, function (s, rq, rs) {
+      if (! rs.body || ! rs.body.error) return log ('Expected login-required error body');
+      return true;
+   }],
+
+   ['Cloud 5: Signup request is stored', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/auth/signup', {email: s.cloudUserEmail}, function (error, status, body) {
+         if (error) return log ('signup failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from signup, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || body.pending !== true) return log ('Expected pending signup response');
+         next ();
+      });
+   }],
+
+   ['Cloud 6: First admin user bootstraps without a session', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/admin/createUser', {email: s.cloudAdminEmail}, function (error, status, body) {
+         if (error) return log ('Bootstrap admin request failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 bootstrapping admin, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || ! body.user || ! body.user.admin) return log ('Bootstrap admin should be admin: ' + JSON.stringify (body));
+         next ();
+      });
+   }],
+
+   ['Cloud 7: Login request returns an OTP for the bootstrap admin', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/auth/login', {email: s.cloudAdminEmail}, function (error, status, body) {
+         if (error) return log ('OTP request failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 requesting OTP, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || ! body.otp) return log ('Expected OTP in login response for test flow');
+         s.cloudOtp = body.otp;
+         next ();
+      });
+   }],
+
+   ['Cloud 8: OTP login sets session + csrf cookies', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/auth/login', {email: s.cloudAdminEmail, otp: s.cloudOtp}, function (error, status, body, text, headers) {
+         if (error) return log ('OTP login failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 completing OTP login, got ' + status + ' ' + text);
+         s.cloudCookies = cookieJarFromSetCookie (headers ['set-cookie']);
+         if (! s.cloudCookies.vibeySession || ! s.cloudCookies.vibeyCsrf) return log ('Missing auth cookies after login');
+         if (! body || ! body.user || ! body.user.admin) return log ('Logged-in bootstrap admin should be admin');
+         next ();
+      });
+   }],
+
+   ['Cloud 9: GET /auth/csrf returns the csrf token for the logged-in user', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpRequest ('GET', '/auth/csrf', '', {Cookie: cookieHeader (s.cloudCookies)}, function (error, status, body) {
+         if (error) return log ('csrf fetch failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 fetching csrf, got ' + status + ' ' + body);
+         if (body !== s.cloudCookies.vibeyCsrf) return log ('CSRF response mismatch: ' + body + ' !== ' + s.cloudCookies.vibeyCsrf);
+         next ();
+      });
+   }],
+
+   ['Cloud 10: Authenticated admin can list pending signups', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpRequest ('GET', '/admin/signups', '', {Cookie: cookieHeader (s.cloudCookies)}, function (error, status, body) {
+         if (error) return log ('admin/signups failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from admin/signups, got ' + status + ' ' + body);
+         var parsed;
+         try {parsed = JSON.parse (body);} catch (e) {return log ('Could not parse signups JSON: ' + body);}
+         var signup = dale.stopNot (parsed, undefined, function (entry) {
+            if (entry.email === s.cloudUserEmail) return entry;
+         });
+         if (! signup) return log ('Expected pending signup for ' + s.cloudUserEmail + ' in ' + body);
+         next ();
+      });
+   }],
+
+   ['Cloud 11: Authenticated admin can create a normal user', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/admin/createUser', {email: s.cloudUserEmail}, function (error, status, body) {
+         if (error) return log ('admin/createUser failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from admin/createUser, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || ! body.user || body.user.email !== s.cloudUserEmail) return log ('Created user mismatch: ' + JSON.stringify (body));
+         if (body.user.admin) return log ('Second created user should not be admin by default');
+         next ();
+      }, {Cookie: cookieHeader (s.cloudCookies)});
+   }],
+
+   ['Cloud 12: Logout clears cloud auth', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/auth/logout', {}, function (error, status, body) {
+         if (error) return log ('logout failed: ' + error.message);
+         if (status !== 200 || ! body || body.ok !== true) return log ('Logout failed: ' + JSON.stringify (body));
+         next ();
+      }, {Cookie: cookieHeader (s.cloudCookies)});
+   }],
+
+   ['Cloud 13: GET /auth/csrf rejects the old cookies after logout', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+      httpRequest ('GET', '/auth/csrf', '', {Cookie: cookieHeader (s.cloudCookies)}, function (error, status, body) {
+         if (error) return log ('csrf after logout failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 after logout, got ' + status + ' ' + body);
+         next ();
+      });
+   }],
+
+   ['Cloud 14: Disable cloud mode in cleanup', 'post', 'settings', {}, {cloud: {enabled: false}}, 200, function (s, rq, rs) {
+      if (! rs.body || rs.body.ok !== true) return log ('Failed to disable cloud mode');
+      return true;
+   }],
+
+   ['Cloud 15: GET /auth/csrf returns LOCAL again after cleanup', 'get', 'auth/csrf', {}, '', 200, function (s, rq, rs) {
+      if (rs.body !== 'LOCAL') return log ('Expected LOCAL after cleanup, got: ' + JSON.stringify (rs.body));
+      return true;
+   }]
+];
+
 // *** SNAPSHOTS ***
 
 var SNAPSHOTS_PROJECT = 'snapshots-' + testTimestamp () + '-' + Math.floor (Math.random () * 100000);
@@ -2465,7 +2640,7 @@ var autogitSequence = [
 // *** RUNNER ***
 
 // Suite order matches readme.md test suites section.
-var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', /*vi, */'dialog', 'static', 'backend'];
+var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'dialog', 'static', 'backend'];
 var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit'];
 
 var allSuites = {
@@ -2474,6 +2649,7 @@ var allSuites = {
    upload:   uploadSequence,
    snapshot: snapshotsSequence,
    autogit:  autogitSequence,
+   cloud:    cloudSequence,
    dialog:   dialogSequence,
    static:   staticSequence,
    backend:  backendSequence,
