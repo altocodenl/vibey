@@ -345,17 +345,24 @@ var page = ['html', {lang: 'en'}, [
             pillar (3, 'Safe YOLO',
                'The agents don\'t ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. <strong>But</strong> each project is fully isolated in its own container and volume. A rogue agent\'s blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.'),
 
+            pillar (4, 'BYOAI',
+               'Bring your own OpenAI/Anthropic credentials, whether personal or API keys.'),
+
+            pillar (5, 'Open source',
+               'Both the local and cloud versions are open source.'),
 
          ]],
 
          // *** AUDIENCE ***
          ['div', {class: 'audience'}, [
-            ['h2', 'Vibey is for'],
+            ['h2', 'Vibey is for those who don\'t code but want to'],
             ['ul', [
-               ['li', ['LITERAL', '<strong>Students of humanities</strong> stranded in the digital age: bring your ideas for tools, games or small apps just by using your words.']],
-               ['li', ['LITERAL', '<strong>Researchers</strong> who need custom software to explore data, run analyses, and generate visualizations.']],
-               ['li', ['LITERAL', '<strong>Teachers</strong> who want to create interactive learning materials.']],
-               ['li', ['LITERAL', '<strong>Founders</strong> who want to explore or quickly iterate a product idea.']]
+               ['li', 'Create their own agentic workflows to automate repeated tasks.'],
+               ['li', 'Use agents to perform research in the background.'],
+               ['li', 'Explore and iterate a product idea.'],
+               ['li', 'Create small computer games.'],
+               ['li', 'Create custom teaching materials.'],
+               ['li', 'Run ad-hoc data analysis and create visualizations.']
             ]]
          ]],
 
