@@ -10,7 +10,6 @@ var dale   = require ('dale');
 var teishi = require ('teishi');
 var lith   = require ('lith');
 var cicek  = require ('cicek');
-var redis  = require ('redis');
 
 var CONFIG = require ('./secret.json');
 
@@ -125,229 +124,6 @@ var loadInjectedPrompt = async function (projectName) {
 
 var saveConfigJson = function () {
    fs.writeFileSync (Path.join (__dirname, 'secret.json'), JSON.stringify (CONFIG, null, 2), 'utf8');
-};
-
-// *** VIBEY CLOUD (FOUNDATIONS) ***
-
-var CLOUD_SESSION_TTL = 7 * 24 * 60 * 60;
-var CLOUD_OTP_TTL     = 10 * 60;
-var CLOUD_MEMORY      = {strings: {}, hashes: {}};
-var CLOUD_REDIS       = {client: null, failed: false};
-
-var cloudEnabled = function () {
-   if (process.env.VIBEY_CLOUD === '1' || process.env.VIBEY_MODE === 'cloud') return true;
-   return !! (CONFIG.cloud && CONFIG.cloud.enabled);
-};
-
-var cloudCookieOptions = function () {
-   return {
-      path: '/',
-      expires: new Date ('9999-12-31T23:59:59Z'),
-      httponly: true,
-      samesite: 'Lax'
-   };
-};
-
-var normalizeEmail = function (email) {
-   if (type (email) !== 'string') return '';
-   return email.trim ().toLowerCase ();
-};
-
-var isValidEmail = function (email) {
-   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test (email || '');
-};
-
-var randomId = function (prefix) {
-   return prefix + '_' + crypto.randomBytes (18).toString ('hex');
-};
-
-var randomOtp = function () {
-   return ('' + Math.floor (100000 + Math.random () * 900000));
-};
-
-var cloudMemoryCleanup = function () {
-   var now = Date.now ();
-   dale.go (CLOUD_MEMORY.strings, function (entry, key) {
-      if (entry && entry.expiresAt && entry.expiresAt <= now) delete CLOUD_MEMORY.strings [key];
-   });
-};
-
-var getRedisClient = function () {
-   if (CLOUD_REDIS.failed) return null;
-   if (CLOUD_REDIS.client) return CLOUD_REDIS.client;
-
-   var redisUrl = (CONFIG.redis && CONFIG.redis.url) || process.env.REDIS_URL;
-   if (! redisUrl) return null;
-
-   try {
-      CLOUD_REDIS.client = redis.createClient (redisUrl);
-      CLOUD_REDIS.client.on ('error', function () {
-         CLOUD_REDIS.failed = true;
-      });
-      return CLOUD_REDIS.client;
-   }
-   catch (error) {
-      CLOUD_REDIS.failed = true;
-      return null;
-   }
-};
-
-var redisCall = function (method) {
-   var client = getRedisClient ();
-   if (! client || CLOUD_REDIS.failed) return null;
-   var args = Array.prototype.slice.call (arguments, 1);
-   return new Promise (function (resolve, reject) {
-      args.push (function (error, value) {
-         if (error) return reject (error);
-         resolve (value);
-      });
-      client [method].apply (client, args);
-   }).catch (function () {
-      CLOUD_REDIS.failed = true;
-      return null;
-   });
-};
-
-var cloudGet = async function (key) {
-   cloudMemoryCleanup ();
-   var redisValue = await redisCall ('get', key);
-   if (redisValue !== null && redisValue !== undefined) return redisValue;
-   var entry = CLOUD_MEMORY.strings [key];
-   return entry ? entry.value : null;
-};
-
-var cloudSet = async function (key, value, ttlSeconds) {
-   if (ttlSeconds) await redisCall ('setex', key, ttlSeconds, value);
-   else            await redisCall ('set',   key, value);
-
-   CLOUD_MEMORY.strings [key] = {
-      value: value,
-      expiresAt: ttlSeconds ? Date.now () + ttlSeconds * 1000 : null
-   };
-};
-
-var cloudDel = async function (key) {
-   await redisCall ('del', key);
-   delete CLOUD_MEMORY.strings [key];
-};
-
-var cloudHset = async function (key, field, value) {
-   await redisCall ('hset', key, field, value);
-   if (! CLOUD_MEMORY.hashes [key]) CLOUD_MEMORY.hashes [key] = {};
-   CLOUD_MEMORY.hashes [key] [field] = value;
-};
-
-var cloudHmset = async function (key, object) {
-   var args = [];
-   dale.go (object, function (value, field) {
-      args.push (field, value);
-   });
-   if (args.length) await redisCall.apply (null, ['hmset', key].concat (args));
-   if (! CLOUD_MEMORY.hashes [key]) CLOUD_MEMORY.hashes [key] = {};
-   dale.go (object, function (value, field) {
-      CLOUD_MEMORY.hashes [key] [field] = value;
-   });
-};
-
-var cloudHgetall = async function (key) {
-   var redisValue = await redisCall ('hgetall', key);
-   if (redisValue) return redisValue;
-   return CLOUD_MEMORY.hashes [key] ? teishi.copy (CLOUD_MEMORY.hashes [key]) : {};
-};
-
-var cloudHdel = async function (key, field) {
-   await redisCall ('hdel', key, field);
-   if (CLOUD_MEMORY.hashes [key]) delete CLOUD_MEMORY.hashes [key] [field];
-};
-
-var cloudIncr = async function (key) {
-   var redisValue = await redisCall ('incr', key);
-   if (redisValue !== null && redisValue !== undefined) {
-      CLOUD_MEMORY.strings [key] = {value: String (redisValue), expiresAt: null};
-      return Number (redisValue);
-   }
-   var current = Number ((CLOUD_MEMORY.strings [key] || {}).value || 0) + 1;
-   CLOUD_MEMORY.strings [key] = {value: String (current), expiresAt: null};
-   return current;
-};
-
-var cloudUserCount = async function () {
-   var value = await cloudGet ('meta:userCount');
-   return Number (value || 0);
-};
-
-var createCloudUser = async function (email, options) {
-   email = normalizeEmail (email);
-   options = options || {};
-
-   var existingId = await cloudGet ('email:user:' + email);
-   if (existingId) {
-      var existing = await cloudHgetall ('user:' + existingId);
-      return existing;
-   }
-
-   var now = new Date ().toISOString ();
-   var user = {
-      id: randomId ('usr'),
-      email: email,
-      createdAt: now,
-      lastActive: now,
-      settings: options.settings || '{}',
-      admin: options.admin ? '1' : '0'
-   };
-
-   await cloudHmset ('user:' + user.id, user);
-   await cloudSet ('email:user:' + email, user.id);
-   await cloudHdel ('signups', email);
-   await cloudIncr ('meta:userCount');
-   return user;
-};
-
-var getCloudUserByEmail = async function (email) {
-   email = normalizeEmail (email);
-   var userId = await cloudGet ('email:user:' + email);
-   if (! userId) return null;
-   var user = await cloudHgetall ('user:' + userId);
-   return user && user.id ? user : null;
-};
-
-var getCloudUserBySession = async function (sessionId) {
-   if (! sessionId) return null;
-   var userId = await cloudGet ('session:' + sessionId);
-   if (! userId) return null;
-   var user = await cloudHgetall ('user:' + userId);
-   if (! user || ! user.id) return null;
-   user.lastActive = new Date ().toISOString ();
-   await cloudHset ('user:' + user.id, 'lastActive', user.lastActive);
-   await cloudSet ('session:' + sessionId, user.id, CLOUD_SESSION_TTL);
-   return user;
-};
-
-var getCloudAuth = async function (rq) {
-   if (! cloudEnabled ()) return {mode: 'local'};
-
-   var cookie = rq.data.cookie || {};
-   var sessionId = cookie.vibeySession;
-   var csrf = cookie.vibeyCsrf;
-   if (! sessionId || ! csrf) return null;
-
-   var csrfSession = await cloudGet ('csrf:' + csrf);
-   if (! csrfSession || csrfSession !== sessionId) return null;
-
-   var user = await getCloudUserBySession (sessionId);
-   if (! user) return null;
-
-   await cloudSet ('csrf:' + csrf, sessionId, CLOUD_SESSION_TTL);
-   return {user: user, sessionId: sessionId, csrf: csrf};
-};
-
-var requireCloudAdmin = async function (rq, rs) {
-   if (! cloudEnabled ()) return reply (rs, 400, {error: 'Cloud mode is disabled'});
-   var auth = await getCloudAuth (rq);
-   if (auth && auth.user && auth.user.admin === '1') return auth;
-   if (await cloudUserCount () === 0) return {bootstrap: true};
-   if (! auth || ! auth.user) return reply (rs, 403, {error: 'Login required'});
-   return reply (rs, 403, {error: 'Admin access required'});
 };
 
 var maskApiKey = function (key) {
@@ -3042,9 +2818,6 @@ var buildSettingsResponse = function (config) {
       editor: {
          viMode: !! editor.viMode
       },
-      cloud: {
-         enabled: cloudEnabled ()
-      },
       testButton: !! config.testButton
    };
 };
@@ -3069,13 +2842,6 @@ var applySettingsUpdate = function (config, body) {
    if (type (editorInput.viMode) === 'boolean') {
       if (! config.editor) config.editor = {};
       config.editor.viMode = editorInput.viMode;
-   }
-
-   var cloudInput = body.cloud || {};
-   if (type (body.cloudMode) === 'boolean') cloudInput = {enabled: body.cloudMode};
-   if (type (cloudInput.enabled) === 'boolean') {
-      if (! config.cloud) config.cloud = {};
-      config.cloud.enabled = cloudInput.enabled;
    }
 
    return config;
@@ -3106,87 +2872,6 @@ var routes = [
    ['get', 'client-css.js', cicek.file],
    ['get', 'client.js', cicek.file],
    ['get', 'test-client.js', cicek.file],
-
-   // *** CLOUD AUTH ***
-
-   ['get', 'auth/csrf', async function (rq, rs) {
-      if (! cloudEnabled ()) return reply (rs, 200, 'LOCAL', {'content-type': 'text/plain; charset=utf-8'});
-
-      var auth = await getCloudAuth (rq);
-      if (! auth || ! auth.user) return reply (rs, 403, {error: 'Login required'});
-      reply (rs, 200, auth.csrf, {'content-type': 'text/plain; charset=utf-8'});
-   }],
-
-   ['post', 'auth/signup', async function (rq, rs) {
-      if (! cloudEnabled ()) return reply (rs, 400, {error: 'Cloud mode is disabled'});
-      var email = normalizeEmail (rq.body.email);
-      if (! isValidEmail (email)) return reply (rs, 400, {error: 'Valid email is required'});
-      await cloudHset ('signups', email, new Date ().toISOString ());
-      reply (rs, 200, {ok: true, email: email, pending: true});
-   }],
-
-   ['post', 'auth/login', async function (rq, rs) {
-      if (! cloudEnabled ()) return reply (rs, 400, {error: 'Cloud mode is disabled'});
-      var email = normalizeEmail (rq.body.email);
-      if (! isValidEmail (email)) return reply (rs, 400, {error: 'Valid email is required'});
-
-      var user = await getCloudUserByEmail (email);
-      if (! user) return reply (rs, 403, {error: 'Unknown user'});
-
-      if (! rq.body.otp) {
-         var otp = randomOtp ();
-         await cloudSet ('otp:' + user.id, otp, CLOUD_OTP_TTL);
-         return reply (rs, 200, {ok: true, sent: true, otp: otp});
-      }
-
-      var storedOtp = await cloudGet ('otp:' + user.id);
-      if (! storedOtp || storedOtp !== String (rq.body.otp).trim ()) return reply (rs, 403, {error: 'Invalid OTP'});
-      await cloudDel ('otp:' + user.id);
-
-      var sessionId = randomId ('sess');
-      var csrf = randomId ('csrf');
-      await cloudSet ('session:' + sessionId, user.id, CLOUD_SESSION_TTL);
-      await cloudSet ('csrf:' + csrf, sessionId, CLOUD_SESSION_TTL);
-      await cloudHset ('user:' + user.id, 'lastActive', new Date ().toISOString ());
-
-      rs.setHeader ('Set-Cookie', [
-         cicek.cookie.write ('vibeySession', sessionId, cloudCookieOptions ()),
-         cicek.cookie.write ('vibeyCsrf', csrf, cloudCookieOptions ())
-      ]);
-      reply (rs, 200, {ok: true, user: {id: user.id, email: user.email, admin: user.admin === '1'}});
-   }],
-
-   ['post', 'auth/logout', async function (rq, rs) {
-      var cookie = rq.data.cookie || {};
-      if (cookie.vibeySession) await cloudDel ('session:' + cookie.vibeySession);
-      if (cookie.vibeyCsrf)    await cloudDel ('csrf:' + cookie.vibeyCsrf);
-      rs.setHeader ('Set-Cookie', [
-         cicek.cookie.write ('vibeySession', false, {path: '/', httponly: true, samesite: 'Lax'}),
-         cicek.cookie.write ('vibeyCsrf', false, {path: '/', httponly: true, samesite: 'Lax'})
-      ]);
-      reply (rs, 200, {ok: true});
-   }],
-
-   ['get', 'admin/signups', async function (rq, rs) {
-      var auth = await requireCloudAdmin (rq, rs);
-      if (! auth || ! auth.user) return;
-      var signups = await cloudHgetall ('signups');
-      var entries = dale.go (signups, function (createdAt, email) {
-         return {email: email, createdAt: createdAt};
-      }).sort (function (a, b) {
-         return (a.createdAt < b.createdAt ? -1 : 1);
-      });
-      reply (rs, 200, entries);
-   }],
-
-   ['post', 'admin/createUser', async function (rq, rs) {
-      var auth = await requireCloudAdmin (rq, rs);
-      if (! auth) return;
-      var email = normalizeEmail (rq.body.email);
-      if (! isValidEmail (email)) return reply (rs, 400, {error: 'Valid email is required'});
-      var user = await createCloudUser (email, {admin: auth.bootstrap || !! rq.body.admin});
-      reply (rs, 200, {ok: true, user: {id: user.id, email: user.email, admin: user.admin === '1'}, bootstrap: !! auth.bootstrap});
-   }],
 
    // *** SETTINGS ***
 
