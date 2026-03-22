@@ -336,10 +336,10 @@ var page = ['html', {lang: 'en'}, [
 
          // *** AUDIENCE ***
          ['div', {class: 'audience'}, [
-            ['h2', 'Vibey is for those who don\'t code but want to'],
+            ['h2', 'Vibey is for those who don\'t code but want to use AI to:'],
             ['ul', [
-               ['li', 'Create their own agentic workflows to automate repeated tasks.'],
-               ['li', 'Use agents to perform research in the background.'],
+               ['li', 'Create their own workflows to automate repeated tasks.'],
+               ['li', 'Perform research in the background.'],
                ['li', 'Explore and iterate a product idea.'],
                ['li', 'Create small computer games.'],
                ['li', 'Create custom teaching materials.'],
