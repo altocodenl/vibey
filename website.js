@@ -334,8 +334,22 @@ var page = ['html', {lang: 'en'}, [
             ['p', {class: 'tagline'}, 'Build your ideas with your words.'],
          ]],
 
+         // *** AUDIENCE ***
+         ['div', {class: 'audience'}, [
+            ['h2', 'Vibey is for those who don\'t code but want to'],
+            ['ul', [
+               ['li', 'Create their own agentic workflows to automate repeated tasks.'],
+               ['li', 'Use agents to perform research in the background.'],
+               ['li', 'Explore and iterate a product idea.'],
+               ['li', 'Create small computer games.'],
+               ['li', 'Create custom teaching materials.'],
+               ['li', 'Run ad-hoc data analysis and create visualizations.']
+            ]]
+         ]],
+
          // *** PILLARS ***
          ['div', {class: 'pillars'}, [
+            ['h2', 'How is vibey different?'],
             pillar (1, 'Everything is a document',
                'Your description of what you\'re building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. <strong>There is no database.</strong>'),
 
@@ -351,19 +365,6 @@ var page = ['html', {lang: 'en'}, [
             pillar (5, 'Open source',
                'Both the local and cloud versions are open source.'),
 
-         ]],
-
-         // *** AUDIENCE ***
-         ['div', {class: 'audience'}, [
-            ['h2', 'Vibey is for those who don\'t code but want to'],
-            ['ul', [
-               ['li', 'Create their own agentic workflows to automate repeated tasks.'],
-               ['li', 'Use agents to perform research in the background.'],
-               ['li', 'Explore and iterate a product idea.'],
-               ['li', 'Create small computer games.'],
-               ['li', 'Create custom teaching materials.'],
-               ['li', 'Run ad-hoc data analysis and create visualizations.']
-            ]]
          ]],
 
          // *** INSTALL ***
