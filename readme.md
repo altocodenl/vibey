@@ -857,7 +857,14 @@ Lower-level details:
 - Cookies expire after seven days automatically with SETEX. Set them exactly like tagaway does, so that they are httponly, expires set very well in the future (so the server controls when they expire through setex + 403). CSRF tokens last exactly as much as the session to which they are bound.
 - Snapshots should be prepended with the user id. We need to get rid of the silliness of snapshots.json and not be afraid to use fs.scandir or something to that effect.
 
+- POST to trigger an agent! Without a response, to avoid abuse. Just a wake up. It should also be protected.
+- Not everyone needs to build an app; many could have better use for agents researching and writing documents and sending API calls.
+
 #### For later
 
 - Choose your own adventure website: local vs cloud
+   BYOAI
+   open source
+   aligned pricing
 - Hosted services? (email, DB)
+

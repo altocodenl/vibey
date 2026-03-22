@@ -1,5 +1,15 @@
 ## Vibey development notes
 
+### 2026-03-20
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. Use agents-now.md to coordinate. For pupeteer, use the global pupeteer, don't install it.
+
+Prompts:
+- Please read the spec for vibey cloud. Then add new tests to test.md. But instead of doing a new "vibey cloud" chunk, only enrich some of the existing tests for scenarios where we need to test cloud stuff. You can add new sections only for new endpoints, and those should be grouped in a meaningful group.
+- Please take a manageable chunk of the server side implementation of cloud vibey and proceed. Don't modify test.md.
+- Please move all variables you used once and inline them, or at least put them near where they are.
+- Please inline redis calls. Make the redis client be called `redis`, don't initialize it. Use await.
+
 ### 2026-03-19
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. Use agents-now.md to coordinate. For pupeteer, use the global pupeteer, don't install it.
