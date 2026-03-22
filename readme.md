@@ -7,16 +7,17 @@ Build your ideas with your words.
 1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. There is no database.
 2. **Everything in your browser**: your documents are not only text: use images, audio, and embed small apps in your documents. No terminal or dedicated native app required.
 3. **Safe YOLO**: the agents don't ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
+4. **BYOAI**: bring your own OpenAI/Anthropic credentials, whether personal or API keys.
+5. **Open source**: both the local and cloud versions are open source.
 
-## Vibey is for
+## Vibey is for those who don't code but want to
 
-- **Students of humanities** stranded in the digital age: bring your ideas for tools, games or small apps just by using your words.
-
-- **Researchers** who need custom software to explore data, run analyses, and generate visualizations.
-
-- **Teachers** who want to create interactive learning materials.
-
-- **Founders** who want to explore or quickly iterate a product idea.
+- Create their own agentic workflows to automate repeated tasks.
+- Use agents to perform research in the background.
+- Explore and iterate a product idea.
+- Create small computer games.
+- Create custom teaching materials.
+- Run ad-hoc data analysis and create visualizations.
 
 ## Installation
 
@@ -683,7 +684,7 @@ Agent prompt says: *"Your working directory is /workspace. If you run a server, 
 - `edit_file`: `projectFS.readFile` → find/replace in vibey's memory → `projectFS.writeFile`.
 - `launch_agent`: spawns a new dialog in the same project container (same container, new dialog file).
 
-### Vi mode [TODO]
+## Vi mode [TODO]
 
 Vi mode is available for the docs editor and the chat input. Toggle it in **Settings → Editor → Vi mode**. The setting is persisted in `secret.json` under `editor.viMode` and loaded via `GET /settings`.
 
@@ -703,7 +704,167 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 - Search: `/` then `n`/`N`.
 - Commands: `:` enters command mode.
 
-### Client implementation
+## Cloud mode
+
+Vibey runs in one of two modes: **local** (the default) or **cloud**. The mode is determined by the presence of a `VIBEY_CLOUD` environment variable. In local mode, there is no authentication — the user is implicitly logged in. In cloud mode, all routes (except auth routes and public routes) require a valid session cookie and CSRF token.
+
+### Server: mode detection
+
+`GET /auth/csrf` — the client calls this on startup to determine the mode.
+
+- **Local mode**: returns `{mode: 'LOCAL'}`. No cookie or CSRF needed.
+- **Cloud mode, logged in**: returns `{csrf: '<token>'}`. The session cookie is already set.
+- **Cloud mode, not logged in**: returns `403 {error: 'session'}`.
+
+### Server: cloud configuration
+
+Cloud mode requires additional fields in `secret.json`:
+
+```json
+{
+  "cookieSecret": "a-long-random-string",
+  "ses": {
+    "accessKeyId": "...",
+    "secretAccessKey": "...",
+    "region": "eu-west-1"
+  },
+  "email": {
+    "name": "Vibey",
+    "address": "no-reply@yourdomain.com"
+  },
+  "adminEmail": "admin@yourdomain.com"
+}
+```
+
+- `cookieSecret` — used by cicek for cookie signing. Required in cloud mode; ignored in local mode.
+- `ses` — AWS SES credentials for nodemailer (`nodemailer-ses-transport`). All transactional emails (OTPs, signup notifications, welcome emails) go through SES.
+- `email.name` / `email.address` — the `From:` header on outgoing emails.
+- `adminEmail` — where signup notification emails are sent.
+
+### Server: auth
+
+Authentication is OTP-over-email. No passwords, no SSO. Emails are sent via nodemailer with the SES transport configured in `secret.json`.
+
+- `POST /auth/signup` — request an invite. Body: `{email}`. Stores the request in redis (`signup:<email>` hash with `email`, `createdAt`) and sends a notification email to `adminEmail`. Returns `{ok: true}`. Idempotent — re-requesting with the same email overwrites the previous request.
+
+- `POST /auth/login` — request an OTP. Body: `{email}`. If the user exists, generates a 6-digit OTP, stores it in redis (`otp:<user-id>` with a 10-minute TTL via `SETEX`), and emails it to the user via SES. Returns `{ok: true}`. If the user does not exist, returns `403 {error: 'user not found'}`.
+
+- `POST /auth/verify` — verify an OTP and create a session. Body: `{email, otp}`. Validates the OTP against `otp:<user-id>`. On success:
+  - Deletes the OTP key.
+  - Generates a session id (`crypto.randomBytes(32).toString('hex')`).
+  - Stores `session:<id>` → `<user-id>` with a 7-day TTL (`SETEX`, `604800` seconds).
+  - Generates a CSRF token (`crypto.randomBytes(32).toString('hex')`).
+  - Stores `csrf:<csrf-token>` → `<session-id>` with the same TTL.
+  - Sets an `httponly` cookie named `vibey` with `samesite=Lax`, `path=/`, and a far-future `expires` (so the server controls expiry via `SETEX` + 403, not the browser).
+  - Returns `{csrf: '<token>'}`.
+  - On failure: `403 {error: 'invalid otp'}`.
+
+- `POST /auth/logout` — destroy the current session. Deletes `session:<id>` and `csrf:<token>` from redis. Clears the cookie. Returns `{ok: true}`.
+
+### Server: session & CSRF gatekeeping
+
+A catch-all route early in the route list handles session validation for cloud mode:
+
+1. If not in cloud mode, call `rs.next ()`.
+2. If the route is an auth route (`/auth/*`) or a public route (`/public/*`), call `rs.next ()`.
+3. If no cookie or no `vibey` cookie: return `403 {error: 'nocookie'}`.
+4. Look up `session:<cookie-value>` in redis. If missing or expired: return `403 {error: 'session'}`.
+5. Look up the user from `user:<user-id>`. Attach `rq.user` with `{id, email, admin}`.
+6. Refresh the session and CSRF TTLs (`EXPIRE`, 604800 seconds) on every authenticated request.
+7. Look up `csrf:<token>` and attach `rq.user.csrf`.
+8. Call `rs.next ()`.
+
+For `POST`/`PUT`/`DELETE` requests (except auth routes), a subsequent route validates `rq.body.csrf === rq.user.csrf`. On mismatch: `403 {error: 'csrf'}`. The CSRF token is then stripped from `rq.body` before the route handler runs.
+
+### Server: admin
+
+- `GET /admin/signups` — list pending signup requests (admin-only). Returns array of `{email, createdAt}`, newest first. Scans redis keys matching `signup:*`.
+
+- `POST /admin/createUser` — approve a signup (admin-only). Body: `{email}`. Creates the user:
+  - Generates a user id (`crypto.randomBytes(16).toString('hex')`).
+  - Stores `user:<id>` hash with `{id, email, createdAt, lastActive, settings: '{}'}`.
+  - Stores `email:<email>` → `<user-id>` for email-to-id lookup.
+  - Deletes `signup:<email>`.
+  - Sends the user a welcome email with a login link.
+  - Returns `{ok: true, id: '<user-id>'}`.
+
+Admin-only routes check `rq.user.admin === '1'`; non-admins receive `403`.
+
+### Server: user scoping
+
+In cloud mode, projects and snapshots are scoped to the authenticated user:
+
+- Project containers are named `vibey-proj-<user-id>-<name>` (instead of `vibey-proj-<name>`).
+- Project volumes are named `vibey-vol-<user-id>-<name>`.
+- `GET /projects` lists only the current user's projects (filtered by `<user-id>` prefix in container/volume names).
+- Snapshot archive filenames are prefixed with the user id. The `snapshots.json` index file is replaced by a directory scan of `/app/data/snapshots/` — each file is `<user-id>-<snapshot-id>.tar.gz`.
+
+In local mode, scoping is unchanged (no user id prefix).
+
+### Server: user settings
+
+- In **local mode**, settings live in `secret.json` on disk (current behavior).
+- In **cloud mode**, settings live in the `settings` field of `user:<id>` in redis. `GET /settings` reads from redis; `POST /settings` writes to redis. The shape is the same as the local `secret.json`.
+
+### Server: API key
+
+Each user has an auto-generated API key stored in `user:<id>` under the `apiKey` field (created at user creation time, `crypto.randomBytes(24).toString('hex')`). The API key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication.
+
+- `POST /project/:project/trigger` — trigger an agent on a project. Requires API key authentication (no cookie). Body: `{provider, prompt, slug?}`. Equivalent to `POST /project/:project/dialog` but returns immediately with `202 {ok: true, dialogId}` and no further response body. Designed for automation and webhooks.
+
+### Server: public access
+
+Users can publish specific project surfaces (static files, proxied apps, docs) for anonymous access.
+
+- `GET /access` — list all access rules for the current user. Returns `{rules: {<project>:<path>: 'ALL', ...}}`.
+- `POST /access` — overwrite access rules. Body: `{rules: {<project>:<path>: 'ALL', ...}}`. Stores in `access:<user-id>` hash in redis.
+
+Public routes:
+
+- `GET /public/:userId/:project/static/*` — serve a static file if the path is published.
+- `ALL /public/:userId/:project/proxy/:port/*` — reverse-proxy to a running app if the path is published. `POST` is allowed (the app handles its own mutations).
+- `GET /public/:userId/:project/doc/:name` — serve a rendered doc page (HTML generated with `lith` from the markdown source, with working embeds). Only if the doc path is published.
+
+Public routes check for a session cookie if one is present (to identify the caller) but never deny access based on authentication. If the requested path is not in the user's `access:<user-id>` hash, return `404`.
+
+### Server: redis data model
+
+All cloud state lives in redis. Key schema:
+
+| Key pattern | Type | TTL | Contents |
+|---|---|---|---|
+| `user:<id>` | hash | — | `id`, `email`, `createdAt`, `lastActive`, `settings` (JSON string), `admin` (`'1'` or absent), `apiKey` |
+| `email:<email>` | string | — | `<user-id>` — reverse lookup |
+| `session:<id>` | string | 7 days | `<user-id>` |
+| `csrf:<token>` | string | 7 days | `<session-id>` |
+| `otp:<user-id>` | string | 10 min | `<6-digit code>` |
+| `signup:<email>` | hash | — | `email`, `createdAt` |
+| `access:<user-id>` | hash | — | `<project>:<path>` → `ALL` or JSON array of user ids |
+
+### Client: auth
+
+- On startup, the client calls `GET /auth/csrf`.
+  - If response is `{mode: 'LOCAL'}`: skip all auth UI, proceed as today.
+  - If response is `{csrf: '...'}`: store the CSRF token, proceed as today. Show a **Logout** button in the header.
+  - If response is `403`: show the login view.
+
+- **Login view**: email input → "Send code" button → OTP input → "Verify" button. On success, store CSRF token, navigate to projects.
+- **Signup view**: email input → "Request invite" button. Shows confirmation message after submit.
+- **Logout**: `POST /auth/logout`, clear local state, show login view.
+
+All `POST`/`PUT`/`DELETE` requests from the client include `csrf` in the body (stripped by the server before the route handler sees it).
+
+### Client: admin
+
+A new **Admin** tab is visible only when `rq.user.admin === '1'` (the server includes `admin: true` in the CSRF response for admin users: `{csrf: '...', admin: true}`).
+
+- **Signups list**: fetched from `GET /admin/signups`. Each entry shows the email and a "Create user" button that calls `POST /admin/createUser`.
+
+### Client: public access
+
+A new **Access** section in the project header (cloud mode only). Shows a list of published paths with toggles. Calls `GET /access` to load and `POST /access` to save.
+
+## Client implementation
 
 #### State variables (alphabetical, 40 total)
 
@@ -798,9 +959,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
       - The UI redraws synchronously because of gotoB, so there should be
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
-## Vibey cloud in a nutshell
-
-*WARNING: vaporware, will only build if Vibey itself is useful*
+### TODO for website: Vibey cloud in a nutshell
 
 Why use Vibey cloud and not locally?
 
@@ -816,55 +975,14 @@ How does it work?
 
 All you need is an AI provider, no need to install anything.
 
-### TODO vibey cloud design
+### TODO
 
-- There's a switch between running vibey locally and in cloud mode.
-- The client should not know or care if we're running locally or in cloud mode? Yes, with the exception of logging in. Locally, you're in automatically, and in the cloud, you have to identify yourself.
-- This is going to be an initial version in that we won't support the spinning up of engines (Hetzner VPS), but run everything in a local server.
-- How to make this seamless?
-   - When in local mode, everything as it is now
-   - When in cloud mode:
-      - Add auth gatekeeping.
-      - There are no port collisions because the proxying is done through ids.
-      - Docker containers are prepended with the id of their owner, so it's all scoped without making DB calls.
-- Allow users to set a certain project's URLs (not the entire project) to public. Add a `/public` route family for explicitly published project surfaces. These routes always check who you are if a session cookie is present, but they still allow anonymous access when no session exists. If cookies are present, they can be used to identify the caller, but not to deny public access. In MVP, only selected `static`, `proxy`, and `doc` URLs can be published. Publishing a proxied app exposes that app's HTTP interface publicly, including mutating requests if the app supports them. The blast radius is limited to that single project.
-
-Lower-level details:
-- No password, no SSO (for now). Let's just do OTP over email.
-- Form to request invite, sends me an email.
-- Cookie handling done as in tagaway, also with CSRF tokens.
-- When the client starts, it asks for the CSRF token. Three things can happen: the server responds with 'LOCAL' to indicate that we're in local mode; or with the token (cloud, user logged in); or with a 403, user must login.
-- New client views: signup (request invite), login. Add logout button if in cloud.
-- New endpoints: POST /auth/signup, POST /auth/login, POST /auth/logout, POST /admin/createUser (body: `{email}`; admin-only), GET /admin/signups (list pending signup requests; admin-only), GET & POST /access (complete overwrite of what's public or not in all your projects). GET /public/<user-id>/<project-id>/static|proxy|doc/<rest-of-the-path>. Allow POST /public for proxy. GET of a doc should give the entire markdown page with embeds working (let's make it a static page generated with lith).
-- For vibey cloud, we need a database. We have redis already and it's awesome. Let's use it. We'll store:
-   - user:<id> (hash)
-      - id
-      - email
-      - createdAt
-      - lastActive
-      - settings (what we currently store in secret.json)
-      - admin (set to 1 only for my user)
-   - session:<id> -> <user id> (string)
-   - csrf:<id> -> <session id> (string)
-   - otp:<user-id>
-   - access:<user-id> (hash)
-      - <project-id>:<path> -> ALL/<JSON with user ids>
-- To generate OTPs, session cookies and CSRF tokens, let's see if there are good node native crypto calls. Let's use what tagaway uses which is nodemailer + SES.
-- The user settings are in secret.json (for local) and inside redis for cloud
-- Dockers for projects are generated at the level of the host, like it happens on local vibey. There's no vibey inside vibey.
-- The dialog state is still held in memory on a single process. A more serious version can later put these states in redis.
-- POST /auth/signup stores the request and sends me (admin) a notification email. I approve via an admin view in the client (new tab, only visible to admin users) that lists pending signups (`GET /admin/signups`) with an "Approve" button per entry. Approving calls `POST /admin/createUser` with `{email}`, which creates the user and sends them a welcome OTP email.
-- Cookies expire after seven days automatically with SETEX. Set them exactly like tagaway does, so that they are httponly, expires set very well in the future (so the server controls when they expire through setex + 403). CSRF tokens last exactly as much as the session to which they are bound.
+- Implement vibey cloud
 - Snapshots should be prepended with the user id. We need to get rid of the silliness of snapshots.json and not be afraid to use fs.scandir or something to that effect.
-
-- POST to trigger an agent! Without a response, to avoid abuse. Just a wake up. It should also be protected.
-- Not everyone needs to build an app; many could have better use for agents researching and writing documents and sending API calls.
 
 #### For later
 
-- Choose your own adventure website: local vs cloud
-   BYOAI
-   open source
-   aligned pricing
+- Choose your own adventure website (local vs cloud).
+- Spin Hetzner engines and bind projects to them.
+- Put dialog state in memory [perhaps]
 - Hosted services? (email, DB)
-

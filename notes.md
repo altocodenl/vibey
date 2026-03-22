@@ -1,5 +1,25 @@
 ## Vibey development notes
 
+### 2026-03-22
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it.
+
+Prompt:
+- Please document the auth endpoints in readme.md, above client implementation. Copy the existing style of documentation.
+- Please take spec for vibey cloud from the bottom of readme.md. Please implement the server changes taking the style and approach from here (https://raw.githubusercontent.com/altocodenl/tagaway/refs/heads/master/server.js). But don't use giz, just borrow the redis calling style and coding style.
+
+
+Big takeaway from Friday: not everyone needs to build an app; many could have better use for agents researching and writing documents and sending API calls.
+
+### 2026-03-21
+
+#### Alexandrian axioms
+
+- The maker's creed: Everything you build must be a being.
+- The goodness of a thing is represented by its degree of life.
+- The degree of life of a thing is determined by the degree of life of its centers.
+- When bringing a new center, always see how it changes the whole. If a change reduces the degree of life of the whole, discard it.
+
 ### 2026-03-20
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. Use agents-now.md to coordinate. For pupeteer, use the global pupeteer, don't install it.
