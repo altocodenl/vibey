@@ -12,7 +12,7 @@ var inc  = teishi.inc;
 //        node test-server.js dialog       (dialog suite, includes safety checks)
 //        node test-server.js upload       (uploads suite)
 //        node test-server.js autogit      (auto-commit suite)
-//        node test-server.js fast         (fast suites: project, doc, upload, snapshot, autogit)
+//        node test-server.js fast         (fast suites: project, doc, upload, snapshot, autogit, cloud)
 // Suite names: project, doc, upload, snapshot, autogit, dialog, static, backend, vi
 // Assumes server is already running on localhost:5353
 
@@ -1255,6 +1255,96 @@ var dialogSequence = [
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DIALOG_PROJECT)) return log ('Project still exists after final deletion');
       return true;
+   }],
+
+   ['Dialog 49: Cloud trigger setup', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (rs.code === 200 && rs.body && rs.body.mode === 'LOCAL') {
+         s.skipDialogCloudTrigger = true;
+         return next ();
+      }
+      if (rs.code !== 403 && rs.code !== 200) return log ('Expected 403 or 200 from auth/csrf, got ' + rs.code);
+
+      if (s.adminAuth) {
+         s.dialogCloudAuth = s.adminAuth;
+         return next ();
+      }
+
+      s.dialogCloudAdminEmail = 'dialog-cloud-admin-' + testTimestamp () + '@test.vibey.dev';
+      httpJson ('POST', '/admin/createUser', {email: s.dialogCloudAdminEmail}, function (error, status, body) {
+         if (error) return log ('Dialog cloud bootstrap failed: ' + error.message);
+         if (status === 403) {
+            s.skipDialogCloudTrigger = true;
+            return next ();
+         }
+         if (status !== 200) return log ('Expected 200 bootstrapping dialog cloud admin, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || ! body.id) return log ('Dialog cloud bootstrap missing id');
+         cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
+            if (loginError) return log ('Dialog cloud admin login failed: ' + loginError.message);
+            s.dialogCloudAuth = auth;
+            next ();
+         });
+      });
+   }],
+
+   ['Dialog 50: Cloud trigger creates dialog via API key', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+      var auth = s.dialogCloudAuth;
+      if (! auth) return log ('Missing dialog cloud auth');
+
+      authGet ('/settings', auth, function (settingsError, settingsStatus, settingsBody) {
+         if (settingsError) return log ('Dialog cloud GET /settings failed: ' + settingsError.message);
+         if (settingsStatus !== 200) return log ('Expected 200 from dialog cloud settings, got ' + settingsStatus);
+         if (! settingsBody || ! settingsBody.userApiKey || ! settingsBody.userApiKey.key) return log ('Dialog cloud settings missing userApiKey');
+         if (settingsBody.userApiKey.lastUsed) return log ('Dialog cloud api key should start unused');
+
+         s.dialogCloudApiKey = settingsBody.userApiKey.key;
+
+         authJson ('POST', '/projects', {name: 'dialog-cloud-trigger-' + testTimestamp ()}, auth, function (projectError, projectStatus, projectBody) {
+            if (projectError) return log ('Dialog cloud project create failed: ' + projectError.message);
+            if (projectStatus !== 200) return log ('Expected 200 creating dialog cloud project, got ' + projectStatus);
+            if (! projectBody || ! projectBody.slug) return log ('Dialog cloud project create missing slug');
+            s.dialogCloudProjectSlug = projectBody.slug;
+
+            httpJson ('POST', '/project/' + encodeURIComponent (s.dialogCloudProjectSlug) + '/trigger', {
+               provider: 'openai',
+               prompt: 'Reply with the single word ok.',
+               slug: 'api-key-trigger'
+            }, function (triggerError, triggerStatus, triggerBody) {
+               if (triggerError) return log ('Dialog cloud trigger failed: ' + triggerError.message);
+               if (triggerStatus !== 202) return log ('Expected 202 from trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+               if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad trigger response: ' + JSON.stringify (triggerBody));
+               s.dialogCloudTriggeredDialogId = triggerBody.dialogId;
+               next ();
+            }, {Authorization: 'Bearer ' + s.dialogCloudApiKey});
+         });
+      });
+   }],
+
+   ['Dialog 51: Cloud trigger updates lastUsed in settings', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+      authGet ('/settings', s.dialogCloudAuth, function (error, status, body) {
+         if (error) return log ('Dialog cloud GET /settings after trigger failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from dialog cloud settings after trigger, got ' + status);
+         if (! body || ! body.userApiKey) return log ('Expected userApiKey in dialog cloud settings after trigger');
+         if (! body.userApiKey.lastUsed) return log ('Expected lastUsed after trigger');
+         next ();
+      });
+   }],
+
+   ['Dialog 52: Cloud trigger cleanup project', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger || ! s.dialogCloudProjectSlug) return next ();
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/projects/' + encodeURIComponent (s.dialogCloudProjectSlug),
+         method: 'DELETE',
+         headers: {Cookie: cookieHeader (s.dialogCloudAuth.cookies)}
+      }, function (res) {
+         res.on ('data', function () {});
+         res.on ('end', function () {next ();});
+      });
+      req.on ('error', function () {next ();});
+      req.end ();
    }]
 ];
 
@@ -2076,30 +2166,46 @@ var viSequence = [
 
 // *** CLOUD AUTH, ADMIN, ACCESS ***
 
-// Redis client for reading OTPs and verifying state directly.
-// Connects to the same Redis the server uses.
-var redisClient = require ('redis').createClient ({
-   host: process.env.REDIS_HOST || '127.0.0.1',
-   port: process.env.REDIS_PORT || 6379
-});
-redisClient.on ('error', function () {});
+// Redis helpers for reading OTPs and verifying state directly.
+// Each call uses a short-lived client so the test runner exits cleanly.
+var withRedis = function (operation) {
+   var client = require ('redis').createClient ({
+      host: process.env.REDIS_HOST || '127.0.0.1',
+      port: process.env.REDIS_PORT || 6379
+   });
+   client.on ('error', function () {});
+   operation (client, function () {
+      try {client.quit ();} catch (e) {}
+   });
+};
 
 var redisGet = function (key, cb) {
-   redisClient.get (key, function (error, data) {
-      cb (error, data);
+   withRedis (function (client, done) {
+      client.get (key, function (error, data) {
+         done ();
+         cb (error, data);
+      });
    });
 };
 
 var redisHgetall = function (key, cb) {
-   redisClient.hgetall (key, function (error, data) {
-      cb (error, data);
+   withRedis (function (client, done) {
+      client.hgetall (key, function (error, data) {
+         done ();
+         cb (error, data);
+      });
    });
 };
 
 // Flush all test-created keys from Redis after the cloud suite.
 var redisFlushTestKeys = function (keys, cb) {
    if (! keys || ! keys.length) return cb ();
-   redisClient.del (keys, function () {cb ();});
+   withRedis (function (client, done) {
+      client.del (keys, function () {
+         done ();
+         cb ();
+      });
+   });
 };
 
 // Helper: full login flow for a given email. Returns {cookies, csrf} via cb.
@@ -2214,16 +2320,25 @@ var cloudSequence = [
       });
    }],
 
-   ['Cloud 6: Bootstrap admin is marked as admin in Redis', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 6: Bootstrap admin is marked as admin and gets a dedicated API key record', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
       redisHgetall ('user:' + s.adminUserId, function (err, user) {
          if (err || ! user) return log ('Failed to read admin user from Redis');
          if (user.admin !== '1') return log ('Bootstrap admin should have admin=1, got: ' + user.admin);
          if (user.email !== s.cloudAdminEmail) return log ('Admin email mismatch');
-         if (! user.apiKey) return log ('Admin should have an apiKey');
-         s.adminApiKey = user.apiKey;
-         s.cleanupKeys.push ('apikey:' + user.apiKey);
-         next ();
+         if (user.apiKey) return log ('Admin user hash should not store apiKey anymore');
+         redisGet ('userapikey:' + s.adminUserId, function (lookupError, apiKey) {
+            if (lookupError || ! apiKey) return log ('Admin should have userapikey:<id> lookup entry');
+            redisHgetall ('apikey:' + apiKey, function (recordError, record) {
+               if (recordError || ! record) return log ('Admin api key record missing');
+               if (record.userId !== s.adminUserId) return log ('Admin api key record userId mismatch');
+               if (! record.createdAt) return log ('Admin api key record missing createdAt');
+               if (record.lastUsed !== '') return log ('Admin api key record lastUsed should start empty');
+               s.adminApiKey = apiKey;
+               s.cleanupKeys.push ('userapikey:' + s.adminUserId, 'apikey:' + apiKey);
+               next ();
+            });
+         });
       });
    }],
 
@@ -2378,16 +2493,25 @@ var cloudSequence = [
       });
    }],
 
-   ['Cloud 17: Created user is not admin', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 17: Created user is not admin and gets a dedicated API key record', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
       redisHgetall ('user:' + s.memberUserId, function (err, user) {
          if (err || ! user) return log ('Failed to read member user from Redis');
          if (user.admin === '1') return log ('Normal user should not be admin');
          if (user.email !== s.cloudMemberEmail) return log ('Email mismatch');
-         if (! user.apiKey) return log ('User should have an apiKey');
-         s.memberApiKey = user.apiKey;
-         s.cleanupKeys.push ('apikey:' + user.apiKey);
-         next ();
+         if (user.apiKey) return log ('User hash should not store apiKey anymore');
+         redisGet ('userapikey:' + s.memberUserId, function (lookupError, apiKey) {
+            if (lookupError || ! apiKey) return log ('User should have userapikey:<id> lookup entry');
+            redisHgetall ('apikey:' + apiKey, function (recordError, record) {
+               if (recordError || ! record) return log ('User api key record missing');
+               if (record.userId !== s.memberUserId) return log ('User api key record userId mismatch');
+               if (! record.createdAt) return log ('User api key record missing createdAt');
+               if (record.lastUsed !== '') return log ('User api key record lastUsed should start empty');
+               s.memberApiKey = apiKey;
+               s.cleanupKeys.push ('userapikey:' + s.memberUserId, 'apikey:' + apiKey);
+               next ();
+            });
+         });
       });
    }],
 
@@ -2478,6 +2602,20 @@ var cloudSequence = [
          next ();
       });
    }],
+
+   ['Cloud 25a: Member GET /settings exposes their automation API key', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authGet ('/settings', s.memberAuth, function (error, status, body) {
+         if (error) return log ('Member GET /settings failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from member settings, got ' + status);
+         if (! body || ! body.userApiKey) return log ('Expected userApiKey in settings response');
+         if (body.userApiKey.key !== s.memberApiKey) return log ('Settings userApiKey.key mismatch');
+         if (! body.userApiKey.createdAt) return log ('Settings userApiKey missing createdAt');
+         if (body.userApiKey.lastUsed) return log ('Settings userApiKey.lastUsed should be empty before trigger use');
+         next ();
+      });
+   }],
+
 
    // *** ACCESS & PUBLIC ROUTES ***
 
@@ -3031,7 +3169,7 @@ var autogitSequence = [
 
 // Suite order matches readme.md test suites section.
 var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'dialog', 'static', 'backend'];
-var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit'];
+var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud'];
 
 var allSuites = {
    project:  projectSequence,
@@ -3059,6 +3197,10 @@ if (! requestedSuites.length) requestedSuites = SUITE_ORDER;
 var sequences = dale.go (requestedSuites, function (name) {return allSuites [name];});
 var label = requestedSuites.join (' + ');
 
+var finish = function (code) {
+   process.exit (code);
+};
+
 h.seq (
    {
       host: 'localhost',
@@ -3074,9 +3216,11 @@ h.seq (
             }
          }
          catch (e) {}
-         return console.log ('VIBEY TEST FAILED:', error);
+         console.log ('VIBEY TEST FAILED:', error);
+         return finish (1);
       }
       log ('ALL TESTS PASSED (' + label + ')');
+      finish (0);
    },
    h.stdmap
 );

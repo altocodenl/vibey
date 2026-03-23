@@ -2,13 +2,22 @@
 
 ### 2026-03-23
 
-Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server.
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output.
 
 Prompt:
 - Why are we passing config to the chatWithX functions? Why do we need it?
 - Add a local/cloud flag to that getApiKey function. Call getApiKey from inside the chat functions and let that function resolve the config. getApiKey should take the rq as parameter.
-
 - Please remove snapshots.json, let's just do a scandir where we need to.
+- Let's add proper API keys: just one per user, but in its own redis key that points to the user, createdAt and lastUsed. Update readme.md, then server.js, then client.js, then the tests. The single key should be accessible from the settings view.
+- You can now rebuild vibey and run the server cloud tests. Don't leave any bugs on the server, if necessary fix the server. If necessary, tighten up the cloud tests.
+- The tests pass but the runner doesn't exit. Please fix that.
+- Rerun them please and see if there are other "cloud related" tests to run
+- What is that vibey redis container? It should all be inside vibey
+- Yeah, please kill that extra container. You can rebuild vibey. Test against the surface.
+- Please move that test for triggering the dialog to the dialog section. Then mark cloud as fast on both server and client tests.
+- You can put it at the end of the dialog suite, creating what you need there. Also update first test.md
+- Please take the deploy script I have on ../acpic/deploy.sh and make a version here on utils/deploy.sh.
+- Please remove the separate data volume for redis. Vibey's redis should be on the same volume as vibey itself.
 
 ### 2026-03-22
 

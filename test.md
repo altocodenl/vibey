@@ -16,7 +16,13 @@ Run the client tests the same way, using `test-client.js` instead:
 
 Note: if you change `test-client.js`, rebuild/restart vibey before running the client tests. The browser loads the test bundle from the running vibey server/container, so local file edits are not enough on their own.
 
-Available suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `cloud`, `dialog`, `static`, `backend`, `vi`.
+Available server suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `cloud`, `dialog`, `static`, `backend`, `vi`.
+
+Available client suite names: `project`, `dialog`, `docs`, `uploads`, `snapshots`, `static`, `backend`, `vi`, `settings`, `cloud`.
+
+Notes:
+- Server `fast` now includes `cloud`.
+- Client `fast` now includes `cloud`, where `cloud` is an alias for the settings/API-key surface tests.
 
 ## Test suites
 
@@ -443,6 +449,11 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 *Cleanup:*
 33. Re-login admin, delete the test project.
 34. Flush all test-created Redis keys.
+
+**Dialog (cloud trigger at end of suite):**
+- The API-key-trigger surface test now lives at the end of the Dialog suite.
+- In cloud mode it creates what it needs there, calls `POST /project/:project/trigger` with the user's Bearer token, and verifies `lastUsed` through `GET /settings`.
+- In local mode it is skipped.
 
 **Vi mode:** [COMMENTED OUT, BROKEN]
 

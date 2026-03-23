@@ -140,7 +140,7 @@ Projects tab lists all projects with + New and × delete.
 
 ### Server: snapshots
 
-Snapshots are tar.gz archives of a project's `/workspace`, stored inside vibey's own data volume at `/app/data/snapshots/`. A `snapshots.json` index file tracks metadata. Snapshots are not stored inside project containers — they survive project deletion.
+Snapshots are tar.gz archives of a project's `/workspace`, stored inside vibey's own data volume at `/app/data/snapshots/`. Snapshot metadata is stored in per-snapshot sidecar JSON files next to the archives, and listings are built by scanning the directory. Snapshots are not stored inside project containers — they survive project deletion.
 
 - `POST /project/:project/snapshot` — create a snapshot. Body: `{label?}`. Tars the project container's `/workspace` and stores it. Returns the snapshot entry.
 - `GET /snapshots` — list all snapshots, newest first. Returns array of snapshot entries.
@@ -763,6 +763,9 @@ For `POST`/`PUT`/`DELETE` requests (except auth routes), a subsequent route vali
 - `POST /admin/createUser` — approve a signup (admin-only). Body: `{email}`. Creates the user:
   - Generates a user id (`crypto.randomBytes(16).toString('hex')`).
   - Stores `user:<id>` hash with `{id, email, createdAt, lastActive, settings: '{}'}`.
+  - Generates one automation API key for the user.
+  - Stores `userapikey:<user-id>` → `<api-key>` for quick lookup from the user.
+  - Stores `apikey:<api-key>` hash with `{userId, createdAt, lastUsed}`.
   - Stores `email:<email>` → `<user-id>` for email-to-id lookup.
   - Deletes `signup:<email>`.
   - Sends the user a welcome email with a login link.
@@ -777,20 +780,25 @@ In cloud mode, projects and snapshots are scoped to the authenticated user:
 - Project containers are named `vibey-proj-<user-id>-<name>` (instead of `vibey-proj-<name>`).
 - Project volumes are named `vibey-vol-<user-id>-<name>`.
 - `GET /projects` lists only the current user's projects (filtered by `<user-id>` prefix in container/volume names).
-- Snapshot archive filenames are prefixed with the user id. The `snapshots.json` index file is replaced by a directory scan of `/app/data/snapshots/` — each file is `<user-id>-<snapshot-id>.tar.gz`.
+- Snapshot archive filenames are prefixed with the user id. Snapshot listings come from scanning `/app/data/snapshots/`; each archive is `<user-id>-<snapshot-id>.tar.gz` with a matching metadata sidecar `<user-id>-<snapshot-id>.json`.
 
 In local mode, scoping is unchanged (no user id prefix).
 
 ### Server: user settings
 
 - In **local mode**, settings live in `secret.json` on disk (current behavior).
-- In **cloud mode**, settings live in the `settings` field of `user:<id>` in redis. `GET /settings` reads from redis; `POST /settings` writes to redis. The shape is the same as the local `secret.json`.
+- In **cloud mode**, settings live in the `settings` field of `user:<id>` in redis. `GET /settings` reads from redis; `POST /settings` writes to redis. The response also includes the user's automation API key record (`key`, `maskedKey`, `createdAt`, `lastUsed`) so the Settings view can show it.
 
 ### Server: API key
 
-Each user has an auto-generated API key stored in `user:<id>` under the `apiKey` field (created at user creation time, `crypto.randomBytes(24).toString('hex')`). The API key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication.
+Each user has exactly one auto-generated automation API key. It is created at user creation time (`crypto.randomBytes(24).toString('hex')`) and stored in redis as its own hash:
 
-- `POST /project/:project/trigger` — trigger an agent on a project. Requires API key authentication (no cookie). Body: `{provider, prompt, slug?}`. Equivalent to `POST /project/:project/dialog` but returns immediately with `202 {ok: true, dialogId}` and no further response body. Designed for automation and webhooks.
+- `userapikey:<user-id>` → `<api-key>`
+- `apikey:<api-key>` hash → `{userId, createdAt, lastUsed}`
+
+The key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication for automation endpoints. The current user's key is also returned by `GET /settings` in cloud mode so it can be shown in the Settings view, together with `createdAt` and `lastUsed`.
+
+- `POST /project/:project/trigger` — trigger an agent on a project. Requires API key authentication (no cookie). Body: `{provider, prompt, slug?}`. Equivalent to `POST /project/:project/dialog` but returns immediately with `202 {ok: true, dialogId}` and no further response body. On success, the API key record's `lastUsed` field is updated. Designed for automation and webhooks.
 
 ### Server: public access
 
@@ -813,14 +821,15 @@ All cloud state lives in redis. Key schema:
 
 | Key pattern | Type | TTL | Contents |
 |---|---|---|---|
-| `user:<id>` | hash | — | `id`, `email`, `createdAt`, `lastActive`, `settings` (JSON string), `admin` (`'1'` or absent), `apiKey` |
+| `user:<id>` | hash | — | `id`, `email`, `createdAt`, `lastActive`, `settings` (JSON string), `admin` (`'1'` or absent) |
 | `email:<email>` | string | — | `<user-id>` — reverse lookup |
 | `session:<id>` | string | 7 days | `<user-id>` |
 | `sessioncsrf:<session-id>` | string | 7 days | `<csrf-token>` — quick lookup for `GET /auth/csrf` |
 | `csrf:<token>` | string | 7 days | `<session-id>` |
 | `otp:<user-id>` | string | 10 min | `<6-digit code>` |
 | `signup:<email>` | hash | — | `email`, `createdAt` |
-| `apikey:<key>` | string | — | `<user-id>` — reverse lookup for Bearer auth |
+| `userapikey:<user-id>` | string | — | `<api-key>` — quick lookup for the user's single automation key |
+| `apikey:<key>` | hash | — | `userId`, `createdAt`, `lastUsed` |
 | `access:<user-id>` | hash | — | `<project>:<path>` → `ALL` or JSON array of user ids |
 
 ### Client: auth
@@ -927,7 +936,7 @@ Bigger refactors:
 
 ## TODO
 
-Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server.
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output.
 
 - Demo videos
    - A 3D solar system I can rotate and zoom

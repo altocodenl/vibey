@@ -683,6 +683,41 @@
          return true;
       }],
 
+      ['Settings 1: Automation API key card renders from settings state', function (done) {
+         B.call ('set', 'currentProject', null);
+         B.call ('set', 'tab', 'settings');
+         B.call ('set', 'settings', {
+            userApiKey: {
+               key: 'vk_test_settings_key_1234567890',
+               maskedKey: 'vk_test••••••••7890',
+               createdAt: '2026-03-23T10:11:12.000Z',
+               lastUsed: ''
+            }
+         });
+         B.call ('set', 'showApiKeys', false);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         if (B.get ('tab') !== 'settings') return 'Expected settings tab';
+         var input = document.querySelector ('[data-testid="user-api-key-input"]');
+         if (! input) return 'Automation API key input not rendered';
+         if (input.value !== 'vk_test••••••••7890') return 'Expected masked automation key, got: ' + input.value;
+         var card = document.querySelector ('.settings-user-api-key');
+         if (! card) return 'Automation API key card not found';
+         if (card.textContent.indexOf ('Created: 2026-03-23T10:11:12.000Z') === -1) return 'Automation key createdAt missing from card';
+         if (card.textContent.indexOf ('Last used: Never') === -1) return 'Automation key lastUsed fallback missing from card';
+         return true;
+      }],
+
+      ['Settings 2: Show key toggle reveals full automation key', function (done) {
+         B.call ('set', 'showApiKeys', true);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var input = document.querySelector ('[data-testid="user-api-key-input"]');
+         if (! input) return 'Automation API key input not rendered';
+         if (input.value !== 'vk_test_settings_key_1234567890') return 'Expected full automation key when shown, got: ' + input.value;
+         return true;
+      }],
+
       // --- Dialog: We start on the projects tab ---
       ['Dialog 1: Shell includes client.js', function () {
          var script = document.querySelector ('script[src="client.js"]');
@@ -3455,9 +3490,11 @@
 
    ];
 
-   var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'static', 'backend', 'vi', 'snapshots'];
+   var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'static', 'backend', 'vi', 'snapshots', 'settings'];
    // Match test-server's convention: fast excludes dialog/static/backend-style slow suites.
-   var FAST_SUITES = ['project', 'docs', 'uploads', 'vi', 'snapshots'];
+   // Client `cloud` maps to the settings/API-key surface tests.
+   var FAST_SUITES = ['project', 'docs', 'uploads', 'snapshots', 'cloud'];
+   var SUITE_ALIASES = {cloud: ['settings']};
 
    var filterValue = suiteFilter.toLowerCase ().trim ();
 
@@ -3468,11 +3505,17 @@
       return acc;
    });
 
+   var addSuiteTests = function (suite) {
+      dale.go (SUITE_ALIASES [suite] || [suite], function (resolved) {
+         if (testsBySuite [resolved]) filteredTests = filteredTests.concat (testsBySuite [resolved]);
+      });
+   };
+
    var filteredTests = [];
 
    if (filterValue === 'all') {
       dale.go (SUITE_ORDER, function (suite) {
-         if (testsBySuite [suite]) filteredTests = filteredTests.concat (testsBySuite [suite]);
+         addSuiteTests (suite);
       });
       dale.go (testsBySuite, function (tests, suite) {
          if (! inc (SUITE_ORDER, suite)) filteredTests = filteredTests.concat (tests);
@@ -3480,11 +3523,11 @@
    }
    else if (filterValue === 'fast') {
       dale.go (FAST_SUITES, function (suite) {
-         if (testsBySuite [suite]) filteredTests = filteredTests.concat (testsBySuite [suite]);
+         addSuiteTests (suite);
       });
    }
    else {
-      filteredTests = testsBySuite [filterValue] || [];
+      addSuiteTests (filterValue);
    }
 
    var originalAlert = window.alert;

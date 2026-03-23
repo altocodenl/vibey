@@ -14,6 +14,7 @@ var cicek  = require ('cicek');
 var CONFIG = require ('./secret.json');
 
 var CLOUD = !! process.env.VIBEY_CLOUD;
+var DISABLE_EMAIL = !! process.env.VIBEY_DISABLE_EMAIL;
 
 var clog = console.log;
 
@@ -59,17 +60,19 @@ var Redis = function (command) {
 
 var mailer;
 if (CLOUD) {
-   if (! CONFIG.ses)          throw new Error ('secret.json must have `ses` in cloud mode');
-   if (! CONFIG.email)        throw new Error ('secret.json must have `email` in cloud mode');
-   if (! CONFIG.adminEmail)   throw new Error ('secret.json must have `adminEmail` in cloud mode');
    if (! CONFIG.cookieSecret) throw new Error ('secret.json must have `cookieSecret` in cloud mode');
-   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (CONFIG.ses));
+   if (! DISABLE_EMAIL) {
+      if (! CONFIG.ses)        throw new Error ('secret.json must have `ses` in cloud mode');
+      if (! CONFIG.email)      throw new Error ('secret.json must have `email` in cloud mode');
+      if (! CONFIG.adminEmail) throw new Error ('secret.json must have `adminEmail` in cloud mode');
+      mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (CONFIG.ses));
+   }
 }
 
 var sendmail = function (to, subject, html) {
    return new Promise (function (resolve, reject) {
-      if (! CLOUD) {
-         clog (new Date ().toISOString (), 'sendmail', {to: to, subject: subject});
+      if (! CLOUD || DISABLE_EMAIL) {
+         clog (new Date ().toISOString (), 'sendmail', {to: to, subject: subject, disabled: !! DISABLE_EMAIL});
          return resolve ();
       }
       mailer.sendMail ({
@@ -117,6 +120,47 @@ var getUserById = async function (id) {
    var user = await Redis ('hgetall', 'user:' + id);
    if (! user || ! user.id) return null;
    return user;
+};
+
+var userApiKeyLookupKey = function (userId) {
+   return 'userapikey:' + userId;
+};
+
+var userApiKeyRedisKey = function (apiKey) {
+   return 'apikey:' + apiKey;
+};
+
+var createUserApiKeyRecord = async function (userId, createdAt) {
+   var apiKey = generateToken (24);
+   await Redis ('set', userApiKeyLookupKey (userId), apiKey);
+   await Redis ('hmset', userApiKeyRedisKey (apiKey), 'userId', userId, 'createdAt', createdAt, 'lastUsed', '');
+   return apiKey;
+};
+
+var getApiKeyRecordByKey = async function (apiKey) {
+   if (! apiKey) return null;
+
+   var record = await Redis ('hgetall', userApiKeyRedisKey (apiKey));
+   if (! record || ! record.userId) return null;
+   record.key = apiKey;
+   return record;
+};
+
+var getUserApiKeyRecord = async function (userId) {
+   if (! userId) return null;
+
+   var apiKey = await Redis ('get', userApiKeyLookupKey (userId));
+   if (! apiKey) return null;
+   return await getApiKeyRecordByKey (apiKey);
+};
+
+var touchApiKeyRecord = async function (apiKey) {
+   var record = await getApiKeyRecordByKey (apiKey);
+   if (! record || ! record.userId) return null;
+   var now = new Date ().toISOString ();
+   await Redis ('hset', userApiKeyRedisKey (apiKey), 'lastUsed', now);
+   record.lastUsed = now;
+   return record;
 };
 
 var log = {
@@ -1153,20 +1197,71 @@ var ensureSnapshotsDir = function () {
    if (! fs.existsSync (SNAPSHOTS_DIR)) fs.mkdirSync (SNAPSHOTS_DIR, {recursive: true});
 };
 
-var SNAPSHOTS_INDEX = Path.join (SNAPSHOTS_DIR, 'snapshots.json');
+var snapshotArchiveName = function (id) {
+   return id + '.tar.gz';
+};
+
+var snapshotMetaName = function (id) {
+   return id + '.json';
+};
+
+var snapshotMetaPath = function (id) {
+   return Path.join (SNAPSHOTS_DIR, snapshotMetaName (id));
+};
+
+var loadSnapshotEntry = function (id) {
+   ensureSnapshotsDir ();
+   var archiveName = snapshotArchiveName (id);
+   var archivePath = Path.join (SNAPSHOTS_DIR, archiveName);
+   if (! fs.existsSync (archivePath)) return null;
+
+   var entry = {
+      id: id,
+      project: '',
+      projectName: '',
+      label: '',
+      file: archiveName,
+      created: fs.statSync (archivePath).mtime.toISOString (),
+      fileCount: 0
+   };
+
+   try {
+      var metaPath = snapshotMetaPath (id);
+      if (fs.existsSync (metaPath)) {
+         var meta = JSON.parse (fs.readFileSync (metaPath, 'utf8'));
+         if (type (meta) === 'object' && meta) {
+            if (meta.project !== undefined) entry.project = meta.project;
+            if (meta.projectName !== undefined) entry.projectName = meta.projectName;
+            if (meta.label !== undefined) entry.label = meta.label;
+            if (meta.created !== undefined) entry.created = meta.created;
+            if (meta.fileCount !== undefined) entry.fileCount = meta.fileCount;
+         }
+      }
+   }
+   catch (e) {}
+
+   return entry;
+};
 
 var loadSnapshotsIndex = function () {
    ensureSnapshotsDir ();
+   var entries = [];
    try {
-      if (fs.existsSync (SNAPSHOTS_INDEX)) return JSON.parse (fs.readFileSync (SNAPSHOTS_INDEX, 'utf8'));
+      dale.go (fs.readdirSync (SNAPSHOTS_DIR, {withFileTypes: true}), function (dirent) {
+         if (! dirent || ! dirent.isFile ()) return;
+         if (! dirent.name.match (/\.tar\.gz$/)) return;
+         var id = dirent.name.slice (0, -7);
+         var entry = loadSnapshotEntry (id);
+         if (entry) entries.push (entry);
+      });
    }
-   catch (e) {}
-   return [];
-};
-
-var saveSnapshotsIndex = function (index) {
-   ensureSnapshotsDir ();
-   fs.writeFileSync (SNAPSHOTS_INDEX, JSON.stringify (index, null, 2), 'utf8');
+   catch (e) {
+      return [];
+   }
+   entries.sort (function (a, b) {
+      return a.created < b.created ? 1 : (a.created > b.created ? -1 : 0);
+   });
+   return entries;
 };
 
 var generateSnapshotId = function () {
@@ -1178,7 +1273,7 @@ var createSnapshot = async function (projectName, label) {
    ensureSnapshotsDir ();
 
    var id = generateSnapshotId ();
-   var archiveName = id + '.tar.gz';
+   var archiveName = snapshotArchiveName (id);
    var archivePath = Path.join (SNAPSHOTS_DIR, archiveName);
    var name = containerName (projectName);
 
@@ -1190,7 +1285,6 @@ var createSnapshot = async function (projectName, label) {
 
    var fileCount = 0;
    try {
-      // Count all files recursively under /workspace
       var counted = await withProjectContainerRecovery (projectName, null, function () {
          return execA ('docker exec ' + name + " sh -c 'find /workspace -type f | wc -l'");
       });
@@ -1198,63 +1292,58 @@ var createSnapshot = async function (projectName, label) {
    }
    catch (e) {}
 
-   var displayName = unslugifyProjectName (projectName);
-
    var entry = {
       id: id,
       project: projectName,
-      projectName: displayName,
+      projectName: unslugifyProjectName (projectName),
       label: label || '',
       file: archiveName,
       created: new Date ().toISOString (),
       fileCount: fileCount
    };
 
-   var index = loadSnapshotsIndex ();
-   index.unshift (entry);
-   saveSnapshotsIndex (index);
+   fs.writeFileSync (snapshotMetaPath (id), JSON.stringify ({
+      project: entry.project,
+      projectName: entry.projectName,
+      label: entry.label,
+      created: entry.created,
+      fileCount: entry.fileCount
+   }, null, 2), 'utf8');
 
    return entry;
 };
 
 var restoreSnapshot = async function (snapshotId, newProjectName) {
-   var index = loadSnapshotsIndex ();
-   var entry = dale.stopNot (index, undefined, function (e) {
-      if (e.id === snapshotId) return e;
-   });
+   var entry = loadSnapshotEntry (snapshotId);
    if (! entry) throw new Error ('Snapshot not found: ' + snapshotId);
 
    var archivePath = Path.join (SNAPSHOTS_DIR, entry.file);
    if (! fs.existsSync (archivePath)) throw new Error ('Snapshot archive missing: ' + entry.file);
 
-   var displayName = newProjectName || (entry.projectName + ' (restored ' + formatDialogTimestamp () + ')');
+   var displayName = newProjectName || ((entry.projectName || 'Snapshot') + ' (restored ' + formatDialogTimestamp () + ')');
    var slug = await ensureProject (displayName);
 
    var name = containerName (slug);
-   // Pipe the tar.gz into the new container's /workspace
    await execA ('cat ' + JSON.stringify (archivePath) + ' | docker exec -i ' + name + ' tar xzf - -C /workspace', {encoding: 'buffer', shell: '/bin/sh'});
 
    return {slug: slug, name: displayName, snapshotId: snapshotId};
 };
 
 var deleteSnapshot = function (snapshotId) {
-   var index = loadSnapshotsIndex ();
-   var found = false;
-   var newIndex = dale.fil (index, undefined, function (e) {
-      if (e.id === snapshotId) {
-         found = true;
-         // Delete archive file
-         var archivePath = Path.join (SNAPSHOTS_DIR, e.file);
-         try {
-            if (fs.existsSync (archivePath)) fs.unlinkSync (archivePath);
-         }
-         catch (err) {}
-         return;
-      }
-      return e;
-   });
-   if (! found) throw new Error ('Snapshot not found: ' + snapshotId);
-   saveSnapshotsIndex (newIndex);
+   var entry = loadSnapshotEntry (snapshotId);
+   if (! entry) throw new Error ('Snapshot not found: ' + snapshotId);
+
+   try {
+      var archivePath = Path.join (SNAPSHOTS_DIR, entry.file);
+      if (fs.existsSync (archivePath)) fs.unlinkSync (archivePath);
+   }
+   catch (err) {}
+
+   try {
+      var metaPath = snapshotMetaPath (snapshotId);
+      if (fs.existsSync (metaPath)) fs.unlinkSync (metaPath);
+   }
+   catch (err) {}
 };
 
 // *** PROJECT HELPERS ***
@@ -2913,10 +3002,12 @@ var autoCommitApi = function (projectName, method, path) {
 
 // *** ROUTES ***
 
-var buildSettingsResponse = function (config) {
+var buildSettingsResponse = function (config, extra) {
    config = config || {};
+   extra = extra || {};
    var accounts = config.accounts || {};
    var editor = config.editor || {};
+   var userApiKey = extra.userApiKey || null;
 
    return {
       openai: {
@@ -2935,6 +3026,12 @@ var buildSettingsResponse = function (config) {
          loggedIn: !! (accounts.claudeOAuth && accounts.claudeOAuth.type === 'oauth'),
          expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
       },
+      userApiKey: userApiKey ? {
+         key: userApiKey.key || '',
+         maskedKey: maskApiKey (userApiKey.key || ''),
+         createdAt: userApiKey.createdAt || '',
+         lastUsed: userApiKey.lastUsed || ''
+      } : null,
       editor: {
          viMode: !! editor.viMode
       },
@@ -2967,6 +3064,31 @@ var applySettingsUpdate = function (config, body) {
    return config;
 };
 
+var createCloudUser = async function (email, isAdmin) {
+   var existing = await Redis ('get', 'email:' + email);
+   if (existing) return {error: 409, body: {error: 'User already exists'}};
+
+   var id = generateToken (16);
+   var now = new Date ().toISOString ();
+
+   await Redis ('hmset', 'user:' + id, 'id', id, 'email', email, 'createdAt', now, 'lastActive', now, 'settings', '{}', 'admin', isAdmin ? '1' : '0');
+   await Redis ('set', 'email:' + email, id);
+   await createUserApiKeyRecord (id, now);
+   await Redis ('del', 'signup:' + email);
+
+   try {
+      await sendmail (email, 'Welcome to Vibey', lith.g ([
+         ['p', 'Your Vibey account has been created!'],
+         ['p', ['Go to ', ['a', {href: 'https://vibey.app'}, 'vibey.app'], ' and log in with your email.']],
+      ]));
+   }
+   catch (e) {
+      clog ('Error sending welcome email:', e);
+   }
+
+   return {id: id};
+};
+
 var routes = [
 
    // *** STATIC ***
@@ -2994,6 +3116,22 @@ var routes = [
    ['get', 'test-client.js', cicek.file],
 
    // *** AUTH ***
+
+   // Bootstrap the very first cloud user before auth middleware runs.
+   ['post', 'admin/createUser', async function (rq, rs) {
+      if (! CLOUD) return rs.next ();
+
+      var userKeys = await Redis ('keys', 'user:*');
+      if (userKeys && userKeys.length > 0) return rs.next ();
+      if (stop (rs, [['email', rq.body.email, 'string']])) return;
+
+      var email = rq.body.email.trim ().toLowerCase ();
+      if (! email.match (H_email)) return reply (rs, 400, {error: 'Invalid email'});
+
+      var result = await createCloudUser (email, true);
+      if (result.error) return reply (rs, result.error, result.body);
+      reply (rs, 200, {ok: true, id: result.id});
+   }],
 
    // Mode detection + CSRF token
    ['get', 'auth/csrf', async function (rq, rs) {
@@ -3130,6 +3268,9 @@ var routes = [
       // Auth routes and public routes are open
       if (rq.url.match (/^\/auth\//) || rq.url.match (/^\/public\//)) return rs.next ();
 
+      // admin/createUser handles bootstrap auth itself when there are no users yet.
+      if (rq.url === '/admin/createUser') return rs.next ();
+
       // Static assets are open
       if (rq.url === '/' || rq.url === '/client.js' || rq.url === '/client-css.js' || rq.url === '/test-client.js') return rs.next ();
 
@@ -3146,12 +3287,7 @@ var routes = [
          var authHeader = rq.headers.authorization || '';
          var bearerMatch = authHeader.match (/^Bearer\s+(.+)$/i);
          if (bearerMatch) {
-            // Look up user by API key — scan all users (MVP; add reverse index later)
-            var apiKey = bearerMatch [1];
-            // For now, require cookie. API key users must use the /trigger endpoint
-            // which does its own auth. This fallback prevents 403 on /trigger.
-            rq._bearerKey = apiKey;
-            // Let the trigger route handle its own auth
+            rq._bearerKey = bearerMatch [1];
             if (rq.url.match (/\/trigger$/)) return rs.next ();
          }
          return reply (rs, 403, {error: session ? 'session' : 'nocookie'});
@@ -3182,6 +3318,7 @@ var routes = [
       if (! CLOUD) return rs.next ();
       if (rq.url.match (/^\/auth\//)) return rs.next ();
       if (rq.url.match (/^\/public\//)) return rs.next ();
+      if (rq.url === '/admin/createUser') return rs.next ();
       // Bearer-authenticated endpoints skip CSRF
       if (rq._bearerKey) return rs.next ();
 
@@ -3239,7 +3376,8 @@ var routes = [
          try {
             var userData = await getUserById (rq.user.id);
             var settings = userData && userData.settings ? JSON.parse (userData.settings) : {};
-            return reply (rs, 200, buildSettingsResponse (settings));
+            var userApiKey = await getUserApiKeyRecord (rq.user.id);
+            return reply (rs, 200, buildSettingsResponse (settings, {userApiKey: userApiKey}));
          }
          catch (e) {
             return reply (rs, 500, {error: 'Failed to load settings'});
@@ -3423,53 +3561,15 @@ var routes = [
 
    ['post', 'admin/createUser', async function (rq, rs) {
       if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
-
-      // Bootstrap: if no users exist at all, allow unauthenticated creation
-      // of the first user as admin.
-      var isBootstrap = false;
-      if (! rq.user || ! rq.user.admin) {
-         var userKeys = await Redis ('keys', 'user:*');
-         if (! userKeys || userKeys.length === 0) {
-            isBootstrap = true;
-         }
-         else {
-            return reply (rs, 403);
-         }
-      }
-
+      if (! rq.user || ! rq.user.admin) return reply (rs, 403);
       if (stop (rs, [['email', rq.body.email, 'string']])) return;
 
       var email = rq.body.email.trim ().toLowerCase ();
       if (! email.match (H_email)) return reply (rs, 400, {error: 'Invalid email'});
 
-      // Check if user already exists
-      var existing = await Redis ('get', 'email:' + email);
-      if (existing) return reply (rs, 409, {error: 'User already exists'});
-
-      var id = generateToken (16);
-      var apiKey = generateToken (24);
-      var now = new Date ().toISOString ();
-      var isAdmin = isBootstrap ? '1' : '0';
-
-      await Redis ('hmset', 'user:' + id, 'id', id, 'email', email, 'createdAt', now, 'lastActive', now, 'settings', '{}', 'apiKey', apiKey, 'admin', isAdmin);
-      await Redis ('set', 'email:' + email, id);
-      await Redis ('set', 'apikey:' + apiKey, id);
-
-      // Delete signup request if it exists
-      await Redis ('del', 'signup:' + email);
-
-      // Send welcome email
-      try {
-         await sendmail (email, 'Welcome to Vibey', lith.g ([
-            ['p', 'Your Vibey account has been created!'],
-            ['p', ['Go to ', ['a', {href: 'https://vibey.app'}, 'vibey.app'], ' and log in with your email.']],
-         ]));
-      }
-      catch (e) {
-         clog ('Error sending welcome email:', e);
-      }
-
-      reply (rs, 200, {ok: true, id: id});
+      var result = await createCloudUser (email, false);
+      if (result.error) return reply (rs, result.error, result.body);
+      reply (rs, 200, {ok: true, id: result.id});
    }],
 
    // *** ACCESS ***
@@ -3517,22 +3617,24 @@ var routes = [
       }
       if (! apiKey) return reply (rs, 403, {error: 'API key required'});
 
-      // If user was already authenticated by session, verify API key
-      // Otherwise, we need to find the user by API key
+      // If user was already authenticated by session, verify API key.
+      // Otherwise, find the user through the dedicated API-key record.
+      var apiKeyRecord = await getApiKeyRecordByKey (apiKey);
+      if (! apiKeyRecord || ! apiKeyRecord.userId) return reply (rs, 403, {error: 'Invalid API key'});
+
       var user;
       if (rq.user) {
+         if (rq.user.id !== apiKeyRecord.userId) return reply (rs, 403, {error: 'Invalid API key'});
          user = await getUserById (rq.user.id);
-         if (! user || user.apiKey !== apiKey) return reply (rs, 403, {error: 'Invalid API key'});
+         if (! user) return reply (rs, 403, {error: 'Invalid API key'});
       }
       else {
-         // Look up by API key (MVP: scan; add apikey:<key> -> <userId> index later)
-         // For now, the user must use the apikey:<key> reverse index
-         var apiKeyUserId = await Redis ('get', 'apikey:' + apiKey);
-         if (! apiKeyUserId) return reply (rs, 403, {error: 'Invalid API key'});
-         user = await getUserById (apiKeyUserId);
+         user = await getUserById (apiKeyRecord.userId);
          if (! user) return reply (rs, 403, {error: 'Invalid API key'});
          rq.user = {id: user.id, email: user.email, admin: user.admin === '1'};
       }
+
+      await touchApiKeyRecord (apiKey);
 
       if (stop (rs, [
          ['provider', rq.body.provider, 'string'],

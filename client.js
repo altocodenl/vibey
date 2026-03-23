@@ -3754,6 +3754,7 @@ views.settings = function () {
       var claude = settingsData.claude || {};
       var openaiOAuth = settingsData.openaiOAuth || {};
       var claudeOAuth = settingsData.claudeOAuth || {};
+      var userApiKey = settingsData.userApiKey || null;
       var settings = settingsData.editor || {};
       oauth = oauth || {};
       var oauthLoading = oauth.loading;
@@ -3875,6 +3876,39 @@ views.settings = function () {
          ]];
       };
 
+      var renderUserApiKey = function (info) {
+         if (! info || ! info.key) return '';
+         var display = showKeys ? info.key : (info.maskedKey || '');
+         var metaStyle = style ({color: '#9aa4bf', 'font-size': '12px'});
+         return ['div', {class: 'settings-user-api-key', style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
+            ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '1rem', 'margin-bottom': '0.75rem'})}, [
+               ['div', [
+                  ['span', {style: style ({'font-weight': 'bold', 'font-size': '16px', color: '#94b8ff'})}, 'Automation API key'],
+                  ['div', {style: metaStyle}, 'Use as Bearer token for POST /project/:project/trigger']
+               ]],
+               ['button', {
+                  class: 'btn-small',
+                  style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
+                  onclick: B.ev ('set', 'showApiKeys', ! showKeys)
+               }, showKeys ? 'Hide key' : 'Show key']
+            ]],
+            ['input', {
+               'data-testid': 'user-api-key-input',
+               type: showKeys ? 'text' : 'password',
+               readOnly: true,
+               value: display,
+               style: style ({
+                  width: '100%', padding: '0.6rem', 'border-radius': '6px', border: 'none',
+                  'background-color': '#1a1a2e', color: '#eee', 'font-family': 'Monaco, Consolas, monospace', 'font-size': '13px', 'margin-bottom': '0.75rem'
+               })
+            }],
+            ['div', {style: style ({display: 'grid', gap: '0.35rem'})}, [
+               ['div', {style: metaStyle}, 'Created: ' + (info.createdAt || 'Unknown')],
+               ['div', {style: metaStyle}, 'Last used: ' + (info.lastUsed || 'Never')]
+            ]]
+         ]];
+      };
+
       var hasEdits = edits.openaiKey !== undefined || edits.claudeKey !== undefined;
       var showMore = B.get ('settingsShowMore');
 
@@ -3889,6 +3923,12 @@ views.settings = function () {
             ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Use your existing ChatGPT or Claude subscription. Logs in via OAuth — no API key needed.'],
             renderOAuthProvider ('openai', 'ChatGPT Plus/Pro', 'Use your ChatGPT subscription (Plus, Pro, Team)', openaiOAuth),
             renderOAuthProvider ('claude', 'Claude Pro/Max', 'Use your Anthropic Claude subscription (Pro, Max)', claudeOAuth),
+
+            userApiKey ? ['div', [
+               sectionTitle ('Automation'),
+               ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Your personal Vibey automation key. There is one per user.'],
+               renderUserApiKey (userApiKey)
+            ]] : '',
 
             // *** MORE BUTTON ***
             ['div', {style: style ({'margin-top': '1.5rem', 'text-align': 'center'})}, [
