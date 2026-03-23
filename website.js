@@ -318,8 +318,8 @@ var page = ['html', {lang: 'en'}, [
    ['head', [
       ['meta', {charset: 'utf-8'}],
       ['meta', {name: 'viewport', content: 'width=device-width, initial-scale=1'}],
-      ['title', 'Vibey — Build your ideas with your words.'],
-      ['meta', {name: 'description', content: 'Build your ideas with your words. An agentic interface where everything is a document, everything runs in your browser, and agents work at full speed inside safe containers.'}],
+      ['title', 'Vibey — Build with words, not code.'],
+      ['meta', {name: 'description', content: 'An agentic interface where everything is a document, everything runs in your browser, and agents work at full speed inside safe containers.'}],
       ['link', {rel: 'preconnect', href: 'https://fonts.googleapis.com'}],
       ['link', {rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: ''}],
       ['link', {rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap'}],
@@ -331,7 +331,7 @@ var page = ['html', {lang: 'en'}, [
       ['div', {class: 'wrap'}, [
          ['div', {class: 'hero'}, [
             ['h1', ['LITERAL', '<em>Vibey</em>']],
-            ['p', {class: 'tagline'}, 'Build your ideas with your words.'],
+            ['p', {class: 'tagline'}, 'Build with words, not code.'],
          ]],
 
          // *** AUDIENCE ***
