@@ -112,7 +112,9 @@ If the user contradicts one of the guidelines, the user is right. Use the guidel
 - **Put related code close together. Put stuff on the top only if it's truly general.**
 - **Organize entities in a logical order.** The codebase should read like a good narrative.
 - **Minimize the lines of code without golfing.**
+- **Resist the impluse to be a litterbug**. Make every variable and function count.
 - Use functions for everything.
+- Avoid loops and use functional equivalents.
 - Use objects to collect groups of related functions. Avoid having globals.
 - Avoid OOP. Build the program out of functions that pass data. No need to use classes, to inherit anything or to have templates. Data emerges from code.
 - Functions should mostly be pure, but it's OK to use free variables to pass around state when that's truly necessary.
@@ -148,6 +150,7 @@ If the user contradicts one of the guidelines, the user is right. Use the guidel
 
 ### Testing
 
+- **Never weaken a test to work around an implementation bug, unless the user explicitly requires it.**
 - Test through surfaces only. Test exposed calls, endpoints, UI behavior, and library interfaces - not internals.
 - Use the real system. Avoid mocks unless they are strictly necessary.
 - Document the surface first. Describe data at rest and each call's interface before writing tests.

@@ -1,8 +1,8 @@
 # Vibey master container
 FROM node:22-alpine
 
-# Install docker-cli only (not the daemon)
-RUN apk add --no-cache docker-cli bash
+# Install docker-cli, bash, and redis server
+RUN apk add --no-cache docker-cli bash redis
 
 WORKDIR /app
 

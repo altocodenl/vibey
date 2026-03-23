@@ -3,6 +3,9 @@ var h      = require ('hitit');
 var dale   = require ('dale');
 var teishi = require ('teishi');
 
+var TEST_MODE = {cloud: false, auth: null};
+var CONFIG = require ('./secret.json');
+
 var log  = teishi.l || function () {console.log.apply (console, arguments)};
 var type = teishi.type || teishi.t;
 var inc  = teishi.inc;
@@ -178,7 +181,13 @@ var httpGet = function (port, path, cb) {
 };
 
 var httpJson = function (method, path, payload, cb, headers) {
-   var body = payload === undefined ? '' : JSON.stringify (payload);
+   payload = payload === undefined ? '' : payload;
+   if (TEST_MODE.cloud && TEST_MODE.auth && ! isOpenPath (path)) {
+      headers = headers || {};
+      if (! headers.Cookie) headers.Cookie = cookieHeader (TEST_MODE.auth.cookies);
+      if ((method === 'POST' || method === 'PUT') && type (payload) === 'object' && payload.csrf === undefined) payload.csrf = TEST_MODE.auth.csrf;
+   }
+   var body = payload === '' ? '' : JSON.stringify (payload);
    var requestHeaders = {};
    dale.go (headers || {}, function (value, key) {
       requestHeaders [key] = value;
@@ -207,6 +216,7 @@ var httpJson = function (method, path, payload, cb, headers) {
 
 var httpRequest = function (method, path, body, headers, cb) {
    headers = headers || {};
+   if (TEST_MODE.cloud && TEST_MODE.auth && ! isOpenPath (path) && ! headers.Cookie) headers.Cookie = cookieHeader (TEST_MODE.auth.cookies);
    var payload = body || '';
    var req = http.request ({
       hostname: 'localhost',
@@ -247,6 +257,70 @@ var cookieHeader = function (jar) {
    }).join ('; ');
 };
 
+var isOpenPath = function (path) {
+   if (! path) return false;
+   if (path [0] !== '/') path = '/' + path;
+   return path === '/' || path === '/client.js' || path === '/client-css.js' || path === '/test-client.js' || path.match (/^\/auth\//) || path.match (/^\/public\//);
+};
+
+var scopeCloudPath = function (path) {
+   if (! TEST_MODE.cloud || ! TEST_MODE.auth || ! TEST_MODE.auth.userId || type (path) !== 'string') return path;
+   var normalized = path [0] === '/' ? path : '/' + path;
+   var matchProject = normalized.match (/^\/project\/([^/]+)(\/.*)?$/);
+   if (matchProject) {
+      var slug = decodeURIComponent (matchProject [1]);
+      if (slug.indexOf (TEST_MODE.auth.userId + '-') !== 0) slug = TEST_MODE.auth.userId + '-' + slug;
+      return '/project/' + encodeURIComponent (slug) + (matchProject [2] || '');
+   }
+   var matchProjects = normalized.match (/^\/projects\/([^/]+)$/);
+   if (matchProjects) {
+      var slug2 = decodeURIComponent (matchProjects [1]);
+      if (slug2.indexOf (TEST_MODE.auth.userId + '-') !== 0) slug2 = TEST_MODE.auth.userId + '-' + slug2;
+      return '/projects/' + encodeURIComponent (slug2);
+   }
+   return path;
+};
+
+var originalHttpRequest = http.request;
+http.request = function (options, cb) {
+   if (TEST_MODE.cloud && TEST_MODE.auth && type (options) === 'object' && options.hostname === 'localhost' && options.port === 5353) {
+      options.path = scopeCloudPath (options.path);
+      if (! isOpenPath (options.path)) {
+         options.headers = options.headers || {};
+         if (! options.headers.Cookie) options.headers.Cookie = cookieHeader (TEST_MODE.auth.cookies);
+      }
+   }
+   var req = originalHttpRequest.call (http, options, cb);
+   if (TEST_MODE.cloud && TEST_MODE.auth && type (options) === 'object' && options.hostname === 'localhost' && options.port === 5353 && ! isOpenPath (options.path) && (options.method === 'POST' || options.method === 'PUT')) {
+      var contentType = (((options.headers || {}) ['Content-Type']) || ((options.headers || {}) ['content-type']) || '').toLowerCase ();
+      if (contentType.indexOf ('application/json') === 0) {
+         var originalWrite = req.write.bind (req);
+         var originalEnd = req.end.bind (req);
+         var chunks = [];
+         req.write = function (chunk, encoding, callback2) {
+            if (chunk) chunks.push (Buffer.isBuffer (chunk) ? chunk : Buffer.from (chunk, encoding));
+            if (type (callback2) === 'function') callback2 ();
+            return true;
+         };
+         req.end = function (chunk, encoding, callback2) {
+            if (chunk) chunks.push (Buffer.isBuffer (chunk) ? chunk : Buffer.from (chunk, encoding));
+            var text = Buffer.concat (chunks).toString ('utf8');
+            var payload;
+            try {payload = text ? JSON.parse (text) : {};} catch (e) {payload = undefined;}
+            if (type (payload) === 'object' && payload && payload.csrf === undefined) {
+               payload.csrf = TEST_MODE.auth.csrf;
+               var finalText = JSON.stringify (payload);
+               options.headers ['Content-Length'] = Buffer.byteLength (finalText);
+               originalWrite (finalText);
+            }
+            else if (text) originalWrite (text);
+            return originalEnd (callback2);
+         };
+      }
+   }
+   return req;
+};
+
 // *** PROJECTS ***
 
 var PROJECT_BASIC = 'test-proj';
@@ -255,6 +329,12 @@ var PROJECT_EMOJI = '🚀 Rocket App';
 var PROJECT_ACCENTED = 'café étude';
 var PROJECT_MIXED = 'hello—world & friends!';
 var PROJECT_NONLATIN = '日本語プロジェクト';
+
+var normalizeProjectSlugForMode = function (slug) {
+   if (! TEST_MODE.cloud || ! TEST_MODE.auth || ! TEST_MODE.auth.userId || type (slug) !== 'string') return slug;
+   var prefix = TEST_MODE.auth.userId + '-';
+   return slug.indexOf (prefix) === 0 ? slug.slice (prefix.length) : slug;
+};
 
 var projectListFindBySlug = function (list, slug) {
    return dale.stopNot (list, undefined, function (item) {
@@ -1269,20 +1349,18 @@ var dialogSequence = [
          return next ();
       }
 
-      s.dialogCloudAdminEmail = 'dialog-cloud-admin-' + testTimestamp () + '@test.vibey.dev';
-      httpJson ('POST', '/admin/createUser', {email: s.dialogCloudAdminEmail}, function (error, status, body) {
-         if (error) return log ('Dialog cloud bootstrap failed: ' + error.message);
-         if (status === 403) {
+      s.dialogCloudAdminEmail = (CONFIG.adminEmail || '').toLowerCase ();
+      if (! s.dialogCloudAdminEmail) {
+         s.skipDialogCloudTrigger = true;
+         return next ();
+      }
+      cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
+         if (loginError) {
             s.skipDialogCloudTrigger = true;
             return next ();
          }
-         if (status !== 200) return log ('Expected 200 bootstrapping dialog cloud admin, got ' + status + ' ' + JSON.stringify (body));
-         if (! body || ! body.id) return log ('Dialog cloud bootstrap missing id');
-         cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
-            if (loginError) return log ('Dialog cloud admin login failed: ' + loginError.message);
-            s.dialogCloudAuth = auth;
-            next ();
-         });
+         s.dialogCloudAuth = auth;
+         next ();
       });
    }],
 
@@ -2167,44 +2245,50 @@ var viSequence = [
 // *** CLOUD AUTH, ADMIN, ACCESS ***
 
 // Redis helpers for reading OTPs and verifying state directly.
-// Each call uses a short-lived client so the test runner exits cleanly.
-var withRedis = function (operation) {
-   var client = require ('redis').createClient ({
-      host: process.env.REDIS_HOST || '127.0.0.1',
-      port: process.env.REDIS_PORT || 6379
-   });
-   client.on ('error', function () {});
-   operation (client, function () {
-      try {client.quit ();} catch (e) {}
+// Cloud mode runs embedded redis inside the vibey container, so tests access it
+// through docker exec instead of opening a host TCP connection.
+var exec = require ('child_process').exec;
+
+var redisExec = function (args, cb) {
+   exec ('docker compose exec -T vibey redis-cli --raw ' + args, {maxBuffer: 1024 * 1024}, function (error, stdout, stderr) {
+      if (error) return cb (error);
+      cb (null, (stdout || '').replace (/\n$/, ''));
    });
 };
 
 var redisGet = function (key, cb) {
-   withRedis (function (client, done) {
-      client.get (key, function (error, data) {
-         done ();
-         cb (error, data);
-      });
+   redisExec ('GET ' + JSON.stringify (key), function (error, data) {
+      if (error) return cb (error);
+      cb (null, data === '' || data === '(nil)' ? null : data);
    });
 };
 
 var redisHgetall = function (key, cb) {
-   withRedis (function (client, done) {
-      client.hgetall (key, function (error, data) {
-         done ();
-         cb (error, data);
-      });
+   redisExec ('HGETALL ' + JSON.stringify (key), function (error, data) {
+      if (error) return cb (error);
+      if (! data) return cb (null, null);
+      var parts = data.split ('\n');
+      if (! parts.length || parts [0] === '(nil)') return cb (null, null);
+      var hash = {};
+      for (var i = 0; i < parts.length; i += 2) {
+         if (parts [i] === undefined || parts [i + 1] === undefined) continue;
+         hash [parts [i]] = parts [i + 1];
+      }
+      cb (null, dale.keys (hash).length ? hash : null);
+   });
+};
+
+var redisFlushdb = function (cb) {
+   redisExec ('FLUSHDB', function (error) {
+      cb (error);
    });
 };
 
 // Flush all test-created keys from Redis after the cloud suite.
 var redisFlushTestKeys = function (keys, cb) {
    if (! keys || ! keys.length) return cb ();
-   withRedis (function (client, done) {
-      client.del (keys, function () {
-         done ();
-         cb ();
-      });
+   redisExec ('DEL ' + dale.go (keys, JSON.stringify).join (' '), function (error) {
+      cb (error);
    });
 };
 
@@ -2253,7 +2337,7 @@ var cloudSequence = [
    // *** MODE DETECTION ***
 
    ['Cloud 1: Detect cloud mode via GET /auth/csrf', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs) {
-      s.cloudAdminEmail  = 'admin-' + testTimestamp () + '@test.vibey.dev';
+      s.cloudAdminEmail  = (CONFIG.adminEmail || '').toLowerCase ();
       s.cloudMemberEmail = 'member-' + testTimestamp () + '@test.vibey.dev';
       s.cleanupKeys = [];
 
@@ -2272,6 +2356,15 @@ var cloudSequence = [
          s.skipCloud = false;
       }
       return true;
+   }],
+
+   ['Cloud 1b: Flush Redis before cloud tests', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      redisFlushdb (function (error) {
+         if (error) return log ('Failed to flush Redis before cloud tests: ' + error.message);
+         s.cleanupKeys = [];
+         next ();
+      });
    }],
 
    // *** SIGNUP ***
@@ -2307,24 +2400,22 @@ var cloudSequence = [
 
    // *** BOOTSTRAP ADMIN ***
 
-   ['Cloud 5: Bootstrap first admin user (no users exist yet)', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 5: Config admin user exists in Redis', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
-      // POST /admin/createUser without auth — allowed when no users exist
-      httpJson ('POST', '/admin/createUser', {email: s.cloudAdminEmail}, function (error, status, body) {
-         if (error) return log ('Bootstrap admin failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 bootstrapping admin, got ' + status + ' ' + JSON.stringify (body));
-         if (! body || body.ok !== true || ! body.id) return log ('Expected {ok: true, id} from bootstrap, got: ' + JSON.stringify (body));
-         s.adminUserId = body.id;
-         s.cleanupKeys.push ('user:' + body.id, 'email:' + s.cloudAdminEmail);
+      if (! s.cloudAdminEmail) return log ('secret.json must define adminEmail for cloud tests');
+      redisGet ('email:' + s.cloudAdminEmail, function (error, userId) {
+         if (error) return log ('Failed to read admin email lookup from Redis: ' + error.message);
+         if (! userId) return log ('Expected config admin user to exist in Redis for ' + s.cloudAdminEmail);
+         s.adminUserId = userId;
          next ();
       });
    }],
 
-   ['Cloud 6: Bootstrap admin is marked as admin and gets a dedicated API key record', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 6: Config admin is marked as admin and gets a dedicated API key record', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
       redisHgetall ('user:' + s.adminUserId, function (err, user) {
          if (err || ! user) return log ('Failed to read admin user from Redis');
-         if (user.admin !== '1') return log ('Bootstrap admin should have admin=1, got: ' + user.admin);
+         if (user.admin !== '1') return log ('Config admin should have admin=1, got: ' + user.admin);
          if (user.email !== s.cloudAdminEmail) return log ('Admin email mismatch');
          if (user.apiKey) return log ('Admin user hash should not store apiKey anymore');
          redisGet ('userapikey:' + s.adminUserId, function (lookupError, apiKey) {
@@ -2762,7 +2853,7 @@ var snapshotsSequence = [
    ['Snapshots 4: Create snapshot with label', 'post', 'project/' + SNAPSHOTS_PROJECT + '/snapshot', {}, {label: 'before refactor'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected snapshot entry object');
       if (! rs.body.id) return log ('Snapshot missing id');
-      if (rs.body.project !== SNAPSHOTS_PROJECT) return log ('Snapshot project mismatch: ' + rs.body.project);
+      if (normalizeProjectSlugForMode (rs.body.project) !== SNAPSHOTS_PROJECT) return log ('Snapshot project mismatch: ' + rs.body.project);
       if (rs.body.label !== 'before refactor') return log ('Snapshot label mismatch');
       if (! rs.body.file || rs.body.file.indexOf ('.tar.gz') === -1) return log ('Snapshot file should be .tar.gz');
       if (type (rs.body.fileCount) !== 'integer' || rs.body.fileCount < 2) return log ('Expected at least 2 files, got: ' + rs.body.fileCount);
@@ -2837,7 +2928,7 @@ var snapshotsSequence = [
                var result = JSON.parse (data);
                if (! result.slug) return log ('Restore missing slug');
                if (result.snapshotId !== s.snapshotId) return log ('Restore snapshotId mismatch');
-               s.restoredSlug = result.slug;
+               s.restoredSlug = normalizeProjectSlugForMode (result.slug);
                s.restoredName = result.name;
                next ();
             }
@@ -3016,7 +3107,7 @@ var snapshotsSequence = [
    ['Snapshots 25: Snapshots list is clean', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var ours = dale.fil (rs.body, undefined, function (snap) {
-         if (snap.project === SNAPSHOTS_PROJECT) return snap;
+         if (normalizeProjectSlugForMode (snap.project) === SNAPSHOTS_PROJECT) return snap;
       });
       if (ours.length > 0) return log ('Leftover snapshots from snapshots suite: ' + ours.length);
       return true;
@@ -3194,33 +3285,132 @@ dale.go (process.argv.slice (2), function (arg) {
 
 if (! requestedSuites.length) requestedSuites = SUITE_ORDER;
 
-var sequences = dale.go (requestedSuites, function (name) {return allSuites [name];});
-var label = requestedSuites.join (' + ');
+var adaptSequenceForCloud = function (sequence) {
+   return dale.go (sequence, function (step) {
+      var copy = step.slice ();
+      var method = (copy [1] || '').toUpperCase ();
+      var headers = {};
+      dale.go (copy [3] || {}, function (value, key) {
+         headers [key] = value;
+      });
+      headers.Cookie = cookieHeader (TEST_MODE.auth.cookies);
+      copy [3] = headers;
+      if (type (copy [2]) === 'string') copy [2] = scopeCloudPath (copy [2]).replace (/^\//, '');
+      else if (type (copy [2]) === 'function') {
+         var originalPath = copy [2];
+         copy [2] = function (s) {
+            var path = originalPath (s);
+            return type (path) === 'string' ? scopeCloudPath (path).replace (/^\//, '') : path;
+         };
+      }
+      if ((method === 'POST' || method === 'PUT') && type (copy [4]) === 'object' && copy [4].csrf === undefined) copy [4].csrf = TEST_MODE.auth.csrf;
+      return copy;
+   });
+};
 
 var finish = function (code) {
    process.exit (code);
 };
 
-h.seq (
-   {
-      host: 'localhost',
-      port: 5353,
-      timeout: 420
-   },
-   sequences,
-   function (error) {
-      if (error) {
-         try {
-            if (error.request && type (error.request.body) === 'string') {
-               error.request.body = error.request.body.slice (0, 1200) + (error.request.body.length > 1200 ? '... OMITTING REMAINDER' : '');
-            }
+var runSuites = function () {
+   if (TEST_MODE.cloud) {
+      requestedSuites = dale.fil (requestedSuites, undefined, function (name) {
+         if (name !== 'cloud') return name;
+      }).concat (requestedSuites.indexOf ('cloud') === -1 ? [] : ['cloud']);
+   }
+
+   var sequences = dale.go (requestedSuites, function (name) {
+      if (TEST_MODE.cloud && name === 'cloud') return [[
+         'Cloud 0: Clear generic auth before cloud suite', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs) {
+            TEST_MODE.auth = null;
+            return true;
          }
-         catch (e) {}
-         console.log ('VIBEY TEST FAILED:', error);
+      ]].concat (allSuites [name]);
+      if (TEST_MODE.cloud && TEST_MODE.auth && name !== 'cloud') return adaptSequenceForCloud (allSuites [name]);
+      return allSuites [name];
+   });
+   var label = requestedSuites.join (' + ');
+
+   h.seq (
+      {
+         host: 'localhost',
+         port: 5353,
+         timeout: 420
+      },
+      sequences,
+      function (error) {
+         if (error) {
+            try {
+               if (error.request && type (error.request.body) === 'string') {
+                  error.request.body = error.request.body.slice (0, 1200) + (error.request.body.length > 1200 ? '... OMITTING REMAINDER' : '');
+               }
+            }
+            catch (e) {}
+            console.log ('VIBEY TEST FAILED:', error);
+            return finish (1);
+         }
+         log ('ALL TESTS PASSED (' + label + ')');
+         finish (0);
+      },
+      h.stdmap
+   );
+};
+
+httpRequest ('GET', '/auth/csrf', '', {}, function (error, status, text) {
+   if (error) {
+      console.log ('VIBEY TEST FAILED:', error);
+      return finish (1);
+   }
+
+   var body = null;
+   try {body = text ? JSON.parse (text) : null;} catch (e) {}
+
+   if (status === 200 && body && body.mode === 'LOCAL') return runSuites ();
+   if (status !== 403 && status !== 200) {
+      console.log ('VIBEY TEST FAILED:', new Error ('Unexpected GET /auth/csrf status: ' + status));
+      return finish (1);
+   }
+
+   TEST_MODE.cloud = true;
+
+   var needsCloudAuth = dale.stopNot (requestedSuites, false, function (name) {
+      return name !== 'cloud';
+   });
+
+   if (! needsCloudAuth) return runSuites ();
+
+   redisFlushdb (function (flushError) {
+      if (flushError) {
+         console.log ('VIBEY TEST FAILED:', flushError);
          return finish (1);
       }
-      log ('ALL TESTS PASSED (' + label + ')');
-      finish (0);
-   },
-   h.stdmap
-);
+
+      var email = (CONFIG.adminEmail || '').toLowerCase ();
+      if (! email) {
+         console.log ('VIBEY TEST FAILED:', new Error ('secret.json must define adminEmail for cloud tests'));
+         return finish (1);
+      }
+
+      httpRequest ('GET', '/auth/csrf', '', {}, function (bootstrapError) {
+         if (bootstrapError) {
+            console.log ('VIBEY TEST FAILED:', bootstrapError);
+            return finish (1);
+         }
+         cloudLogin (email, function (loginError, auth) {
+            if (loginError) {
+               console.log ('VIBEY TEST FAILED:', loginError);
+               return finish (1);
+            }
+            redisGet ('email:' + email, function (lookupError, userId) {
+               if (lookupError || ! userId) {
+                  console.log ('VIBEY TEST FAILED:', lookupError || new Error ('Missing config admin user in Redis'));
+                  return finish (1);
+               }
+               auth.userId = userId;
+               TEST_MODE.auth = auth;
+               runSuites ();
+            });
+         });
+      });
+   });
+});

@@ -3,11 +3,9 @@ if [ "$1" == "prod" ] ; then
       echo "Must add 'confirm' to deploy to prod"
       exit 1
    fi
-   HOST="root@95.216.118.115"
-elif [ "$1" == "dev" ] ; then
    HOST="root@136.243.174.166"
 else
-   echo "Must specify environment (dev|prod)"
+   echo "Must specify environment (prod)"
    exit 1
 fi
 
@@ -22,7 +20,7 @@ fi
 
 if [ "$2" == "server" ] ; then
    scp server.js $HOST:$FOLDER
-   ssh $HOST "cd $FOLDER && mg restart"
+   ssh $HOST "cd $FOLDER && VIBEY_CLOUD=1 mg restart"
    exit 0
 fi
 
@@ -34,4 +32,4 @@ fi
 
 rsync -av . $HOST:$FOLDER
 ssh $HOST chown -R root /root/$FOLDER
-ssh $HOST "cd $FOLDER && npm i --no-save --omit=dev && mg restart"
+ssh $HOST "cd $FOLDER && npm i --no-save --omit=dev && VIBEY_CLOUD=1 mg restart"

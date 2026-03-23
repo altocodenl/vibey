@@ -78,13 +78,31 @@ var styles = css ([
       background: C.surface,
       border: '1px solid ' + C.border,
       'border-radius': '12px',
-      padding: '32px',
-      'margin-bottom': '20px'
+      padding: '0',
+      'margin-bottom': '20px',
+      overflow: 'hidden'
+   }],
+   ['.pillar-toggle', {
+      width: '100%',
+      background: 'transparent',
+      border: 'none',
+      color: C.text,
+      cursor: 'pointer',
+      padding: '28px 32px',
+      'text-align': 'left',
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'space-between',
+      gap: '16px',
+      'font-family': font
+   }],
+   ['.pillar-toggle:hover', {
+      background: C.surface2
    }],
    ['.pillar h3', {
       'font-size': '1.15rem',
       'font-weight': '600',
-      'margin-bottom': '10px',
+      margin: 0,
       display: 'flex',
       'align-items': 'center',
       gap: '10px'
@@ -102,6 +120,12 @@ var styles = css ([
       'font-weight': '700',
       'flex-shrink': '0'
    }],
+   ['.pillar-body', {
+      padding: '0 32px 28px 32px'
+   }],
+   ['.pillar-body[hidden]', {
+      display: 'none'
+   }],
    ['.pillar p', {
       color: C.textDim,
       'line-height': '1.7'
@@ -109,6 +133,82 @@ var styles = css ([
    ['.pillar strong', {
       color: C.text,
       'font-weight': '600'
+   }],
+   ['.pillar-caret', {
+      color: C.accent,
+      'font-size': '1.8rem',
+      'line-height': '1',
+      'font-weight': '700',
+      'flex-shrink': '0',
+      width: '28px',
+      'text-align': 'center'
+   }],
+
+   // *** ADVENTURE ***
+   ['.adventure', {
+      'padding-bottom': '70px'
+   }],
+   ['.adventure h2', {
+      'font-size': '1.8rem',
+      'font-weight': '700',
+      'letter-spacing': '-0.02em',
+      'margin-bottom': '12px'
+   }],
+   ['.adventure .intro', {
+      color: C.textDim,
+      'margin-bottom': '22px'
+   }],
+   ['.adventure-switcher', {
+      display: 'flex',
+      gap: '12px',
+      'margin-bottom': '20px',
+      'flex-wrap': 'wrap'
+   }],
+   ['.adventure-btn', {
+      background: C.surface2,
+      color: C.text,
+      border: '1px solid ' + C.border,
+      'border-radius': '999px',
+      padding: '10px 16px',
+      cursor: 'pointer',
+      'font-size': '0.95rem',
+      'font-family': font,
+      transition: 'border-color 0.15s, color 0.15s, background 0.15s'
+   }],
+   ['.adventure-btn:hover', {
+      'border-color': C.accent,
+      color: C.white
+   }],
+   ['.adventure-btn.active', {
+      background: C.accent,
+      color: C.bg,
+      'border-color': C.accent,
+      'font-weight': '600'
+   }],
+   ['.adventure-panel', {
+      background: C.surface,
+      border: '1px solid ' + C.border,
+      'border-radius': '12px',
+      padding: '28px 28px 6px 28px'
+   }],
+   ['.adventure-panel[hidden]', {
+      display: 'none'
+   }],
+   ['.adventure-panel h3', {
+      'font-size': '1.2rem',
+      'margin-bottom': '10px'
+   }],
+   ['.adventure-panel p', {
+      color: C.textDim,
+      'margin-bottom': '18px'
+   }],
+   ['.adventure-panel ul', {
+      'padding-left': '1.2rem',
+      'margin-bottom': '18px'
+   }],
+   ['.adventure-panel li', {
+      color: C.textDim,
+      'margin-bottom': '10px'
    }],
 
    // *** INSTALL ***
@@ -248,18 +348,37 @@ var styles = css ([
       'font-size': '1.8rem',
       'font-weight': '700',
       'letter-spacing': '-0.02em',
-      'margin-bottom': '20px'
+      'margin-bottom': '12px'
    }],
-   ['.audience ul', {
-      margin: 0,
-      padding: 0,
-      'padding-left': '1.2rem'
-   }],
-   ['.audience li', {
+   ['.audience .intro', {
       color: C.textDim,
-      'margin-bottom': '14px'
+      'margin-bottom': '22px',
+      'max-width': '620px'
    }],
-   ['.audience strong', {
+   ['.audience-grid', {
+      display: 'grid',
+      gap: '14px',
+      'grid-template-columns': 'repeat(2, minmax(0, 1fr))'
+   }],
+   ['.audience-card', {
+      background: C.surface,
+      border: '1px solid ' + C.border,
+      'border-radius': '12px',
+      padding: '18px 18px 18px 48px',
+      position: 'relative',
+      color: C.textDim,
+      'line-height': '1.6',
+      'min-height': '100%'
+   }],
+   ['.audience-card:before', {
+      content: '"→"',
+      position: 'absolute',
+      left: '18px',
+      top: '17px',
+      color: C.accent,
+      'font-weight': '700'
+   }],
+   ['.audience-card strong', {
       color: C.text,
       'font-weight': '600'
    }],
@@ -271,6 +390,7 @@ var mediaQuery = '@media (max-width: 600px){' + css ([
    ['.hero h1', {'font-size': '2.2rem'}],
    ['.wrap', {padding: '0 16px'}],
    ['.pillar', {padding: '24px'}],
+   ['.audience-grid', {'grid-template-columns': '1fr'}],
    ['.code-row', {'flex-direction': 'column'}],
    ['.copy-btn', {width: '100%', 'text-align': 'center'}],
    ['.step-link', {width: '100%', 'justify-content': 'center'}]
@@ -288,6 +408,29 @@ var copyScript = [
    '    e.target.textContent = "copied!";',
    '    setTimeout(function() { e.target.textContent = "copy"; }, 1500);',
    '  });',
+   '});',
+   'document.addEventListener("click", function(e) {',
+   '  if (!e.target.classList.contains("adventure-btn")) return;',
+   '  var mode = e.target.getAttribute("data-mode");',
+   '  var buttons = document.querySelectorAll(".adventure-btn");',
+   '  var panels = document.querySelectorAll(".adventure-panel");',
+   '  buttons.forEach(function(button) {',
+   '    button.classList.toggle("active", button.getAttribute("data-mode") === mode);',
+   '  });',
+   '  panels.forEach(function(panel) {',
+   '    panel.hidden = panel.getAttribute("data-mode") !== mode;',
+   '  });',
+   '});',
+   'document.addEventListener("click", function(e) {',
+   '  var button = e.target.closest(".pillar-toggle");',
+   '  if (!button) return;',
+   '  var pillar = button.closest(".pillar");',
+   '  var body = pillar.querySelector(".pillar-body");',
+   '  var caret = pillar.querySelector(".pillar-caret");',
+   '  var expanded = button.getAttribute("aria-expanded") === "true";',
+   '  button.setAttribute("aria-expanded", expanded ? "false" : "true");',
+   '  body.hidden = expanded;',
+   '  if (caret) caret.textContent = expanded ? "▾" : "▸";',
    '});'
 ].join ('\n');
 
@@ -302,13 +445,18 @@ var codeBlock = function (text) {
    ]];
 };
 
-var pillar = function (num, title, body) {
+var pillar = function (num, title, body, open) {
    return ['div', {class: 'pillar'}, [
-      ['h3', [
-         ['span', {class: 'num'}, '' + num],
-         ['LITERAL', title]
+      ['button', {class: 'pillar-toggle', 'aria-expanded': open ? 'true' : 'false', type: 'button'}, [
+         ['h3', [
+            ['span', {class: 'num'}, '' + num],
+            ['LITERAL', title]
+         ]],
+         ['span', {class: 'pillar-caret'}, open ? '▸' : '▾']
       ]],
-      ['p', ['LITERAL', body]]
+      ['div', {class: 'pillar-body', hidden: ! open}, [
+         ['p', ['LITERAL', body]]
+      ]]
    ]];
 };
 
@@ -336,14 +484,14 @@ var page = ['html', {lang: 'en'}, [
 
          // *** AUDIENCE ***
          ['div', {class: 'audience'}, [
-            ['h2', 'Vibey is for those who don\'t code but want to use AI to:'],
-            ['ul', [
-               ['li', 'Create their own workflows to automate repeated tasks.'],
-               ['li', 'Perform research in the background.'],
-               ['li', 'Explore and iterate a product idea.'],
-               ['li', 'Create small computer games.'],
-               ['li', 'Create custom teaching materials.'],
-               ['li', 'Run ad-hoc data analysis and create visualizations.']
+            ['h2', 'For those who don\'t code but want to use AI to:'],
+            ['div', {class: 'audience-grid'}, [
+               ['div', {class: 'audience-card'}, [['strong', 'Create workflows'], ' to automate repeated tasks.']],
+               ['div', {class: 'audience-card'}, [['strong', 'Perform research'], ' in the background.']],
+               ['div', {class: 'audience-card'}, [['strong', 'Explore product ideas'], ' and iterate quickly.']],
+               ['div', {class: 'audience-card'}, [['strong', 'Create small games'], ' from a simple prompt.']],
+               ['div', {class: 'audience-card'}, [['strong', 'Create teaching materials'], ' tailored to your needs.']],
+               ['div', {class: 'audience-card'}, [['strong', 'Run ad-hoc analysis'], ' and create visualizations.']]
             ]]
          ]],
 
@@ -351,7 +499,7 @@ var page = ['html', {lang: 'en'}, [
          ['div', {class: 'pillars'}, [
             ['h2', 'How is vibey different?'],
             pillar (1, 'Everything is a document',
-               'Your description of what you\'re building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. <strong>There is no database.</strong>'),
+               'Your description of what you\'re building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. <strong>There is no database.</strong>', true),
 
             pillar (2, 'Everything in your browser',
                'Your documents are not only text: use images, audio, and embed small apps in your documents. No terminal or dedicated native app required.'),
@@ -367,39 +515,48 @@ var page = ['html', {lang: 'en'}, [
 
          ]],
 
-         // *** INSTALL ***
-         ['div', {class: 'install'}, [
-            ['h2', 'Get started'],
-            ['p', {class: 'prereq'}, ['LITERAL', 'Requirements: <strong>macOS or Linux</strong> and <strong>Docker</strong> installed and running. Open a terminal and run these commands:']],
-
-            ['div', {class: 'step'}, [
-               ['div', {class: 'step-label'}, '1. Install'],
-               codeBlock ('curl -fsSL https://raw.githubusercontent.com/altocodenl/vibey/main/install.sh | sh')
+         // *** ADVENTURE ***
+         ['div', {class: 'adventure'}, [
+            ['h2', 'Choose your own adventure'],
+            ['p', {class: 'intro'}, 'After reading the five things above, choose how you want to run vibey.'],
+            ['div', {class: 'adventure-switcher'}, [
+               ['button', {class: 'adventure-btn active', 'data-mode': 'local'}, 'I want to run vibey locally'],
+               ['button', {class: 'adventure-btn', 'data-mode': 'cloud'}, 'I want to run vibey on the cloud']
             ]],
-
-            ['div', {class: 'step'}, [
-               ['div', {class: 'step-label'}, '2. Start'],
-               codeBlock ('cd vibey\ndocker compose up --build')
+            ['div', {class: 'adventure-panel', 'data-mode': 'local'}, [
+               ['h3', 'Run vibey locally'],
+               ['p', 'The default path: everything runs on your machine. You bring your own AI credentials, keep full control, and get started with Docker only.'],
+               ['div', {class: 'step'}, [
+                  ['div', {class: 'step-label'}, '1. Install'],
+                  codeBlock ('curl -fsSL https://raw.githubusercontent.com/altocodenl/vibey/main/install.sh | sh')
+               ]],
+               ['div', {class: 'step'}, [
+                  ['div', {class: 'step-label'}, '2. Start'],
+                  codeBlock ('cd vibey\ndocker compose up --build')
+               ]],
+               ['div', {class: 'step'}, [
+                  ['div', {class: 'step-label'}, '3. Open'],
+                  ['a', {class: 'step-link', href: 'http://localhost:5353', target: '_blank', rel: 'noopener'}, 'http://localhost:5353']
+               ]],
+               ['div', {class: 'step'}, [
+                  ['div', {class: 'step-label'}, 'Stop vibey'],
+                  codeBlock ('docker compose down')
+               ]],
+               ['div', {class: 'step'}, [
+                  ['div', {class: 'step-label'}, 'Reset all data'],
+                  codeBlock ('docker compose down -v')
+               ]]
             ]],
-
-            ['div', {class: 'step'}, [
-               ['div', {class: 'step-label'}, '3. Open'],
-               ['a', {class: 'step-link', href: 'http://localhost:5353', target: '_blank', rel: 'noopener'}, 'http://localhost:5353']
-            ]]
-         ]],
-
-         // *** USAGE ***
-         ['div', {class: 'usage'}, [
-            ['h2', 'Usage'],
-
-            ['div', {class: 'step'}, [
-               ['div', {class: 'step-label'}, 'Stop vibey'],
-               codeBlock ('docker compose down')
-            ]],
-
-            ['div', {class: 'step'}, [
-               ['div', {class: 'step-label'}, 'Reset all data'],
-               codeBlock ('docker compose down -v')
+            ['div', {class: 'adventure-panel', 'data-mode': 'cloud', hidden: true}, [
+               ['h3', 'Run vibey on the cloud'],
+               ['p', 'Cloud mode is for when you want your agents to keep working while you are away, open your projects from any device, and share them with others.'],
+               ['ul', [
+                  ['li', [['strong', 'Always running'], ' — your agents can work while your computer is closed.']],
+                  ['li', [['strong', 'Available from any device'], ' — all you need is a browser.']],
+                  ['li', [['strong', 'Shareable'], ' — publish and share projects with others.']],
+                  ['li', [['strong', 'Zero lock-in'], ' — the whole thing is open source, so you can always run it yourself.']]
+               ]],
+               ['a', {class: 'step-link', href: 'https://buildwithvibey.com/app', target: '_blank', rel: 'noopener'}, 'Go to Vibey Cloud']
             ]]
          ]],
 

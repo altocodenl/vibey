@@ -36,8 +36,8 @@ var stop = function (rs, rules) {
 // *** REDIS ***
 
 var redis = require ('redis').createClient ({
-   host: process.env.REDIS_HOST || CONFIG.redisHost || '127.0.0.1',
-   port: process.env.REDIS_PORT || CONFIG.redisPort || 6379,
+   host: CONFIG.redisHost || process.env.REDIS_HOST || '127.0.0.1',
+   port: CONFIG.redisPort || process.env.REDIS_PORT || 6379,
    db:   CONFIG.redisdb || 0
 });
 
@@ -290,7 +290,7 @@ var ANTHROPIC_SCOPES = 'org:create_api_key user:profile user:inference';
 // In-flight PKCE state for Anthropic login
 var anthropicPendingLogin = null;
 
-var startAnthropicLogin = async function () {
+var startAnthropicLogin = async function (rq) {
    var pkce = await generatePKCE ();
    var params = new URLSearchParams ({
       code: 'true',
@@ -303,14 +303,15 @@ var startAnthropicLogin = async function () {
       state: pkce.verifier
    });
    var url = ANTHROPIC_AUTHORIZE_URL + '?' + params.toString ();
-   anthropicPendingLogin = {verifier: pkce.verifier};
+   await storePendingOAuth ('claude', {verifier: pkce.verifier}, rq);
    return url;
 };
 
-var completeAnthropicLogin = async function (authCode) {
-   if (! anthropicPendingLogin) throw new Error ('No pending Anthropic login');
-   var verifier = anthropicPendingLogin.verifier;
-   anthropicPendingLogin = null;
+var completeAnthropicLogin = async function (authCode, rq) {
+   var pending = await loadPendingOAuth ('claude', rq);
+   if (! pending) throw new Error ('No pending Anthropic login');
+   var verifier = pending.verifier;
+   await clearPendingOAuth ('claude', rq);
 
    var splits = authCode.split ('#');
    var code = splits [0];
@@ -339,14 +340,12 @@ var completeAnthropicLogin = async function (authCode) {
    var tokenData = await response.json ();
    var expiresAt = Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000;
 
-   if (! CONFIG.accounts) CONFIG.accounts = {};
-   CONFIG.accounts.claudeOAuth = {
+   await storeOAuthCredential ('claude', {
       type: 'oauth',
       access: tokenData.access_token,
       refresh: tokenData.refresh_token,
       expires: expiresAt
-   };
-   saveConfigJson ();
+   }, rq);
    return {ok: true};
 };
 
@@ -403,7 +402,7 @@ var extractOpenAIAccountId = function (accessToken) {
    return (type (accountId) === 'string' && accountId.length > 0) ? accountId : null;
 };
 
-var startOpenAILogin = async function () {
+var startOpenAILogin = async function (rq) {
    var pkce = await generatePKCE ();
    var state = crypto.randomBytes (16).toString ('hex');
 
@@ -421,16 +420,15 @@ var startOpenAILogin = async function () {
    });
 
    var url = OPENAI_AUTHORIZE_URL + '?' + params.toString ();
-
-   // Start local callback server
-   var callbackPromise = startOpenAICallbackServer (state);
-
-   openaiPendingLogin = {
+   var pending = {
       verifier: pkce.verifier,
-      state: state,
-      callbackPromise: callbackPromise
+      state: state
    };
 
+   // Local mode can wait for the localhost callback helper; cloud mode must use manual completion.
+   if (! CLOUD) pending.callbackPromise = startOpenAICallbackServer (state);
+
+   await storePendingOAuth ('openai', pending, rq);
    return url;
 };
 
@@ -501,20 +499,23 @@ var startOpenAICallbackServer = function (expectedState) {
    });
 };
 
-var completeOpenAILogin = async function (manualCode) {
-   if (! openaiPendingLogin) throw new Error ('No pending OpenAI login');
-   var verifier = openaiPendingLogin.verifier;
-   var state = openaiPendingLogin.state;
-   var callbackPromise = openaiPendingLogin.callbackPromise;
-   openaiPendingLogin = null;
+var completeOpenAILogin = async function (manualCode, rq) {
+   var pending = await loadPendingOAuth ('openai', rq);
+   if (! pending) throw new Error ('No pending OpenAI login');
+   var verifier = pending.verifier;
+   var state = pending.state;
+   var callbackPromise = pending.callbackPromise;
+   await clearPendingOAuth ('openai', rq);
 
-   var server = await callbackPromise;
+   var server = callbackPromise ? await callbackPromise : null;
    var code = null;
 
    if (manualCode) {
       // User pasted code manually
-      server.cancelWait ();
-      server.close ();
+      if (server) {
+         server.cancelWait ();
+         server.close ();
+      }
       var parts = manualCode.trim ().split ('#');
       code = parts [0];
       if (parts [1] && parts [1] !== state) throw new Error ('OpenAI OAuth state mismatch');
@@ -530,6 +531,7 @@ var completeOpenAILogin = async function (manualCode) {
       }
    }
    else {
+      if (! server) throw new Error ('OpenAI login requires manual code completion in cloud mode');
       // Wait for browser callback
       var result = await server.waitForCode ();
       server.close ();
@@ -561,15 +563,13 @@ var completeOpenAILogin = async function (manualCode) {
    var accountId = extractOpenAIAccountId (tokenData.access_token);
    if (! accountId) throw new Error ('Failed to extract accountId from token');
 
-   if (! CONFIG.accounts) CONFIG.accounts = {};
-   CONFIG.accounts.openaiOAuth = {
+   await storeOAuthCredential ('openai', {
       type: 'oauth',
       access: tokenData.access_token,
       refresh: tokenData.refresh_token,
       expires: Date.now () + tokenData.expires_in * 1000,
       accountId: accountId
-   };
-   saveConfigJson ();
+   }, rq);
    return {ok: true};
 };
 
@@ -605,16 +605,77 @@ var refreshOpenAIToken = async function (cred) {
 
 // *** API KEY RESOLUTION (API key from secret.json > OAuth token) ***
 
-var getApiKey = async function (provider, rq) {
-   var config;
+var loadSettingsForRequest = async function (rq) {
    if (CLOUD && rq && rq.user) {
       var userData = await getUserById (rq.user.id);
-      config = userData && userData.settings ? JSON.parse (userData.settings) : {};
+      var settings = userData && userData.settings ? safeJsonParse (userData.settings, {}) : {};
+      if (type (settings) !== 'object' || ! settings) settings = {};
+      if (! settings.accounts) settings.accounts = {};
+      return settings;
    }
-   else {
-      config = CONFIG;
+   if (! CONFIG.accounts) CONFIG.accounts = {};
+   return CONFIG;
+};
+
+var saveSettingsForRequest = async function (rq, settings) {
+   settings = settings || {};
+   if (! settings.accounts) settings.accounts = {};
+   if (CLOUD && rq && rq.user) {
+      await Redis ('hset', 'user:' + rq.user.id, 'settings', JSON.stringify (settings));
+      return;
    }
-   if (! config.accounts) config.accounts = {};
+   CONFIG = settings;
+   saveConfigJson ();
+};
+
+var oauthPendingRedisKey = function (userId, provider) {
+   return 'oauthpending:' + userId + ':' + provider;
+};
+
+var storePendingOAuth = async function (provider, data, rq) {
+   if (CLOUD && rq && rq.user) {
+      await Redis ('setex', oauthPendingRedisKey (rq.user.id, provider), 15 * 60, JSON.stringify (data || {}));
+      return;
+   }
+   if (provider === 'claude') anthropicPendingLogin = data;
+   if (provider === 'openai') openaiPendingLogin = data;
+};
+
+var loadPendingOAuth = async function (provider, rq) {
+   if (CLOUD && rq && rq.user) {
+      var raw = await Redis ('get', oauthPendingRedisKey (rq.user.id, provider));
+      return raw ? safeJsonParse (raw, null) : null;
+   }
+   if (provider === 'claude') return anthropicPendingLogin;
+   if (provider === 'openai') return openaiPendingLogin;
+   return null;
+};
+
+var clearPendingOAuth = async function (provider, rq) {
+   if (CLOUD && rq && rq.user) {
+      await Redis ('del', oauthPendingRedisKey (rq.user.id, provider));
+      return;
+   }
+   if (provider === 'claude') anthropicPendingLogin = null;
+   if (provider === 'openai') openaiPendingLogin = null;
+};
+
+var storeOAuthCredential = async function (provider, credential, rq) {
+   var settings = await loadSettingsForRequest (rq);
+   if (! settings.accounts) settings.accounts = {};
+   settings.accounts [provider + 'OAuth'] = credential;
+   await saveSettingsForRequest (rq, settings);
+};
+
+var clearOAuthCredential = async function (provider, rq) {
+   var settings = await loadSettingsForRequest (rq);
+   if (! settings.accounts) settings.accounts = {};
+   delete settings.accounts [provider + 'OAuth'];
+   await saveSettingsForRequest (rq, settings);
+};
+
+var getApiKey = async function (provider, rq) {
+   var config = await loadSettingsForRequest (rq);
    var accounts = config.accounts || {};
 
    if (provider === 'claude') {
@@ -624,9 +685,8 @@ var getApiKey = async function (provider, rq) {
          if (Date.now () >= cred.expires) {
             try {
                var refreshed = await refreshAnthropicToken (cred);
-               CONFIG.accounts.claudeOAuth = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires};
-               saveConfigJson ();
-               cred = CONFIG.accounts.claudeOAuth;
+               cred = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires};
+               await storeOAuthCredential ('claude', cred, rq);
             }
             catch (e) {
                return {key: '', type: 'api_key'};
@@ -647,9 +707,8 @@ var getApiKey = async function (provider, rq) {
          if (Date.now () >= cred.expires) {
             try {
                var refreshed = await refreshOpenAIToken (cred);
-               CONFIG.accounts.openaiOAuth = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires, accountId: refreshed.accountId};
-               saveConfigJson ();
-               cred = CONFIG.accounts.openaiOAuth;
+               cred = {type: 'oauth', access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires, accountId: refreshed.accountId};
+               await storeOAuthCredential ('openai', cred, rq);
             }
             catch (e) {
                return {key: '', type: 'api_key'};
@@ -1220,6 +1279,7 @@ var loadSnapshotEntry = function (id) {
       project: '',
       projectName: '',
       label: '',
+      ownerId: '',
       file: archiveName,
       created: fs.statSync (archivePath).mtime.toISOString (),
       fileCount: 0
@@ -1233,6 +1293,7 @@ var loadSnapshotEntry = function (id) {
             if (meta.project !== undefined) entry.project = meta.project;
             if (meta.projectName !== undefined) entry.projectName = meta.projectName;
             if (meta.label !== undefined) entry.label = meta.label;
+            if (meta.ownerId !== undefined) entry.ownerId = meta.ownerId;
             if (meta.created !== undefined) entry.created = meta.created;
             if (meta.fileCount !== undefined) entry.fileCount = meta.fileCount;
          }
@@ -1241,6 +1302,16 @@ var loadSnapshotEntry = function (id) {
    catch (e) {}
 
    return entry;
+};
+
+var snapshotOwnerId = function (entry) {
+   if (! entry) return '';
+   if (entry.ownerId) return entry.ownerId;
+   if (CLOUD && entry.project) {
+      var match = entry.project.match (/^([a-f0-9]+)-/);
+      if (match) return match [1];
+   }
+   return '';
 };
 
 var loadSnapshotsIndex = function () {
@@ -1268,7 +1339,7 @@ var generateSnapshotId = function () {
    return formatDialogTimestamp () + '-' + crypto.randomBytes (4).toString ('hex');
 };
 
-var createSnapshot = async function (projectName, label) {
+var createSnapshot = async function (projectName, label, rq) {
    projectName = validateProjectName (projectName);
    ensureSnapshotsDir ();
 
@@ -1297,6 +1368,7 @@ var createSnapshot = async function (projectName, label) {
       project: projectName,
       projectName: unslugifyProjectName (projectName),
       label: label || '',
+      ownerId: CLOUD && rq && rq.user ? rq.user.id : '',
       file: archiveName,
       created: new Date ().toISOString (),
       fileCount: fileCount
@@ -1306,6 +1378,7 @@ var createSnapshot = async function (projectName, label) {
       project: entry.project,
       projectName: entry.projectName,
       label: entry.label,
+      ownerId: entry.ownerId,
       created: entry.created,
       fileCount: entry.fileCount
    }, null, 2), 'utf8');
@@ -1313,15 +1386,25 @@ var createSnapshot = async function (projectName, label) {
    return entry;
 };
 
-var restoreSnapshot = async function (snapshotId, newProjectName) {
+var restoreSnapshot = async function (snapshotId, newProjectName, rq) {
    var entry = loadSnapshotEntry (snapshotId);
    if (! entry) throw new Error ('Snapshot not found: ' + snapshotId);
+
+   var ownerId = snapshotOwnerId (entry);
+   if (CLOUD) {
+      if (! rq || ! rq.user || ! rq.user.id) throw new Error ('Session required');
+      if (ownerId && ownerId !== rq.user.id) throw new Error ('Snapshot not found: ' + snapshotId);
+   }
 
    var archivePath = Path.join (SNAPSHOTS_DIR, entry.file);
    if (! fs.existsSync (archivePath)) throw new Error ('Snapshot archive missing: ' + entry.file);
 
    var displayName = newProjectName || ((entry.projectName || 'Snapshot') + ' (restored ' + formatDialogTimestamp () + ')');
-   var slug = await ensureProject (displayName);
+   var baseSlug = slugifyProjectName (displayName);
+   var scopedOwnerId = rq && rq.user && rq.user.id ? rq.user.id : ownerId;
+   var slug = scopedOwnerId ? scopedOwnerId + '-' + baseSlug : baseSlug;
+   await ensureProjectContainer (slug, {createVolume: true});
+   await ensureProjectLayout (slug);
 
    var name = containerName (slug);
    await execA ('cat ' + JSON.stringify (archivePath) + ' | docker exec -i ' + name + ' tar xzf - -C /workspace', {encoding: 'buffer', shell: '/bin/sh'});
@@ -3000,6 +3083,18 @@ var autoCommitApi = function (projectName, method, path) {
    });
 };
 
+var requestCsrfToken = function (rq) {
+   if (type (rq.body) === 'object' && rq.body && type (rq.body.csrf) === 'string') return rq.body.csrf;
+   if (rq.headers && type (rq.headers ['x-csrf-token']) === 'string') return rq.headers ['x-csrf-token'];
+   try {
+      var url = new URL (rq.rawurl || rq.url || '/', 'http://localhost');
+      return url.searchParams.get ('csrf') || null;
+   }
+   catch (error) {
+      return null;
+   }
+};
+
 // *** ROUTES ***
 
 var buildSettingsResponse = function (config, extra) {
@@ -3027,7 +3122,6 @@ var buildSettingsResponse = function (config, extra) {
          expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
       },
       userApiKey: userApiKey ? {
-         key: userApiKey.key || '',
          maskedKey: maskApiKey (userApiKey.key || ''),
          createdAt: userApiKey.createdAt || '',
          lastUsed: userApiKey.lastUsed || ''
@@ -3089,6 +3183,30 @@ var createCloudUser = async function (email, isAdmin) {
    return {id: id};
 };
 
+var ensureCloudAdminUser = async function () {
+   if (! CLOUD) return;
+   if (! CONFIG.adminEmail || type (CONFIG.adminEmail) !== 'string' || ! CONFIG.adminEmail.trim ()) {
+      throw new Error ('secret.json must have `adminEmail` in cloud mode');
+   }
+
+   var email = CONFIG.adminEmail.trim ().toLowerCase ();
+   if (! email.match (H_email)) throw new Error ('secret.json has invalid `adminEmail` for cloud mode');
+
+   var userId = await Redis ('get', 'email:' + email);
+   if (userId) {
+      var user = await Redis ('hgetall', 'user:' + userId);
+      if (! user || ! user.id) throw new Error ('adminEmail points to missing user in Redis');
+      if (user.admin !== '1') await Redis ('hset', 'user:' + userId, 'admin', '1');
+      var apiKey = await Redis ('get', 'userapikey:' + userId);
+      if (! apiKey) await createUserApiKeyRecord (userId, user.createdAt || new Date ().toISOString ());
+      return userId;
+   }
+
+   var result = await createCloudUser (email, true);
+   if (result.error) throw new Error ('Failed to create cloud admin user');
+   return result.id;
+};
+
 var routes = [
 
    // *** STATIC ***
@@ -3117,25 +3235,11 @@ var routes = [
 
    // *** AUTH ***
 
-   // Bootstrap the very first cloud user before auth middleware runs.
-   ['post', 'admin/createUser', async function (rq, rs) {
-      if (! CLOUD) return rs.next ();
-
-      var userKeys = await Redis ('keys', 'user:*');
-      if (userKeys && userKeys.length > 0) return rs.next ();
-      if (stop (rs, [['email', rq.body.email, 'string']])) return;
-
-      var email = rq.body.email.trim ().toLowerCase ();
-      if (! email.match (H_email)) return reply (rs, 400, {error: 'Invalid email'});
-
-      var result = await createCloudUser (email, true);
-      if (result.error) return reply (rs, result.error, result.body);
-      reply (rs, 200, {ok: true, id: result.id});
-   }],
-
    // Mode detection + CSRF token
    ['get', 'auth/csrf', async function (rq, rs) {
       if (! CLOUD) return reply (rs, 200, {mode: 'LOCAL'});
+
+      await ensureCloudAdminUser ();
 
       if (! rq.data.cookie || ! rq.data.cookie [COOKIE_NAME]) return reply (rs, 403, {error: 'session'});
 
@@ -3268,9 +3372,6 @@ var routes = [
       // Auth routes and public routes are open
       if (rq.url.match (/^\/auth\//) || rq.url.match (/^\/public\//)) return rs.next ();
 
-      // admin/createUser handles bootstrap auth itself when there are no users yet.
-      if (rq.url === '/admin/createUser') return rs.next ();
-
       // Static assets are open
       if (rq.url === '/' || rq.url === '/client.js' || rq.url === '/client-css.js' || rq.url === '/test-client.js') return rs.next ();
 
@@ -3314,11 +3415,10 @@ var routes = [
    }],
 
    // CSRF validation for mutating requests
-   ['post', '*', function (rq, rs) {
+   ['post', '*', async function (rq, rs) {
       if (! CLOUD) return rs.next ();
       if (rq.url.match (/^\/auth\//)) return rs.next ();
       if (rq.url.match (/^\/public\//)) return rs.next ();
-      if (rq.url === '/admin/createUser') return rs.next ();
       // Bearer-authenticated endpoints skip CSRF
       if (rq._bearerKey) return rs.next ();
 
@@ -3338,7 +3438,12 @@ var routes = [
 
    ['delete', '*', function (rq, rs) {
       if (! CLOUD) return rs.next ();
-      // DELETE may not have a body, check csrf in query or skip
+      if (rq.url.match (/^\/auth\//)) return rs.next ();
+      if (rq.url.match (/^\/public\//)) return rs.next ();
+      if (rq._bearerKey) return rs.next ();
+      var csrf = requestCsrfToken (rq);
+      if (csrf !== (rq.user || {}).csrf) return reply (rs, 403, {error: 'csrf'});
+      if (type (rq.body) === 'object' && rq.body) delete rq.body.csrf;
       rs.next ();
    }],
 
@@ -3355,8 +3460,9 @@ var routes = [
             rq.data.params.project = prefix + rq.data.params.project;
          }
          // DELETE /projects/:name
-         if (rq.url.match (/^\/projects\//) && rq.data.params.name && rq.data.params.name.indexOf (prefix) !== 0) {
-            rq.data.params.name = prefix + rq.data.params.name;
+         if (rq.url.match (/^\/projects\//)) {
+            if (rq.data.params.name && rq.data.params.name.indexOf (prefix) !== 0) rq.data.params.name = prefix + rq.data.params.name;
+            if (rq.data.params [0] && rq.data.params [0].indexOf (prefix) !== 0) rq.data.params [0] = prefix + rq.data.params [0];
          }
       }
       // Regex-matched routes store params in rq.data.params as [0], [1], etc.
@@ -3409,12 +3515,12 @@ var routes = [
       var provider = rq.data.params.provider;
       try {
          if (provider === 'claude') {
-            var url = await startAnthropicLogin ();
+            var url = await startAnthropicLogin (rq);
             reply (rs, 200, {url: url, flow: 'paste_code'});
          }
          else if (provider === 'openai') {
-            var url = await startOpenAILogin ();
-            reply (rs, 200, {url: url, flow: 'callback'});
+            var url = await startOpenAILogin (rq);
+            reply (rs, 200, {url: url, flow: CLOUD ? 'paste_code' : 'callback'});
          }
          else {
             reply (rs, 400, {error: 'Unknown provider: ' + provider});
@@ -3431,12 +3537,12 @@ var routes = [
       try {
          if (provider === 'claude') {
             if (type (rq.body.code) !== 'string' || ! rq.body.code.trim ()) return reply (rs, 400, {error: 'code is required'});
-            var result = await completeAnthropicLogin (rq.body.code.trim ());
+            var result = await completeAnthropicLogin (rq.body.code.trim (), rq);
             reply (rs, 200, result);
          }
          else if (provider === 'openai') {
-            // manualCode is optional; if not provided, waits for browser callback
-            var result = await completeOpenAILogin (rq.body.code || null);
+            // manualCode is optional in local mode; cloud mode requires manual completion.
+            var result = await completeOpenAILogin (rq.body.code || null, rq);
             reply (rs, 200, result);
          }
          else {
@@ -3449,42 +3555,34 @@ var routes = [
    }],
 
    // OAuth logout
-   ['post', 'settings/logout/:provider', function (rq, rs) {
+   ['post', 'settings/logout/:provider', async function (rq, rs) {
       var provider = rq.data.params.provider;
-      if (! CONFIG.accounts) CONFIG.accounts = {};
-
-      if (provider === 'claude') {
-         delete CONFIG.accounts.claudeOAuth;
-      }
-      else if (provider === 'openai') {
-         delete CONFIG.accounts.openaiOAuth;
-      }
-      else {
-         return reply (rs, 400, {error: 'Unknown provider: ' + provider});
-      }
-
-      saveConfigJson ();
+      if (provider !== 'claude' && provider !== 'openai') return reply (rs, 400, {error: 'Unknown provider: ' + provider});
+      await clearOAuthCredential (provider, rq);
       reply (rs, 200, {ok: true});
    }],
 
-   // Backward-compatible accounts routes
-   ['get', 'accounts', function (rq, rs) {
-      reply (rs, 200, buildSettingsResponse (CONFIG));
+   // Backward-compatible accounts routes (local mode only)
+   ['get', 'accounts', async function (rq, rs) {
+      if (CLOUD) return reply (rs, 404, {error: 'Not available in cloud mode'});
+      reply (rs, 200, buildSettingsResponse (await loadSettingsForRequest (rq)));
    }],
-   ['post', 'accounts', function (rq, rs) {
+   ['post', 'accounts', async function (rq, rs) {
+      if (CLOUD) return reply (rs, 404, {error: 'Not available in cloud mode'});
       applySettingsUpdate (CONFIG, rq.body);
       saveConfigJson ();
       reply (rs, 200, {ok: true});
    }],
    ['post', 'accounts/login/:provider', async function (rq, rs) {
+      if (CLOUD) return reply (rs, 404, {error: 'Not available in cloud mode'});
       var provider = rq.data.params.provider;
       try {
          if (provider === 'claude') {
-            var url = await startAnthropicLogin ();
+            var url = await startAnthropicLogin (rq);
             reply (rs, 200, {url: url, flow: 'paste_code'});
          }
          else if (provider === 'openai') {
-            var url = await startOpenAILogin ();
+            var url = await startOpenAILogin (rq);
             reply (rs, 200, {url: url, flow: 'callback'});
          }
          else {
@@ -3496,15 +3594,16 @@ var routes = [
       }
    }],
    ['post', 'accounts/login/:provider/callback', async function (rq, rs) {
+      if (CLOUD) return reply (rs, 404, {error: 'Not available in cloud mode'});
       var provider = rq.data.params.provider;
       try {
          if (provider === 'claude') {
             if (type (rq.body.code) !== 'string' || ! rq.body.code.trim ()) return reply (rs, 400, {error: 'code is required'});
-            var result = await completeAnthropicLogin (rq.body.code.trim ());
+            var result = await completeAnthropicLogin (rq.body.code.trim (), rq);
             reply (rs, 200, result);
          }
          else if (provider === 'openai') {
-            var result = await completeOpenAILogin (rq.body.code || null);
+            var result = await completeOpenAILogin (rq.body.code || null, rq);
             reply (rs, 200, result);
          }
          else {
@@ -3515,21 +3614,11 @@ var routes = [
          reply (rs, 500, {error: error.message});
       }
    }],
-   ['post', 'accounts/logout/:provider', function (rq, rs) {
+   ['post', 'accounts/logout/:provider', async function (rq, rs) {
+      if (CLOUD) return reply (rs, 404, {error: 'Not available in cloud mode'});
       var provider = rq.data.params.provider;
-      if (! CONFIG.accounts) CONFIG.accounts = {};
-
-      if (provider === 'claude') {
-         delete CONFIG.accounts.claudeOAuth;
-      }
-      else if (provider === 'openai') {
-         delete CONFIG.accounts.openaiOAuth;
-      }
-      else {
-         return reply (rs, 400, {error: 'Unknown provider: ' + provider});
-      }
-
-      saveConfigJson ();
+      if (provider !== 'claude' && provider !== 'openai') return reply (rs, 400, {error: 'Unknown provider: ' + provider});
+      await clearOAuthCredential (provider, rq);
       reply (rs, 200, {ok: true});
    }],
 
@@ -3722,7 +3811,8 @@ var routes = [
    }],
 
    ['delete', 'projects/:name', async function (rq, rs) {
-      var projectName = validProjectNameOrReply (rs, rq.data.params.name);
+      var rawProjectName = rq.data.params.name || rq.data.params [0];
+      var projectName = validProjectNameOrReply (rs, rawProjectName);
       if (! projectName) return;
 
       if (! (await volumeExists (projectName))) return reply (rs, 404, {error: 'Project not found'});
@@ -3754,7 +3844,7 @@ var routes = [
       var projectName = rq.data.params.project;
       try {
          var label = (rq.body.label && type (rq.body.label) === 'string') ? rq.body.label.trim () : '';
-         var entry = await createSnapshot (projectName, label);
+         var entry = await createSnapshot (projectName, label, rq);
          reply (rs, 200, entry);
       }
       catch (error) {
@@ -3766,7 +3856,13 @@ var routes = [
 
    ['get', 'snapshots', function (rq, rs) {
       try {
-         reply (rs, 200, loadSnapshotsIndex ());
+         var entries = loadSnapshotsIndex ();
+         if (CLOUD && rq.user) {
+            entries = dale.fil (entries, undefined, function (entry) {
+               if (snapshotOwnerId (entry) === rq.user.id) return entry;
+            });
+         }
+         reply (rs, 200, entries);
       }
       catch (error) {
          reply (rs, 500, {error: error.message});
@@ -3777,8 +3873,8 @@ var routes = [
       var snapshotId = rq.data.params.id;
       try {
          var newName = (rq.body.name && type (rq.body.name) === 'string') ? rq.body.name.trim () : null;
-         var result = await restoreSnapshot (snapshotId, newName);
-         reply (rs, 200, result);
+         var result = await restoreSnapshot (snapshotId, newName, rq);
+         reply (rs, 200, {slug: unscopeSlug (result.slug, rq), name: result.name, snapshotId: result.snapshotId});
       }
       catch (error) {
          reply (rs, 400, {error: error.message});
@@ -3788,6 +3884,9 @@ var routes = [
    ['delete', 'snapshots/:id', function (rq, rs) {
       var snapshotId = rq.data.params.id;
       try {
+         var entry = loadSnapshotEntry (snapshotId);
+         if (! entry) return reply (rs, 400, {error: 'Snapshot not found'});
+         if (CLOUD && rq.user && snapshotOwnerId (entry) !== rq.user.id) return reply (rs, 404, {error: 'Snapshot not found'});
          deleteSnapshot (snapshotId);
          reply (rs, 200, {ok: true});
       }
@@ -3799,11 +3898,9 @@ var routes = [
    ['get', 'snapshots/:id/download', function (rq, rs) {
       var snapshotId = rq.data.params.id;
       try {
-         var index = loadSnapshotsIndex ();
-         var entry = dale.stopNot (index, undefined, function (e) {
-            if (e.id === snapshotId) return e;
-         });
+         var entry = loadSnapshotEntry (snapshotId);
          if (! entry) return reply (rs, 404, {error: 'Snapshot not found'});
+         if (CLOUD && rq.user && snapshotOwnerId (entry) !== rq.user.id) return reply (rs, 404, {error: 'Snapshot not found'});
 
          var archivePath = Path.join (SNAPSHOTS_DIR, entry.file);
          if (! fs.existsSync (archivePath)) return reply (rs, 404, {error: 'Snapshot archive missing'});
@@ -4793,6 +4890,13 @@ cicek.logconsole = function (message) {
    }
 };
 
-cicek.listen ({port: port}, routes);
+var startServer = async function () {
+   if (CLOUD) await ensureCloudAdminUser ();
+   cicek.listen ({port: port}, routes);
+   clog ('vibey server running on port ' + port);
+};
 
-clog ('vibey server running on port ' + port);
+startServer ().catch (function (error) {
+   clog ({priority: 'critical', type: 'cloud admin bootstrap error', error: error, stack: error.stack});
+   process.exit (1);
+});

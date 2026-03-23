@@ -58,6 +58,18 @@ docker compose down
 docker compose down -v
 ```
 
+### Advanced: Vibey cloud
+
+```bash
+VIBEY_CLOUD=1 VIBEY_DISABLE_EMAIL=1 docker compose up --build
+```
+
+If you have configured emails, you can run:
+
+```bash
+VIBEY_CLOUD=1 docker compose up --build
+```
+
 ## The concept
 
 Think of a text-based agentic system as three things:
@@ -140,13 +152,13 @@ Projects tab lists all projects with + New and × delete.
 
 ### Server: snapshots
 
-Snapshots are tar.gz archives of a project's `/workspace`, stored inside vibey's own data volume at `/app/data/snapshots/`. Snapshot metadata is stored in per-snapshot sidecar JSON files next to the archives, and listings are built by scanning the directory. Snapshots are not stored inside project containers — they survive project deletion.
+Snapshots are tar.gz archives of a project's `/workspace`, stored inside vibey's own data volume at `/app/data/snapshots/`. Snapshot metadata is stored in per-snapshot sidecar JSON files next to the archives, and listings are built by scanning the directory. Snapshots are not stored inside project containers — they survive project deletion. In cloud mode, each snapshot carries an `ownerId`, and all snapshot operations enforce ownership.
 
 - `POST /project/:project/snapshot` — create a snapshot. Body: `{label?}`. Tars the project container's `/workspace` and stores it. Returns the snapshot entry.
-- `GET /snapshots` — list all snapshots, newest first. Returns array of snapshot entries.
-- `POST /snapshots/:id/restore` — restore a snapshot as a new project. Body: `{name?}`. Creates a new project container and unpacks the archive into it. Returns `{slug, name, snapshotId}`.
-- `DELETE /snapshots/:id` — delete a snapshot. Removes the archive file and index entry.
-- `GET /snapshots/:id/download` — download the snapshot archive as a `.tar.gz` file.
+- `GET /snapshots` — list the current user's snapshots, newest first (all snapshots in local mode). Returns array of snapshot entries.
+- `POST /snapshots/:id/restore` — restore one of the current user's snapshots as a new project. Body: `{name?}`. Creates a new project container and unpacks the archive into it. Returns `{slug, name, snapshotId}`.
+- `DELETE /snapshots/:id` — delete one of the current user's snapshots. Removes the archive file and metadata.
+- `GET /snapshots/:id/download` — download one of the current user's snapshot archives as a `.tar.gz` file.
 
 Snapshot entry shape:
 
@@ -156,6 +168,7 @@ Snapshot entry shape:
   "project": "my-project-slug",
   "projectName": "My Project",
   "label": "before refactor",
+  "ownerId": "9f3c2a1b4d5e6f78",
   "file": "20260225-122518-a1b2c3d4.tar.gz",
   "created": "2026-02-25T12:25:18.000Z",
   "fileCount": 12
@@ -754,7 +767,7 @@ A catch-all route early in the route list handles session validation for cloud m
 7. Look up `csrf:<token>` and attach `rq.user.csrf`.
 8. Call `rs.next ()`.
 
-For `POST`/`PUT`/`DELETE` requests (except auth routes), a subsequent route validates `rq.body.csrf === rq.user.csrf`. On mismatch: `403 {error: 'csrf'}`. The CSRF token is then stripped from `rq.body` before the route handler runs.
+For `POST`/`PUT`/`DELETE` requests (except auth routes and Bearer-authenticated endpoints), a subsequent route validates the CSRF token against `rq.user.csrf`. For `POST`/`PUT` the client sends it in `rq.body.csrf`; for `DELETE` the server also accepts `X-CSRF-Token` or `?csrf=...`. On mismatch: `403 {error: 'csrf'}`. When present in the JSON body, the CSRF token is stripped before the route handler runs.
 
 ### Server: admin
 
@@ -780,14 +793,16 @@ In cloud mode, projects and snapshots are scoped to the authenticated user:
 - Project containers are named `vibey-proj-<user-id>-<name>` (instead of `vibey-proj-<name>`).
 - Project volumes are named `vibey-vol-<user-id>-<name>`.
 - `GET /projects` lists only the current user's projects (filtered by `<user-id>` prefix in container/volume names).
-- Snapshot archive filenames are prefixed with the user id. Snapshot listings come from scanning `/app/data/snapshots/`; each archive is `<user-id>-<snapshot-id>.tar.gz` with a matching metadata sidecar `<user-id>-<snapshot-id>.json`.
+- Snapshots are stored in the shared snapshots directory, but each snapshot entry carries an `ownerId` in its metadata. Listing, download, restore, and delete operations all enforce ownership, so users can only access their own snapshots.
 
 In local mode, scoping is unchanged (no user id prefix).
 
 ### Server: user settings
 
 - In **local mode**, settings live in `secret.json` on disk (current behavior).
-- In **cloud mode**, settings live in the `settings` field of `user:<id>` in redis. `GET /settings` reads from redis; `POST /settings` writes to redis. The response also includes the user's automation API key record (`key`, `maskedKey`, `createdAt`, `lastUsed`) so the Settings view can show it.
+- In **cloud mode**, settings live in the `settings` field of `user:<id>` in redis. `GET /settings` reads from redis; `POST /settings` writes to redis.
+- In cloud mode, OAuth credentials are also stored per-user inside that user's settings. Pending OAuth login state is stored in Redis with a TTL, keyed by user and provider, so concurrent users do not share OAuth flow state.
+- `GET /settings` returns masked provider keys and the automation API key metadata (`maskedKey`, `createdAt`, `lastUsed`), but not the raw automation API key by default.
 
 ### Server: API key
 
@@ -796,7 +811,7 @@ Each user has exactly one auto-generated automation API key. It is created at us
 - `userapikey:<user-id>` → `<api-key>`
 - `apikey:<api-key>` hash → `{userId, createdAt, lastUsed}`
 
-The key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication for automation endpoints. The current user's key is also returned by `GET /settings` in cloud mode so it can be shown in the Settings view, together with `createdAt` and `lastUsed`.
+The key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication for automation endpoints. `GET /settings` exposes only metadata for this key in cloud mode (`maskedKey`, `createdAt`, `lastUsed`), not the raw key itself.
 
 - `POST /project/:project/trigger` — trigger an agent on a project. Requires API key authentication (no cookie). Body: `{provider, prompt, slug?}`. Equivalent to `POST /project/:project/dialog` but returns immediately with `202 {ok: true, dialogId}` and no further response body. On success, the API key record's `lastUsed` field is updated. Designed for automation and webhooks.
 
@@ -949,27 +964,15 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
       - The UI redraws synchronously because of gotoB, so there should be
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
-### TODO for website: Vibey cloud in a nutshell
-
-Why use Vibey cloud and not locally?
-
-1. **Always running**: your agents can work while you're away and while your computer is closed.
-2. **Available from any device**.
-3. **You can share your projects with others**.
-
-How does it work?
-
-1. **Automatic infra**: accessible anywhere with a browser; put projects (containers) onto engines (servers), proxy traffic from/to your apps, HTTPS (bring your DNS record), receive emails, vibey session cookies.
-2. **Aligned pricing**: An annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
-3. **Zero lock-in**: the whole thing being open source, so you can always run the same thing yourself elsewhere, also in the cloud.
-
-All you need is an AI provider, no need to install anything.
-
 ### TODO
 
 - Say about time and token limits, so that agents can check.
 - Implement vibey cloud
-- Snapshots should be prepended with the user id. We need to get rid of the silliness of snapshots.json and not be afraid to use fs.scandir or something to that effect.
+
+#### Security
+
+- Public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
+- Continue to avoid returning reusable secrets to the client by default. Keep provider credentials masked in `GET /settings`, keep the automation API key metadata-only by default, and use explicit reveal/regenerate flows only when needed.
 
 #### For later
 
@@ -977,6 +980,8 @@ All you need is an AI provider, no need to install anything.
 - Spin Hetzner engines and bind projects to them.
 - Put dialog state in memory [perhaps]
 - Hosted services? (email, DB)
+- Billing: aligned pricing: an annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
+
 
 ##### Vi mode [TODO]
 

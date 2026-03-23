@@ -18,6 +18,29 @@ Prompt:
 - You can put it at the end of the dialog suite, creating what you need there. Also update first test.md
 - Please take the deploy script I have on ../acpic/deploy.sh and make a version here on utils/deploy.sh.
 - Please remove the separate data volume for redis. Vibey's redis should be on the same volume as vibey itself.
+- Please start vibey in cloud mode (passing env vars ad hoc, not changing the default local), and run the cloud tests.
+- The cloud tests should flush redis.
+- I need the existing suites to work for both local and cloud. If we're in cloud, autodetect it by calling GET /auth/csrf and modify the tests accordingly.
+- Please read the cloud code. What env variables I need to put in secret.json so I can run vibey in the cloud? Can you put placeholders for them already in secret.json?
+- Modify utils/deploy.sh to pass cloud mode. Don't run it yet. Also, use the IP of dev as prod, and remove the prod one.
+- I just ran the cloud suite and no redis calls happened
+- Please make Vibey's redis run inside the vibey container too. Let the vibey config specify which redis to use, just in case. The variables should be baked inside secret.json.
+- Please make Vibey's redis run inside the vibey container too. Let the vibey config specify which redis to use, just in case.
+- Nice! Please now debug the server tests for cloud. Here's how you can restart vibey:
+- There's something off there, a docker compose down should also bring that down, right?
+- Now please debug the server cloud tests. It's probably the implementation too.
+- This admin bootstrapping is a headache. Just create the user mentioned in adminEmail. If that email is absent from the config, report an error. If it's in redis, do nothing. If not, create it and set it to admin. End of story. Don't do any of this on local.
+- OK, I believe you! Now debug each suite, starting from the top. Just the server tests first.
+
+- Another agent is still building the cloud mode. In the meantime, could you do a server review for security issues? Look for real issues, like escalation of privileges, routes that bypass auth and shouldn't; eschew cargo culte security headers with marginal real impact. I'm also concerned about an user seeing another user's credentials.
+- Implement those four fixes.
+- Amazing. Do one pass on readme.md to make sure the spec is aligned with the implementation after the security fixes.
+
+
+- Let's build a choose your own adventure part of vibey's website. After reading the five things, let's add the switcher there. The options would be: I want to run vibey locally; I want to run vibey on the cloud.
+- Nice one! Now add the local commands at the bottom within the "local" part of the adventure. And in the cloud one, instead of talking about the environment flag, just add a button that takes you to buildwithvibey.com/app
+- Nice! Please improve the look of the Vibey is for those who... section.
+- Can you make the cards for the five differences be expandable, to show/hide the non-headline text?
 
 ### 2026-03-22
 

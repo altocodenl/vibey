@@ -3877,8 +3877,9 @@ views.settings = function () {
       };
 
       var renderUserApiKey = function (info) {
-         if (! info || ! info.key) return '';
-         var display = showKeys ? info.key : (info.maskedKey || '');
+         if (! info || (! info.key && ! info.maskedKey)) return '';
+         var hasRawKey = !! info.key;
+         var display = hasRawKey ? (showKeys ? info.key : (info.maskedKey || '')) : (info.maskedKey || '');
          var metaStyle = style ({color: '#9aa4bf', 'font-size': '12px'});
          return ['div', {class: 'settings-user-api-key', style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
             ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '1rem', 'margin-bottom': '0.75rem'})}, [
@@ -3886,15 +3887,15 @@ views.settings = function () {
                   ['span', {style: style ({'font-weight': 'bold', 'font-size': '16px', color: '#94b8ff'})}, 'Automation API key'],
                   ['div', {style: metaStyle}, 'Use as Bearer token for POST /project/:project/trigger']
                ]],
-               ['button', {
+               hasRawKey ? ['button', {
                   class: 'btn-small',
                   style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
                   onclick: B.ev ('set', 'showApiKeys', ! showKeys)
-               }, showKeys ? 'Hide key' : 'Show key']
+               }, showKeys ? 'Hide key' : 'Show key'] : ''
             ]],
             ['input', {
                'data-testid': 'user-api-key-input',
-               type: showKeys ? 'text' : 'password',
+               type: hasRawKey && showKeys ? 'text' : 'password',
                readOnly: true,
                value: display,
                style: style ({
