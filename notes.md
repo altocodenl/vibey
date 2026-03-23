@@ -1,5 +1,15 @@
 ## Vibey development notes
 
+### 2026-03-23
+
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server.
+
+Prompt:
+- Why are we passing config to the chatWithX functions? Why do we need it?
+- Add a local/cloud flag to that getApiKey function. Call getApiKey from inside the chat functions and let that function resolve the config. getApiKey should take the rq as parameter.
+
+- Please remove snapshots.json, let's just do a scandir where we need to.
+
 ### 2026-03-22
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it.
@@ -7,7 +17,13 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
 Prompt:
 - Please document the auth endpoints in readme.md, above client implementation. Copy the existing style of documentation.
 - Please take spec for vibey cloud from the bottom of readme.md. Please implement the server changes taking the style and approach from here (https://raw.githubusercontent.com/altocodenl/tagaway/refs/heads/master/server.js). But don't use giz, just borrow the redis calling style and coding style.
-
+- Can you implement vibey cloud in the server first?
+- Please make sure the server tests are aligned with the implementation (just the new ones). If not, align the tests to the spec. Also update test.md if you need to.
+- BTW, are we reading directly from redis to get the otps in the tests?
+- Please run vibey in local mode and make sure the fast server tests don't fail.
+- Now, check the client fast tests.
+- Please run the dialog tests in the server.
+- Please run the dialog tests in the client.
 
 Big takeaway from Friday: not everyone needs to build an app; many could have better use for agents researching and writing documents and sending API calls.
 

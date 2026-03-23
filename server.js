@@ -13,6 +13,8 @@ var cicek  = require ('cicek');
 
 var CONFIG = require ('./secret.json');
 
+var CLOUD = !! process.env.VIBEY_CLOUD;
+
 var clog = console.log;
 
 var type = teishi.type, eq = teishi.eq, last = teishi.last, inc = teishi.inc;
@@ -29,6 +31,93 @@ var stop = function (rs, rules) {
       reply (rs, 400, {error: error});
    }, true);
 }
+
+// *** REDIS ***
+
+var redis = require ('redis').createClient ({
+   host: process.env.REDIS_HOST || CONFIG.redisHost || '127.0.0.1',
+   port: process.env.REDIS_PORT || CONFIG.redisPort || 6379,
+   db:   CONFIG.redisdb || 0
+});
+
+redis.on ('error', function (error) {
+   if (CLOUD) clog ('Redis error:', error.message);
+   // In local mode, redis errors are non-fatal (redis is optional)
+});
+
+var Redis = function (command) {
+   var args = [].slice.call (arguments, 1);
+   return new Promise (function (resolve, reject) {
+      redis [command].apply (redis, args.concat (function (error, data) {
+         if (error) reject (error);
+         else       resolve (data);
+      }));
+   });
+};
+
+// *** CLOUD: EMAIL ***
+
+var mailer;
+if (CLOUD) {
+   if (! CONFIG.ses)          throw new Error ('secret.json must have `ses` in cloud mode');
+   if (! CONFIG.email)        throw new Error ('secret.json must have `email` in cloud mode');
+   if (! CONFIG.adminEmail)   throw new Error ('secret.json must have `adminEmail` in cloud mode');
+   if (! CONFIG.cookieSecret) throw new Error ('secret.json must have `cookieSecret` in cloud mode');
+   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (CONFIG.ses));
+}
+
+var sendmail = function (to, subject, html) {
+   return new Promise (function (resolve, reject) {
+      if (! CLOUD) {
+         clog (new Date ().toISOString (), 'sendmail', {to: to, subject: subject});
+         return resolve ();
+      }
+      mailer.sendMail ({
+         from:    CONFIG.email.name + ' <' + CONFIG.email.address + '>',
+         to:      to,
+         replyTo: CONFIG.email.address,
+         subject: subject,
+         html:    html
+      }, function (error) {
+         if (error) reject (error);
+         else       resolve ();
+      });
+   });
+};
+
+// *** CLOUD: AUTH HELPERS ***
+
+var SESSION_EXPIRY = 7 * 24 * 60 * 60; // 7 days in seconds
+var OTP_EXPIRY     = 10 * 60;           // 10 minutes in seconds
+
+var COOKIE_NAME = 'vibey';
+
+var FAR_FUTURE_COOKIE = new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10);
+
+var generateToken = function (bytes) {
+   return crypto.randomBytes (bytes || 32).toString ('hex');
+};
+
+var generateOTP = function () {
+   return String (crypto.randomInt (100000, 999999));
+};
+
+var H_email = /^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i;
+
+// Look up user id by email, then fetch user hash. Returns null if not found.
+var getUserByEmail = async function (email) {
+   var userId = await Redis ('get', 'email:' + email.toLowerCase ());
+   if (! userId) return null;
+   var user = await Redis ('hgetall', 'user:' + userId);
+   if (! user || ! user.id) return null;
+   return user;
+};
+
+var getUserById = async function (id) {
+   var user = await Redis ('hgetall', 'user:' + id);
+   if (! user || ! user.id) return null;
+   return user;
+};
 
 var log = {
    style: {
@@ -472,9 +561,17 @@ var refreshOpenAIToken = async function (cred) {
 
 // *** API KEY RESOLUTION (API key from secret.json > OAuth token) ***
 
-var getApiKey = async function (provider) {
-   if (! CONFIG.accounts) CONFIG.accounts = {};
-   var accounts = CONFIG.accounts || {};
+var getApiKey = async function (provider, rq) {
+   var config;
+   if (CLOUD && rq && rq.user) {
+      var userData = await getUserById (rq.user.id);
+      config = userData && userData.settings ? JSON.parse (userData.settings) : {};
+   }
+   else {
+      config = CONFIG;
+   }
+   if (! config.accounts) config.accounts = {};
+   var accounts = config.accounts || {};
 
    if (provider === 'claude') {
       // 1. OAuth subscription (preferred)
@@ -615,6 +712,21 @@ var containerName = function (projectName) {
 
 var volumeName = function (projectName) {
    return 'vibey-vol-' + projectName;
+};
+
+// In cloud mode, scope project slugs to the user so containers/volumes
+// are namespaced without changing every call site.
+var scopedSlug = function (slug, rq) {
+   if (! CLOUD || ! rq || ! rq.user) return slug;
+   return rq.user.id + '-' + slug;
+};
+
+// Extract the display slug (without user prefix) from a scoped slug.
+var unscopeSlug = function (slug, rq) {
+   if (! CLOUD || ! rq || ! rq.user) return slug;
+   var prefix = rq.user.id + '-';
+   if (slug.indexOf (prefix) === 0) return slug.slice (prefix.length);
+   return slug;
 };
 
 var dockerErrorText = function (error) {
@@ -1203,16 +1315,18 @@ var validProjectNameOrReply = function (rs, projectName) {
    }
 };
 
-var ensureProject = async function (projectName) {
+var ensureProject = async function (projectName, rq) {
    var slug = slugifyProjectName (projectName);
-   await ensureProjectContainer (slug, {createVolume: true});
-   await ensureProjectLayout (slug);
-   return slug;
+   var scoped = scopedSlug (slug, rq);
+   await ensureProjectContainer (scoped, {createVolume: true});
+   await ensureProjectLayout (scoped);
+   return scoped;
 };
 
-var listProjects = async function () {
+var listProjects = async function (rq) {
    try {
       var projectsBySlug = {};
+      var prefix = CLOUD && rq && rq.user ? rq.user.id + '-' : '';
 
       var output = (await execA ('docker ps -a --filter label=vibey=project --format "{{.Names}}"')).trim ();
       if (output) {
@@ -1220,7 +1334,10 @@ var listProjects = async function () {
          dale.go (names, function (name) {
             if (name.indexOf ('vibey-proj-') !== 0) return;
             var slug = name.slice ('vibey-proj-'.length);
-            projectsBySlug [slug] = {slug: slug, name: unslugifyProjectName (slug)};
+            // In cloud mode, only show this user's projects
+            if (prefix && slug.indexOf (prefix) !== 0) return;
+            var displaySlug = prefix ? slug.slice (prefix.length) : slug;
+            projectsBySlug [slug] = {slug: displaySlug, name: unslugifyProjectName (displaySlug)};
          });
       }
 
@@ -1240,7 +1357,10 @@ var listProjects = async function () {
                   var slug = labelSlug;
                   if (! slug && volName.indexOf ('vibey-vol-') === 0) slug = volName.slice ('vibey-vol-'.length);
                   if (! slug) return;
-                  if (! projectsBySlug [slug]) projectsBySlug [slug] = {slug: slug, name: unslugifyProjectName (slug)};
+                  // In cloud mode, only show this user's projects
+                  if (prefix && slug.indexOf (prefix) !== 0) return;
+                  var displaySlug = prefix ? slug.slice (prefix.length) : slug;
+                  if (! projectsBySlug [slug]) projectsBySlug [slug] = {slug: displaySlug, name: unslugifyProjectName (displaySlug)};
                });
             }
          }
@@ -1516,7 +1636,7 @@ var sanitizeToolPath = function (path) {
 };
 
 // Execute a tool inside the project container
-var executeTool = async function (toolName, toolInput, projectName, rs) {
+var executeTool = async function (toolName, toolInput, projectName, rs, rq) {
    // Strip description from input — it's metadata for the UI, not a tool parameter
    toolInput = teishi.copy (toolInput || {});
    delete toolInput.description;
@@ -1590,7 +1710,7 @@ var executeTool = async function (toolName, toolInput, projectName, rs) {
       }
 
       try {
-         var result = await startDialogTurn (projectName, toolInput.provider, toolInput.prompt.trim (), toolInput.model, toolInput.slug, null);
+         var result = await startDialogTurn (projectName, toolInput.provider, toolInput.prompt.trim (), toolInput.model, toolInput.slug, null, null, rq);
          return await finalizeTool ({
             success: true,
             launched: {
@@ -2060,7 +2180,7 @@ var writeToolResults = async function (projectName, filename, resultsById, onRep
 };
 
 // Implementation function for Claude (streaming with tool support)
-var chatWithClaude = async function (projectName, messages, model, onChunk, abortSignal) {
+var chatWithClaude = async function (projectName, messages, model, onChunk, abortSignal, rq) {
    model = model || 'claude-sonnet-4-6';
 
    var systemPrompt = await loadInjectedPrompt (projectName);
@@ -2074,7 +2194,7 @@ var chatWithClaude = async function (projectName, messages, model, onChunk, abor
       system: systemPrompt
    };
 
-   var auth = await getApiKey ('claude');
+   var auth = await getApiKey ('claude', rq);
    var headers = {'Content-Type': 'application/json'};
 
    if (auth.type === 'oauth') {
@@ -2232,7 +2352,7 @@ var normalizeMessagesForResponsesApi = function (messages) {
 };
 
 // Implementation function for OpenAI (streaming with tool support)
-var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal) {
+var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal, rq) {
    model = model || 'gpt-5.4';
 
    var systemPrompt = await loadInjectedPrompt (projectName);
@@ -2248,7 +2368,7 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
       tools: OPENAI_TOOLS
    };
 
-   var auth = await getApiKey ('openai');
+   var auth = await getApiKey ('openai', rq);
    var apiUrl = 'https://api.openai.com/v1/chat/completions';
    var headers = {
       'Content-Type': 'application/json',
@@ -2440,7 +2560,7 @@ var appendToolCallsToAssistantSection = async function (projectName, filename, t
    }
 };
 
-var runCompletion = async function (projectName, dialog, provider, model, onChunk, abortSignal) {
+var runCompletion = async function (projectName, dialog, provider, model, onChunk, abortSignal, rq) {
    var autoExecutedAll = [];
    var lastContent = '';
 
@@ -2510,8 +2630,8 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
       try {
          var result = provider === 'claude'
-            ? await chatWithClaude (projectName, messages, model, writeChunk, abortSignal)
-            : await chatWithOpenAI (projectName, messages, model, writeChunk, abortSignal);
+            ? await chatWithClaude (projectName, messages, model, writeChunk, abortSignal, rq)
+            : await chatWithOpenAI (projectName, messages, model, writeChunk, abortSignal, rq);
 
          var llmMs = Date.now () - llmStartMs;
          var toolCount = (result.toolCalls || []).length;
@@ -2560,7 +2680,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
 
          for (var i = 0; i < toolCalls.length; i++) {
             var tc = toolCalls [i];
-            var toolResult = await executeTool (tc.name, tc.input, projectName);
+            var toolResult = await executeTool (tc.name, tc.input, projectName, null, rq);
             resultsById [tc.id] = toolResult;
             executed.push ({id: tc.id, name: tc.name, result: toolResult});
             emitEvent ({type: 'tool_result', tool: {id: tc.id, name: tc.name, result: toolResult}});
@@ -2620,7 +2740,7 @@ var createDialogDraft = async function (projectName, provider, model, slug) {
    };
 };
 
-var startDialogTurn = async function (projectName, provider, prompt, model, slug, onChunk, abortSignal) {
+var startDialogTurn = async function (projectName, provider, prompt, model, slug, onChunk, abortSignal, rq) {
    if (provider !== 'claude' && provider !== 'openai') {
       throw new Error ('Unknown provider: ' + provider + '. Use "claude" or "openai".');
    }
@@ -2653,7 +2773,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    };
 
    try {
-      var result = await runCompletion (projectName, dialog, provider, defaultModel, wrappedOnChunk, abortSignal || stream.controller.signal);
+      var result = await runCompletion (projectName, dialog, provider, defaultModel, wrappedOnChunk, abortSignal || stream.controller.signal, rq);
       await setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/success');
       result.filename = dialog.filename;
       result.status = dialog.status;
@@ -2673,7 +2793,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    }
 };
 
-var updateDialogTurn = async function (projectName, dialogId, status, prompt, provider, model, onChunk, abortSignal) {
+var updateDialogTurn = async function (projectName, dialogId, status, prompt, provider, model, onChunk, abortSignal, rq) {
    var dialog = await loadDialog (projectName, dialogId);
    if (! dialog.exists) throw new Error ('Dialog not found: ' + dialogId);
 
@@ -2693,7 +2813,7 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
       var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
 
       try {
-         var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal);
+         var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal, rq);
          await setDialogStatus (projectName, dialog, 'done', 'updateDialogTurn/success');
          result.filename = dialog.filename;
          result.status = dialog.status;
@@ -2873,13 +2993,274 @@ var routes = [
    ['get', 'client.js', cicek.file],
    ['get', 'test-client.js', cicek.file],
 
+   // *** AUTH ***
+
+   // Mode detection + CSRF token
+   ['get', 'auth/csrf', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 200, {mode: 'LOCAL'});
+
+      if (! rq.data.cookie || ! rq.data.cookie [COOKIE_NAME]) return reply (rs, 403, {error: 'session'});
+
+      var userId = await Redis ('get', 'session:' + rq.data.cookie [COOKIE_NAME]);
+      if (! userId) return reply (rs, 403, {error: 'session'});
+
+      var user = await getUserById (userId);
+      if (! user) return reply (rs, 403, {error: 'session'});
+
+      // Refresh TTLs
+      await Redis ('expire', 'session:' + rq.data.cookie [COOKIE_NAME], SESSION_EXPIRY);
+
+      // Find CSRF for this session
+      // We store csrf:<token> -> <session-id>; scan is expensive, so we also
+      // store the csrf token on the session hash for quick lookup.
+      var csrf = await Redis ('get', 'sessioncsrf:' + rq.data.cookie [COOKIE_NAME]);
+      if (csrf) await Redis ('expire', 'csrf:' + csrf, SESSION_EXPIRY);
+
+      var result = {csrf: csrf};
+      if (user.admin === '1') result.admin = true;
+      reply (rs, 200, result);
+   }],
+
+   // Request invite
+   ['post', 'auth/signup', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (stop (rs, [['email', rq.body.email, 'string']])) return;
+
+      var email = rq.body.email.trim ().toLowerCase ();
+      if (! email.match (H_email)) return reply (rs, 400, {error: 'Invalid email'});
+
+      await Redis ('hmset', 'signup:' + email, 'email', email, 'createdAt', new Date ().toISOString ());
+
+      try {
+         await sendmail (CONFIG.adminEmail, 'Vibey signup request', lith.g (['p', 'New signup request from: ' + email]));
+      }
+      catch (e) {
+         clog ('Error sending signup notification:', e);
+      }
+
+      reply (rs, 200, {ok: true});
+   }],
+
+   // Request OTP
+   ['post', 'auth/login', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (stop (rs, [['email', rq.body.email, 'string']])) return;
+
+      var email = rq.body.email.trim ().toLowerCase ();
+      var user = await getUserByEmail (email);
+      if (! user) return reply (rs, 403, {error: 'user not found'});
+
+      var otp = generateOTP ();
+      await Redis ('setex', 'otp:' + user.id, OTP_EXPIRY, otp);
+
+      try {
+         await sendmail (email, 'Your Vibey login code', lith.g ([
+            ['p', 'Your login code is:'],
+            ['p', {style: 'font-size: 24px; font-weight: bold; letter-spacing: 4px;'}, otp],
+            ['p', 'This code expires in 10 minutes.']
+         ]));
+      }
+      catch (e) {
+         clog ('Error sending OTP:', e);
+         return reply (rs, 500, {error: 'Failed to send email'});
+      }
+
+      reply (rs, 200, {ok: true});
+   }],
+
+   // Verify OTP and create session
+   ['post', 'auth/verify', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (stop (rs, [
+         ['email', rq.body.email, 'string'],
+         ['otp', rq.body.otp, 'string'],
+      ])) return;
+
+      var email = rq.body.email.trim ().toLowerCase ();
+      var user = await getUserByEmail (email);
+      if (! user) return reply (rs, 403, {error: 'invalid otp'});
+
+      var storedOtp = await Redis ('get', 'otp:' + user.id);
+      if (! storedOtp || storedOtp !== rq.body.otp.trim ()) return reply (rs, 403, {error: 'invalid otp'});
+
+      // OTP is valid — delete it
+      await Redis ('del', 'otp:' + user.id);
+
+      // Create session
+      var session = generateToken (32);
+      await Redis ('setex', 'session:' + session, SESSION_EXPIRY, user.id);
+
+      // Create CSRF token
+      var csrf = generateToken (32);
+      await Redis ('setex', 'csrf:' + csrf, SESSION_EXPIRY, session);
+
+      // Store CSRF on session for quick lookup in GET /auth/csrf
+      await Redis ('setex', 'sessioncsrf:' + session, SESSION_EXPIRY, csrf);
+
+      // Update last active
+      await Redis ('hset', 'user:' + user.id, 'lastActive', new Date ().toISOString ());
+
+      var result = {csrf: csrf};
+      if (user.admin === '1') result.admin = true;
+
+      reply (rs, 200, result, {'set-cookie': cicek.cookie.write (COOKIE_NAME, session, {httponly: true, samesite: 'Lax', path: '/', expires: FAR_FUTURE_COOKIE})});
+   }],
+
+   // Logout
+   ['post', 'auth/logout', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      if (rq.data.cookie && rq.data.cookie [COOKIE_NAME]) {
+         var session = rq.data.cookie [COOKIE_NAME];
+         var csrf = await Redis ('get', 'sessioncsrf:' + session);
+         await Redis ('del', 'session:' + session);
+         await Redis ('del', 'sessioncsrf:' + session);
+         if (csrf) await Redis ('del', 'csrf:' + csrf);
+      }
+
+      reply (rs, 200, {ok: true}, {'set-cookie': cicek.cookie.write (COOKIE_NAME, false, {httponly: true, samesite: 'Lax', path: '/'})});
+   }],
+
+   // *** CLOUD: SESSION & CSRF GATEKEEPING ***
+
+   ['all', '*', async function (rq, rs) {
+      // In local mode, skip all auth
+      if (! CLOUD) return rs.next ();
+
+      // Auth routes and public routes are open
+      if (rq.url.match (/^\/auth\//) || rq.url.match (/^\/public\//)) return rs.next ();
+
+      // Static assets are open
+      if (rq.url === '/' || rq.url === '/client.js' || rq.url === '/client-css.js' || rq.url === '/test-client.js') return rs.next ();
+
+      // Try cookie auth first
+      var session = rq.data.cookie ? rq.data.cookie [COOKIE_NAME] : null;
+      var userId;
+
+      if (session) {
+         userId = await Redis ('get', 'session:' + session);
+      }
+
+      // Fall back to Bearer token auth (for API key endpoints like /trigger)
+      if (! userId) {
+         var authHeader = rq.headers.authorization || '';
+         var bearerMatch = authHeader.match (/^Bearer\s+(.+)$/i);
+         if (bearerMatch) {
+            // Look up user by API key — scan all users (MVP; add reverse index later)
+            var apiKey = bearerMatch [1];
+            // For now, require cookie. API key users must use the /trigger endpoint
+            // which does its own auth. This fallback prevents 403 on /trigger.
+            rq._bearerKey = apiKey;
+            // Let the trigger route handle its own auth
+            if (rq.url.match (/\/trigger$/)) return rs.next ();
+         }
+         return reply (rs, 403, {error: session ? 'session' : 'nocookie'});
+      }
+
+      var user = await getUserById (userId);
+      if (! user) return reply (rs, 403, {error: 'session'});
+
+      rq.user = {id: user.id, email: user.email, admin: user.admin === '1'};
+
+      // Refresh TTLs
+      await Redis ('expire', 'session:' + session, SESSION_EXPIRY);
+      var csrf = await Redis ('get', 'sessioncsrf:' + session);
+      if (csrf) {
+         await Redis ('expire', 'csrf:' + csrf, SESSION_EXPIRY);
+         await Redis ('expire', 'sessioncsrf:' + session, SESSION_EXPIRY);
+         rq.user.csrf = csrf;
+      }
+
+      // Update last active
+      await Redis ('hset', 'user:' + user.id, 'lastActive', new Date ().toISOString ());
+
+      rs.next ();
+   }],
+
+   // CSRF validation for mutating requests
+   ['post', '*', function (rq, rs) {
+      if (! CLOUD) return rs.next ();
+      if (rq.url.match (/^\/auth\//)) return rs.next ();
+      if (rq.url.match (/^\/public\//)) return rs.next ();
+      // Bearer-authenticated endpoints skip CSRF
+      if (rq._bearerKey) return rs.next ();
+
+      if (type (rq.body) !== 'object') return reply (rs, 400, {error: 'body must be an object'});
+      if (rq.body.csrf !== (rq.user || {}).csrf) return reply (rs, 403, {error: 'csrf'});
+      delete rq.body.csrf;
+      rs.next ();
+   }],
+
+   ['put', '*', function (rq, rs) {
+      if (! CLOUD) return rs.next ();
+      if (type (rq.body) !== 'object') return reply (rs, 400, {error: 'body must be an object'});
+      if (rq.body.csrf !== (rq.user || {}).csrf) return reply (rs, 403, {error: 'csrf'});
+      delete rq.body.csrf;
+      rs.next ();
+   }],
+
+   ['delete', '*', function (rq, rs) {
+      if (! CLOUD) return rs.next ();
+      // DELETE may not have a body, check csrf in query or skip
+      rs.next ();
+   }],
+
+   // *** CLOUD: PROJECT SCOPING ***
+   // In cloud mode, prefix :project and :name params with the user id
+   // so that all downstream code (containerName, volumeName, pfs, etc.)
+   // operates on user-scoped containers without any changes.
+   ['all', '*', function (rq, rs) {
+      if (! CLOUD || ! rq.user) return rs.next ();
+      var prefix = rq.user.id + '-';
+      if (rq.data && rq.data.params) {
+         // Named param routes: project/:project/*
+         if (rq.data.params.project && rq.data.params.project.indexOf (prefix) !== 0) {
+            rq.data.params.project = prefix + rq.data.params.project;
+         }
+         // DELETE /projects/:name
+         if (rq.url.match (/^\/projects\//) && rq.data.params.name && rq.data.params.name.indexOf (prefix) !== 0) {
+            rq.data.params.name = prefix + rq.data.params.name;
+         }
+      }
+      // Regex-matched routes store params in rq.data.params as [0], [1], etc.
+      // For /project/<slug>/file/<name> etc., param [0] is the project slug.
+      if (rq.data && rq.data.params && rq.data.params [0] !== undefined) {
+         if (rq.url.match (/^\/project\//) && rq.data.params [0].indexOf (prefix) !== 0) {
+            rq.data.params [0] = prefix + rq.data.params [0];
+         }
+      }
+      rs.next ();
+   }],
+
    // *** SETTINGS ***
 
-   ['get', 'settings', function (rq, rs) {
+   ['get', 'settings', async function (rq, rs) {
+      if (CLOUD && rq.user) {
+         try {
+            var userData = await getUserById (rq.user.id);
+            var settings = userData && userData.settings ? JSON.parse (userData.settings) : {};
+            return reply (rs, 200, buildSettingsResponse (settings));
+         }
+         catch (e) {
+            return reply (rs, 500, {error: 'Failed to load settings'});
+         }
+      }
       reply (rs, 200, buildSettingsResponse (CONFIG));
    }],
 
-   ['post', 'settings', function (rq, rs) {
+   ['post', 'settings', async function (rq, rs) {
+      if (CLOUD && rq.user) {
+         try {
+            var userData = await getUserById (rq.user.id);
+            var settings = userData && userData.settings ? JSON.parse (userData.settings) : {};
+            applySettingsUpdate (settings, rq.body);
+            await Redis ('hset', 'user:' + rq.user.id, 'settings', JSON.stringify (settings));
+            return reply (rs, 200, {ok: true});
+         }
+         catch (e) {
+            return reply (rs, 500, {error: 'Failed to save settings'});
+         }
+      }
       applySettingsUpdate (CONFIG, rq.body);
       saveConfigJson ();
       reply (rs, 200, {ok: true});
@@ -3014,11 +3395,202 @@ var routes = [
       reply (rs, 200, {ok: true});
    }],
 
+   // *** ADMIN ***
+
+   ['get', 'admin/signups', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (! rq.user || ! rq.user.admin) return reply (rs, 403);
+
+      // Scan for signup:* keys
+      var signups = [];
+      var cursor = '0';
+      do {
+         var result = await Redis ('scan', cursor, 'MATCH', 'signup:*', 'COUNT', '100');
+         cursor = result [0];
+         var keys = result [1];
+         for (var i = 0; i < keys.length; i++) {
+            var data = await Redis ('hgetall', keys [i]);
+            if (data && data.email) signups.push ({email: data.email, createdAt: data.createdAt || ''});
+         }
+      } while (cursor !== '0');
+
+      signups.sort (function (a, b) {
+         return (b.createdAt || '') < (a.createdAt || '') ? -1 : 1;
+      });
+
+      reply (rs, 200, signups);
+   }],
+
+   ['post', 'admin/createUser', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      // Bootstrap: if no users exist at all, allow unauthenticated creation
+      // of the first user as admin.
+      var isBootstrap = false;
+      if (! rq.user || ! rq.user.admin) {
+         var userKeys = await Redis ('keys', 'user:*');
+         if (! userKeys || userKeys.length === 0) {
+            isBootstrap = true;
+         }
+         else {
+            return reply (rs, 403);
+         }
+      }
+
+      if (stop (rs, [['email', rq.body.email, 'string']])) return;
+
+      var email = rq.body.email.trim ().toLowerCase ();
+      if (! email.match (H_email)) return reply (rs, 400, {error: 'Invalid email'});
+
+      // Check if user already exists
+      var existing = await Redis ('get', 'email:' + email);
+      if (existing) return reply (rs, 409, {error: 'User already exists'});
+
+      var id = generateToken (16);
+      var apiKey = generateToken (24);
+      var now = new Date ().toISOString ();
+      var isAdmin = isBootstrap ? '1' : '0';
+
+      await Redis ('hmset', 'user:' + id, 'id', id, 'email', email, 'createdAt', now, 'lastActive', now, 'settings', '{}', 'apiKey', apiKey, 'admin', isAdmin);
+      await Redis ('set', 'email:' + email, id);
+      await Redis ('set', 'apikey:' + apiKey, id);
+
+      // Delete signup request if it exists
+      await Redis ('del', 'signup:' + email);
+
+      // Send welcome email
+      try {
+         await sendmail (email, 'Welcome to Vibey', lith.g ([
+            ['p', 'Your Vibey account has been created!'],
+            ['p', ['Go to ', ['a', {href: 'https://vibey.app'}, 'vibey.app'], ' and log in with your email.']],
+         ]));
+      }
+      catch (e) {
+         clog ('Error sending welcome email:', e);
+      }
+
+      reply (rs, 200, {ok: true, id: id});
+   }],
+
+   // *** ACCESS ***
+
+   ['get', 'access', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (! rq.user) return reply (rs, 403, {error: 'session'});
+
+      var rules = await Redis ('hgetall', 'access:' + rq.user.id);
+      reply (rs, 200, {rules: rules || {}});
+   }],
+
+   ['post', 'access', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (! rq.user) return reply (rs, 403, {error: 'session'});
+      if (type (rq.body.rules) !== 'object') return reply (rs, 400, {error: 'rules must be an object'});
+
+      // Delete existing rules and set new ones
+      await Redis ('del', 'access:' + rq.user.id);
+
+      var keys = dale.keys (rq.body.rules);
+      if (keys.length > 0) {
+         var args = ['access:' + rq.user.id];
+         dale.go (keys, function (key) {
+            args.push (key);
+            args.push (rq.body.rules [key]);
+         });
+         await Redis.apply (null, ['hmset'].concat (args));
+      }
+
+      reply (rs, 200, {ok: true});
+   }],
+
+   // *** TRIGGER ***
+
+   ['post', 'project/:project/trigger', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      // API key auth (Bearer token) — no CSRF needed
+      var apiKey = rq._bearerKey;
+      if (! apiKey) {
+         var authHeader = rq.headers.authorization || '';
+         var bearerMatch = authHeader.match (/^Bearer\s+(.+)$/i);
+         if (bearerMatch) apiKey = bearerMatch [1];
+      }
+      if (! apiKey) return reply (rs, 403, {error: 'API key required'});
+
+      // If user was already authenticated by session, verify API key
+      // Otherwise, we need to find the user by API key
+      var user;
+      if (rq.user) {
+         user = await getUserById (rq.user.id);
+         if (! user || user.apiKey !== apiKey) return reply (rs, 403, {error: 'Invalid API key'});
+      }
+      else {
+         // Look up by API key (MVP: scan; add apikey:<key> -> <userId> index later)
+         // For now, the user must use the apikey:<key> reverse index
+         var apiKeyUserId = await Redis ('get', 'apikey:' + apiKey);
+         if (! apiKeyUserId) return reply (rs, 403, {error: 'Invalid API key'});
+         user = await getUserById (apiKeyUserId);
+         if (! user) return reply (rs, 403, {error: 'Invalid API key'});
+         rq.user = {id: user.id, email: user.email, admin: user.admin === '1'};
+      }
+
+      if (stop (rs, [
+         ['provider', rq.body.provider, 'string'],
+         ['prompt', rq.body.prompt, 'string'],
+      ])) return;
+
+      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
+      if (! projectName) return;
+
+      var slug = scopedSlug (projectName, rq);
+
+      try {
+         var defaultModel = rq.body.model || (rq.body.provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+         var dialogId = await createDialogId (slug, rq.body.slug || 'triggered', rs);
+         if (dialogId === false) return;
+         var filename = buildDialogFilename (dialogId, 'active');
+         var dialog = {dialogId: dialogId, filename: filename, status: 'active', exists: false, markdown: '', metadata: {}};
+         await ensureDialogFile (slug, dialog, rq.body.provider, defaultModel);
+         await appendToDialog (slug, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + rq.body.prompt + '\n\n');
+
+         var stream = beginActiveStream (slug, dialogId);
+
+         // Fire and forget — no response body
+         reply (rs, 202, {ok: true, dialogId: dialogId});
+
+         (async function () {
+            try {
+               var result = await runCompletion (slug, dialog, rq.body.provider, defaultModel, function (chunk) {
+                  if (chunk && type (chunk) === 'object' && chunk.type) stream.emitter.emit ('event', chunk);
+                  else stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+               }, stream.controller.signal, rq);
+               await setDialogStatus (slug, dialog, 'done', 'route/trigger/success');
+               stream.emitter.emit ('event', {type: 'done', result: result});
+               endActiveStream (slug, dialogId);
+               stream.settle ();
+            }
+            catch (error) {
+               try {
+                  var d = await loadDialog (slug, dialogId);
+                  if (d.exists) await setDialogStatus (slug, d, 'done', 'route/trigger/error');
+               }
+               catch (e) {}
+               stream.emitter.emit ('event', {type: 'error', error: error.message});
+               endActiveStream (slug, dialogId);
+               stream.settle ();
+            }
+         }) ();
+      }
+      catch (error) {
+         reply (rs, 500, {error: error.message});
+      }
+   }],
+
    // *** PROJECTS ***
 
    ['get', 'projects', async function (rq, rs) {
       try {
-         reply (rs, 200, await listProjects ());
+         reply (rs, 200, await listProjects (rq));
       }
       catch (error) {
          reply (rs, 500, {error: error.message});
@@ -3029,7 +3601,7 @@ var routes = [
       if (stop (rs, [['name', rq.body.name, 'string']])) return;
       try {
          var displayName = rq.body.name.trim ();
-         var slug = await ensureProject (displayName);
+         var slug = await ensureProject (displayName, rq);
          try {
             await pfs.readFile (slug, DOC_MAIN_FILE);
          }
@@ -3038,7 +3610,9 @@ var routes = [
             await pfs.writeFile (slug, DOC_MAIN_FILE, '# ' + displayName + '\n');
          }
          await autoCommitApi (slug, 'POST', '/projects');
-         reply (rs, 200, {ok: true, slug: slug, name: displayName});
+         // Return the unscoped slug to the client
+         var clientSlug = unscopeSlug (slug, rq);
+         reply (rs, 200, {ok: true, slug: clientSlug, name: displayName});
       }
       catch (error) {
          reply (rs, 400, {error: error.message});
@@ -3407,7 +3981,7 @@ var routes = [
                else {
                   stream.emitter.emit ('event', {type: 'chunk', content: chunk});
                }
-            }, stream.controller.signal);
+            }, stream.controller.signal, rq);
             await setDialogStatus (projectName, dialog, 'done', 'route/post-dialog/success');
             result.filename = dialog.filename;
             result.status = dialog.status;
@@ -3544,7 +4118,7 @@ var routes = [
                else {
                   stream.emitter.emit ('event', {type: 'chunk', content: chunk});
                }
-            }, stream.controller.signal);
+            }, stream.controller.signal, rq);
             await setDialogStatus (projectName, dialog, 'done', 'route/put-dialog/success');
             result.filename = dialog.filename;
             result.status = dialog.status;
@@ -3889,6 +4463,196 @@ var routes = [
       }
       else {
          proxyReq.end ();
+      }
+   }],
+
+   // *** PUBLIC ROUTES ***
+
+   // Public static files
+   ['get', /^\/public\/([^/]+)\/([^/]+)\/static(\/.*)?$/, async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      var userId = rq.data.params [0];
+      var projectSlug = rq.data.params [1];
+      var filePath = rq.data.params [2] || '/';
+
+      // Check access
+      var rules = await Redis ('hgetall', 'access:' + userId);
+      var accessKey = projectSlug + ':static' + filePath;
+      // Also check with trailing slash and without
+      if (! rules || (! rules [accessKey] && ! rules [projectSlug + ':static/*'] && ! rules [projectSlug + ':static/'])) {
+         return reply (rs, 404, {error: 'Not found'});
+      }
+
+      var scopedProject = userId + '-' + projectSlug;
+      if (filePath [0] !== '/') filePath = '/' + filePath;
+      if (filePath === '/' || filePath [filePath.length - 1] === '/') filePath += 'index.html';
+      filePath = filePath.replace (/^\//, '');
+
+      if (filePath.includes ('..')) return reply (rs, 400, {error: 'Invalid path'});
+
+      try {
+         var fullPath = '/workspace/' + filePath;
+         var content = await pfs.readFileBinaryAt (scopedProject, fullPath);
+         if (content === false) return reply (rs, 404, {error: 'Not found'});
+
+         var ext = Path.extname (filePath).toLowerCase ();
+         var contentTypes = {
+            '.html': 'text/html', '.htm': 'text/html',
+            '.js': 'application/javascript', '.mjs': 'application/javascript',
+            '.css': 'text/css', '.json': 'application/json',
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+            '.ico': 'image/x-icon',
+            '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+            '.txt': 'text/plain', '.md': 'text/markdown'
+         };
+         var contentType = contentTypes [ext] || 'application/octet-stream';
+
+         rs.writeHead (200, {
+            'Content-Type': contentType,
+            'Content-Length': content.length,
+            'X-Frame-Options': 'SAMEORIGIN'
+         });
+         rs.end (content);
+      }
+      catch (error) {
+         if (isNoSuchFileError (error)) return reply (rs, 404, {error: 'Not found'});
+         if (! rs.headersSent) reply (rs, 500, {error: 'Failed to serve file'});
+      }
+   }],
+
+   // Public proxy
+   ['all', /^\/public\/([^/]+)\/([^/]+)\/proxy\/(\d+)(\/.*)?$/, async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      var userId = rq.data.params [0];
+      var projectSlug = rq.data.params [1];
+      var port = Number (rq.data.params [2]);
+      var proxyPath = rq.data.params [3] || '/';
+
+      // Check access
+      var rules = await Redis ('hgetall', 'access:' + userId);
+      if (! rules || (! rules [projectSlug + ':proxy/' + port] && ! rules [projectSlug + ':proxy/' + port + '/*'])) {
+         return reply (rs, 404, {error: 'Not found'});
+      }
+
+      if (port < 1 || port > 65535 || isNaN (port)) return reply (rs, 400, {error: 'Invalid port'});
+
+      var scopedProject = userId + '-' + projectSlug;
+
+      var targetHost;
+      try {
+         targetHost = await getContainerIP (scopedProject);
+      }
+      catch (e) {
+         return reply (rs, 502, {error: 'Could not resolve container'});
+      }
+
+      var HOP_BY_HOP = {host: 1, connection: 1, 'keep-alive': 1, 'proxy-authenticate': 1, 'proxy-authorization': 1, te: 1, trailer: 1, 'transfer-encoding': 1, upgrade: 1, 'content-length': 1};
+      var forwardHeaders = {};
+      dale.go (rq.headers, function (v, k) {
+         if (! HOP_BY_HOP [k]) forwardHeaders [k] = v;
+      });
+      forwardHeaders.host = targetHost + ':' + port;
+
+      if (rq.body && rq.method !== 'GET' && rq.method !== 'HEAD') {
+         var bodyBuf = type (rq.body) === 'string' ? rq.body : JSON.stringify (rq.body);
+         forwardHeaders ['content-length'] = Buffer.byteLength (bodyBuf);
+      }
+
+      var proxyReq = http.request ({
+         hostname: targetHost,
+         port: port,
+         path: proxyPath,
+         method: rq.method,
+         headers: forwardHeaders
+      }, function (proxyRes) {
+         var resHeaders = {};
+         dale.go (proxyRes.headers, function (v, k) {
+            if (! HOP_BY_HOP [k]) resHeaders [k] = v;
+         });
+         resHeaders ['x-frame-options'] = 'SAMEORIGIN';
+         rs.writeHead (proxyRes.statusCode, resHeaders);
+         proxyRes.pipe (rs);
+      });
+
+      proxyReq.on ('error', function (error) {
+         if (! rs.headersSent) reply (rs, 502, {error: 'Proxy error: ' + error.message});
+         else rs.end ();
+      });
+
+      if (rq.body && rq.method !== 'GET' && rq.method !== 'HEAD') {
+         var bodyStr = type (rq.body) === 'string' ? rq.body : JSON.stringify (rq.body);
+         proxyReq.end (bodyStr);
+      }
+      else {
+         proxyReq.end ();
+      }
+   }],
+
+   // Public doc (rendered as HTML page)
+   ['get', /^\/public\/([^/]+)\/([^/]+)\/doc\/(.+)$/, async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      var userId = rq.data.params [0];
+      var projectSlug = rq.data.params [1];
+      var docName = rq.data.params [2];
+
+      // Check access
+      var rules = await Redis ('hgetall', 'access:' + userId);
+      if (! rules || ! rules [projectSlug + ':doc/' + docName]) {
+         return reply (rs, 404, {error: 'Not found'});
+      }
+
+      var scopedProject = userId + '-' + projectSlug;
+      var filePath = 'doc/' + docName;
+      if (! filePath.match (/\.md$/)) filePath += '.md';
+
+      try {
+         var content = await pfs.readFile (scopedProject, filePath);
+         if (content === false) return reply (rs, 404, {error: 'Not found'});
+
+         // Render markdown as HTML page with lith
+         // Replace embed blocks with iframes pointing to public proxy/static URLs
+         var publicBase = '/public/' + userId + '/' + projectSlug;
+         var htmlContent = content.replace (/əə(ə?)embed\n([\s\S]*?)əə\1/g, function (match, extra, body) {
+            var fields = {port: 'static', path: '/', height: '400', title: 'App'};
+            dale.go (body.split ('\n'), function (line) {
+               line = line.trim ();
+               if (! line || line [0] === '#') return;
+               var spaceIdx = line.indexOf (' ');
+               if (spaceIdx === -1) return;
+               fields [line.slice (0, spaceIdx)] = line.slice (spaceIdx + 1).trim ();
+            });
+            var src = fields.port === 'static'
+               ? publicBase + '/static' + fields.path
+               : publicBase + '/proxy/' + fields.port + fields.path;
+            return '<iframe src="' + src + '" style="width:100%; height:' + fields.height + 'px; border:1px solid #333; border-radius:8px;" title="' + fields.title + '" sandbox="allow-scripts allow-forms allow-same-origin"></iframe>';
+         });
+
+         var page = lith.g ([
+            ['!DOCTYPE HTML'],
+            ['html', [
+               ['head', [
+                  ['meta', {charset: 'utf-8'}],
+                  ['meta', {name: 'viewport', content: 'width=device-width, initial-scale=1'}],
+                  ['title', docName.replace (/\.md$/, '')],
+                  ['script', {src: 'https://cdn.jsdelivr.net/npm/marked/marked.min.js'}],
+                  ['style', ['LITERAL', 'body{font-family:sans-serif;max-width:800px;margin:0 auto;padding:20px;background:#0a0a0a;color:#e8e8e8;} a{color:#b07aff;} img{max-width:100%;} pre{background:#1a1a2e;padding:16px;border-radius:8px;overflow-x:auto;} code{font-family:monospace;}']]
+               ]],
+               ['body', [
+                  ['div', {id: 'content'}],
+                  ['script', ['LITERAL', 'document.getElementById("content").innerHTML = marked.parse(' + JSON.stringify (htmlContent) + ');']]
+               ]]
+            ]]
+         ]);
+         rs.writeHead (200, {'Content-Type': 'text/html', 'X-Frame-Options': 'SAMEORIGIN'});
+         rs.end (page);
+      }
+      catch (error) {
+         if (isNoSuchFileError (error)) return reply (rs, 404, {error: 'Not found'});
+         if (! rs.headersSent) reply (rs, 500, {error: 'Failed to render doc'});
       }
    }],
 ];

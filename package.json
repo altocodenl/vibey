@@ -7,7 +7,9 @@
       "hitit":   "1.2.8",
       "lith":    "6.0.7",
       "teishi":  "5.1.0",
-      "redis":   "3.1.2"
+      "redis":   "3.1.2",
+      "nodemailer":               "6.9.16",
+      "nodemailer-ses-transport": "1.5.1"
    },
    "main": "server.js",
    "author": "Altocode <info@altocode.nl>",

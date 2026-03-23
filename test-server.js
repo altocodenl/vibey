@@ -2074,133 +2074,523 @@ var viSequence = [
    }]
 ];
 
-// *** CLOUD AUTH ***
+// *** CLOUD AUTH, ADMIN, ACCESS ***
+
+// Redis client for reading OTPs and verifying state directly.
+// Connects to the same Redis the server uses.
+var redisClient = require ('redis').createClient ({
+   host: process.env.REDIS_HOST || '127.0.0.1',
+   port: process.env.REDIS_PORT || 6379
+});
+redisClient.on ('error', function () {});
+
+var redisGet = function (key, cb) {
+   redisClient.get (key, function (error, data) {
+      cb (error, data);
+   });
+};
+
+var redisHgetall = function (key, cb) {
+   redisClient.hgetall (key, function (error, data) {
+      cb (error, data);
+   });
+};
+
+// Flush all test-created keys from Redis after the cloud suite.
+var redisFlushTestKeys = function (keys, cb) {
+   if (! keys || ! keys.length) return cb ();
+   redisClient.del (keys, function () {cb ();});
+};
+
+// Helper: full login flow for a given email. Returns {cookies, csrf} via cb.
+var cloudLogin = function (email, cb) {
+   // 1. Request OTP
+   httpJson ('POST', '/auth/login', {email: email}, function (error, status, body) {
+      if (error || status !== 200) return cb (new Error ('Login request failed: ' + (error ? error.message : status)));
+
+      // 2. Read OTP from Redis. We need the userId first.
+      redisGet ('email:' + email.toLowerCase (), function (err, userId) {
+         if (err || ! userId) return cb (new Error ('Could not find userId for ' + email));
+
+         redisGet ('otp:' + userId, function (err2, otp) {
+            if (err2 || ! otp) return cb (new Error ('Could not read OTP from Redis for userId ' + userId));
+
+            // 3. Verify OTP
+            httpJson ('POST', '/auth/verify', {email: email, otp: otp}, function (verifyErr, verifyStatus, verifyBody, verifyText, verifyHeaders) {
+               if (verifyErr || verifyStatus !== 200) return cb (new Error ('Verify failed: ' + (verifyErr ? verifyErr.message : verifyStatus + ' ' + verifyText)));
+               var cookies = cookieJarFromSetCookie (verifyHeaders ['set-cookie']);
+               cb (null, {cookies: cookies, csrf: verifyBody.csrf, admin: verifyBody.admin});
+            });
+         });
+      });
+   });
+};
+
+// Helper: make authenticated JSON request with cookie + csrf.
+var authJson = function (method, path, payload, auth, cb) {
+   payload = payload || {};
+   if (auth.csrf) payload.csrf = auth.csrf;
+   httpJson (method, path, payload, cb, {Cookie: cookieHeader (auth.cookies)});
+};
+
+var authGet = function (path, auth, cb) {
+   httpRequest ('GET', path, '', {Cookie: cookieHeader (auth.cookies)}, function (error, status, body, headers) {
+      if (error) return cb (error);
+      var parsed = null;
+      try {parsed = JSON.parse (body);} catch (e) {}
+      cb (null, status, parsed, body, headers);
+   });
+};
 
 var cloudSequence = [
 
-   ['Cloud 1: Force cloud mode off before the suite starts', 'post', 'settings', {}, {cloud: {enabled: false}}, 200, function (s, rq, rs) {
-      s.cloudAdminEmail = 'admin+' + testTimestamp () + '@example.com';
-      s.cloudUserEmail  = 'member+' + testTimestamp () + '@example.com';
-      if (! rs.body || rs.body.ok !== true) return log ('Failed to disable cloud mode before suite');
+   // *** MODE DETECTION ***
+
+   ['Cloud 1: Detect cloud mode via GET /auth/csrf', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs) {
+      s.cloudAdminEmail  = 'admin-' + testTimestamp () + '@test.vibey.dev';
+      s.cloudMemberEmail = 'member-' + testTimestamp () + '@test.vibey.dev';
+      s.cleanupKeys = [];
+
+      // If server is in local mode, the response is {mode: 'LOCAL'}.
+      // Cloud tests require cloud mode — skip the suite gracefully.
+      if (rs.body && rs.body.mode === 'LOCAL') {
+         log ('Server is in LOCAL mode — skipping cloud suite');
+         s.skipCloud = true;
+      }
+      else if (rs.code === 403) {
+         // Cloud mode, not logged in — expected at this stage
+         s.skipCloud = false;
+      }
+      else {
+         // Cloud mode, already logged in (shouldn't happen in clean test)
+         s.skipCloud = false;
+      }
       return true;
    }],
 
-   ['Cloud 2: GET /auth/csrf returns LOCAL while cloud mode is off', 'get', 'auth/csrf', {}, '', 200, function (s, rq, rs) {
-      if (rs.body !== 'LOCAL') return log ('Expected LOCAL, got: ' + JSON.stringify (rs.body));
-      return true;
-   }],
+   // *** SIGNUP ***
 
-   ['Cloud 3: Enable cloud mode from settings', 'post', 'settings', {}, {cloud: {enabled: true}}, 200, function (s, rq, rs) {
-      if (! rs.body || rs.body.ok !== true) return log ('Failed to enable cloud mode');
-      return true;
-   }],
-
-   ['Cloud 3: GET /settings reports cloud enabled', 'get', 'settings', {}, '', 200, function (s, rq, rs) {
-      if (! rs.body.cloud || rs.body.cloud.enabled !== true) return log ('Expected cloud enabled in settings response');
-      return true;
-   }],
-
-   ['Cloud 4: GET /auth/csrf requires login in cloud mode', 'get', 'auth/csrf', {}, '', 403, function (s, rq, rs) {
-      if (! rs.body || ! rs.body.error) return log ('Expected login-required error body');
-      return true;
-   }],
-
-   ['Cloud 5: Signup request is stored', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
-      httpJson ('POST', '/auth/signup', {email: s.cloudUserEmail}, function (error, status, body) {
+   ['Cloud 2: POST /auth/signup stores request', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpJson ('POST', '/auth/signup', {email: s.cloudMemberEmail}, function (error, status, body) {
          if (error) return log ('signup failed: ' + error.message);
          if (status !== 200) return log ('Expected 200 from signup, got ' + status + ' ' + JSON.stringify (body));
-         if (! body || body.pending !== true) return log ('Expected pending signup response');
+         if (! body || body.ok !== true) return log ('Expected {ok: true} from signup, got: ' + JSON.stringify (body));
+         s.cleanupKeys.push ('signup:' + s.cloudMemberEmail);
          next ();
       });
    }],
 
-   ['Cloud 6: First admin user bootstraps without a session', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+   ['Cloud 3: POST /auth/signup with invalid email returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpJson ('POST', '/auth/signup', {email: 'not-an-email'}, function (error, status, body) {
+         if (error) return log ('signup bad email request failed: ' + error.message);
+         if (status !== 400) return log ('Expected 400 for invalid email signup, got ' + status);
+         next ();
+      });
+   }],
+
+   ['Cloud 4: POST /auth/signup with empty email returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpJson ('POST', '/auth/signup', {email: ''}, function (error, status, body) {
+         if (error) return log ('signup empty email request failed: ' + error.message);
+         if (status !== 400) return log ('Expected 400 for empty email signup, got ' + status);
+         next ();
+      });
+   }],
+
+   // *** BOOTSTRAP ADMIN ***
+
+   ['Cloud 5: Bootstrap first admin user (no users exist yet)', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      // POST /admin/createUser without auth — allowed when no users exist
       httpJson ('POST', '/admin/createUser', {email: s.cloudAdminEmail}, function (error, status, body) {
-         if (error) return log ('Bootstrap admin request failed: ' + error.message);
+         if (error) return log ('Bootstrap admin failed: ' + error.message);
          if (status !== 200) return log ('Expected 200 bootstrapping admin, got ' + status + ' ' + JSON.stringify (body));
-         if (! body || ! body.user || ! body.user.admin) return log ('Bootstrap admin should be admin: ' + JSON.stringify (body));
+         if (! body || body.ok !== true || ! body.id) return log ('Expected {ok: true, id} from bootstrap, got: ' + JSON.stringify (body));
+         s.adminUserId = body.id;
+         s.cleanupKeys.push ('user:' + body.id, 'email:' + s.cloudAdminEmail);
          next ();
       });
    }],
 
-   ['Cloud 7: Login request returns an OTP for the bootstrap admin', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
+   ['Cloud 6: Bootstrap admin is marked as admin in Redis', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      redisHgetall ('user:' + s.adminUserId, function (err, user) {
+         if (err || ! user) return log ('Failed to read admin user from Redis');
+         if (user.admin !== '1') return log ('Bootstrap admin should have admin=1, got: ' + user.admin);
+         if (user.email !== s.cloudAdminEmail) return log ('Admin email mismatch');
+         if (! user.apiKey) return log ('Admin should have an apiKey');
+         s.adminApiKey = user.apiKey;
+         s.cleanupKeys.push ('apikey:' + user.apiKey);
+         next ();
+      });
+   }],
+
+   // *** LOGIN FLOW ***
+
+   ['Cloud 7: POST /auth/login sends OTP (stored in Redis)', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
       httpJson ('POST', '/auth/login', {email: s.cloudAdminEmail}, function (error, status, body) {
-         if (error) return log ('OTP request failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 requesting OTP, got ' + status + ' ' + JSON.stringify (body));
-         if (! body || ! body.otp) return log ('Expected OTP in login response for test flow');
-         s.cloudOtp = body.otp;
-         next ();
-      });
-   }],
+         if (error) return log ('Login OTP request failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from login, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || body.ok !== true) return log ('Expected {ok: true} from login, got: ' + JSON.stringify (body));
 
-   ['Cloud 8: OTP login sets session + csrf cookies', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
-      httpJson ('POST', '/auth/login', {email: s.cloudAdminEmail, otp: s.cloudOtp}, function (error, status, body, text, headers) {
-         if (error) return log ('OTP login failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 completing OTP login, got ' + status + ' ' + text);
-         s.cloudCookies = cookieJarFromSetCookie (headers ['set-cookie']);
-         if (! s.cloudCookies.vibeySession || ! s.cloudCookies.vibeyCsrf) return log ('Missing auth cookies after login');
-         if (! body || ! body.user || ! body.user.admin) return log ('Logged-in bootstrap admin should be admin');
-         next ();
-      });
-   }],
-
-   ['Cloud 9: GET /auth/csrf returns the csrf token for the logged-in user', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
-      httpRequest ('GET', '/auth/csrf', '', {Cookie: cookieHeader (s.cloudCookies)}, function (error, status, body) {
-         if (error) return log ('csrf fetch failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 fetching csrf, got ' + status + ' ' + body);
-         if (body !== s.cloudCookies.vibeyCsrf) return log ('CSRF response mismatch: ' + body + ' !== ' + s.cloudCookies.vibeyCsrf);
-         next ();
-      });
-   }],
-
-   ['Cloud 10: Authenticated admin can list pending signups', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
-      httpRequest ('GET', '/admin/signups', '', {Cookie: cookieHeader (s.cloudCookies)}, function (error, status, body) {
-         if (error) return log ('admin/signups failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 from admin/signups, got ' + status + ' ' + body);
-         var parsed;
-         try {parsed = JSON.parse (body);} catch (e) {return log ('Could not parse signups JSON: ' + body);}
-         var signup = dale.stopNot (parsed, undefined, function (entry) {
-            if (entry.email === s.cloudUserEmail) return entry;
+         // Read OTP from Redis
+         redisGet ('otp:' + s.adminUserId, function (err, otp) {
+            if (err || ! otp) return log ('OTP not found in Redis for ' + s.adminUserId);
+            s.adminOtp = otp;
+            next ();
          });
-         if (! signup) return log ('Expected pending signup for ' + s.cloudUserEmail + ' in ' + body);
+      });
+   }],
+
+   ['Cloud 8: POST /auth/login with non-existent email returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpJson ('POST', '/auth/login', {email: 'nobody@nowhere.dev'}, function (error, status) {
+         if (error) return log ('Login bad email failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for non-existent email login, got ' + status);
          next ();
       });
    }],
 
-   ['Cloud 11: Authenticated admin can create a normal user', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
-      httpJson ('POST', '/admin/createUser', {email: s.cloudUserEmail}, function (error, status, body) {
-         if (error) return log ('admin/createUser failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 from admin/createUser, got ' + status + ' ' + JSON.stringify (body));
-         if (! body || ! body.user || body.user.email !== s.cloudUserEmail) return log ('Created user mismatch: ' + JSON.stringify (body));
-         if (body.user.admin) return log ('Second created user should not be admin by default');
-         next ();
-      }, {Cookie: cookieHeader (s.cloudCookies)});
-   }],
-
-   ['Cloud 12: Logout clears cloud auth', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
-      httpJson ('POST', '/auth/logout', {}, function (error, status, body) {
-         if (error) return log ('logout failed: ' + error.message);
-         if (status !== 200 || ! body || body.ok !== true) return log ('Logout failed: ' + JSON.stringify (body));
-         next ();
-      }, {Cookie: cookieHeader (s.cloudCookies)});
-   }],
-
-   ['Cloud 13: GET /auth/csrf rejects the old cookies after logout', 'get', 'settings', {}, '', 200, function (s, rq, rs, next) {
-      httpRequest ('GET', '/auth/csrf', '', {Cookie: cookieHeader (s.cloudCookies)}, function (error, status, body) {
-         if (error) return log ('csrf after logout failed: ' + error.message);
-         if (status !== 403) return log ('Expected 403 after logout, got ' + status + ' ' + body);
+   ['Cloud 9: POST /auth/verify with wrong OTP returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpJson ('POST', '/auth/verify', {email: s.cloudAdminEmail, otp: '000000'}, function (error, status) {
+         if (error) return log ('Verify wrong OTP failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for wrong OTP, got ' + status);
          next ();
       });
    }],
 
-   ['Cloud 14: Disable cloud mode in cleanup', 'post', 'settings', {}, {cloud: {enabled: false}}, 200, function (s, rq, rs) {
-      if (! rs.body || rs.body.ok !== true) return log ('Failed to disable cloud mode');
-      return true;
+   ['Cloud 10: POST /auth/verify with correct OTP sets session cookie and returns CSRF', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpJson ('POST', '/auth/verify', {email: s.cloudAdminEmail, otp: s.adminOtp}, function (error, status, body, text, headers) {
+         if (error) return log ('Verify OTP failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from verify, got ' + status + ' ' + text);
+         if (! body || ! body.csrf) return log ('Expected {csrf: "..."} from verify, got: ' + JSON.stringify (body));
+         if (body.admin !== true) return log ('Expected admin: true in verify response');
+
+         var cookies = cookieJarFromSetCookie (headers ['set-cookie']);
+         if (! cookies.vibey) return log ('Expected vibey cookie after verify, got: ' + JSON.stringify (cookies));
+
+         s.adminAuth = {cookies: cookies, csrf: body.csrf};
+         s.cleanupKeys.push ('session:' + cookies.vibey);
+         next ();
+      });
    }],
 
-   ['Cloud 15: GET /auth/csrf returns LOCAL again after cleanup', 'get', 'auth/csrf', {}, '', 200, function (s, rq, rs) {
-      if (rs.body !== 'LOCAL') return log ('Expected LOCAL after cleanup, got: ' + JSON.stringify (rs.body));
-      return true;
+   ['Cloud 11: Cookie attributes include HttpOnly and SameSite=Lax', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      // Re-login to inspect raw Set-Cookie header
+      httpJson ('POST', '/auth/login', {email: s.cloudAdminEmail}, function (error, status) {
+         if (error || status !== 200) return log ('Re-login for cookie check failed');
+         redisGet ('otp:' + s.adminUserId, function (err, otp) {
+            if (err || ! otp) return log ('OTP not found for cookie check');
+            httpJson ('POST', '/auth/verify', {email: s.cloudAdminEmail, otp: otp}, function (err2, st2, body2, text2, headers2) {
+               if (err2 || st2 !== 200) return log ('Verify for cookie check failed');
+               var raw = headers2 ['set-cookie'];
+               if (! raw) return log ('No Set-Cookie header');
+               var cookieStr = type (raw) === 'array' ? raw.join ('; ') : raw;
+               var lower = cookieStr.toLowerCase ();
+               if (lower.indexOf ('httponly') === -1) return log ('Missing HttpOnly on cookie');
+               if (lower.indexOf ('samesite=lax') === -1) return log ('Missing SameSite=Lax on cookie');
+               // Store the new session for cleanup
+               var newCookies = cookieJarFromSetCookie (headers2 ['set-cookie']);
+               if (newCookies.vibey) s.cleanupKeys.push ('session:' + newCookies.vibey);
+               next ();
+            });
+         });
+      });
+   }],
+
+   // *** CSRF ***
+
+   ['Cloud 12: GET /auth/csrf returns CSRF for logged-in user', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpRequest ('GET', '/auth/csrf', '', {Cookie: cookieHeader (s.adminAuth.cookies)}, function (error, status, body) {
+         if (error) return log ('CSRF fetch failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         var parsed;
+         try {parsed = JSON.parse (body);} catch (e) {return log ('CSRF response not JSON: ' + body);}
+         if (! parsed.csrf) return log ('Expected {csrf: "..."}, got: ' + body);
+         // Verify it matches what we got at login
+         if (parsed.csrf !== s.adminAuth.csrf) return log ('CSRF mismatch: ' + parsed.csrf + ' !== ' + s.adminAuth.csrf);
+         next ();
+      });
+   }],
+
+   ['Cloud 13: POST without CSRF token returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      // Authenticated but no csrf in body
+      httpJson ('POST', '/projects', {name: 'no-csrf-test'}, function (error, status, body) {
+         if (error) return log ('No-CSRF request failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for missing CSRF, got ' + status);
+         if (! body || body.error !== 'csrf') return log ('Expected {error: "csrf"}, got: ' + JSON.stringify (body));
+         next ();
+      }, {Cookie: cookieHeader (s.adminAuth.cookies)});
+   }],
+
+   // *** ADMIN: SIGNUPS ***
+
+   ['Cloud 14: GET /admin/signups lists the pending signup', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authGet ('/admin/signups', s.adminAuth, function (error, status, body) {
+         if (error) return log ('admin/signups failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         if (type (body) !== 'array') return log ('Expected array, got: ' + JSON.stringify (body));
+         var found = dale.stopNot (body, undefined, function (entry) {
+            if (entry.email === s.cloudMemberEmail) return entry;
+         });
+         if (! found) return log ('Pending signup for ' + s.cloudMemberEmail + ' not found in: ' + JSON.stringify (body));
+         next ();
+      });
+   }],
+
+   ['Cloud 15: GET /admin/signups without auth returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpRequest ('GET', '/admin/signups', '', {}, function (error, status) {
+         if (error) return log ('Unauthenticated signups request failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for unauthenticated signups, got ' + status);
+         next ();
+      });
+   }],
+
+   // *** ADMIN: CREATE USER ***
+
+   ['Cloud 16: POST /admin/createUser creates a normal user', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authJson ('POST', '/admin/createUser', {email: s.cloudMemberEmail}, s.adminAuth, function (error, status, body) {
+         if (error) return log ('createUser failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || body.ok !== true || ! body.id) return log ('Expected {ok: true, id}, got: ' + JSON.stringify (body));
+         s.memberUserId = body.id;
+         s.cleanupKeys.push ('user:' + body.id, 'email:' + s.cloudMemberEmail);
+
+         // Verify the signup entry was removed
+         redisGet ('signup:' + s.cloudMemberEmail, function (err, data) {
+            // signup is a hash, so GET returns null; check with hgetall
+            redisHgetall ('signup:' + s.cloudMemberEmail, function (err2, hashData) {
+               if (hashData && hashData.email) return log ('Signup entry should have been deleted after createUser');
+               next ();
+            });
+         });
+      });
+   }],
+
+   ['Cloud 17: Created user is not admin', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      redisHgetall ('user:' + s.memberUserId, function (err, user) {
+         if (err || ! user) return log ('Failed to read member user from Redis');
+         if (user.admin === '1') return log ('Normal user should not be admin');
+         if (user.email !== s.cloudMemberEmail) return log ('Email mismatch');
+         if (! user.apiKey) return log ('User should have an apiKey');
+         s.memberApiKey = user.apiKey;
+         s.cleanupKeys.push ('apikey:' + user.apiKey);
+         next ();
+      });
+   }],
+
+   ['Cloud 18: POST /admin/createUser with duplicate email returns 409', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authJson ('POST', '/admin/createUser', {email: s.cloudMemberEmail}, s.adminAuth, function (error, status, body) {
+         if (error) return log ('duplicate createUser failed: ' + error.message);
+         if (status !== 409) return log ('Expected 409 for duplicate email, got ' + status);
+         next ();
+      });
+   }],
+
+   ['Cloud 19: POST /admin/createUser without auth returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpJson ('POST', '/admin/createUser', {email: 'noauth@test.dev'}, function (error, status) {
+         if (error) return log ('Unauthenticated createUser failed: ' + error.message);
+         // No users to bootstrap (admin exists) so this should be 403
+         if (status !== 403) return log ('Expected 403 for unauthenticated createUser (users exist), got ' + status);
+         next ();
+      });
+   }],
+
+   // *** MEMBER LOGIN ***
+
+   ['Cloud 20: Member logs in via full OTP flow', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      cloudLogin (s.cloudMemberEmail, function (error, auth) {
+         if (error) return log ('Member login failed: ' + error.message);
+         if (! auth.cookies.vibey) return log ('Missing vibey cookie for member');
+         if (! auth.csrf) return log ('Missing CSRF for member');
+         if (auth.admin) return log ('Member should not be admin');
+         s.memberAuth = auth;
+         s.cleanupKeys.push ('session:' + auth.cookies.vibey);
+         next ();
+      });
+   }],
+
+   ['Cloud 21: Non-admin cannot access GET /admin/signups', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authGet ('/admin/signups', s.memberAuth, function (error, status) {
+         if (error) return log ('Non-admin signups failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for non-admin signups, got ' + status);
+         next ();
+      });
+   }],
+
+   ['Cloud 22: Non-admin cannot POST /admin/createUser', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authJson ('POST', '/admin/createUser', {email: 'sneaky@test.dev'}, s.memberAuth, function (error, status) {
+         if (error) return log ('Non-admin createUser failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for non-admin createUser, got ' + status);
+         next ();
+      });
+   }],
+
+   // *** PROJECT SCOPING ***
+
+   ['Cloud 23: Admin creates a project', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authJson ('POST', '/projects', {name: 'admin-proj-cloud'}, s.adminAuth, function (error, status, body) {
+         if (error) return log ('Admin create project failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status + ' ' + JSON.stringify (body));
+         if (! body || body.ok !== true || ! body.slug) return log ('Bad create response: ' + JSON.stringify (body));
+         s.adminProjectSlug = body.slug;
+         next ();
+      });
+   }],
+
+   ['Cloud 24: Member cannot see admin project', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authGet ('/projects', s.memberAuth, function (error, status, body) {
+         if (error) return log ('Member list projects failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         if (type (body) !== 'array') return log ('Expected array, got: ' + JSON.stringify (body));
+         var found = dale.stopNot (body, undefined, function (p) {
+            if (p.slug === s.adminProjectSlug) return p;
+         });
+         if (found) return log ('Member should NOT see admin project ' + s.adminProjectSlug);
+         next ();
+      });
+   }],
+
+   ['Cloud 25: Unauthenticated GET /projects returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpRequest ('GET', '/projects', '', {}, function (error, status) {
+         if (error) return log ('Unauthenticated projects request failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for unauthenticated projects, got ' + status);
+         next ();
+      });
+   }],
+
+   // *** ACCESS & PUBLIC ROUTES ***
+
+   ['Cloud 26: GET /access returns empty rules initially', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authGet ('/access', s.adminAuth, function (error, status, body) {
+         if (error) return log ('GET /access failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         if (! body || type (body.rules) !== 'object') return log ('Expected {rules: {}}, got: ' + JSON.stringify (body));
+         next ();
+      });
+   }],
+
+   ['Cloud 27: POST /access sets rules', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      var rules = {};
+      rules [s.adminProjectSlug + ':static/'] = 'ALL';
+      authJson ('POST', '/access', {rules: rules}, s.adminAuth, function (error, status, body) {
+         if (error) return log ('POST /access failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         if (! body || body.ok !== true) return log ('Expected {ok: true}, got: ' + JSON.stringify (body));
+         s.cleanupKeys.push ('access:' + s.adminUserId);
+         next ();
+      });
+   }],
+
+   ['Cloud 28: GET /access reflects saved rules', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authGet ('/access', s.adminAuth, function (error, status, body) {
+         if (error) return log ('GET /access after save failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         if (! body || ! body.rules || body.rules [s.adminProjectSlug + ':static/'] !== 'ALL') {
+            return log ('Expected published static rule, got: ' + JSON.stringify (body));
+         }
+         next ();
+      });
+   }],
+
+   ['Cloud 29: POST /access overwrites all rules', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      var rules = {};
+      rules [s.adminProjectSlug + ':doc/main.md'] = 'ALL';
+      authJson ('POST', '/access', {rules: rules}, s.adminAuth, function (error, status) {
+         if (error) return log ('Overwrite access failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200, got ' + status);
+         // Verify old rule is gone
+         authGet ('/access', s.adminAuth, function (err2, st2, body2) {
+            if (err2 || st2 !== 200) return log ('GET /access after overwrite failed');
+            if (body2.rules [s.adminProjectSlug + ':static/']) return log ('Old static/ rule should be gone after overwrite');
+            if (body2.rules [s.adminProjectSlug + ':doc/main.md'] !== 'ALL') return log ('New doc rule missing');
+            next ();
+         });
+      });
+   }],
+
+   ['Cloud 30: GET /access without auth returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpRequest ('GET', '/access', '', {}, function (error, status) {
+         if (error) return log ('Unauthenticated access request failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for unauthenticated /access, got ' + status);
+         next ();
+      });
+   }],
+
+   // *** LOGOUT ***
+
+   ['Cloud 31: POST /auth/logout clears session', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      authJson ('POST', '/auth/logout', {}, s.adminAuth, function (error, status, body) {
+         if (error) return log ('Logout failed: ' + error.message);
+         if (status !== 200 || ! body || body.ok !== true) return log ('Logout response bad: ' + JSON.stringify (body));
+         next ();
+      });
+   }],
+
+   ['Cloud 32: Old session cookie is rejected after logout', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud) return next ();
+      httpRequest ('GET', '/auth/csrf', '', {Cookie: cookieHeader (s.adminAuth.cookies)}, function (error, status) {
+         if (error) return log ('CSRF after logout failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 after logout, got ' + status);
+         next ();
+      });
+   }],
+
+   // *** CLEANUP ***
+
+   ['Cloud 33: Delete admin project', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud || ! s.adminProjectSlug) return next ();
+      // Re-login admin to delete the project
+      cloudLogin (s.cloudAdminEmail, function (error, auth) {
+         if (error) return log ('Admin re-login for cleanup failed: ' + error.message);
+         s.cleanupKeys.push ('session:' + auth.cookies.vibey);
+         var req = http.request ({
+            hostname: 'localhost',
+            port: 5353,
+            path: '/projects/' + encodeURIComponent (s.adminProjectSlug),
+            method: 'DELETE',
+            headers: {Cookie: cookieHeader (auth.cookies)}
+         }, function (res) {
+            var data = '';
+            res.on ('data', function (chunk) {data += chunk;});
+            res.on ('end', function () {next ();});
+         });
+         req.on ('error', function () {next ();});
+         req.end ();
+      });
+   }],
+
+   ['Cloud 34: Flush test keys from Redis', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud || ! s.cleanupKeys || ! s.cleanupKeys.length) return next ();
+      redisFlushTestKeys (s.cleanupKeys, function () {
+         next ();
+      });
    }]
 ];
 

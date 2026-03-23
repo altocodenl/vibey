@@ -341,7 +341,7 @@
       }, function () {
          var tab = B.get ('tab');
          if (tab !== 'projects') return 'Expected tab to be "projects" but got "' + tab + '"';
-         var heading = findByText ('.editor-filename', 'Projects');
+         var heading = findByText ('.projects-title', 'Projects');
          if (! heading) return 'Projects heading not found in DOM';
          return true;
       }],
@@ -414,7 +414,7 @@
       }, function () {
          var tab = B.get ('tab');
          if (tab !== 'projects') return 'Expected tab to be "projects" but got "' + tab + '"';
-         var item = findByText ('.file-name', PROJECT_FLOW);
+         var item = findByText ('.project-card-name', PROJECT_FLOW);
          if (! item) return 'Project entry not found in list for "' + PROJECT_FLOW + '"';
          return true;
       }],
@@ -461,7 +461,7 @@
       ['Project 6: Projects list no longer shows deleted project', function (done) {
          done (SHORT_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', PROJECT_FLOW);
+         var item = findByText ('.project-card-name', PROJECT_FLOW);
          if (item) return 'Deleted project still appears in list';
          return true;
       }],
@@ -534,7 +534,7 @@
          B.call ('navigate', 'hash', '#/projects');
          done (SHORT_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', 'My Cool Project');
+         var item = findByText ('.project-card-name', 'My Cool Project');
          if (! item) return 'Project entry not found for "My Cool Project"';
          return true;
       }],
@@ -546,7 +546,7 @@
          B.call ('delete', 'project', window._projSpecialSlug1);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', 'My Cool Project');
+         var item = findByText ('.project-card-name', 'My Cool Project');
          if (item) return 'Deleted project still appears in list for "My Cool Project"';
          return true;
       }],
@@ -567,7 +567,7 @@
          B.call ('navigate', 'hash', '#/projects');
          done (SHORT_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', '🚀 Rocket App');
+         var item = findByText ('.project-card-name', '🚀 Rocket App');
          if (! item) return 'Project entry not found for "🚀 Rocket App"';
          return true;
       }],
@@ -579,7 +579,7 @@
          B.call ('delete', 'project', window._projSpecialSlug2);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', '🚀 Rocket App');
+         var item = findByText ('.project-card-name', '🚀 Rocket App');
          if (item) return 'Deleted project still appears in list for "🚀 Rocket App"';
          return true;
       }],
@@ -600,7 +600,7 @@
          B.call ('navigate', 'hash', '#/projects');
          done (SHORT_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', 'café étude');
+         var item = findByText ('.project-card-name', 'café étude');
          if (! item) return 'Project entry not found for "café étude"';
          return true;
       }],
@@ -612,7 +612,7 @@
          B.call ('delete', 'project', window._projSpecialSlug3);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', 'café étude');
+         var item = findByText ('.project-card-name', 'café étude');
          if (item) return 'Deleted project still appears in list for "café étude"';
          return true;
       }],
@@ -633,7 +633,7 @@
          B.call ('navigate', 'hash', '#/projects');
          done (SHORT_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', 'hello—world & friends!');
+         var item = findByText ('.project-card-name', 'hello—world & friends!');
          if (! item) return 'Project entry not found for "hello—world & friends!"';
          return true;
       }],
@@ -645,7 +645,7 @@
          B.call ('delete', 'project', window._projSpecialSlug4);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', 'hello—world & friends!');
+         var item = findByText ('.project-card-name', 'hello—world & friends!');
          if (item) return 'Deleted project still appears in list for "hello—world & friends!"';
          return true;
       }],
@@ -666,7 +666,7 @@
          B.call ('navigate', 'hash', '#/projects');
          done (SHORT_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', '日本語プロジェクト');
+         var item = findByText ('.project-card-name', '日本語プロジェクト');
          if (! item) return 'Project entry not found for "日本語プロジェクト"';
          return true;
       }],
@@ -678,7 +678,7 @@
          B.call ('delete', 'project', window._projSpecialSlug5);
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', '日本語プロジェクト');
+         var item = findByText ('.project-card-name', '日本語プロジェクト');
          if (item) return 'Deleted project still appears in list for "日本語プロジェクト"';
          return true;
       }],
@@ -2165,7 +2165,7 @@
          B.call ('load', 'projects');
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', window._docsProject);
+         var item = findByText ('.project-card-name', window._docsProject);
          if (item) return 'Deleted docs project still appears in projects list';
          return true;
       }],
@@ -2450,7 +2450,7 @@
          B.call ('load', 'projects');
          done (MEDIUM_WAIT, POLL);
       }, function () {
-         var item = findByText ('.file-name', window._uploadsProject);
+         var item = findByText ('.project-card-name', window._uploadsProject);
          if (item) return 'Deleted uploads project still appears in projects list';
          return true;
       }],

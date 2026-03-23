@@ -1,4 +1,14 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    network_mode: bridge
+
   vibey:
     build: .
     ports:
@@ -11,7 +21,13 @@ services:
       - vibey=master
     environment:
       - VIBEY_DOCKER=1
+      - REDIS_HOST=host.docker.internal
+      # Set VIBEY_CLOUD=1 to enable cloud mode (auth, user scoping, etc.)
+      # - VIBEY_CLOUD=1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     network_mode: bridge
 
 volumes:
   vibey-data:
+  redis-data:

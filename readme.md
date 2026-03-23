@@ -684,26 +684,6 @@ Agent prompt says: *"Your working directory is /workspace. If you run a server, 
 - `edit_file`: `projectFS.readFile` → find/replace in vibey's memory → `projectFS.writeFile`.
 - `launch_agent`: spawns a new dialog in the same project container (same container, new dialog file).
 
-## Vi mode [TODO]
-
-Vi mode is available for the docs editor and the chat input. Toggle it in **Settings → Editor → Vi mode**. The setting is persisted in `secret.json` under `editor.viMode` and loaded via `GET /settings`.
-
-**Docs editor**
-- Modes: normal / insert / command.
-- Save with `:w`, close with `:q`, save+close with `:wq`, force close with `:q!`.
-- Status bar shows mode or command input + cursor position.
-
-**Chat input (lighter)**
-- Modes: normal / insert (no command mode).
-- `Ctrl+Enter` sends in both modes.
-
-**Keymap (normal mode)**
-- Movement: `h` `j` `k` `l`, `w`/`b`, `0`/`$`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`.
-- Insert: `i` `a` `o` `O` `A` `I`.
-- Editing: `x`, `dd`, `yy`, `p`, `u`, `Ctrl-r`.
-- Search: `/` then `n`/`N`.
-- Commands: `:` enters command mode.
-
 ## Cloud mode
 
 Vibey runs in one of two modes: **local** (the default) or **cloud**. The mode is determined by the presence of a `VIBEY_CLOUD` environment variable. In local mode, there is no authentication — the user is implicitly logged in. In cloud mode, all routes (except auth routes and public routes) require a valid session cookie and CSRF token.
@@ -836,9 +816,11 @@ All cloud state lives in redis. Key schema:
 | `user:<id>` | hash | — | `id`, `email`, `createdAt`, `lastActive`, `settings` (JSON string), `admin` (`'1'` or absent), `apiKey` |
 | `email:<email>` | string | — | `<user-id>` — reverse lookup |
 | `session:<id>` | string | 7 days | `<user-id>` |
+| `sessioncsrf:<session-id>` | string | 7 days | `<csrf-token>` — quick lookup for `GET /auth/csrf` |
 | `csrf:<token>` | string | 7 days | `<session-id>` |
 | `otp:<user-id>` | string | 10 min | `<6-digit code>` |
 | `signup:<email>` | hash | — | `email`, `createdAt` |
+| `apikey:<key>` | string | — | `<user-id>` — reverse lookup for Bearer auth |
 | `access:<user-id>` | hash | — | `<project>:<path>` → `ALL` or JSON array of user ids |
 
 ### Client: auth
@@ -945,9 +927,8 @@ Bigger refactors:
 
 ## TODO
 
-Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention in prompt.md. For pupeteer, use the global pupeteer, don't install it.
+Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries). Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server.
 
-- Guidelines: write & inject them into the beginning prompt. Make them editable in the advanced section of settings (also prompt.md).
 - Demo videos
    - A 3D solar system I can rotate and zoom
    - A quick expense tracker
@@ -977,6 +958,7 @@ All you need is an AI provider, no need to install anything.
 
 ### TODO
 
+- Say about time and token limits, so that agents can check.
 - Implement vibey cloud
 - Snapshots should be prepended with the user id. We need to get rid of the silliness of snapshots.json and not be afraid to use fs.scandir or something to that effect.
 
@@ -986,3 +968,24 @@ All you need is an AI provider, no need to install anything.
 - Spin Hetzner engines and bind projects to them.
 - Put dialog state in memory [perhaps]
 - Hosted services? (email, DB)
+
+##### Vi mode [TODO]
+
+Vi mode is available for the docs editor and the chat input. Toggle it in **Settings → Editor → Vi mode**. The setting is persisted in `secret.json` under `editor.viMode` and loaded via `GET /settings`.
+
+**Docs editor**
+- Modes: normal / insert / command.
+- Save with `:w`, close with `:q`, save+close with `:wq`, force close with `:q!`.
+- Status bar shows mode or command input + cursor position.
+
+**Chat input (lighter)**
+- Modes: normal / insert (no command mode).
+- `Ctrl+Enter` sends in both modes.
+
+**Keymap (normal mode)**
+- Movement: `h` `j` `k` `l`, `w`/`b`, `0`/`$`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`.
+- Insert: `i` `a` `o` `O` `A` `I`.
+- Editing: `x`, `dd`, `yy`, `p`, `u`, `Ctrl-r`.
+- Search: `/` then `n`/`N`.
+- Commands: `:` enters command mode.
+
