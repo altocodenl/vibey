@@ -964,19 +964,17 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
       - The UI redraws synchronously because of gotoB, so there should be
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
-### TODO
+### TODO now
 
-- Say about time and token limits, so that agents can check.
-- Implement vibey cloud
+- Make tests pass:
+   - Vibey local: recheck that full flow works in server & client
+   - Vibey cloud: fix dialog tests in server; fix client tests
+- Tell agents about time and token limits, so that agents can check if they should stop and spawn another one.
+- Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
+- Security: add explicit reveal/regenerate flows for reusable secrets when needed. Keep `GET /settings` metadata-only by default; do not return raw automation API keys or other reusable credentials unless the user explicitly requests a reveal/regeneration flow.
 
-#### Security
+### TODO later
 
-- Public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
-- Continue to avoid returning reusable secrets to the client by default. Keep provider credentials masked in `GET /settings`, keep the automation API key metadata-only by default, and use explicit reveal/regenerate flows only when needed.
-
-#### For later
-
-- Choose your own adventure website (local vs cloud).
 - Spin Hetzner engines and bind projects to them.
 - Put dialog state in memory [perhaps]
 - Hosted services? (email, DB)
