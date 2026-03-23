@@ -186,6 +186,7 @@ var httpJson = function (method, path, payload, cb, headers) {
       headers = headers || {};
       if (! headers.Cookie) headers.Cookie = cookieHeader (TEST_MODE.auth.cookies);
       if ((method === 'POST' || method === 'PUT') && type (payload) === 'object' && payload.csrf === undefined) payload.csrf = TEST_MODE.auth.csrf;
+      if (method === 'DELETE' && ! headers ['X-CSRF-Token'] && ! headers ['x-csrf-token']) headers ['X-CSRF-Token'] = TEST_MODE.auth.csrf;
    }
    var body = payload === '' ? '' : JSON.stringify (payload);
    var requestHeaders = {};
@@ -288,10 +289,11 @@ http.request = function (options, cb) {
       if (! isOpenPath (options.path)) {
          options.headers = options.headers || {};
          if (! options.headers.Cookie) options.headers.Cookie = cookieHeader (TEST_MODE.auth.cookies);
+         if (options.method === 'DELETE' && ! options.headers ['X-CSRF-Token'] && ! options.headers ['x-csrf-token']) options.headers ['X-CSRF-Token'] = TEST_MODE.auth.csrf;
       }
    }
    var req = originalHttpRequest.call (http, options, cb);
-   if (TEST_MODE.cloud && TEST_MODE.auth && type (options) === 'object' && options.hostname === 'localhost' && options.port === 5353 && ! isOpenPath (options.path) && (options.method === 'POST' || options.method === 'PUT')) {
+   if (TEST_MODE.cloud && TEST_MODE.auth && type (options) === 'object' && options.hostname === 'localhost' && options.port === 5353 && ! isOpenPath (options.path) && (options.method === 'POST' || options.method === 'PUT' || options.method === 'DELETE')) {
       var contentType = (((options.headers || {}) ['Content-Type']) || ((options.headers || {}) ['content-type']) || '').toLowerCase ();
       if (contentType.indexOf ('application/json') === 0) {
          var originalWrite = req.write.bind (req);
@@ -2694,13 +2696,14 @@ var cloudSequence = [
       });
    }],
 
-   ['Cloud 25a: Member GET /settings exposes their automation API key', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 25a: Member GET /settings exposes only masked automation API key metadata', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
       authGet ('/settings', s.memberAuth, function (error, status, body) {
          if (error) return log ('Member GET /settings failed: ' + error.message);
          if (status !== 200) return log ('Expected 200 from member settings, got ' + status);
          if (! body || ! body.userApiKey) return log ('Expected userApiKey in settings response');
-         if (body.userApiKey.key !== s.memberApiKey) return log ('Settings userApiKey.key mismatch');
+         if (body.userApiKey.key !== undefined) return log ('Settings should not return raw userApiKey.key');
+         if (! body.userApiKey.maskedKey) return log ('Settings userApiKey missing maskedKey');
          if (! body.userApiKey.createdAt) return log ('Settings userApiKey missing createdAt');
          if (body.userApiKey.lastUsed) return log ('Settings userApiKey.lastUsed should be empty before trigger use');
          next ();
@@ -3304,6 +3307,7 @@ var adaptSequenceForCloud = function (sequence) {
          };
       }
       if ((method === 'POST' || method === 'PUT') && type (copy [4]) === 'object' && copy [4].csrf === undefined) copy [4].csrf = TEST_MODE.auth.csrf;
+      if (method === 'DELETE' && ! headers ['X-CSRF-Token'] && ! headers ['x-csrf-token']) headers ['X-CSRF-Token'] = TEST_MODE.auth.csrf;
       return copy;
    });
 };

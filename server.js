@@ -1072,7 +1072,7 @@ var pfs = {
       dale.go (filenames, function (filename) {
          command += ' ' + shQuote ('/workspace/' + filename);
       });
-      command += '; do stat -c "%Y %s %n" "$f"; done';
+      command += '; do if [ -e "$f" ]; then stat -c "%Y %s %n" "$f"; fi; done';
 
       var output = await withProjectContainerRecovery (projectName, rs, function () {
          return execA ('docker exec ' + name + ' sh -c ' + shQuote (command));
