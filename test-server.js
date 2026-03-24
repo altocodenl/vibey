@@ -749,8 +749,8 @@ var dialogSequence = [
       });
    }],
 
-   // Test 16: SSE stream output does not contain metadata
-   ['Dialog 16: SSE output has no metadata leakage', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+   // Test 16: SSE stream output does not contain stripped metadata
+   ['Dialog 16: SSE output strips only Id/Provider/Model metadata', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       var started = Date.now ();
       log ('[dialog-16] stream start ' + s.dialogId);
       collectSSE (DIALOG_PROJECT, s.dialogId, function (error, events) {
@@ -761,9 +761,9 @@ var dialogSequence = [
          var combined = dale.go (events, function (ev) {
             if (ev && ev.type === 'chunk' && type (ev.content) === 'string') return ev.content;
          }).join ('');
+         if (combined.indexOf ('> Id:') !== -1) return log ('Output contains > Id: metadata');
          if (combined.indexOf ('> Provider:') !== -1) return log ('Output contains > Provider: metadata');
          if (combined.indexOf ('> Model:') !== -1) return log ('Output contains > Model: metadata');
-         if (combined.indexOf ('> Context:') !== -1) return log ('Output contains > Context: metadata');
          next ();
       }, {
          heartbeatMs: 10000,
@@ -1371,15 +1371,22 @@ var dialogSequence = [
       var auth = s.dialogCloudAuth;
       if (! auth) return log ('Missing dialog cloud auth');
 
-      authGet ('/settings', auth, function (settingsError, settingsStatus, settingsBody) {
-         if (settingsError) return log ('Dialog cloud GET /settings failed: ' + settingsError.message);
-         if (settingsStatus !== 200) return log ('Expected 200 from dialog cloud settings, got ' + settingsStatus);
-         if (! settingsBody || ! settingsBody.userApiKey || ! settingsBody.userApiKey.key) return log ('Dialog cloud settings missing userApiKey');
-         if (settingsBody.userApiKey.lastUsed) return log ('Dialog cloud api key should start unused');
+      // GET /settings only returns maskedKey (per spec), so read the raw API key from Redis
+      redisGet ('email:' + (CONFIG.adminEmail || '').toLowerCase (), function (lookupErr, userId) {
+         if (lookupErr || ! userId) return log ('Could not find userId for admin email');
 
-         s.dialogCloudApiKey = settingsBody.userApiKey.key;
+         redisGet ('userapikey:' + userId, function (keyErr, apiKey) {
+            if (keyErr || ! apiKey) return log ('Dialog cloud settings missing userApiKey in Redis');
 
-         authJson ('POST', '/projects', {name: 'dialog-cloud-trigger-' + testTimestamp ()}, auth, function (projectError, projectStatus, projectBody) {
+            // Verify lastUsed is empty (unused)
+            authGet ('/settings', auth, function (settingsError, settingsStatus, settingsBody) {
+               if (settingsError) return log ('Dialog cloud GET /settings failed: ' + settingsError.message);
+               if (settingsStatus !== 200) return log ('Expected 200 from dialog cloud settings, got ' + settingsStatus);
+               if (settingsBody && settingsBody.userApiKey && settingsBody.userApiKey.lastUsed) return log ('Dialog cloud api key should start unused');
+
+               s.dialogCloudApiKey = apiKey;
+
+               authJson ('POST', '/projects', {name: 'dialog-cloud-trigger-' + testTimestamp ()}, auth, function (projectError, projectStatus, projectBody) {
             if (projectError) return log ('Dialog cloud project create failed: ' + projectError.message);
             if (projectStatus !== 200) return log ('Expected 200 creating dialog cloud project, got ' + projectStatus);
             if (! projectBody || ! projectBody.slug) return log ('Dialog cloud project create missing slug');
@@ -1397,6 +1404,8 @@ var dialogSequence = [
                next ();
             }, {Authorization: 'Bearer ' + s.dialogCloudApiKey});
          });
+      });
+      });
       });
    }],
 
@@ -3317,12 +3326,6 @@ var finish = function (code) {
 };
 
 var runSuites = function () {
-   if (TEST_MODE.cloud) {
-      requestedSuites = dale.fil (requestedSuites, undefined, function (name) {
-         if (name !== 'cloud') return name;
-      }).concat (requestedSuites.indexOf ('cloud') === -1 ? [] : ['cloud']);
-   }
-
    var sequences = dale.go (requestedSuites, function (name) {
       if (TEST_MODE.cloud && name === 'cloud') return [[
          'Cloud 0: Clear generic auth before cloud suite', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs) {
@@ -3412,7 +3415,20 @@ httpRequest ('GET', '/auth/csrf', '', {}, function (error, status, text) {
                }
                auth.userId = userId;
                TEST_MODE.auth = auth;
-               runSuites ();
+
+               // Seed API keys from secret.json into the user's Redis settings
+               if (CONFIG.accounts && (CONFIG.accounts.openaiOAuth || CONFIG.accounts.claudeOAuth || (CONFIG.accounts.openai && CONFIG.accounts.openai.apiKey) || (CONFIG.accounts.claude && CONFIG.accounts.claude.apiKey))) {
+                  var settings = JSON.stringify ({accounts: CONFIG.accounts});
+                  redisExec ('HSET ' + JSON.stringify ('user:' + userId) + ' settings ' + JSON.stringify (settings), function (seedError) {
+                     if (seedError) {
+                        console.log ('VIBEY TEST WARNING: Could not seed API keys into Redis:', seedError.message);
+                     }
+                     runSuites ();
+                  });
+               }
+               else {
+                  runSuites ();
+               }
             });
          });
       });

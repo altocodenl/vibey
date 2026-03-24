@@ -2028,7 +2028,7 @@ var parseSections = function (markdown) {
 };
 
 var stripSectionMetadata = function (text) {
-   var metaRe = /^>\s*(Id|Time|Resources(?: cumulative)?|Usage(?: cumulative)?|Context|Provider|Model|Started|Status)\s*:/;
+   var metaRe = /^>\s*(Id|Provider|Model)\s*:/;
    return dale.fil ((text || '').split ('\n'), undefined, function (line) {
       if (metaRe.test (line)) return;
       return line;
@@ -2078,25 +2078,10 @@ var appendToDialog = async function (projectName, filename, text) {
    await pfs.appendFile (projectName, filename, text);
 };
 
-var appendUsageToAssistantSection = async function (projectName, filename, usage, onAppend) {
+var appendUsageToAssistantSection = async function (projectName, filename, usage, model, onAppend) {
    var normalized = parseUsageNumbers (usage);
    if (! normalized) return null;
-
-   var cumulative = await getLastCumulativeUsage (projectName, filename);
-   // Input tokens already include the full conversation history each turn,
-   // so cumulative input = this turn's input (not a running sum).
-   // Output tokens are genuinely new each turn, so those accumulate.
-   cumulative.input = normalized.input;
-   cumulative.output += normalized.output;
-   cumulative.total = normalized.input + cumulative.output;
-
-   var text =
-      '> Usage: input=' + normalized.input + ' output=' + normalized.output + ' total=' + normalized.total + '\n' +
-      '> Usage cumulative: input=' + cumulative.input + ' output=' + cumulative.output + ' total=' + cumulative.total + '\n\n';
-
-   await appendToDialog (projectName, filename, text);
-   if (onAppend) onAppend (text);
-   return {usage: normalized, cumulative: cumulative, text: text};
+   return {usage: normalized};
 };
 
 var finalizeAssistantTime = async function (projectName, filename, startIso, endIso, onReplace) {
@@ -2817,7 +2802,7 @@ var runCompletion = async function (projectName, dialog, provider, model, onChun
          if (queuedWriteError) throw queuedWriteError;
          await appendToDialog (projectName, dialog.filename, '\n\n');
          appendMarkdown ('\n\n');
-         await appendUsageToAssistantSection (projectName, dialog.filename, result.usage, appendMarkdown);
+         await appendUsageToAssistantSection (projectName, dialog.filename, result.usage, model, appendMarkdown);
 
          // Log + emit helper: logs as LLM-RS and propagates to onChunk (SSE).
          // Does NOT write to dialog — tool/context blocks are written separately above/below.
@@ -3454,21 +3439,34 @@ var routes = [
    ['all', '*', function (rq, rs) {
       if (! CLOUD || ! rq.user) return rs.next ();
       var prefix = rq.user.id + '-';
+
+      // Rewrite the URL to inject the userId prefix into the project slug.
+      // This ensures that when the actual route matches and cicek extracts
+      // :project, the param is already scoped.
+      var projectMatch = rq.url.match (/^\/project\/([^/]+)(\/.*)?$/);
+      if (projectMatch) {
+         var slug = decodeURIComponent (projectMatch [1]);
+         if (slug.indexOf (prefix) !== 0) {
+            rq.url = '/project/' + encodeURIComponent (prefix + slug) + (projectMatch [2] || '');
+         }
+      }
+      var projectsMatch = rq.url.match (/^\/projects\/([^/]+)$/);
+      if (projectsMatch) {
+         var slug2 = decodeURIComponent (projectsMatch [1]);
+         if (slug2.indexOf (prefix) !== 0) {
+            rq.url = '/projects/' + encodeURIComponent (prefix + slug2);
+         }
+      }
+
+      // Also patch already-extracted params (for routes matched before this middleware)
       if (rq.data && rq.data.params) {
-         // Named param routes: project/:project/*
          if (rq.data.params.project && rq.data.params.project.indexOf (prefix) !== 0) {
             rq.data.params.project = prefix + rq.data.params.project;
          }
-         // DELETE /projects/:name
-         if (rq.url.match (/^\/projects\//)) {
-            if (rq.data.params.name && rq.data.params.name.indexOf (prefix) !== 0) rq.data.params.name = prefix + rq.data.params.name;
-            if (rq.data.params [0] && rq.data.params [0].indexOf (prefix) !== 0) rq.data.params [0] = prefix + rq.data.params [0];
+         if (rq.data.params.name && rq.url.match (/^\/projects\//) && rq.data.params.name.indexOf (prefix) !== 0) {
+            rq.data.params.name = prefix + rq.data.params.name;
          }
-      }
-      // Regex-matched routes store params in rq.data.params as [0], [1], etc.
-      // For /project/<slug>/file/<name> etc., param [0] is the project slug.
-      if (rq.data && rq.data.params && rq.data.params [0] !== undefined) {
-         if (rq.url.match (/^\/project\//) && rq.data.params [0].indexOf (prefix) !== 0) {
+         if (rq.data.params [0] !== undefined && rq.url.match (/^\/project\//) && rq.data.params [0].indexOf (prefix) !== 0) {
             rq.data.params [0] = prefix + rq.data.params [0];
          }
       }
@@ -3733,7 +3731,7 @@ var routes = [
       var projectName = validProjectNameOrReply (rs, rq.data.params.project);
       if (! projectName) return;
 
-      var slug = scopedSlug (projectName, rq);
+      var slug = projectName;
 
       try {
          var defaultModel = rq.body.model || (rq.body.provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
@@ -3860,6 +3858,12 @@ var routes = [
          if (CLOUD && rq.user) {
             entries = dale.fil (entries, undefined, function (entry) {
                if (snapshotOwnerId (entry) === rq.user.id) return entry;
+            });
+            // Unscope project slugs for the client
+            entries = dale.go (entries, function (entry) {
+               var copy = dale.obj (entry, function (v, k) {return [k, v];});
+               copy.project = unscopeSlug (copy.project, rq);
+               return copy;
             });
          }
          reply (rs, 200, entries);

@@ -949,10 +949,12 @@ Bigger refactors:
 - Break up the two mega-views into smaller nested `B.view`s so that e.g. `dialog.input` changes only redraw the input area, not the entire dialog view. The B.views can be inline, no need to extract them to a separate variable. Bring state down to where it's needed, instead of up as in react.
 - The `setTimeout(fn, 0)` calls for auto-file-select (line 1261) and auto-scroll (line 980) are workarounds for ordering issues — replace with explicit sequencing in responders.
 
-## TODO
+## TODO now
 
-Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output.
+Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 
+- Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
+- Security: add explicit reveal/regenerate flows for reusable secrets when needed. Keep `GET /settings` metadata-only by default; do not return raw automation API keys or other reusable credentials unless the user explicitly requests a reveal/regeneration flow.
 - Demo videos
    - A 3D solar system I can rotate and zoom
    - A quick expense tracker
@@ -962,16 +964,6 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
       - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
       - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
       - The UI redraws synchronously because of gotoB, so there should be
-- Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
-
-### TODO now
-
-- Make tests pass:
-   - Vibey local: recheck that full flow works in server & client
-   - Vibey cloud: fix dialog tests in server; fix client tests
-- Tell agents about time and token limits, so that agents can check if they should stop and spawn another one.
-- Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
-- Security: add explicit reveal/regenerate flows for reusable secrets when needed. Keep `GET /settings` metadata-only by default; do not return raw automation API keys or other reusable credentials unless the user explicitly requests a reveal/regeneration flow.
 
 ### TODO later
 
@@ -979,7 +971,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (
 - Put dialog state in memory [perhaps]
 - Hosted services? (email, DB)
 - Billing: aligned pricing: an annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
-
+- Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
 
 ##### Vi mode [TODO]
 

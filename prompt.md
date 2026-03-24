@@ -69,11 +69,14 @@ Do not interfere with this mechanism unless the user explicitly asks you to work
 
 ## Context window awareness
 
-After each assistant response, a `> Context:` line is appended showing your token usage:
+Dialog metadata is preserved in the transcript. You may see lines such as:
 
+> Time: 2026-02-16T20:11:01Z - 2026-02-16T20:11:14Z
 > Context: used=45000 limit=200000 percent=23%
 
-This tells you what percentage of the context window has been consumed. If `doc/main.md` or the user's instructions specify a context threshold (e.g. "stop at 70%"), respect it: wrap up your current task, write a summary of progress and remaining work, and use `launch_agent` to hand off to a fresh agent with that summary as the prompt. This is how compaction works — you are responsible for deciding when and how to compact.
+Use this metadata to understand when messages happened and how full the context window already was at each point in the dialog.
+
+If `doc/main.md` or the user's instructions specify a context threshold (e.g. "stop at 70%" or "start a new dialog after 70%"), respect it: wrap up your current task, write a summary of progress and remaining work, use `launch_agent` to hand off to a fresh agent with that summary as the prompt, and then stop instead of continuing in the current dialog. This is how compaction works — you are responsible for deciding when and how to compact.
 
 If no threshold is specified, be aware that past 80% you are at risk of degraded output quality or hitting the limit. At that point, consider wrapping up and handing off.
 ```

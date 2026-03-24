@@ -254,7 +254,7 @@ Notes:
 13. `PUT /project/:p/dialog` (same dialogId, prompt: "continue without provider", no provider field) — returns JSON (provider/model resolved from multi-line header).
 14. `GET /project/:p/dialog/:id/stream` — SSE stream finishes with `done`.
 15. `PUT /project/:p/dialog` (prompt: "Repeat your previous assistant message verbatim; if any line starts with '>' include it.") — returns JSON.
-16. `GET /project/:p/dialog/:id/stream` — collect SSE output. Verify it **does not** contain `> Provider:`, `> Model:`, or `> Context:`.
+16. `GET /project/:p/dialog/:id/stream` — collect SSE output. Verify it **does not** contain `> Id:`, `> Provider:`, or `> Model:`. Time/context metadata remain visible to the LLM.
 17. `POST /project/:p/dialog` (provider, model, prompt: "read test-sample.txt", slug: "async-test") — returns **JSON** `{dialogId, filename, status: "active"}` immediately (no SSE on POST).
 18. `GET /project/:p/dialog/:id/stream` (for the new dialog) — SSE stream finishes with `done`.
 19. `GET /project/:p/dialog/:id` — markdown has tool request + result for `run_command`.

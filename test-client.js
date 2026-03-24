@@ -9,7 +9,99 @@
 
    if (typeof window === 'undefined') {
       var Path = require ('path');
+      var http = require ('http');
+      var exec = require ('child_process').exec;
       var puppeteer = require (Path.join (process.execPath, '..', '..', 'lib', 'node_modules', 'puppeteer'));
+
+      var CONFIG = {};
+      try {CONFIG = require ('./secret.json');} catch (e) {}
+
+      // Helper: HTTP JSON request
+      var httpJson = function (method, path, body) {
+         return new Promise (function (resolve, reject) {
+            var payload = body ? JSON.stringify (body) : '';
+            var headers = payload ? {'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength (payload)} : {};
+            var req = http.request ({hostname: 'localhost', port: 5353, path: path, method: method, headers: headers}, function (res) {
+               var text = '';
+               res.on ('data', function (chunk) {text += chunk;});
+               res.on ('end', function () {
+                  var parsed = null;
+                  try {parsed = JSON.parse (text);} catch (e) {}
+                  resolve ({status: res.statusCode, body: parsed, headers: res.headers});
+               });
+            });
+            req.on ('error', reject);
+            if (payload) req.write (payload);
+            req.end ();
+         });
+      };
+
+      // Helper: Redis CLI via docker compose
+      var redisExec = function (args) {
+         return new Promise (function (resolve, reject) {
+            exec ('docker compose exec -T vibey redis-cli --raw ' + args, {maxBuffer: 1024 * 1024}, function (error, stdout) {
+               if (error) return reject (error);
+               var result = (stdout || '').replace (/\n$/, '');
+               resolve (result === '' || result === '(nil)' ? null : result);
+            });
+         });
+      };
+
+      // Cloud mode authentication: detect mode, login, return session cookie string
+      var cloudAuth = async function () {
+         var csrfRes = await httpJson ('GET', '/auth/csrf');
+         if (csrfRes.status === 200 && csrfRes.body && csrfRes.body.mode === 'LOCAL') return null;
+
+         console.log ('[vibey-test] Cloud mode detected, authenticating...');
+
+         var email = (CONFIG.adminEmail || '').toLowerCase ();
+         if (! email) throw new Error ('secret.json must define adminEmail for cloud client tests');
+
+         // Request OTP
+         var loginRes = await httpJson ('POST', '/auth/login', {email: email});
+         if (loginRes.status !== 200) throw new Error ('Login request failed: ' + loginRes.status);
+
+         // Read userId and OTP from Redis
+         var userId = await redisExec ('GET ' + JSON.stringify ('email:' + email));
+         if (! userId) throw new Error ('Could not find userId for ' + email);
+
+         var otp = await redisExec ('GET ' + JSON.stringify ('otp:' + userId));
+         if (! otp) throw new Error ('Could not read OTP from Redis');
+
+         // Verify OTP
+         var verifyRes = await httpJson ('POST', '/auth/verify', {email: email, otp: otp});
+         if (verifyRes.status !== 200) throw new Error ('Verify failed: ' + verifyRes.status);
+
+         // Extract session cookie (preserve quotes — cicek uses them for signed cookies)
+         var setCookie = verifyRes.headers ['set-cookie'] || [];
+         if (typeof setCookie === 'string') setCookie = [setCookie];
+         var sessionCookie = null;
+         setCookie.forEach (function (line) {
+            var first = (line || '').split (';') [0] || '';
+            var eqIndex = first.indexOf ('=');
+            if (eqIndex !== -1 && first.slice (0, eqIndex) === 'vibey') {
+               sessionCookie = first.slice (eqIndex + 1);
+            }
+         });
+         if (! sessionCookie) throw new Error ('No session cookie in verify response');
+
+         // Seed API keys and testButton into user Redis settings
+         var userSettings = {testButton: true};
+         if (CONFIG.accounts) userSettings.accounts = CONFIG.accounts;
+         var settingsJson = JSON.stringify (userSettings);
+         // Write settings via a heredoc to avoid shell escaping issues with complex JSON
+         await new Promise (function (resolve, reject) {
+            var cmd = 'docker compose exec -T vibey redis-cli HSET "user:' + userId + '" settings \'' + settingsJson.replace (/'/g, "'\\''") + '\'';
+            exec (cmd, {maxBuffer: 1024 * 1024}, function (error) {
+               if (error) return reject (error);
+               resolve ();
+            });
+         });
+         console.log ('[vibey-test] Seeded API keys and testButton into user settings');
+
+         console.log ('[vibey-test] Cloud auth complete, userId=' + userId);
+         return {cookieValue: sessionCookie, csrf: verifyRes.body.csrf, userId: userId};
+      };
 
       (async function () {
          // Accept flow filter from CLI: node test-client.js [flow]
@@ -46,7 +138,22 @@
             console.log ('[vibey-request-failed] ' + request.method () + ' ' + request.url () + ' :: ' + (fail && fail.errorText ? fail.errorText : 'unknown'));
          });
 
+
          try {
+            // Authenticate in cloud mode before loading the page
+            var auth = await cloudAuth ();
+            if (auth) {
+               var cookieValue = auth.cookieValue;
+               await page.setCookie ({
+                  name: 'vibey',
+                  value: cookieValue,
+                  url: 'http://localhost:5353',
+                  httpOnly: true,
+                  sameSite: 'Lax'
+               });
+               console.log ('[vibey-test] Session cookie set');
+            }
+
             await page.goto ('http://localhost:5353', {waitUntil: 'networkidle2', timeout: 30000});
 
             // Intercept the prompt dialog from client.js and answer with our CLI flow choice.
@@ -128,6 +235,40 @@
    var B = window.B;
    var type = teishi.type;
    var inc  = teishi.inc;
+
+   // Monkey-patch c.ajax to inject CSRF token in cloud mode for mutating requests
+   var originalAjax = c.ajax;
+   c.ajax = function (method, path, headers, body, cb) {
+      var csrf = B.get ('cloudCsrf');
+      if (csrf && (method === 'post' || method === 'put')) {
+         if (type (body) === 'object' && body) body.csrf = csrf;
+      }
+      if (csrf && method === 'delete') {
+         headers = headers || {};
+         headers ['X-CSRF-Token'] = csrf;
+      }
+      return originalAjax (method, path, headers, body, cb);
+   };
+
+   // Monkey-patch fetch to inject CSRF token into PUT/POST/DELETE JSON bodies
+   var originalFetch = window.fetch;
+   window.fetch = function (url, options) {
+      var csrf = B.get ('cloudCsrf');
+      if (csrf && options && options.method && /^(PUT|POST|DELETE)$/i.test (options.method)) {
+         var ct = (options.headers && (options.headers ['Content-Type'] || options.headers ['content-type'])) || '';
+         if (ct.indexOf ('application/json') !== -1 && type (options.body) === 'string') {
+            try {
+               var parsed = JSON.parse (options.body);
+               if (type (parsed) === 'object' && parsed && parsed.csrf === undefined) {
+                  parsed.csrf = csrf;
+                  options.body = JSON.stringify (parsed);
+               }
+            }
+            catch (e) {}
+         }
+      }
+      return originalFetch (url, options);
+   };
 
    // *** HELPERS ***
 
@@ -969,7 +1110,7 @@
          return true;
       }],
 
-      ['Dialog 16: Stream repeat and verify no headers in output', function (done) {
+      ['Dialog 16: Stream repeat and verify only Id/Provider/Model headers are stripped', function (done) {
          streamDialogEvents (window._dialogProjectSlug, window._dialogDialogId, function (result) {
             window._dialogStream4 = result;
             done (SHORT_WAIT, POLL);
@@ -981,9 +1122,9 @@
             if (ev.type === 'chunk' && ev.content) return ev.content;
          });
          var text = chunks.join ('');
+         if (text.indexOf ('> Id:') !== -1) return 'Output should not contain > Id:';
          if (text.indexOf ('> Provider:') !== -1) return 'Output should not contain > Provider:';
          if (text.indexOf ('> Model:') !== -1) return 'Output should not contain > Model:';
-         if (text.indexOf ('> Context:') !== -1) return 'Output should not contain > Context:';
          return true;
       }],
 
@@ -1635,8 +1776,7 @@
             role: 'assistant',
             content: '---\nTool request: run_command [call_a]\n> Description: First\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_b]\n> Description: Second\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---',
             time: '2026-03-13T20:00:00Z - 2026-03-13T20:00:05Z',
-            usage: {input: 10, output: 20, total: 30},
-            usageCumulative: {input: 10, output: 20, total: 30},
+            usage: {percent: 3},
             context: {used: 30, limit: 1000, percent: 3},
             model: 'gpt-5'
          }]);
@@ -1657,7 +1797,7 @@
                return done (SHORT_WAIT, POLL);
             }
             window._displaySplitSlug = rs.body.slug;
-            var markdown = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\nplease inspect\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:01Z - 2026-03-13T20:00:05Z\n\n---\nTool request: run_command [call_a]\n> Description: First tool\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_b]\n> Description: Second tool\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---\n\n> Usage: input=10 output=20 total=30\n> Usage cumulative: input=10 output=20 total=30\n\n> Context: used=30 limit=1000 percent=3%\n';
+            var markdown = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\nplease inspect\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:01Z - 2026-03-13T20:00:05Z\n\n---\nTool request: run_command [call_a]\n> Description: First tool\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_b]\n> Description: Second tool\n\n    {\n      "command": "ls"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "a\\nb"\n    }\n\n---\n\n> Context: used=30 limit=1000 percent=3%\n';
             c.ajax ('post', 'project/' + encodeURIComponent (window._displaySplitSlug) + '/file/' + encodeURIComponent ('dialog/20260313-200000-split-done.md'), {}, {content: markdown}, function (error2) {
                window._displaySplitSetup = {error: !! error2};
                if (! error2) window.location.hash = '#/project/' + encodeURIComponent (window._displaySplitSlug) + '/dialogs/' + encodeURIComponent ('20260313-200000-split');

@@ -1108,9 +1108,20 @@ B.mrespond ([
             undoStack: []
          }
       });
-      B.call (x, 'load', 'projects');
-      B.call (x, 'load', 'settings');
-      B.call (x, 'read', 'hash');
+      // Detect mode and fetch CSRF token before loading data
+      c.ajax ('get', 'auth/csrf', {}, '', function (error, rs) {
+         var body = rs && rs.body;
+         if (body && body.mode === 'LOCAL') {
+            B.call (x, 'set', 'cloudMode', false);
+         }
+         else if (body && body.csrf) {
+            B.call (x, 'set', 'cloudMode', true);
+            B.call (x, 'set', 'cloudCsrf', body.csrf);
+         }
+         B.call (x, 'load', 'projects');
+         B.call (x, 'load', 'settings');
+         B.call (x, 'read', 'hash');
+      });
 
    }],
 
@@ -1295,6 +1306,12 @@ B.mrespond ([
       if (inc (['project', 'file', 'snapshot'], first)) return false;
       return true;
    }}, function (x, headers, body, cb) {
+      // Inject CSRF token for mutating requests in cloud mode
+      var csrf = B.get ('cloudCsrf');
+      if (csrf && (x.verb === 'post' || x.verb === 'delete')) {
+         if (type (body) === 'object' && body) body.csrf = csrf;
+         else if (x.verb === 'delete') headers ['X-CSRF-Token'] = csrf;
+      }
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (cb) cb (x, error, rs);
       });
@@ -2040,10 +2057,13 @@ B.mrespond ([
          // Use the (possibly updated) filename for stream processing
          var streamFilename = B.get ('currentFile') ? B.get ('currentFile').name : null;
 
+         var fetchPayload = payload;
+         var fetchCsrf = B.get ('cloudCsrf');
+         if (fetchCsrf && type (fetchPayload) === 'object') fetchPayload = teishi.copy (fetchPayload), fetchPayload.csrf = fetchCsrf;
          fetch (projectPath (project, 'dialog'), {
             method: method,
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify (payload)
+            body: JSON.stringify (fetchPayload)
          }).then (function (response) {
             if (! response.ok) {
                return response.text ().then (function (text) {
@@ -2285,13 +2305,13 @@ B.mrespond ([
          activeDialogStream = null;
       }
 
+      var stopPayload = {dialogId: parsed.dialogId, status: 'done'};
+      var stopCsrf = B.get ('cloudCsrf');
+      if (stopCsrf) stopPayload.csrf = stopCsrf;
       fetch (projectPath (B.get ('currentProject'), 'dialog'), {
          method: 'PUT',
          headers: {'Content-Type': 'application/json'},
-         body: JSON.stringify ({
-            dialogId: parsed.dialogId,
-            status: 'done'
-         })
+         body: JSON.stringify (stopPayload)
       }).then (function (response) {
          if (! response.ok) return response.text ().then (function (text) {throw new Error (text || ('HTTP ' + response.status));});
          return response.json ().then (function () {
@@ -3207,9 +3227,15 @@ var parseDialogContent = function (content) {
             return;
          }
 
-         var mUsage = line.match (/^>\s*Usage:\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s*$/);
+         var mUsage = line.match (/^>\s*Usage:\s*(\d+)%\s*$/);
          if (mUsage) {
-            usage = {input: Number (mUsage [1]), output: Number (mUsage [2]), total: Number (mUsage [3])};
+            usage = {percent: Number (mUsage [1])};
+            return;
+         }
+
+         var mUsageLegacy = line.match (/^>\s*Usage:\s*input=(\d+)\s+output=(\d+)\s+total=(\d+)\s*$/);
+         if (mUsageLegacy) {
+            usage = {input: Number (mUsageLegacy [1]), output: Number (mUsageLegacy [2]), total: Number (mUsageLegacy [3])};
             return;
          }
 
@@ -3429,7 +3455,7 @@ var formatMessageGauges = function (msg) {
       modelLabel,
       hasEnd ? formatLocalDateTimeNoMs (timeRange.end) : undefined,
       elapsedMs !== null ? formatSecondsRounded (elapsedMs) : undefined,
-      msg.usageCumulative ? formatKTokens (msg.usageCumulative.input) + 'ti + ' + formatKTokens (msg.usageCumulative.output) + 'to' : undefined
+      msg.usage && msg.usage.percent !== undefined && ! msg.context ? msg.usage.percent + '% used' : undefined
    ], undefined, function (v) { return v; });
 
    if (msg.context) {

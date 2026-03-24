@@ -1,5 +1,15 @@
 ## Vibey development notes
 
+### 2026-03-24
+
+Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
+
+- Make tests pass:
+   - Vibey local: recheck that full flow works in server & client
+   - Vibey cloud: fix dialog tests in server; fix client tests
+- Every time we send a message to the LLM, the LLM should know per message at what time it was sent and how much of the context was already used, so that agents can check if they should stop and spawn another agent according to user-provided rules.
+- Just strip id, provider and model. Put the tokens used as a simple percentage (you can compute it on the fly). Please also modify prompt.md to let the agent know that if the user recommends starting a new dialog after a certain % of the window, it should spawn a new agent and itself stop. First modify test.md, then the server tests, then re-run vibey in local mode until the fast & dialog tests pass, then do the client.
+
 ### 2026-03-23
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output.
