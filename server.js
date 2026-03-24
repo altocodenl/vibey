@@ -259,6 +259,16 @@ var saveConfigJson = function () {
    fs.writeFileSync (Path.join (__dirname, 'secret.json'), JSON.stringify (CONFIG, null, 2), 'utf8');
 };
 
+var baseURL = function () {
+   var domain = CONFIG.domain;
+   if (type (domain) === 'string' && domain.trim ()) {
+      domain = domain.trim ();
+      if (! domain.match (/^https?:\/\//)) domain = 'https://' + domain;
+      return domain.replace (/\/$/, '');
+   }
+   return 'http://localhost:5353';
+};
+
 var maskApiKey = function (key) {
    if (! key || key.length < 12) return key ? '••••••••' : '';
    return key.slice (0, 7) + '••••••••' + key.slice (-4);
@@ -289,6 +299,7 @@ var ANTHROPIC_SCOPES = 'org:create_api_key user:profile user:inference';
 
 // In-flight PKCE state for Anthropic login
 var anthropicPendingLogin = null;
+var openaiPendingCallbackServers = {};
 
 var startAnthropicLogin = async function (rq) {
    var pkce = await generatePKCE ();
@@ -384,7 +395,7 @@ var OPENAI_JWT_CLAIM_PATH = 'https://api.openai.com/auth';
 
 var openaiPendingLogin = null;
 
-var SUCCESS_HTML = '<!doctype html><html><head><meta charset="utf-8"><title>Authentication successful</title></head><body><p>Authentication successful. Return to vibey to continue.</p></body></html>';
+var SUCCESS_HTML = '<!doctype html><html><head><meta charset="utf-8"><title>Authentication successful</title></head><body><p>Authentication successful. You can close this window and return to vibey.</p><script>window.close && window.close ();</script></body></html>';
 
 var decodeJwt = function (token) {
    try {
@@ -420,13 +431,13 @@ var startOpenAILogin = async function (rq) {
    });
 
    var url = OPENAI_AUTHORIZE_URL + '?' + params.toString ();
+   clog ('OpenAI OAuth start', {redirect_uri: OPENAI_REDIRECT_URI, cloud: CLOUD, userId: rq && rq.user && rq.user.id ? rq.user.id : null});
    var pending = {
       verifier: pkce.verifier,
       state: state
    };
 
-   // Local mode can wait for the localhost callback helper; cloud mode must use manual completion.
-   if (! CLOUD) pending.callbackPromise = startOpenAICallbackServer (state);
+   pending.callbackPromise = startOpenAICallbackServer (state);
 
    await storePendingOAuth ('openai', pending, rq);
    return url;
@@ -519,7 +530,6 @@ var completeOpenAILogin = async function (manualCode, rq) {
       var parts = manualCode.trim ().split ('#');
       code = parts [0];
       if (parts [1] && parts [1] !== state) throw new Error ('OpenAI OAuth state mismatch');
-      // Check for URL format
       try {
          var url = new URL (manualCode.trim ());
          var urlState = url.searchParams.get ('state');
@@ -532,7 +542,6 @@ var completeOpenAILogin = async function (manualCode, rq) {
    }
    else {
       if (! server) throw new Error ('OpenAI login requires manual code completion in cloud mode');
-      // Wait for browser callback
       var result = await server.waitForCode ();
       server.close ();
       if (result) code = result.code;
@@ -632,7 +641,16 @@ var oauthPendingRedisKey = function (userId, provider) {
    return 'oauthpending:' + userId + ':' + provider;
 };
 
+var openaiPendingCallbackKey = function (rq) {
+   return rq && rq.user && rq.user.id ? rq.user.id : 'local';
+};
+
 var storePendingOAuth = async function (provider, data, rq) {
+   if (provider === 'openai' && data && data.callbackPromise) {
+      openaiPendingCallbackServers [openaiPendingCallbackKey (rq)] = data.callbackPromise;
+      data = teishi.copy (data);
+      delete data.callbackPromise;
+   }
    if (CLOUD && rq && rq.user) {
       await Redis ('setex', oauthPendingRedisKey (rq.user.id, provider), 15 * 60, JSON.stringify (data || {}));
       return;
@@ -642,16 +660,21 @@ var storePendingOAuth = async function (provider, data, rq) {
 };
 
 var loadPendingOAuth = async function (provider, rq) {
+   var pending;
    if (CLOUD && rq && rq.user) {
       var raw = await Redis ('get', oauthPendingRedisKey (rq.user.id, provider));
-      return raw ? safeJsonParse (raw, null) : null;
+      pending = raw ? safeJsonParse (raw, null) : null;
    }
-   if (provider === 'claude') return anthropicPendingLogin;
-   if (provider === 'openai') return openaiPendingLogin;
-   return null;
+   else {
+      if (provider === 'claude') pending = anthropicPendingLogin;
+      if (provider === 'openai') pending = openaiPendingLogin;
+   }
+   if (provider === 'openai' && pending && openaiPendingCallbackServers [openaiPendingCallbackKey (rq)]) pending.callbackPromise = openaiPendingCallbackServers [openaiPendingCallbackKey (rq)];
+   return pending || null;
 };
 
 var clearPendingOAuth = async function (provider, rq) {
+   if (provider === 'openai') delete openaiPendingCallbackServers [openaiPendingCallbackKey (rq)];
    if (CLOUD && rq && rq.user) {
       await Redis ('del', oauthPendingRedisKey (rq.user.id, provider));
       return;
@@ -3158,7 +3181,7 @@ var createCloudUser = async function (email, isAdmin) {
    try {
       await sendmail (email, 'Welcome to Vibey', lith.g ([
          ['p', 'Your Vibey account has been created!'],
-         ['p', ['Go to ', ['a', {href: 'https://vibey.app'}, 'vibey.app'], ' and log in with your email.']],
+         ['p', ['Go to ', ['a', {href: baseURL ()}, baseURL ().replace (/^https?:\/\//, '')], ' and log in with your email.']],
       ]));
    }
    catch (e) {
@@ -3282,7 +3305,7 @@ var routes = [
 
       try {
          await sendmail (email, 'Your Vibey login code', lith.g ([
-            ['p', 'Your login code is:'],
+            ['p', ['Use this code to log in at ', ['a', {href: baseURL ()}, baseURL ().replace (/^https?:\/\//, '')], ':']],
             ['p', {style: 'font-size: 24px; font-weight: bold; letter-spacing: 4px;'}, otp],
             ['p', 'This code expires in 10 minutes.']
          ]));
@@ -3727,6 +3750,11 @@ var routes = [
          ['provider', rq.body.provider, 'string'],
          ['prompt', rq.body.prompt, 'string'],
       ])) return;
+
+      if (rq.user && rq.data && rq.data.params && rq.data.params.project) {
+         var triggerPrefix = rq.user.id + '-';
+         if (rq.data.params.project.indexOf (triggerPrefix) !== 0) rq.data.params.project = triggerPrefix + rq.data.params.project;
+      }
 
       var projectName = validProjectNameOrReply (rs, rq.data.params.project);
       if (! projectName) return;

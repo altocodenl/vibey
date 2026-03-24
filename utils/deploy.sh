@@ -13,17 +13,6 @@ FOLDER="vibey"
 
 wc -l client.js client-css.js server.js test-client.js test-server.js website.js secret.js utils/deploy.sh
 
-if [ "$2" == "client" ] ; then
-   scp client.js client-css.js $HOST:$FOLDER
-   exit 0
-fi
-
-if [ "$2" == "server" ] ; then
-   scp server.js $HOST:$FOLDER
-   ssh $HOST "cd $FOLDER && VIBEY_CLOUD=1 mg restart"
-   exit 0
-fi
-
 if [ "$2" == "website" ] ; then
    node ../website
    scp website.html $HOST:/var/www/html
@@ -32,4 +21,4 @@ fi
 
 rsync -av . $HOST:$FOLDER
 ssh $HOST chown -R root /root/$FOLDER
-ssh $HOST "cd $FOLDER && npm i --no-save --omit=dev && VIBEY_CLOUD=1 mg restart"
+ssh $HOST "cd $FOLDER && node -e \"var fs=require('fs'); var path='secret.json'; var data=JSON.parse(fs.readFileSync(path, 'utf8')); data.domain='https://buildwithvibey.com/app'; fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\\n');\" && VIBEY_CLOUD=1 docker compose up --build -d"

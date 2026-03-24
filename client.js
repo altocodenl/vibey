@@ -246,6 +246,13 @@ var readHashTarget = function (hashValue) {
    return {project: null, tab: 'projects', target: null};
 };
 
+var readAuthPageFromHash = function (hashValue) {
+   var rawHash = hashValue !== undefined ? hashValue : (window.location.hash || '');
+   var raw = rawHash.replace (/^#\/?/, '');
+   if (raw === 'signup') return 'signup';
+   return 'login';
+};
+
 var projectPath = function (project, tail) {
    return 'project/' + encodeURIComponent (project) + '/' + tail;
 };
@@ -1089,6 +1096,13 @@ B.mrespond ([
             provider: 'openai',
             voiceSupported: !! (window.SpeechRecognition || window.webkitSpeechRecognition)
          },
+         auth: {
+            email: '',
+            otp: '',
+            page: 'login',
+            sent: false,
+            signupRequested: false
+         },
          editorPreview: true,
          projectModal: {
             open: false,
@@ -1113,19 +1127,35 @@ B.mrespond ([
          var body = rs && rs.body;
          if (body && body.mode === 'LOCAL') {
             B.call (x, 'set', 'cloudMode', false);
+            B.call (x, 'set', 'cloudAuth', 'local');
+            B.call (x, 'load', 'projects');
+            B.call (x, 'load', 'settings');
+            return B.call (x, 'read', 'hash');
          }
-         else if (body && body.csrf) {
+         if (body && body.csrf) {
             B.call (x, 'set', 'cloudMode', true);
+            B.call (x, 'set', 'cloudAuth', 'authenticated');
             B.call (x, 'set', 'cloudCsrf', body.csrf);
+            B.call (x, 'load', 'projects');
+            B.call (x, 'load', 'settings');
+            return B.call (x, 'read', 'hash');
          }
-         B.call (x, 'load', 'projects');
-         B.call (x, 'load', 'settings');
-         B.call (x, 'read', 'hash');
+         if (error && error.status === 403) {
+            B.call (x, 'set', 'cloudMode', true);
+            B.call (x, 'set', 'cloudAuth', 'guest');
+            B.call (x, 'set', ['auth', 'page'], readAuthPageFromHash ());
+            return;
+         }
+         B.call (x, 'report', 'error', 'Failed to determine auth mode');
       });
 
    }],
 
    ['read', 'hash', function (x) {
+      if (B.get ('cloudMode') && B.get ('cloudAuth') === 'guest') {
+         return B.call (x, 'set', ['auth', 'page'], readAuthPageFromHash ());
+      }
+
       var parsed = readHashTarget ();
       var currentFile = B.get ('currentFile');
       var leavingDirtyDoc = isDirtyDoc (currentFile) && ! isSameDocTarget (parsed, currentFile, B.get ('currentProject'));
@@ -1313,7 +1343,71 @@ B.mrespond ([
          else if (x.verb === 'delete') headers ['X-CSRF-Token'] = csrf;
       }
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
+         if (error && error.status === 403 && B.get ('cloudMode') && x.path [0].indexOf ('auth/') !== 0) {
+            B.call (x, 'set', 'cloudAuth', 'guest');
+            B.call (x, 'set', 'cloudCsrf', null);
+            B.call (x, 'set', 'currentProject', null);
+            B.call (x, 'set', 'currentFile', null);
+            B.call (x, 'set', 'files', []);
+            B.call (x, 'set', 'projects', []);
+            B.call (x, 'set', 'uploads', []);
+            B.call (x, 'set', 'snapshots', []);
+            B.call (x, 'set', ['auth', 'page'], 'login');
+            if (window.location.hash !== '#/login') window.location.hash = '#/login';
+            return;
+         }
          if (cb) cb (x, error, rs);
+      });
+   }],
+
+   // *** AUTH ***
+
+   ['login', [], function (x) {
+      var email = ((B.get ('auth', 'email') || '') + '').trim ().toLowerCase ();
+      if (! email) return B.call (x, 'report', 'error', 'Please enter your email');
+      B.call (x, 'post', 'auth/login', {}, {email: email}, function (x, error) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to send login code');
+         B.call (x, 'set', 'auth', {email: email, otp: '', page: 'login', sent: true, signupRequested: false});
+      });
+   }],
+
+   ['signup', [], function (x) {
+      var email = ((B.get ('auth', 'email') || '') + '').trim ().toLowerCase ();
+      if (! email) return B.call (x, 'report', 'error', 'Please enter your email');
+      B.call (x, 'post', 'auth/signup', {}, {email: email}, function (x, error) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to request invite');
+         B.call (x, 'set', 'auth', {email: email, otp: '', page: 'signup', sent: false, signupRequested: true});
+      });
+   }],
+
+   ['verify', [], function (x) {
+      var email = ((B.get ('auth', 'email') || '') + '').trim ().toLowerCase ();
+      var otp = ((B.get ('auth', 'otp') || '') + '').trim ();
+      if (! email || ! otp) return B.call (x, 'report', 'error', 'Please enter your email and code');
+      B.call (x, 'post', 'auth/verify', {}, {email: email, otp: otp}, function (x, error, rs) {
+         if (error) return B.call (x, 'report', 'error', 'Invalid code');
+         B.call (x, 'set', 'cloudAuth', 'authenticated');
+         B.call (x, 'set', 'cloudCsrf', rs.body && rs.body.csrf);
+         B.call (x, 'set', 'auth', {email: '', otp: '', page: 'login', sent: false, signupRequested: false});
+         B.call (x, 'load', 'projects');
+         B.call (x, 'load', 'settings');
+         B.call (x, 'navigate', 'hash', '#/projects');
+      });
+   }],
+
+   ['logout', [], function (x) {
+      B.call (x, 'post', 'auth/logout', {}, {}, function (x, error) {
+         if (error) return B.call (x, 'report', 'error', 'Failed to logout');
+         B.call (x, 'set', 'cloudAuth', 'guest');
+         B.call (x, 'set', 'cloudCsrf', null);
+         B.call (x, 'set', 'currentProject', null);
+         B.call (x, 'set', 'currentFile', null);
+         B.call (x, 'set', 'files', []);
+         B.call (x, 'set', 'projects', []);
+         B.call (x, 'set', 'uploads', []);
+         B.call (x, 'set', 'snapshots', []);
+         B.call (x, 'set', 'auth', {email: '', otp: '', page: 'login', sent: false, signupRequested: false});
+         B.call (x, 'navigate', 'hash', '#/login');
       });
    }],
 
@@ -1494,12 +1588,10 @@ B.mrespond ([
          window.open (body.url, '_blank');
 
          if (body.flow === 'paste_code') {
-            // Anthropic: user must paste code#state
             B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code', url: body.url});
             B.call (x, 'set', ['oauth', 'loading'], null);
          }
          else {
-            // OpenAI: wait for browser callback, then complete
             B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting', url: body.url});
             B.call (x, 'complete', 'oauthCallback', provider, null);
          }
@@ -3851,14 +3943,13 @@ views.settings = function () {
                }, isLoading ? 'Opening browser...' : 'Login with ' + label]
             ]] : '',
 
-            // Anthropic: paste code step
             isPasteStep ? ['div', {style: style ({'margin-top': '0.75rem', 'background-color': '#1a1a2e', padding: '1rem', 'border-radius': '6px'})}, [
-               ['div', {style: style ({color: '#f0ad4e', 'font-size': '13px', 'margin-bottom': '0.5rem'})}, 'A browser tab opened. Log in and paste the authorization code below:'],
+               ['div', {style: style ({color: '#f0ad4e', 'font-size': '13px', 'margin-bottom': '0.5rem'})}, providerId === 'openai' ? 'A browser tab opened. After OpenAI redirects to localhost:1455, copy the full URL from the address bar and paste it below.' : 'A browser tab opened. Log in and paste the authorization code below:'],
                ['div', {style: style ({display: 'flex', gap: '0.5rem'})}, [
                   ['input', {
                      type: 'text',
                      value: oauthCode || '',
-                     placeholder: 'Paste code#state here...',
+                     placeholder: providerId === 'openai' ? 'Paste the full localhost:1455 callback URL here...' : 'Paste code#state here...',
                      oninput: B.ev ('set', ['oauth', 'code'], {raw: 'this.value'}),
                      style: style ({
                         flex: 1, padding: '0.6rem', 'border-radius': '6px', border: 'none',
@@ -4069,9 +4160,67 @@ views.snapshots = function () {
    });
 };
 
+views.auth = function () {
+   return B.view ([['auth', 'page'], ['auth', 'email'], ['auth', 'otp'], ['auth', 'sent'], ['auth', 'signupRequested']], function (page, email, otp, sent, signupRequested) {
+      var card = function (title, subtitle, body, footer) {
+         return ['div', {style: style ({display: 'flex', 'justify-content': 'center', 'align-items': 'center', 'min-height': '100vh', padding: '2rem'})}, [
+            ['div', {style: style ({width: '100%', 'max-width': '460px', 'background-color': '#16213e', color: '#f5f7ff', padding: '1.5rem', 'border-radius': '12px', border: '1px solid #2b3558'})}, [
+               ['h1', {style: style ({margin: '0 0 0.5rem 0', 'font-size': '1.6rem'})}, 'vibey'],
+               ['div', {style: style ({color: '#94b8ff', 'font-size': '1.2rem', 'margin-bottom': '0.5rem'})}, title],
+               ['div', {style: style ({color: '#9aa4bf', 'margin-bottom': '1rem', 'line-height': '1.5'})}, subtitle],
+               body,
+               footer || ''
+            ]]
+         ]];
+      };
+
+      if (page === 'signup') return card ('Request invite', 'Cloud mode uses invite-only signup. Enter your email and request access.', ['div', [
+         ['input', {
+            type: 'email',
+            value: email || '',
+            placeholder: 'you@example.com',
+            oninput: B.ev ('set', ['auth', 'email']),
+            style: style ({width: '100%', padding: '0.75rem', 'border-radius': '8px', border: '1px solid #2b3558', 'background-color': '#1a1a2e', color: '#f5f7ff', 'margin-bottom': '0.75rem'})
+         }],
+         signupRequested ? ['div', {style: style ({color: '#6ad48a', 'margin-bottom': '0.75rem'})}, 'Invite requested. If approved, come back here and log in with a code sent to your email.'] : '',
+         ['button', {class: 'primary', style: style ({width: '100%'}), onclick: B.ev ('signup', [])}, 'Request invite']
+      ]], ['div', {style: style ({'margin-top': '1rem', 'text-align': 'center'})}, [
+         ['a', {href: '#/login', style: style ({color: '#94b8ff'})}, 'Already have access? Log in']
+      ]]);
+
+      return card ('Log in', 'Enter your email to receive a one-time code. Then verify it to enter vibey cloud.', ['div', [
+         ['input', {
+            type: 'email',
+            value: email || '',
+            placeholder: 'you@example.com',
+            oninput: B.ev ('set', ['auth', 'email']),
+            style: style ({width: '100%', padding: '0.75rem', 'border-radius': '8px', border: '1px solid #2b3558', 'background-color': '#1a1a2e', color: '#f5f7ff', 'margin-bottom': '0.75rem'})
+         }],
+         ['button', {class: 'primary', style: style ({width: '100%', 'margin-bottom': '0.75rem'}), onclick: B.ev ('login', [])}, sent ? 'Send another code' : 'Send code'],
+         sent ? ['div', [
+            ['input', {
+               type: 'text',
+               value: otp || '',
+               placeholder: '6-digit code',
+               oninput: B.ev ('set', ['auth', 'otp']),
+               style: style ({width: '100%', padding: '0.75rem', 'border-radius': '8px', border: '1px solid #2b3558', 'background-color': '#1a1a2e', color: '#f5f7ff', 'margin-bottom': '0.75rem'})
+            }],
+            ['button', {class: 'primary', style: style ({width: '100%'}), onclick: B.ev ('verify', [])}, 'Verify']
+         ]] : ''
+      ]], ['div', {style: style ({'margin-top': '1rem', 'text-align': 'center'})}, [
+         ['a', {href: '#/signup', style: style ({color: '#94b8ff'})}, 'Need an invite? Request access']
+      ]]);
+   });
+};
+
 views.main = function () {
-   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton'], ['projectModal']], function (tab, currentProject, testButton, projectModal) {
+   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton'], ['projectModal'], ['cloudMode'], ['cloudAuth']], function (tab, currentProject, testButton, projectModal, cloudMode, cloudAuth) {
       projectModal = projectModal || {open: false, name: ''};
+      if (cloudMode && cloudAuth === 'guest') return ['div', {class: 'container'}, [
+         ['style', window.vibeyCSS],
+         views.auth ()
+      ]];
+
       return ['div', {class: 'container'}, [
          ['style', window.vibeyCSS],
 
@@ -4093,6 +4242,10 @@ views.main = function () {
                   class: 'btn-small' + (tab === 'settings' ? ' primary' : ''),
                   onclick: B.ev ('navigate', 'hash', '#/settings')
                }, 'Settings'],
+               cloudMode ? ['button', {
+                  class: 'btn-small',
+                  onclick: B.ev ('logout', [])
+               }, 'Logout'] : '',
                testButton ? ['button', {
                   class: 'btn-small',
                   style: style ({'background-color': '#2d6a4f', color: '#b7e4c7'}),
@@ -4141,6 +4294,7 @@ views.main = function () {
 
 window.addEventListener ('hashchange', function () {
    B.call ('read', 'hash');
+   if (B.get ('cloudMode') && B.get ('cloudAuth') === 'guest') return;
    var parsed = readHashTarget ();
    if (parsed.tab === 'projects') B.call ('load', 'projects');
 });

@@ -10,6 +10,13 @@ Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from t
 - Every time we send a message to the LLM, the LLM should know per message at what time it was sent and how much of the context was already used, so that agents can check if they should stop and spawn another agent according to user-provided rules.
 - Just strip id, provider and model. Put the tokens used as a simple percentage (you can compute it on the fly). Please also modify prompt.md to let the agent know that if the user recommends starting a new dialog after a certain % of the window, it should spawn a new agent and itself stop. First modify test.md, then the server tests, then re-run vibey in local mode until the fast & dialog tests pass, then do the client.
 
+- Let's debug vibey cloud, but locally. It's running. Do we even have login and signup pages in the client?
+- Please crib the rfuns from ../acpic/client.js for doing the auth. Implement some barebones views here, following the spec of the docs.
+- Let's use a proper oauth callback for openai. Let's get rid of the 1455 port nonsense, it should just be an endpoint. I don't see a reason for making the entrypoint different in cloud vs local. Let's default to localhost, and if there's a "domain" key in secret.json, let's use that as the base URL.
+- Nice one! Can you add, on the fly, a "domain": "https://buildwithvibey.com/app" to secret.json on deploying?
+- We need 1455, please restore it. Why don't we just listen as well in 1455 always?
+- Brilliant. Modify the routes so that we can paste this ugly URL for openai in the client. Only on cloud mode.
+
 ### 2026-03-23
 
 Intro prompt: Hi! I'm building vibey. See please readme.md, then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. Then use the orchestration convention mentioned in prompt.md, also the coding guidelines. Use agents-now.md to coordinate. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output.
