@@ -234,7 +234,10 @@ Notes:
 
 1. **Cloud mode — settings stored in Redis**: In cloud mode, `GET /settings` reads from `user:<id>` `settings` field in Redis (not `secret.json`). `POST /settings` writes to Redis. Verify round-trip.
 2. **Cloud mode — settings per user**: User A saves `{editor: {viMode: true}}`. User B's `GET /settings` does not include user A's vi mode setting.
-3. **Local mode — settings in secret.json**: In local mode, `GET /settings` reads from `secret.json`. `POST /settings` writes to `secret.json`. Unchanged from current behavior.
+3. **Cloud mode — automation API key first reveal**: The first successful `GET /settings` after a cloud user is created includes `userApiKey.key` once, plus metadata. It also clears `userapikeyreveal:<user-id>`.
+4. **Cloud mode — automation API key stays hidden after first reveal**: A second `GET /settings` returns only `maskedKey`, `createdAt`, `lastUsed`, with no raw `key`.
+5. **Cloud mode — explicit regenerate flow**: `POST /settings/userApiKey/regenerate` rotates the key, deletes the old `apikey:<old-key>` record, returns the new raw key once, and makes the old Bearer token invalid immediately.
+6. **Local mode — settings in secret.json**: In local mode, `GET /settings` reads from `secret.json`. `POST /settings` writes to `secret.json`. Unchanged from current behavior.
 
 **Dialog:**
 
@@ -404,7 +407,7 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 
 *Bootstrap admin (no users exist):*
 5. `POST /admin/createUser` body `{email}` **without** session — **200** `{ok: true, id}`. Allowed because no users exist yet. First user is created as admin (`admin: '1'` in Redis).
-6. Verify via Redis: `user:<id>` hash has `admin: '1'`, `email` matches, `apiKey` exists.
+6. Verify via Redis: `user:<id>` hash has `admin: '1'`, `email` matches, `userapikey:<id>` exists, `apikey:<key>` exists, and `userapikeyreveal:<id>` points to that same key.
 
 *Login flow:*
 7. `POST /auth/login` body `{email}` — **200** `{ok: true}`. OTP stored in Redis at `otp:<userId>`. Read OTP directly from Redis.
@@ -423,7 +426,7 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 
 *Admin — create user:*
 16. `POST /admin/createUser` body `{email}` with admin session + CSRF — **200** `{ok: true, id}`. Signup entry deleted from Redis.
-17. Verify via Redis: new user has `admin: '0'` (or absent), `apiKey` exists.
+17. Verify via Redis: new user has `admin: '0'` (or absent), `userapikey:<id>` exists, `apikey:<key>` exists, and `userapikeyreveal:<id>` points to that key.
 18. `POST /admin/createUser` with duplicate email — **409** `{error: 'User already exists'}`.
 19. `POST /admin/createUser` without auth (users exist) — **403**.
 

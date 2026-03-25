@@ -1558,6 +1558,17 @@ B.mrespond ([
       });
    }],
 
+   ['regenerate', 'userApiKey', function (x) {
+      if (! confirm ('Regenerate your automation API key? The current key will stop working immediately.')) return;
+      B.call (x, 'set', 'savingSettings', true);
+      B.call (x, 'post', 'settings/userApiKey/regenerate', {}, {}, function (x, error, rs) {
+         B.call (x, 'set', 'savingSettings', false);
+         if (error) return B.call (x, 'report', 'error', 'Failed to regenerate automation API key');
+         B.call (x, 'set', 'showApiKeys', false);
+         B.call (x, 'set', ['settings', 'userApiKey'], rs.body && rs.body.userApiKey ? rs.body.userApiKey : null);
+      });
+   }],
+
    ['toggle', 'viMode', function (x) {
       var next = ! B.get ('viMode');
       var previous = B.get ('viMode');
@@ -4015,12 +4026,25 @@ views.settings = function () {
                   ['span', {style: style ({'font-weight': 'bold', 'font-size': '16px', color: '#94b8ff'})}, 'Automation API key'],
                   ['div', {style: metaStyle}, 'Use as Bearer token for POST /project/:project/trigger']
                ]],
-               hasRawKey ? ['button', {
-                  class: 'btn-small',
-                  style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
-                  onclick: B.ev ('set', 'showApiKeys', ! showKeys)
-               }, showKeys ? 'Hide key' : 'Show key'] : ''
+               ['div', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', 'flex-wrap': 'wrap', 'justify-content': 'flex-end'})}, [
+                  hasRawKey ? ['button', {
+                     class: 'btn-small',
+                     style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
+                     onclick: B.ev ('set', 'showApiKeys', ! showKeys)
+                  }, showKeys ? 'Hide key' : 'Show key'] : '',
+                  ['button', {
+                     class: 'btn-small',
+                     'data-testid': 'user-api-key-regenerate',
+                     style: style ({'background-color': '#6b3fa0', color: '#fff'}),
+                     onclick: B.ev ('regenerate', 'userApiKey'),
+                     disabled: saving
+                  }, saving ? 'Regenerating...' : 'Regenerate']
+               ]]
             ]],
+            hasRawKey ? ['div', {
+               class: 'settings-user-api-key-warning',
+               style: style ({'background-color': '#2a2140', color: '#f7d774', padding: '0.75rem', 'border-radius': '6px', 'font-size': '12px', 'margin-bottom': '0.75rem'})
+            }, 'Copy this key now. For security, Vibey will not show it again.'] : '',
             ['input', {
                'data-testid': 'user-api-key-input',
                type: hasRawKey && showKeys ? 'text' : 'password',

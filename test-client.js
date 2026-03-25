@@ -824,7 +824,7 @@
          return true;
       }],
 
-      ['Settings 1: Automation API key card renders from settings state', function (done) {
+      ['Settings 1: Newly revealed automation API key shows warning and stays masked by default', function (done) {
          B.call ('set', 'currentProject', null);
          B.call ('set', 'tab', 'settings');
          B.call ('set', 'settings', {
@@ -836,6 +836,7 @@
             }
          });
          B.call ('set', 'showApiKeys', false);
+         B.call ('set', 'savingSettings', false);
          done (SHORT_WAIT, POLL);
       }, function () {
          if (B.get ('tab') !== 'settings') return 'Expected settings tab';
@@ -846,16 +847,72 @@
          if (! card) return 'Automation API key card not found';
          if (card.textContent.indexOf ('Created: 2026-03-23T10:11:12.000Z') === -1) return 'Automation key createdAt missing from card';
          if (card.textContent.indexOf ('Last used: Never') === -1) return 'Automation key lastUsed fallback missing from card';
+         var warning = document.querySelector ('.settings-user-api-key-warning');
+         if (! warning) return 'Expected one-time reveal warning';
+         if (warning.textContent.indexOf ('will not show it again') === -1) return 'Reveal warning text missing';
          return true;
       }],
 
-      ['Settings 2: Show key toggle reveals full automation key', function (done) {
+      ['Settings 2: Show key toggle reveals full automation key only in the current session', function (done) {
          B.call ('set', 'showApiKeys', true);
          done (SHORT_WAIT, POLL);
       }, function () {
          var input = document.querySelector ('[data-testid="user-api-key-input"]');
          if (! input) return 'Automation API key input not rendered';
          if (input.value !== 'vk_test_settings_key_1234567890') return 'Expected full automation key when shown, got: ' + input.value;
+         return true;
+      }],
+
+      ['Settings 3: Metadata-only automation API key state hides the warning and raw key', function (done) {
+         B.call ('set', 'showApiKeys', false);
+         B.call ('set', 'settings', {
+            userApiKey: {
+               maskedKey: 'vk_test••••••••7890',
+               createdAt: '2026-03-23T10:11:12.000Z',
+               lastUsed: '2026-03-23T11:22:33.000Z'
+            }
+         });
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var input = document.querySelector ('[data-testid="user-api-key-input"]');
+         if (! input) return 'Automation API key input not rendered for metadata-only state';
+         if (input.value !== 'vk_test••••••••7890') return 'Expected masked automation key for metadata-only state, got: ' + input.value;
+         if (document.querySelector ('.settings-user-api-key-warning')) return 'Reveal warning should be hidden for metadata-only state';
+         var card = document.querySelector ('.settings-user-api-key');
+         if (! card || card.textContent.indexOf ('Last used: 2026-03-23T11:22:33.000Z') === -1) return 'Expected metadata-only state to show lastUsed';
+         return true;
+      }],
+
+      ['Settings 4: Regenerate flow updates the settings card with a newly revealed key', function (done) {
+         var originalAjax = c.ajax;
+         var originalConfirm = window.confirm;
+         window.confirm = function () {return true;};
+         c.ajax = function (method, path, headers, body, cb) {
+            if (method === 'post' && path === 'settings/userApiKey/regenerate') {
+               c.ajax = originalAjax;
+               window.confirm = originalConfirm;
+               return cb (null, {body: {userApiKey: {
+                  key: 'vk_regenerated_key_abcdef123456',
+                  maskedKey: 'vk_regen••••••••3456',
+                  createdAt: '2026-03-24T09:00:00.000Z',
+                  lastUsed: ''
+               }}});
+            }
+            c.ajax = originalAjax;
+            window.confirm = originalConfirm;
+            return cb ({status: 500}, {body: {error: 'unexpected request'}});
+         };
+         var button = document.querySelector ('[data-testid="user-api-key-regenerate"]');
+         if (button) button.click ();
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var info = B.get ('settings', 'userApiKey');
+         if (! info || info.key !== 'vk_regenerated_key_abcdef123456') return 'Expected regenerated automation key in settings state';
+         var warning = document.querySelector ('.settings-user-api-key-warning');
+         if (! warning) return 'Expected reveal warning after regenerate';
+         var input = document.querySelector ('[data-testid="user-api-key-input"]');
+         if (! input) return 'Automation API key input missing after regenerate';
+         if (input.value !== 'vk_regen••••••••3456') return 'Expected regenerated key to stay masked by default, got: ' + input.value;
          return true;
       }],
 

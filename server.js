@@ -130,9 +130,14 @@ var userApiKeyRedisKey = function (apiKey) {
    return 'apikey:' + apiKey;
 };
 
+var userApiKeyRevealKey = function (userId) {
+   return 'userapikeyreveal:' + userId;
+};
+
 var createUserApiKeyRecord = async function (userId, createdAt) {
    var apiKey = generateToken (24);
    await Redis ('set', userApiKeyLookupKey (userId), apiKey);
+   await Redis ('set', userApiKeyRevealKey (userId), apiKey);
    await Redis ('hmset', userApiKeyRedisKey (apiKey), 'userId', userId, 'createdAt', createdAt, 'lastUsed', '');
    return apiKey;
 };
@@ -161,6 +166,25 @@ var touchApiKeyRecord = async function (apiKey) {
    await Redis ('hset', userApiKeyRedisKey (apiKey), 'lastUsed', now);
    record.lastUsed = now;
    return record;
+};
+
+var consumeUserApiKeyReveal = async function (userId) {
+   if (! userId) return null;
+   var apiKey = await Redis ('get', userApiKeyRevealKey (userId));
+   if (! apiKey) return null;
+   await Redis ('del', userApiKeyRevealKey (userId));
+   var currentApiKey = await Redis ('get', userApiKeyLookupKey (userId));
+   return currentApiKey === apiKey ? apiKey : null;
+};
+
+var regenerateUserApiKey = async function (userId) {
+   if (! userId) return null;
+   var previousApiKey = await Redis ('get', userApiKeyLookupKey (userId));
+   var now = new Date ().toISOString ();
+   var nextApiKey = await createUserApiKeyRecord (userId, now);
+   if (previousApiKey && previousApiKey !== nextApiKey) await Redis ('del', userApiKeyRedisKey (previousApiKey));
+   await Redis ('del', userApiKeyRevealKey (userId));
+   return await getApiKeyRecordByKey (nextApiKey);
 };
 
 var log = {
@@ -3111,6 +3135,7 @@ var buildSettingsResponse = function (config, extra) {
    var accounts = config.accounts || {};
    var editor = config.editor || {};
    var userApiKey = extra.userApiKey || null;
+   var revealedUserApiKey = extra.revealedUserApiKey || '';
 
    return {
       openai: {
@@ -3130,6 +3155,7 @@ var buildSettingsResponse = function (config, extra) {
          expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
       },
       userApiKey: userApiKey ? {
+         key: revealedUserApiKey || undefined,
          maskedKey: maskApiKey (userApiKey.key || ''),
          createdAt: userApiKey.createdAt || '',
          lastUsed: userApiKey.lastUsed || ''
@@ -3504,7 +3530,8 @@ var routes = [
             var userData = await getUserById (rq.user.id);
             var settings = userData && userData.settings ? JSON.parse (userData.settings) : {};
             var userApiKey = await getUserApiKeyRecord (rq.user.id);
-            return reply (rs, 200, buildSettingsResponse (settings, {userApiKey: userApiKey}));
+            var revealedUserApiKey = await consumeUserApiKeyReveal (rq.user.id);
+            return reply (rs, 200, buildSettingsResponse (settings, {userApiKey: userApiKey, revealedUserApiKey: revealedUserApiKey}));
          }
          catch (e) {
             return reply (rs, 500, {error: 'Failed to load settings'});
@@ -3529,6 +3556,20 @@ var routes = [
       applySettingsUpdate (CONFIG, rq.body);
       saveConfigJson ();
       reply (rs, 200, {ok: true});
+   }],
+
+   ['post', 'settings/userApiKey/regenerate', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (! rq.user) return reply (rs, 403, {error: 'session'});
+      try {
+         var userData = await getUserById (rq.user.id);
+         var settings = userData && userData.settings ? JSON.parse (userData.settings) : {};
+         var userApiKey = await regenerateUserApiKey (rq.user.id);
+         return reply (rs, 200, buildSettingsResponse (settings, {userApiKey: userApiKey, revealedUserApiKey: userApiKey && userApiKey.key}));
+      }
+      catch (e) {
+         return reply (rs, 500, {error: 'Failed to regenerate automation API key'});
+      }
    }],
 
    // OAuth login: start flow

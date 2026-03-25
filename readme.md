@@ -781,6 +781,7 @@ For `POST`/`PUT`/`DELETE` requests (except auth routes and Bearer-authenticated 
   - Generates one automation API key for the user.
   - Stores `userapikey:<user-id>` → `<api-key>` for quick lookup from the user.
   - Stores `apikey:<api-key>` hash with `{userId, createdAt, lastUsed}`.
+  - Marks the key as revealable once to that user via `userapikeyreveal:<user-id>` → `<api-key>`.
   - Stores `email:<email>` → `<user-id>` for email-to-id lookup.
   - Deletes `signup:<email>`.
   - Sends the user a welcome email with a login link.
@@ -804,7 +805,7 @@ In local mode, scoping is unchanged (no user id prefix).
 - In **local mode**, settings live in `secret.json` on disk (current behavior).
 - In **cloud mode**, settings live in the `settings` field of `user:<id>` in redis. `GET /settings` reads from redis; `POST /settings` writes to redis.
 - In cloud mode, OAuth credentials are also stored per-user inside that user's settings. Pending OAuth login state is stored in Redis with a TTL, keyed by user and provider, so concurrent users do not share OAuth flow state.
-- `GET /settings` returns masked provider keys and the automation API key metadata (`maskedKey`, `createdAt`, `lastUsed`), but not the raw automation API key by default.
+- `GET /settings` returns masked provider keys and the automation API key metadata (`maskedKey`, `createdAt`, `lastUsed`). In cloud mode it may also include the raw automation API key exactly once immediately after user creation, in the first successful settings load for that user.
 
 ### Server: API key
 
@@ -812,9 +813,12 @@ Each user has exactly one auto-generated automation API key. It is created at us
 
 - `userapikey:<user-id>` → `<api-key>`
 - `apikey:<api-key>` hash → `{userId, createdAt, lastUsed}`
+- `userapikeyreveal:<user-id>` → `<api-key>` while the current key is still eligible for its one-time reveal
 
-The key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication for automation endpoints. `GET /settings` exposes only metadata for this key in cloud mode (`maskedKey`, `createdAt`, `lastUsed`), not the raw key itself.
+The key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication for automation endpoints.
 
+- `GET /settings` — in cloud mode, returns automation-key metadata (`maskedKey`, `createdAt`, `lastUsed`) and reveals the raw key only once when `userapikeyreveal:<user-id>` still points at the current key. After that response, the reveal marker is deleted and later `GET /settings` calls return metadata only.
+- `POST /settings/userApiKey/regenerate` — in cloud mode, rotates the user's automation API key immediately, deletes the old `apikey:<old-key>` record, stores the new one, and returns the new raw key once in the response together with fresh metadata. The previous key stops working right away.
 - `POST /project/:project/trigger` — trigger an agent on a project. Requires API key authentication (no cookie). Body: `{provider, prompt, slug?}`. Equivalent to `POST /project/:project/dialog` but returns immediately with `202 {ok: true, dialogId}` and no further response body. On success, the API key record's `lastUsed` field is updated. Designed for automation and webhooks.
 
 ### Server: public access
@@ -847,6 +851,7 @@ All cloud state lives in redis. Key schema:
 | `signup:<email>` | hash | — | `email`, `createdAt` |
 | `userapikey:<user-id>` | string | — | `<api-key>` — quick lookup for the user's single automation key |
 | `apikey:<key>` | hash | — | `userId`, `createdAt`, `lastUsed` |
+| `userapikeyreveal:<user-id>` | string | — | `<api-key>` while the current key can still be revealed once |
 | `access:<user-id>` | hash | — | `<project>:<path>` → `ALL` or JSON array of user ids |
 
 ### Client: auth
@@ -955,15 +960,14 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 
-- Security: Show the automation API key only once at creation, then expose only metadata plus an explicit regenerate flow that rotates and re-reveals a new key once.
-- Re-test claude oauth locally and in cloud
 - Mobile friendly UI
 - "Continue in fresh dialog": manual compaction
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
 - Demo videos
-   - A 3D solar system I can rotate and zoom
-   - A quick expense tracker
-   - A visual timeline of the French Revolution, with key events I can click to expand
+   - Tictactoe
+   - Online research
+   - CSV data analysis
+   - Fitness tracker
 - Literate clanking: server.md & client.md
    - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
       - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.

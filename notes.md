@@ -10,6 +10,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from t
 - I still see these "> Context" lines in the client when streaming. This is a recent bug.
 - When seeing tool uses, particularly when streaming, when the tool is done, don't show the in progress description as before, but overwrite it, so they are not duplicated, which is slightly confusing.
 - Please do a scan on server.js to see if there is some obvious backdoor by an unauthenticated scanner
+- Security: Show the automation API key only once at creation, then expose only metadata plus an explicit regenerate flow that rotates and re-reveals a new key once. Edit readme.md if necessary, then test.md to cover this, then implement the server (tests & code), run it to make it work (with DISABLE EMAIL and CLOUD MODE set), then the client (test & code).
 
 ### 2026-03-24
 
