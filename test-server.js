@@ -16,7 +16,8 @@ var inc  = teishi.inc;
 //        node test-server.js upload       (uploads suite)
 //        node test-server.js autogit      (auto-commit suite)
 //        node test-server.js fast         (fast suites: project, doc, upload, snapshot, autogit, cloud)
-// Suite names: project, doc, upload, snapshot, autogit, dialog, static, backend, vi
+//        node test-server.js noslow       (all suites except static and backend)
+// Suite names: project, doc, upload, snapshot, autogit, dialog, static, backend, vi, cloud
 // Assumes server is already running on localhost:5353
 
 // *** TIMESTAMP ***
@@ -1346,24 +1347,24 @@ var dialogSequence = [
       }
       if (rs.code !== 403 && rs.code !== 200) return log ('Expected 403 or 200 from auth/csrf, got ' + rs.code);
 
-      if (s.adminAuth) {
-         s.dialogCloudAuth = s.adminAuth;
-         return next ();
-      }
-
       s.dialogCloudAdminEmail = (CONFIG.adminEmail || '').toLowerCase ();
       if (! s.dialogCloudAdminEmail) {
          s.skipDialogCloudTrigger = true;
          return next ();
       }
-      cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
-         if (loginError) {
-            s.skipDialogCloudTrigger = true;
-            return next ();
-         }
-         s.dialogCloudAuth = auth;
-         next ();
-      });
+
+      var loginFresh = function () {
+         cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
+            if (loginError) {
+               s.skipDialogCloudTrigger = true;
+               return next ();
+            }
+            s.dialogCloudAuth = auth;
+            next ();
+         });
+      };
+
+      loginFresh ();
    }],
 
    ['Dialog 50: Cloud trigger creates dialog via API key', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
@@ -3273,6 +3274,7 @@ var autogitSequence = [
 // Suite order matches readme.md test suites section.
 var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'dialog', 'static', 'backend'];
 var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud'];
+var NOSLOW_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'dialog'];
 
 var allSuites = {
    project:  projectSequence,
@@ -3290,6 +3292,9 @@ var allSuites = {
 var requestedSuites = [];
 dale.go (process.argv.slice (2), function (arg) {
    if (arg === 'fast') return dale.go (FAST_SUITES, function (name) {
+      requestedSuites.push (name);
+   });
+   if (arg === 'noslow') return dale.go (NOSLOW_SUITES, function (name) {
       requestedSuites.push (name);
    });
    if (allSuites [arg]) requestedSuites.push (arg);
@@ -3326,41 +3331,92 @@ var finish = function (code) {
 };
 
 var runSuites = function () {
-   var sequences = dale.go (requestedSuites, function (name) {
-      if (TEST_MODE.cloud && name === 'cloud') return [[
-         'Cloud 0: Clear generic auth before cloud suite', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs) {
-            TEST_MODE.auth = null;
-            return true;
-         }
-      ]].concat (allSuites [name]);
-      if (TEST_MODE.cloud && TEST_MODE.auth && name !== 'cloud') return adaptSequenceForCloud (allSuites [name]);
-      return allSuites [name];
-   });
    var label = requestedSuites.join (' + ');
+   var state = {
+      host: 'localhost',
+      port: 5353,
+      timeout: 420
+   };
 
-   h.seq (
-      {
-         host: 'localhost',
-         port: 5353,
-         timeout: 420
-      },
-      sequences,
-      function (error) {
-         if (error) {
-            try {
-               if (error.request && type (error.request.body) === 'string') {
-                  error.request.body = error.request.body.slice (0, 1200) + (error.request.body.length > 1200 ? '... OMITTING REMAINDER' : '');
+   var ensureCloudAuth = function (suiteName, cb) {
+      var email = (CONFIG.adminEmail || '').toLowerCase ();
+      if (! email) return cb (new Error ('secret.json must define adminEmail for cloud tests'));
+
+      var seedAccounts = function (userId, done) {
+         if (! CONFIG.accounts) return done ();
+         var hasAccounts = CONFIG.accounts.openaiOAuth || CONFIG.accounts.claudeOAuth || (CONFIG.accounts.openai && CONFIG.accounts.openai.apiKey) || (CONFIG.accounts.claude && CONFIG.accounts.claude.apiKey);
+         if (! hasAccounts) return done ();
+         redisExec ('HSET ' + JSON.stringify ('user:' + userId) + ' settings ' + JSON.stringify (JSON.stringify ({accounts: CONFIG.accounts})), done);
+      };
+
+      var finishAuth = function (auth, userId) {
+         auth.userId = userId;
+         TEST_MODE.auth = auth;
+         seedAccounts (userId, function (seedError) {
+            if (seedError) return cb (seedError);
+            cb (null);
+         });
+      };
+
+      var loginFresh = function () {
+         cloudLogin (email, function (loginError, auth) {
+            if (loginError) return cb (new Error ('Cloud login failed for suite ' + suiteName + ': ' + loginError.message));
+            redisGet ('email:' + email, function (lookupError, userId) {
+               if (lookupError || ! userId) return cb (lookupError || new Error ('Missing config admin user in Redis'));
+               finishAuth (auth, userId);
+            });
+         });
+      };
+
+      if (! TEST_MODE.auth) return loginFresh ();
+      authGet ('/auth/csrf', TEST_MODE.auth, function (error, status, body) {
+         if (! error && status === 200 && body && body.csrf) return finishAuth (TEST_MODE.auth, TEST_MODE.auth.userId);
+         loginFresh ();
+      });
+   };
+
+   var runSuiteAt = function (index) {
+      if (index >= requestedSuites.length) {
+         log ('ALL TESTS PASSED (' + label + ')');
+         return finish (0);
+      }
+
+      var name = requestedSuites [index];
+      var sequence = allSuites [name];
+      if (! sequence) return runSuiteAt (index + 1);
+
+      var execute = function (suiteSequence) {
+         h.seq (state, [suiteSequence], function (error) {
+            if (error) {
+               try {
+                  if (error.request && type (error.request.body) === 'string') {
+                     error.request.body = error.request.body.slice (0, 1200) + (error.request.body.length > 1200 ? '... OMITTING REMAINDER' : '');
+                  }
                }
+               catch (e) {}
+               console.log ('VIBEY TEST FAILED:', error);
+               return finish (1);
             }
-            catch (e) {}
-            console.log ('VIBEY TEST FAILED:', error);
+            runSuiteAt (index + 1);
+         }, h.stdmap);
+      };
+
+      if (! TEST_MODE.cloud) return execute (sequence);
+      if (name === 'cloud') {
+         TEST_MODE.auth = null;
+         return execute (sequence);
+      }
+
+      ensureCloudAuth (name, function (authError) {
+         if (authError) {
+            console.log ('VIBEY TEST FAILED:', authError);
             return finish (1);
          }
-         log ('ALL TESTS PASSED (' + label + ')');
-         finish (0);
-      },
-      h.stdmap
-   );
+         execute (adaptSequenceForCloud (sequence));
+      });
+   };
+
+   runSuiteAt (0);
 };
 
 httpRequest ('GET', '/auth/csrf', '', {}, function (error, status, text) {

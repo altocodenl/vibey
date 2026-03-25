@@ -7,22 +7,24 @@ Start the server first, then run the backend integration tests:
 - `node test-server.js` — run all suites.
 - `node test-server.js <suite>` — run one suite.
 - `node test-server.js fast` — run the fast subset.
+- `node test-server.js noslow` — run everything except the slow `static` and `backend` suites.
 
 Run the client tests the same way, using `test-client.js` instead:
 
 - `node test-client.js` — run all client flows.
 - `node test-client.js <suite>` — run one client flow.
 - `node test-client.js fast` — run the fast subset.
+- `node test-client.js noslow` — run everything except the slow `static` and `backend` suites.
 
 Note: if you change `test-client.js`, rebuild/restart vibey before running the client tests. The browser loads the test bundle from the running vibey server/container, so local file edits are not enough on their own.
 
 Available server suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `cloud`, `dialog`, `static`, `backend`, `vi`.
 
-Available client suite names: `project`, `dialog`, `docs`, `uploads`, `snapshots`, `static`, `backend`, `vi`, `settings`, `cloud`.
+Available client suite names: `project`, `doc`, `docs`, `upload`, `uploads`, `snapshot`, `snapshots`, `dialog`, `static`, `backend`, `vi`, `settings`, `cloud`.
 
 Notes:
-- Server `fast` now includes `cloud`.
-- Client `fast` now includes `cloud`, where `cloud` is an alias for the settings/API-key surface tests.
+- Client `cloud` is an alias for the settings/API-key surface tests.
+- On the client, `doc` maps to `docs`, `upload` maps to `uploads`, and `snapshot` maps to `snapshots`.
 
 ## Test suites
 

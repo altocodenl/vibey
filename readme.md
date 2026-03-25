@@ -1,5 +1,7 @@
 # Vibey
 
+> "Thou shalt not make a machine in the likeness of a human mind." -- Orange Catholic Bible
+
 Build your ideas with your words.
 
 ## Vibey in a nutshell

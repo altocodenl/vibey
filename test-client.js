@@ -105,7 +105,7 @@
 
       (async function () {
          // Accept flow filter from CLI: node test-client.js [flow]
-         // e.g. node test-client.js 6   or   node test-client.js ALL
+         // e.g. node test-client.js dialog   or   node test-client.js ALL   or   node test-client.js noslow
          var cliFlow = (process.argv [2] || 'ALL').trim ().toUpperCase ();
 
          var launchOptions = {headless: true};
@@ -455,8 +455,8 @@
    // *** TESTS ***
 
    // Suite filter: set by client.js prompt or puppeteer CLI arg.
-   // 'ALL' runs everything; use suite name (dialog, docs, uploads, snapshots, static, backend, vi).
-   // Suite order matches readme.md test suites section.
+   // 'ALL' runs everything; use suite name (project, doc/docs, upload/uploads, snapshot/snapshots,
+   // dialog, static, backend, vi, cloud/settings), or use 'fast' / 'noslow'.
    var suiteFilter = (window._vibeyTestFlow || 'ALL').toUpperCase ();
 
    // Extract suite name from test tag: "Dialog: ..." → "dialog", "Docs: ..." → "docs", etc.
@@ -3641,11 +3641,19 @@
 
    ];
 
-   var SUITE_ORDER = ['project', 'dialog', 'docs', 'uploads', 'static', 'backend', 'vi', 'snapshots', 'settings'];
-   // Match test-server's convention: fast excludes dialog/static/backend-style slow suites.
-   // Client `cloud` maps to the settings/API-key surface tests.
-   var FAST_SUITES = ['project', 'docs', 'uploads', 'snapshots', 'cloud'];
-   var SUITE_ALIASES = {cloud: ['settings']};
+   // Match test-server suite order as closely as possible on the client.
+   // Client mappings: doc -> docs, upload -> uploads, snapshot -> snapshots, cloud -> settings.
+   // Client-only vi stays last because server doesn't currently run it in the default order.
+   var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', 'dialog', 'static', 'backend', 'vi'];
+   var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'cloud'];
+   var NOSLOW_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', 'dialog', 'vi'];
+   var SUITE_ALIASES = {
+      doc: ['docs'],
+      upload: ['uploads'],
+      snapshot: ['snapshots'],
+      cloud: ['settings'],
+      autogit: []
+   };
 
    var filterValue = suiteFilter.toLowerCase ().trim ();
 
@@ -3662,6 +3670,13 @@
       });
    };
 
+   var isCoveredBySuiteOrder = function (suite) {
+      if (inc (SUITE_ORDER, suite)) return true;
+      return dale.stopNot (SUITE_ORDER, false, function (orderedSuite) {
+         return inc (SUITE_ALIASES [orderedSuite] || [], suite);
+      }) === true;
+   };
+
    var filteredTests = [];
 
    if (filterValue === 'all') {
@@ -3669,11 +3684,16 @@
          addSuiteTests (suite);
       });
       dale.go (testsBySuite, function (tests, suite) {
-         if (! inc (SUITE_ORDER, suite)) filteredTests = filteredTests.concat (tests);
+         if (! isCoveredBySuiteOrder (suite)) filteredTests = filteredTests.concat (tests);
       });
    }
    else if (filterValue === 'fast') {
       dale.go (FAST_SUITES, function (suite) {
+         addSuiteTests (suite);
+      });
+   }
+   else if (filterValue === 'noslow') {
+      dale.go (NOSLOW_SUITES, function (suite) {
          addSuiteTests (suite);
       });
    }
