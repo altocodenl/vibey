@@ -1789,6 +1789,17 @@
          return true;
       }],
 
+      ['Dialog 49aa: parseDialogContent strips fallback metadata lines from visible content', function () {
+         var messages = parseDialogContent ('# Dialog\n\n## Assistant\n> Model: gpt-5\n> Time : 2026-03-13T20:00:01Z - 2026-03-13T20:00:05Z\n> Usage cumulative : input=1 output=2 total=3\n> Context : used=30 limit=1000 percent=3%\n> Resources : ms=123\n\nhello world\n');
+         if (! messages || messages.length !== 1) return 'Expected one parsed assistant message';
+         var text = messages [0].content || '';
+         if (text.indexOf ('Usage cumulative') !== -1) return 'Usage cumulative metadata leaked into visible content';
+         if (text.indexOf ('Context') !== -1) return 'Context metadata leaked into visible content';
+         if (text.indexOf ('Resources') !== -1) return 'Resources metadata leaked into visible content';
+         if (text.trim () !== 'hello world') return 'Expected assistant content to be only the real text, got: ' + text;
+         return true;
+      }],
+
       ['Dialog 49b: Dialog UI renders two contiguous tool calls as two chat bubbles', function (done) {
          window._displaySplitProject = 'test-display-split-' + testTimestamp ();
          c.ajax ('post', 'projects', {}, {name: window._displaySplitProject}, function (error, rs) {

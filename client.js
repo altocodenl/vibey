@@ -3367,7 +3367,9 @@ var parseDialogContent = function (content) {
             return;
          }
 
-         if (/^>\s*(Id|Parent|Started|Provider):/.test (line)) return;
+         // Fallback: never leak raw metadata-looking lines into visible message text,
+         // even if spacing/casing drifts and a more specific parser above misses them.
+         if (/^>\s*(Id|Parent|Started|Provider|Model|Time|Usage(?: cumulative)?|Context|Resources)\s*:/i.test (line)) return;
 
          return line;
       });
