@@ -176,6 +176,39 @@ window.vibeyCSS = [
       opacity: '1',
       'background-color': 'rgba(0, 0, 0, 0.15)'
    }],
+   ['.projects-view-phone', {
+      padding: '1rem 0.25rem 0.5rem',
+   }],
+   ['.projects-new-wrap-phone', {
+      'justify-content': 'stretch',
+   }],
+   ['.projects-new-button-phone', {
+      width: '100%',
+      'min-width': 0,
+      padding: '1rem 1.25rem',
+   }],
+   ['.project-card-phone', {
+      'align-items': 'stretch',
+      'flex-direction': 'column',
+      gap: '0.75rem',
+      padding: '1rem',
+   }],
+   ['.project-card-main-phone', {
+      width: '100%',
+      cursor: 'pointer',
+   }],
+   ['.project-card-actions-phone', {
+      display: 'flex',
+      gap: '0.5rem',
+      width: '100%',
+   }],
+   ['.project-card-open-phone, .project-card-delete-phone', {
+      flex: 1,
+      width: '100%',
+   }],
+   ['.project-card-delete-phone', {
+      'background-color': 'rgba(0, 0, 0, 0.18)',
+   }],
    ['.projects-empty', {
       color: '#9aa4bf',
       'font-size': '1.05rem',
@@ -831,5 +864,223 @@ window.vibeyCSS = [
       width: '1ch',
       'text-align': 'left',
       display: 'inline-block',
+   }],
+   ['.mobile-shell', {
+      padding: '0.75rem 0.75rem 5.5rem 0.75rem',
+   }],
+   ['.mobile-topbar', {
+      display: 'flex',
+      'justify-content': 'space-between',
+      gap: '0.75rem',
+      'align-items': 'flex-start',
+      'margin-bottom': '0.75rem',
+      'flex-wrap': 'wrap',
+   }],
+   ['.mobile-topbar-main', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '0.15rem',
+      'min-width': 0,
+      flex: 1,
+   }],
+   ['.mobile-title', {
+      margin: 0,
+      'font-size': '1.35rem',
+      color: '#f5f7ff',
+      'line-height': 1.2,
+      'word-break': 'break-word',
+      cursor: 'pointer',
+   }],
+   ['.mobile-subtitle', {
+      color: '#9aa4bf',
+      'font-size': '0.9rem',
+   }],
+   ['.mobile-top-actions', {
+      display: 'flex',
+      gap: '0.45rem',
+      'align-items': 'center',
+      'flex-wrap': 'wrap',
+      'justify-content': 'flex-end',
+   }],
+   ['.mobile-content', {
+      flex: 1,
+      'min-height': 0,
+      overflow: 'auto',
+      'scroll-padding-bottom': '8rem',
+   }],
+   ['.mobile-bottom-nav', {
+      position: 'fixed',
+      left: '0.75rem',
+      right: '0.75rem',
+      bottom: '0.75rem',
+      display: 'flex',
+      gap: '0.5rem',
+      padding: '0.55rem',
+      'background-color': 'rgba(15, 21, 48, 0.96)',
+      border: '1px solid rgba(148, 184, 255, 0.18)',
+      'border-radius': '18px',
+      'box-shadow': '0 16px 40px rgba(0, 0, 0, 0.35)',
+      'backdrop-filter': 'blur(12px)',
+      'z-index': 30,
+   }],
+   ['.mobile-nav-button', {
+      flex: 1,
+      padding: '0.8rem 0.5rem',
+      'border-radius': '12px',
+      'background-color': 'transparent',
+      color: '#9aa4bf',
+      'font-size': '0.95rem',
+      'font-weight': '600',
+   }],
+   ['.mobile-nav-active', {
+      'background-color': '#4a69bd',
+      color: '#fff',
+   }],
+   ['.files-container-phone', {
+      gap: '0.75rem',
+      'padding-bottom': '0.5rem',
+   }],
+   ['.editor-header-phone', {
+      'align-items': 'flex-start',
+      'flex-direction': 'column',
+      gap: '0.65rem',
+   }],
+   ['.editor-actions-phone', {
+      width: '100%',
+      'flex-wrap': 'wrap',
+      gap: '0.45rem',
+   }],
+   ['.editor-empty-actions', {
+      display: 'flex',
+      gap: '0.5rem',
+      'justify-content': 'center',
+      'margin-top': '0.75rem',
+      'flex-wrap': 'wrap',
+   }],
+   ['.docs-sheet-backdrop', {
+      'align-items': 'flex-end',
+      padding: '0.75rem',
+   }],
+   ['.docs-sheet', {
+      'max-width': '100%',
+      'max-height': '80vh',
+      padding: '1rem',
+      'border-radius': '18px 18px 12px 12px',
+      overflow: 'hidden',
+      display: 'flex',
+      'flex-direction': 'column',
+   }],
+   ['.docs-sheet-header', {
+      display: 'flex',
+      'justify-content': 'space-between',
+      'align-items': 'center',
+      gap: '0.75rem',
+      'margin-bottom': '0.5rem',
+   }],
+   ['.docs-sheet-body', {
+      overflow: 'auto',
+      'min-height': 0,
+   }],
+   ['.docs-sheet .file-list', {
+      width: '100%',
+      padding: 0,
+      background: 'transparent',
+      border: 'none',
+      'box-shadow': 'none',
+   }],
+   ['.docs-sheet .file-list-scroll', {
+      'max-height': '45vh',
+   }],
+   ['.upload-section-phone', {
+      'max-height': 'none',
+      'margin-top': 0,
+      'padding-top': 0,
+      border: 'none',
+   }],
+   ['.chat-container-phone', {
+      'min-height': 0,
+      'padding-bottom': '0.25rem',
+   }],
+   ['.chat-input-area-phone', {
+      position: 'sticky',
+      bottom: 0,
+      'z-index': 5,
+      'background-color': '#16213e',
+      'padding-bottom': 'max(1rem, env(safe-area-inset-bottom))',
+      'box-shadow': '0 -8px 20px rgba(0, 0, 0, 0.18)',
+   }],
+   ['.chat-input-area-phone .chat-input', {
+      'min-height': '88px',
+   }],
+   ['.editor-textarea', {
+      'scroll-margin-bottom': '8rem',
+   }],
+   ['.chat-input', {
+      'scroll-margin-bottom': '8rem',
+   }],
+   ['.settings-shell-phone', {
+      'max-width': '100%',
+      padding: '0 0 1rem 0',
+   }],
+   ['.settings-card-phone', {
+      padding: '1rem',
+      'margin-bottom': '0.85rem',
+   }],
+   ['.settings-card-header-phone', {
+      'flex-direction': 'column',
+      'align-items': 'flex-start',
+      gap: '0.45rem',
+   }],
+   ['.settings-row-phone', {
+      'flex-direction': 'column',
+      'align-items': 'stretch',
+      width: '100%',
+   }],
+   ['.settings-actions-phone', {
+      'justify-content': 'stretch',
+   }],
+   ['.settings-actions-phone button', {
+      width: '100%',
+   }],
+   ['.settings-row-phone input', {
+      width: '100%',
+      'box-sizing': 'border-box',
+   }],
+   ['.snapshots-shell-phone', {
+      'max-width': '100%',
+   }],
+   ['.snapshots-list-phone', {
+      padding: '0.5rem',
+   }],
+   ['.snapshot-item-phone', {
+      'flex-direction': 'column',
+      'align-items': 'stretch',
+      gap: '0.75rem',
+      padding: '0.9rem 0.85rem',
+   }],
+   ['.snapshot-actions-phone', {
+      width: '100%',
+      display: 'flex',
+      gap: '0.45rem',
+   }],
+   ['.snapshot-actions-phone button', {
+      flex: 1,
+      width: '100%',
+   }],
+   ['.mobile-more-sheet', {
+      'max-width': '100%',
+   }],
+   ['.mobile-more-body', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '0.6rem',
+   }],
+   ['.mobile-more-action', {
+      width: '100%',
+      'text-align': 'left',
+      padding: '0.95rem 1rem',
+      'background-color': '#1a1a2e',
+      color: '#e5ebff',
+      'border-radius': '12px',
    }],
 ];

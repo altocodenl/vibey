@@ -961,6 +961,37 @@ Bigger refactors:
 Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 
 - Mobile friendly UI
+   - [DONE] On phones, switch from the current multi-pane desktop layout to a single-pane layout: show one primary surface at a time.
+   - [DONE] Add a bottom navigation with 4 entries: Projects, Docs, Dialogs, More.
+   - Replace left sidebars with sheets/drawers on mobile:
+      - [DONE] Files list
+      - [DONE] Dialog list
+      - [DONE] Uploads
+      - [DONE] More menu
+         - [DONE] Add a phone-only More menu surface for secondary actions, without changing desktop navigation behavior.
+         - [DONE] Snapshots should use phone-only stacked cards/actions, without changing desktop snapshots behavior.
+      - Projects list
+   - Docs on mobile:
+      - [DONE] No split editor/preview.
+      - [DONE] Show either edit or preview, with a clear toggle.
+      - [DONE] Keep save visible while dirty.
+      - [DONE] Make the file list and uploads available from phone-only sheets/buttons, without changing desktop docs behavior.
+   - Dialogs on mobile:
+      - [DONE] Sticky composer above the keyboard.
+      - Tool calls collapsed by default.
+      - [DONE] Easy access to the dialog list from a phone-only sheet/button, without changing desktop dialogs behavior.
+      - [DONE] Keep streaming readable; never show cramped or blank-looking bubbles.
+   - Settings/Admin/Access on mobile:
+      - [DONE] Stack cards vertically.
+      - [DONE] Use full-width buttons.
+      - [DONE] Keep destructive actions inside explicit menus or confirmations.
+      - [DONE] Do this with phone-only layout changes, without changing desktop settings/admin/access behavior.
+   - [DONE] Use only 2 responsive modes:
+      - [DONE] phone: <768px
+      - [DONE] desktop: ≥768px
+   - [DONE] On phone, optimize for reading docs, reading dialogs, sending prompts, light editing, and project switching.
+   - [DONE] Projects on mobile should use phone-only card/action treatment with larger tap targets and explicit open/delete actions, without changing desktop project behavior.
+   - [DONE] Handle the soft keyboard properly: keep the focused textarea/composer visible, scroll focused inputs into view on phone, and avoid viewport-height glitches.
 - "Continue in fresh dialog": manual compaction
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
 - Demo videos

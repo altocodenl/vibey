@@ -257,6 +257,22 @@ var projectPath = function (project, tail) {
    return 'project/' + encodeURIComponent (project) + '/' + tail;
 };
 
+var isPhoneViewport = function () {
+   return window.innerWidth < 768;
+};
+
+var keepMobileInputVisible = function (target) {
+   if (! isPhoneViewport () || ! target || ! target.scrollIntoView) return;
+   setTimeout (function () {
+      try {
+         target.scrollIntoView ({block: 'nearest', inline: 'nearest'});
+      }
+      catch (error) {
+         try {target.scrollIntoView (false);} catch (e) {}
+      }
+   }, 120);
+};
+
 var projectDisplayName = function (slug) {
    if (! slug) return '';
    return slug.replace (/\.([A-Za-z0-9_\-]+)\./g, function (match, encoded) {
@@ -1111,10 +1127,14 @@ B.mrespond ([
             signupRequested: false
          },
          editorPreview: true,
+         mobileDialogsPanel: null,
+         mobileDocsPanel: null,
+         mobileMoreMenu: false,
          projectModal: {
             open: false,
             name: ''
          },
+         viewportPhone: isPhoneViewport (),
          tab: 'projects',
          uploads: [],
          viCursor: {line: 1, col: 1},
@@ -2025,7 +2045,7 @@ B.mrespond ([
    }],
 
    ['open', 'uploadPicker', function (x) {
-      var input = document.getElementById ('upload-input');
+      var input = document.getElementById ('upload-input') || document.getElementById ('upload-input-phone');
       if (input) input.click ();
    }],
 
@@ -2594,7 +2614,7 @@ B.mrespond ([
 var views = {};
 
 views.files = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor'], ['viOverlayEditor'], ['uploads'], ['currentUpload'], ['uploading']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor, viOverlayEditor, uploads, currentUpload, uploading) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor'], ['viOverlayEditor'], ['uploads'], ['currentUpload'], ['uploading'], ['viewportPhone'], ['mobileDocsPanel']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor, viOverlayEditor, uploads, currentUpload, uploading, viewportPhone, mobileDocsPanel) {
       var docFiles = dale.fil (files || [], undefined, function (name) {
          if (isDocFile (name)) return name;
       });
@@ -2629,63 +2649,72 @@ views.files = function () {
          return ['div', {class: 'upload-meta'}, meta];
       };
 
-      return ['div', {class: 'files-container'}, [
-         // File list sidebar
-         ['div', {class: 'file-list'}, [
-            ['div', {class: 'file-list-header'}, [
-               ['span', {class: 'file-list-title'}, 'Docs'],
-               ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'file')}, '+ New']
-            ]],
-            ['div', {class: 'file-list-scroll'}, [
-               docFiles && docFiles.length > 0
-                  ? dale.go (docFiles, function (name) {
-                     var isActive = currentFile && currentFile.name === name;
-                     return ['div', {
-                        class: 'file-item' + (isActive ? ' file-item-active' : ''),
-                        onclick: B.ev ('load', 'file', name)
-                     }, [
-                        ['span', {class: 'file-name'}, docDisplayName (name)],
-                        ['span', {
-                           class: 'file-delete',
-                           onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
-                        }, '×']
-                     ]];
-                  })
-                  : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No docs yet']
-            ]],
-            ['div', {class: 'upload-section'}, [
-               ['div', {class: 'upload-header'}, [
-                  ['span', {class: 'file-list-title'}, 'Uploads'],
-                  ['button', {
-                     class: 'btn-small' + (uploading ? ' primary' : ''),
-                     style: style ({'background-color': uploading ? '#4a69bd' : '#3a3a5f', color: uploading ? 'white' : '#c9d4ff'}),
-                     onclick: B.ev ('open', 'uploadPicker'),
-                     disabled: uploading
-                  }, uploading ? 'Uploading...' : 'Upload']
-               ]],
-               ['input', {id: 'upload-input', type: 'file', multiple: true, style: style ({display: 'none'}), onchange: B.ev ('upload', 'file', {raw: 'event'})}],
-               uploads.length
-                  ? ['div', {class: 'upload-list'}, dale.go (uploads, function (upload) {
-                     var isSelected = selectedUpload && selectedUpload.name === upload.name;
-                     return ['div', {
-                        class: 'upload-item' + (isSelected ? ' upload-item-active' : ''),
-                        onclick: B.ev ('select', 'upload', upload)
-                     }, [
-                        ['span', {class: 'upload-name'}, upload.name],
-                        ['span', {class: 'upload-size'}, formatBytes (upload.size)]
-                     ]];
-                  })]
-                  : ['div', {class: 'upload-empty'}, 'No uploads yet']
-            ]]
+      var docsList = ['div', {class: 'file-list'}, [
+         ['div', {class: 'file-list-header'}, [
+            ['span', {class: 'file-list-title'}, 'Docs'],
+            ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'file')}, '+ New']
          ]],
+         ['div', {class: 'file-list-scroll'}, [
+            docFiles && docFiles.length > 0
+               ? dale.go (docFiles, function (name) {
+                  var isActive = currentFile && currentFile.name === name;
+                  return ['div', {
+                     class: 'file-item' + (isActive ? ' file-item-active' : ''),
+                     onclick: viewportPhone ? B.ev (['load', 'file', name], ['set', 'mobileDocsPanel', null]) : B.ev ('load', 'file', name)
+                  }, [
+                     ['span', {class: 'file-name'}, docDisplayName (name)],
+                     ['span', {
+                        class: 'file-delete',
+                        onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
+                     }, '×']
+                  ]];
+               })
+               : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No docs yet']
+         ]],
+         ['div', {class: 'upload-section'}, [
+            ['div', {class: 'upload-header'}, [
+               ['span', {class: 'file-list-title'}, 'Uploads'],
+               ['button', {
+                  class: 'btn-small' + (uploading ? ' primary' : ''),
+                  style: style ({'background-color': uploading ? '#4a69bd' : '#3a3a5f', color: uploading ? 'white' : '#c9d4ff'}),
+                  onclick: B.ev ('open', 'uploadPicker'),
+                  disabled: uploading
+               }, uploading ? 'Uploading...' : 'Upload']
+            ]],
+            ['input', {id: 'upload-input', type: 'file', multiple: true, style: style ({display: 'none'}), onchange: B.ev ('upload', 'file', {raw: 'event'})}],
+            uploads.length
+               ? ['div', {class: 'upload-list'}, dale.go (uploads, function (upload) {
+                  var isSelected = selectedUpload && selectedUpload.name === upload.name;
+                  return ['div', {
+                     class: 'upload-item' + (isSelected ? ' upload-item-active' : ''),
+                     onclick: viewportPhone ? B.ev (['select', 'upload', upload], ['set', 'mobileDocsPanel', null]) : B.ev ('select', 'upload', upload)
+                  }, [
+                     ['span', {class: 'upload-name'}, upload.name],
+                     ['span', {class: 'upload-size'}, formatBytes (upload.size)]
+                  ]];
+               })]
+               : ['div', {class: 'upload-empty'}, 'No uploads yet']
+         ]]
+      ]];
+
+      return ['div', {class: 'files-container' + (viewportPhone ? ' files-container-phone' : '')}, [
+         viewportPhone ? '' : docsList,
          // Editor
          ['div', {class: 'editor-container'}, currentFile ? [
-            ['div', {class: 'editor-header'}, [
+            ['div', {class: 'editor-header' + (viewportPhone ? ' editor-header-phone' : '')}, [
                ['div', [
                   ['span', {class: 'editor-filename'}, docDisplayName (currentFile.name)],
                   isDirty ? ['span', {class: 'editor-dirty'}, '(unsaved)'] : ''
                ]],
-               ['div', {class: 'editor-actions'}, [
+               ['div', {class: 'editor-actions' + (viewportPhone ? ' editor-actions-phone' : '')}, [
+                  viewportPhone ? ['button', {
+                     class: 'btn-small',
+                     onclick: B.ev ('set', 'mobileDocsPanel', 'docs')
+                  }, 'Docs'] : '',
+                  viewportPhone ? ['button', {
+                     class: 'btn-small',
+                     onclick: B.ev ('set', 'mobileDocsPanel', 'uploads')
+                  }, 'Uploads'] : '',
                   ['label', {class: 'view-edit-switch'}, [
                      ['span', {class: 'switch-mode-label' + (editorPreview ? '' : ' active')}, 'Edit'],
                      ['span', {class: 'switch-control'}, [
@@ -2721,7 +2750,8 @@ views.files = function () {
                            : B.ev ('keydown', 'editor', {raw: 'event'}),
                         onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                         onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
-                        onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined
+                        onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                        onfocus: 'window.keepMobileInputVisible && window.keepMobileInputVisible (this)'
                      }, currentFile.content],
                      (viMode && viState.mode !== 'insert' && viOverlayEditor && viOverlayEditor.visible) ? ['div', {
                         class: 'vi-cursor-overlay',
@@ -2748,11 +2778,51 @@ views.files = function () {
             ]] : ''
          ] : [
             ['div', {class: 'editor-empty'}, loadingFile ? 'Loading...' : 'Select a doc to edit'],
+            viewportPhone ? ['div', {class: 'editor-empty-actions'}, [
+               ['button', {class: 'btn-small', onclick: B.ev ('set', 'mobileDocsPanel', 'docs')}, 'Browse docs'],
+               ['button', {class: 'btn-small', onclick: B.ev ('set', 'mobileDocsPanel', 'uploads')}, 'Browse uploads']
+            ]] : '',
             selectedUpload ? ['div', {class: 'upload-preview'}, [
                ['div', {class: 'upload-preview-header'}, selectedUpload.name || 'Upload'],
                renderUploadPreview (selectedUpload)
             ]] : ''
-         ]]
+         ]],
+         viewportPhone && mobileDocsPanel ? ['div', {class: 'modal-backdrop docs-sheet-backdrop', onclick: B.ev ('set', 'mobileDocsPanel', null)}, [
+            ['div', {class: 'modal-card docs-sheet', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'docs-sheet-header'}, [
+                  ['div', {class: 'project-modal-kicker'}, mobileDocsPanel === 'docs' ? 'Docs' : 'Uploads'],
+                  ['button', {class: 'btn-small', onclick: B.ev ('set', 'mobileDocsPanel', null)}, 'Close']
+               ]],
+               mobileDocsPanel === 'docs'
+                  ? ['div', {class: 'docs-sheet-body'}, [docsList]]
+                  : ['div', {class: 'docs-sheet-body'}, [
+                     ['div', {class: 'upload-section upload-section-phone'}, [
+                        ['div', {class: 'upload-header'}, [
+                           ['span', {class: 'file-list-title'}, 'Uploads'],
+                           ['button', {
+                              class: 'btn-small' + (uploading ? ' primary' : ''),
+                              style: style ({'background-color': uploading ? '#4a69bd' : '#3a3a5f', color: uploading ? 'white' : '#c9d4ff'}),
+                              onclick: B.ev ('open', 'uploadPicker'),
+                              disabled: uploading
+                           }, uploading ? 'Uploading...' : 'Upload']
+                        ]],
+                        ['input', {id: 'upload-input-phone', type: 'file', multiple: true, style: style ({display: 'none'}), onchange: B.ev ('upload', 'file', {raw: 'event'})}],
+                        uploads.length
+                           ? ['div', {class: 'upload-list'}, dale.go (uploads, function (upload) {
+                              var isSelected = selectedUpload && selectedUpload.name === upload.name;
+                              return ['div', {
+                                 class: 'upload-item' + (isSelected ? ' upload-item-active' : ''),
+                                 onclick: B.ev (['select', 'upload', upload], ['set', 'mobileDocsPanel', null])
+                              }, [
+                                 ['span', {class: 'upload-name'}, upload.name],
+                                 ['span', {class: 'upload-size'}, formatBytes (upload.size)]
+                              ]];
+                           })]
+                           : ['div', {class: 'upload-empty'}, 'No uploads yet']
+                     ]]
+                  ]]
+            ]]
+         ]] : ''
       ]];
    });
 };
@@ -3590,7 +3660,7 @@ var formatMessageGauges = function (msg) {
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['streamingMarkdown'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, streamingMarkdown, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['streamingMarkdown'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin'], ['viewportPhone'], ['mobileDialogsPanel']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, streamingMarkdown, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin, viewportPhone, mobileDialogsPanel) {
 
       dialog = dialog || {};
       var input = dialog.input;
@@ -3643,36 +3713,41 @@ views.dialogs = function () {
       viState = viState || {};
       var noProvider = ! hasAnyProvider (settings);
 
-      return ['div', {class: 'files-container'}, [
-         // Dialog list sidebar
-         ['div', {class: 'file-list'}, [
-            ['div', {class: 'file-list-header'}, [
-               ['span', {class: 'file-list-title'}, 'Dialogs'],
-               ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'dialog'), disabled: noProvider}, '+ New']
-            ]],
-            dialogFiles && dialogFiles.length > 0
-               ? dale.go (dialogFiles, function (name) {
-                  var isActive = currentFile && currentFile.name === name;
-                  var parsedDialog = parseDialogFilename (name) || {status: null};
-                  var displayName = dialogDisplayLabel (name);
-                  return ['div', {
-                     class: 'file-item' + (isActive ? ' file-item-active' : ''),
-                     onclick: B.ev ('load', 'file', name)
-                  }, [
-                     ['span', {class: 'dialog-name'}, statusIcon (parsedDialog.status) + ' ' + displayName],
-                     ['span', {
-                        class: 'file-delete',
-                        onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
-                     }, '×']
-                  ]];
-               })
-               : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No dialogs yet']
+      var dialogList = ['div', {class: 'file-list'}, [
+         ['div', {class: 'file-list-header'}, [
+            ['span', {class: 'file-list-title'}, 'Dialogs'],
+            ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'dialog'), disabled: noProvider}, '+ New']
          ]],
+         dialogFiles && dialogFiles.length > 0
+            ? dale.go (dialogFiles, function (name) {
+               var isActive = currentFile && currentFile.name === name;
+               var parsedDialog = parseDialogFilename (name) || {status: null};
+               var displayName = dialogDisplayLabel (name);
+               return ['div', {
+                  class: 'file-item' + (isActive ? ' file-item-active' : ''),
+                  onclick: viewportPhone ? B.ev (['load', 'file', name], ['set', 'mobileDialogsPanel', null]) : B.ev ('load', 'file', name)
+               }, [
+                  ['span', {class: 'dialog-name'}, statusIcon (parsedDialog.status) + ' ' + displayName],
+                  ['span', {
+                     class: 'file-delete',
+                     onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
+                  }, '×']
+               ]];
+            })
+            : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No dialogs yet']
+      ]];
+
+      return ['div', {class: 'files-container' + (viewportPhone ? ' files-container-phone' : '')}, [
+         viewportPhone ? '' : dialogList,
          // Chat area
-         ['div', {class: 'chat-container'}, [
-            ['div', {class: 'editor-header'}, [
+         ['div', {class: 'chat-container' + (viewportPhone ? ' chat-container-phone' : '')}, [
+            ['div', {class: 'editor-header' + (viewportPhone ? ' editor-header-phone' : '')}, [
                ['span', {class: 'editor-filename'}, isDialog ? (statusIcon ((parseDialogFilename (currentFile.name) || {}).status) + ' ' + dialogDisplayLabel (currentFile.name)) : 'New dialog'],
-               ['div', {style: style ({display: 'flex', gap: '0.45rem', 'margin-left': 'auto'})}, [
+               ['div', {style: style ({display: 'flex', gap: '0.45rem', 'margin-left': 'auto', 'flex-wrap': 'wrap'})}, [
+                  viewportPhone ? ['button', {
+                     class: 'btn-small',
+                     onclick: B.ev ('set', 'mobileDialogsPanel', 'dialogs')
+                  }, 'Dialogs'] : '',
                   ['button', {
                      class: 'btn-small',
                      title: 'Previous message',
@@ -3779,7 +3854,7 @@ views.dialogs = function () {
                (streaming || dialogIsActive) ? '' : ['span', {class: 'vibeying-cursor'}, '_']
             ]],
             // Input area
-            ['div', {class: 'chat-input-area'}, [
+            ['div', {class: 'chat-input-area' + (viewportPhone ? ' chat-input-area-phone' : '')}, [
                ['select', {
                   class: 'provider-select',
                   onchange: B.ev ('change', 'chatProviderModel'),
@@ -3813,6 +3888,7 @@ views.dialogs = function () {
                      onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                      onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                      onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
+                     onfocus: 'window.keepMobileInputVisible && window.keepMobileInputVisible (this)',
                      disabled: noProvider || streaming || dialogIsActive
                   }],
                   (viMode && viState.mode !== 'insert' && viOverlayChat && viOverlayChat.visible) ? ['div', {
@@ -3848,20 +3924,29 @@ views.dialogs = function () {
                   onclick: B.ev ('stop', 'dialog')
                }, 'Stop'] : ''
             ]]
-         ]]
+         ]],
+         viewportPhone && mobileDialogsPanel ? ['div', {class: 'modal-backdrop docs-sheet-backdrop', onclick: B.ev ('set', 'mobileDialogsPanel', null)}, [
+            ['div', {class: 'modal-card docs-sheet', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'docs-sheet-header'}, [
+                  ['div', {class: 'project-modal-kicker'}, 'Dialogs'],
+                  ['button', {class: 'btn-small', onclick: B.ev ('set', 'mobileDialogsPanel', null)}, 'Close']
+               ]],
+               ['div', {class: 'docs-sheet-body'}, [dialogList]]
+            ]]
+         ]] : ''
       ]];
    });
 };
 
 views.projects = function () {
-   return B.view ([['projects']], function (projects) {
-      return ['div', {class: 'projects-view'}, [
+   return B.view ([['projects'], ['viewportPhone']], function (projects, viewportPhone) {
+      return ['div', {class: 'projects-view' + (viewportPhone ? ' projects-view-phone' : '')}, [
          ['div', {class: 'projects-shell'}, [
             ['div', {class: 'projects-header'}, [
                ['div', {class: 'projects-title'}, 'Projects']
             ]],
-            ['div', {class: 'projects-new-wrap'}, [
-               ['button', {class: 'primary projects-new-button', onclick: B.ev ('create', 'project')}, '+ New project']
+            ['div', {class: 'projects-new-wrap' + (viewportPhone ? ' projects-new-wrap-phone' : '')}, [
+               ['button', {class: 'primary projects-new-button' + (viewportPhone ? ' projects-new-button-phone' : ''), onclick: B.ev ('create', 'project')}, '+ New project']
             ]],
             (projects && projects.length)
                ? ['div', {class: 'projects-list'}, dale.go (projects, function (project) {
@@ -3869,10 +3954,26 @@ views.projects = function () {
                   var displayName = type (project) === 'object' ? project.name : project;
                   var pcolor = projectNameColor (displayName);
                   return ['div', {
-                     class: 'project-card',
-                     style: style ({'background-color': pcolor.bg, color: pcolor.text, border: 'none'}),
-                     onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
-                  }, [
+                     class: 'project-card' + (viewportPhone ? ' project-card-phone' : ''),
+                     style: style ({'background-color': pcolor.bg, color: pcolor.text, border: 'none'})
+                  }, viewportPhone ? [
+                     ['div', {
+                        class: 'project-card-main-phone',
+                        onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
+                     }, [
+                        ['span', {class: 'project-card-name'}, displayName]
+                     ]],
+                     ['div', {class: 'project-card-actions-phone'}, [
+                        ['button', {
+                           class: 'btn-small project-card-open-phone',
+                           onclick: B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
+                        }, 'Open'],
+                        ['button', {
+                           class: 'btn-small project-card-delete-phone',
+                           onclick: B.ev ('delete', 'project', slug, {raw: 'event'})
+                        }, 'Delete']
+                     ]]
+                  ] : [
                      ['span', {class: 'project-card-name'}, displayName],
                      ['span', {
                         class: 'project-card-delete',
@@ -3887,7 +3988,7 @@ views.projects = function () {
 };
 
 views.settings = function () {
-   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauth'], ['viMode'], ['settingsShowMore']], function (settingsData, edits, saving, showKeys, oauth, viMode) {
+   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauth'], ['viMode'], ['settingsShowMore'], ['viewportPhone']], function (settingsData, edits, saving, showKeys, oauth, viMode, viewportPhone) {
       settingsData = settingsData || {};
       edits = edits || {};
       var openai = settingsData.openai || {};
@@ -3910,14 +4011,14 @@ views.settings = function () {
          var editing = edits [editKey] !== undefined;
          var currentDisplay = editing ? edits [editKey] : (showKeys ? (info.apiKey || '') : (info.hasKey ? info.apiKey : ''));
 
-         return ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
-            ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '0.75rem'})}, [
+         return ['div', {class: 'settings-card' + (viewportPhone ? ' settings-card-phone' : ''), style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
+            ['div', {class: viewportPhone ? 'settings-card-header-phone' : '', style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '0.75rem'})}, [
                ['span', {style: style ({'font-weight': 'bold', 'font-size': '16px', color: '#94b8ff'})}, label],
                info.hasKey
                   ? ['span', {style: style ({color: '#6ad48a', 'font-size': '12px'})}, '✓ Configured']
                   : ['span', {style: style ({color: '#ff8b94', 'font-size': '12px'})}, '✗ Not set']
             ]],
-            ['div', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center'})}, [
+            ['div', {class: viewportPhone ? 'settings-row-phone' : '', style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center'})}, [
                ['input', {
                   type: showKeys ? 'text' : 'password',
                   value: currentDisplay,
@@ -3937,8 +4038,8 @@ views.settings = function () {
          var isPasteStep = oauthStep && oauthStep.provider === providerId && oauthStep.flow === 'paste_code';
          var isWaiting = oauthStep && oauthStep.provider === providerId && oauthStep.flow === 'waiting';
 
-         return ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
-            ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '0.5rem'})}, [
+         return ['div', {class: 'settings-card' + (viewportPhone ? ' settings-card-phone' : ''), style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
+            ['div', {class: viewportPhone ? 'settings-card-header-phone' : '', style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '0.5rem'})}, [
                ['div', [
                   ['span', {style: style ({'font-weight': 'bold', 'font-size': '16px', color: '#94b8ff'})}, label],
                   ['div', {style: style ({color: '#9aa4bf', 'font-size': '12px', 'margin-top': '0.25rem'})}, description]
@@ -3967,7 +4068,7 @@ views.settings = function () {
 
             isPasteStep ? ['div', {style: style ({'margin-top': '0.75rem', 'background-color': '#1a1a2e', padding: '1rem', 'border-radius': '6px'})}, [
                ['div', {style: style ({color: '#f0ad4e', 'font-size': '13px', 'margin-bottom': '0.5rem'})}, providerId === 'openai' ? 'A browser tab opened. After OpenAI redirects to localhost:1455, copy the full URL from the address bar and paste it below.' : 'A browser tab opened. Log in and paste the authorization code below:'],
-               ['div', {style: style ({display: 'flex', gap: '0.5rem'})}, [
+               ['div', {class: viewportPhone ? 'settings-row-phone' : '', style: style ({display: 'flex', gap: '0.5rem'})}, [
                   ['input', {
                      type: 'text',
                      value: oauthCode || '',
@@ -4020,13 +4121,13 @@ views.settings = function () {
          var hasRawKey = !! info.key;
          var display = hasRawKey ? (showKeys ? info.key : (info.maskedKey || '')) : (info.maskedKey || '');
          var metaStyle = style ({color: '#9aa4bf', 'font-size': '12px'});
-         return ['div', {class: 'settings-user-api-key', style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
-            ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '1rem', 'margin-bottom': '0.75rem'})}, [
+         return ['div', {class: 'settings-user-api-key settings-card' + (viewportPhone ? ' settings-card-phone' : ''), style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
+            ['div', {class: viewportPhone ? 'settings-card-header-phone' : '', style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '1rem', 'margin-bottom': '0.75rem'})}, [
                ['div', [
                   ['span', {style: style ({'font-weight': 'bold', 'font-size': '16px', color: '#94b8ff'})}, 'Automation API key'],
                   ['div', {style: metaStyle}, 'Use as Bearer token for POST /project/:project/trigger']
                ]],
-               ['div', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', 'flex-wrap': 'wrap', 'justify-content': 'flex-end'})}, [
+               ['div', {class: viewportPhone ? 'settings-row-phone settings-actions-phone' : '', style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', 'flex-wrap': 'wrap', 'justify-content': 'flex-end'})}, [
                   hasRawKey ? ['button', {
                      class: 'btn-small',
                      style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
@@ -4066,8 +4167,8 @@ views.settings = function () {
       var showMore = B.get ('settingsShowMore');
 
       return ['div', {class: 'editor-empty'}, [
-         ['div', {style: style ({width: '100%', 'max-width': '640px', 'overflow-y': 'auto', 'max-height': 'calc(100vh - 120px)'})}, [
-            ['div', {class: 'editor-header'}, [
+         ['div', {class: viewportPhone ? 'settings-shell-phone' : '', style: style ({width: '100%', 'max-width': '640px', 'overflow-y': 'auto', 'max-height': 'calc(100vh - 120px)'})}, [
+            ['div', {class: 'editor-header' + (viewportPhone ? ' editor-header-phone' : '')}, [
                ['span', {class: 'editor-filename'}, 'Settings']
             ]],
 
@@ -4098,7 +4199,7 @@ views.settings = function () {
                // *** API KEYS ***
                sectionTitle ('API Keys'),
                ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Pay-per-use API access. Keys are stored in secret.json.'],
-               ['div', {style: style ({display: 'flex', gap: '0.5rem', 'margin-bottom': '1rem'})}, [
+               ['div', {class: viewportPhone ? 'settings-row-phone settings-actions-phone' : '', style: style ({display: 'flex', gap: '0.5rem', 'margin-bottom': '1rem'})}, [
                   ['button', {
                      class: 'btn-small',
                      style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
@@ -4115,8 +4216,8 @@ views.settings = function () {
 
                // *** EDITOR ***
                sectionTitle ('Editor'),
-               ['div', {style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1rem'})}, [
-                  ['label', {style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', color: '#c9d4ff', 'font-size': '13px'})}, [
+               ['div', {class: 'settings-card' + (viewportPhone ? ' settings-card-phone' : ''), style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1rem'})}, [
+                  ['label', {class: viewportPhone ? 'settings-row-phone' : '', style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', color: '#c9d4ff', 'font-size': '13px'})}, [
                      ['input', {
                         type: 'checkbox',
                         checked: viMode,
@@ -4132,7 +4233,7 @@ views.settings = function () {
 };
 
 views.snapshots = function () {
-   return B.view ([['snapshots']], function (snapshots) {
+   return B.view ([['snapshots'], ['viewportPhone']], function (snapshots, viewportPhone) {
       snapshots = snapshots || [];
 
       var formatDate = function (iso) {
@@ -4147,24 +4248,24 @@ views.snapshots = function () {
       };
 
       return ['div', {class: 'editor-empty'}, [
-         ['div', {style: style ({width: '100%', 'max-width': '800px'})}, [
-            ['div', {class: 'editor-header'}, [
+         ['div', {class: viewportPhone ? 'snapshots-shell-phone' : '', style: style ({width: '100%', 'max-width': '800px'})}, [
+            ['div', {class: 'editor-header' + (viewportPhone ? ' editor-header-phone' : '')}, [
                ['span', {class: 'editor-filename'}, 'Snapshots'],
             ]],
             snapshots.length > 0
-               ? ['div', {class: 'file-list', style: style ({width: '100%'})},
+               ? ['div', {class: 'file-list' + (viewportPhone ? ' snapshots-list-phone' : ''), style: style ({width: '100%'})},
                   dale.go (snapshots, function (snap) {
                      var labelText = snap.label ? snap.label : snap.projectName;
                      var meta = formatDate (snap.created) + ' · ' + snap.fileCount + ' files · from ' + snap.projectName;
                      return ['div', {
-                        class: 'file-item',
-                        style: style ({display: 'flex', 'align-items': 'center', gap: '0.75rem', padding: '0.6rem 0.75rem'})
+                        class: 'file-item' + (viewportPhone ? ' snapshot-item-phone' : ''),
+                        style: style ({display: 'flex', 'align-items': viewportPhone ? 'stretch' : 'center', gap: '0.75rem', padding: '0.6rem 0.75rem'})
                      }, [
                         ['div', {style: style ({flex: 1, 'min-width': 0})}, [
                            ['div', {style: style ({'font-weight': 'bold', color: '#eee', 'margin-bottom': '0.2rem'})}, labelText],
                            ['div', {style: style ({color: '#9aa4bf', 'font-size': '12px'})}, meta]
                         ]],
-                        ['div', {style: style ({display: 'flex', gap: '0.35rem', 'flex-shrink': 0})}, [
+                        ['div', {class: viewportPhone ? 'snapshot-actions-phone' : '', style: style ({display: 'flex', gap: '0.35rem', 'flex-shrink': 0, 'flex-wrap': viewportPhone ? 'wrap' : 'nowrap'})}, [
                            ['button', {
                               class: 'primary btn-small',
                               onclick: B.ev ('restore', 'snapshot', snap.id, snap.projectName),
@@ -4181,7 +4282,7 @@ views.snapshots = function () {
                               style: style ({'background-color': '#5a2a2a', color: '#ff8b94'}),
                               onclick: B.ev ('delete', 'snapshot', snap.id),
                               title: 'Delete snapshot'
-                           }, '×']
+                           }, viewportPhone ? 'Delete' : '×']
                         ]]
                      ]];
                   })
@@ -4249,11 +4350,104 @@ views.auth = function () {
 };
 
 views.main = function () {
-   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton'], ['projectModal'], ['cloudMode'], ['cloudAuth']], function (tab, currentProject, testButton, projectModal, cloudMode, cloudAuth) {
+   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton'], ['projectModal'], ['cloudMode'], ['cloudAuth'], ['viewportPhone'], ['mobileMoreMenu']], function (tab, currentProject, testButton, projectModal, cloudMode, cloudAuth, viewportPhone, mobileMoreMenu) {
       projectModal = projectModal || {open: false, name: ''};
       if (cloudMode && cloudAuth === 'guest') return ['div', {class: 'container'}, [
          ['style', window.vibeyCSS],
          views.auth ()
+      ]];
+
+      var content = tab === 'settings' ? views.settings () : (tab === 'snapshots' ? views.snapshots () : (! currentProject || tab === 'projects' ? views.projects () : (tab === 'docs' ? views.files () : views.dialogs ())));
+      var title = 'vibey';
+      if (tab === 'projects') title = 'Projects';
+      if (tab === 'snapshots') title = 'Snapshots';
+      if (tab === 'settings') title = 'Settings';
+      if (currentProject && tab === 'docs') title = projectDisplayName (currentProject);
+      if (currentProject && tab === 'dialogs') title = projectDisplayName (currentProject);
+
+      if (viewportPhone) return ['div', {class: 'container mobile-shell'}, [
+         ['style', window.vibeyCSS],
+         ['div', {class: 'mobile-topbar'}, [
+            ['div', {class: 'mobile-topbar-main'}, [
+               ['h1', {class: 'mobile-title', onclick: B.ev ('navigate', 'hash', '#/projects')}, title],
+               currentProject && (tab === 'docs' || tab === 'dialogs') ? ['div', {class: 'mobile-subtitle'}, tab === 'docs' ? 'Docs' : 'Dialogs'] : ''
+            ]],
+            ['div', {class: 'mobile-top-actions'}, [
+               currentProject ? ['button', {class: 'btn-small', onclick: B.ev ('create', 'snapshot')}, '📸'] : '',
+               ['button', {
+                  class: 'btn-small' + (mobileMoreMenu ? ' primary' : ''),
+                  onclick: B.ev ('set', 'mobileMoreMenu', ! mobileMoreMenu)
+               }, 'More']
+            ]]
+         ]],
+         ['div', {class: 'mobile-content'}, [content]],
+         ['div', {class: 'mobile-bottom-nav'}, [
+            ['button', {
+               class: 'mobile-nav-button' + (tab === 'projects' ? ' mobile-nav-active' : ''),
+               onclick: B.ev ('navigate', 'hash', '#/projects')
+            }, 'Projects'],
+            ['button', {
+               class: 'mobile-nav-button' + (tab === 'docs' ? ' mobile-nav-active' : ''),
+               onclick: currentProject ? B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (currentProject) + '/docs') : [],
+               disabled: ! currentProject
+            }, 'Docs'],
+            ['button', {
+               class: 'mobile-nav-button' + (tab === 'dialogs' ? ' mobile-nav-active' : ''),
+               onclick: currentProject ? B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (currentProject) + '/dialogs') : [],
+               disabled: ! currentProject
+            }, 'Dialogs'],
+            ['button', {
+               class: 'mobile-nav-button' + ((tab === 'settings' || tab === 'snapshots' || mobileMoreMenu) ? ' mobile-nav-active' : ''),
+               onclick: B.ev ('set', 'mobileMoreMenu', ! mobileMoreMenu)
+            }, 'More']
+         ]],
+         mobileMoreMenu ? ['div', {class: 'modal-backdrop docs-sheet-backdrop', onclick: B.ev ('set', 'mobileMoreMenu', false)}, [
+            ['div', {class: 'modal-card docs-sheet mobile-more-sheet', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'docs-sheet-header'}, [
+                  ['div', {class: 'project-modal-kicker'}, 'More'],
+                  ['button', {class: 'btn-small', onclick: B.ev ('set', 'mobileMoreMenu', false)}, 'Close']
+               ]],
+               ['div', {class: 'docs-sheet-body mobile-more-body'}, [
+                  ['button', {
+                     class: 'btn-small mobile-more-action' + (tab === 'settings' ? ' primary' : ''),
+                     onclick: B.ev (['navigate', 'hash', '#/settings'], ['set', 'mobileMoreMenu', false])
+                  }, 'Settings'],
+                  ['button', {
+                     class: 'btn-small mobile-more-action' + (tab === 'snapshots' ? ' primary' : ''),
+                     onclick: B.ev (['navigate', 'hash', '#/snapshots'], ['set', 'mobileMoreMenu', false])
+                  }, 'Snapshots'],
+                  testButton ? ['button', {
+                     class: 'btn-small mobile-more-action',
+                     style: style ({'background-color': '#2d6a4f', color: '#b7e4c7'}),
+                     onclick: B.ev (['run', 'tests'], ['set', 'mobileMoreMenu', false])
+                  }, 'Run tests'] : '',
+                  cloudMode ? ['button', {
+                     class: 'btn-small mobile-more-action',
+                     style: style ({'background-color': '#5a2a2a', color: '#ffb3ba'}),
+                     onclick: B.ev (['logout', []], ['set', 'mobileMoreMenu', false])
+                  }, 'Logout'] : ''
+               ]]
+            ]]
+         ]] : '',
+         projectModal.open ? ['div', {class: 'modal-backdrop', onclick: B.ev ('close', 'projectModal')}, [
+            ['div', {class: 'modal-card project-modal-card', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'project-modal-kicker'}, 'New project'],
+               ['div', {class: 'project-modal-title'}, 'Name your next world'],
+               ['div', {class: 'project-modal-subtitle'}, 'Create a project and jump straight into a dialog.'],
+               ['input', {
+                  class: 'project-modal-input',
+                  type: 'text',
+                  placeholder: 'I have this idea',
+                  value: projectModal.name || '',
+                  oninput: B.ev ('set', ['projectModal', 'name']),
+                  onkeydown: B.ev ('maybe', 'submitProjectModalOnEnter', {raw: 'event'})
+               }],
+               ['div', {class: 'modal-actions'}, [
+                  ['button', {class: 'btn-small', onclick: B.ev ('close', 'projectModal')}, 'Cancel'],
+                  ['button', {class: 'primary', onclick: B.ev ('submit', 'projectModal'), disabled: ! ((projectModal.name || '').trim ())}, 'Create project']
+               ]]
+            ]]
+         ]] : ''
       ]];
 
       return ['div', {class: 'container'}, [
@@ -4300,7 +4494,7 @@ views.main = function () {
             }, 'Dialogs'],
          ]] : '',
 
-         tab === 'settings' ? views.settings () : (tab === 'snapshots' ? views.snapshots () : (! currentProject || tab === 'projects' ? views.projects () : (tab === 'docs' ? views.files () : views.dialogs ()))),
+         content,
 
          projectModal.open ? ['div', {class: 'modal-backdrop', onclick: B.ev ('close', 'projectModal')}, [
             ['div', {class: 'modal-card project-modal-card', onclick: 'event.stopPropagation()'}, [
@@ -4327,11 +4521,19 @@ views.main = function () {
 
 // *** MOUNT ***
 
+window.keepMobileInputVisible = keepMobileInputVisible;
+
 window.addEventListener ('hashchange', function () {
    B.call ('read', 'hash');
    if (B.get ('cloudMode') && B.get ('cloudAuth') === 'guest') return;
    var parsed = readHashTarget ();
    if (parsed.tab === 'projects') B.call ('load', 'projects');
+});
+
+window.addEventListener ('resize', function () {
+   var next = isPhoneViewport ();
+   if (B.get ('viewportPhone') === next) return;
+   B.call ('set', 'viewportPhone', next);
 });
 
 window.addEventListener ('keydown', function (ev) {
