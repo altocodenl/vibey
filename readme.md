@@ -2,7 +2,7 @@
 
 > "Thou shalt not make a machine in the likeness of a human mind." -- Orange Catholic Bible
 
-Build your ideas with your words.
+Build with words, not code.
 
 ## Vibey in a nutshell
 
