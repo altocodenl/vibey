@@ -521,7 +521,7 @@ var page = ['html', {lang: 'en'}, [
             ['p', {class: 'intro'}, 'After reading the five things above, choose how you want to run vibey.'],
             ['div', {class: 'adventure-switcher'}, [
                ['button', {class: 'adventure-btn active', 'data-mode': 'local'}, 'I want to run vibey locally'],
-               ['button', {class: 'adventure-btn', 'data-mode': 'cloud'}, 'I want to run vibey on the cloud']
+               ['button', {class: 'adventure-btn', 'data-mode': 'cloud'}, 'I want to use vibey on the cloud']
             ]],
             ['div', {class: 'adventure-panel', 'data-mode': 'local'}, [
                ['h3', 'Run vibey locally'],
@@ -548,7 +548,7 @@ var page = ['html', {lang: 'en'}, [
                ]]
             ]],
             ['div', {class: 'adventure-panel', 'data-mode': 'cloud', hidden: true}, [
-               ['h3', 'Run vibey on the cloud'],
+               ['h3', 'Use vibey on the cloud'],
                ['p', 'Cloud mode is for when you want your agents to keep working while you are away, open your projects from any device, and share them with others.'],
                ['ul', [
                   ['li', [['strong', 'Always running'], ' — your agents can work while your computer is closed.']],

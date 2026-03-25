@@ -7,8 +7,13 @@ Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from t
 - Please fix the client tests.
 - Please modify the server and client tests so that a noslow flag skips static and backend. Please make the client tests follow the order of the server ones.
 - One of the dialog tests fails on cloud mode (currently running in cloud mode with no email sending). Only on the server, not the client. Can you fix? Just when running it as part of noslow, so perhaps something left from the previous test?
+- I still see these "> Context" lines in the client when streaming. This is a recent bug.
+- When seeing tool uses, particularly when streaming, when the tool is done, don't show the in progress description as before, but overwrite it, so they are not duplicated, which is slightly confusing.
+- Please do a scan on server.js to see if there is some obvious backdoor by an unauthenticated scanner
 
 ### 2026-03-24
+
+I find it funny that main.md is like c's main function/entrypoint.
 
 Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 

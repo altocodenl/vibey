@@ -16,6 +16,10 @@ Project structure convention:
 - Dialog files live under `dialog/`.
 If you need project context, read from `doc/main.md` first and then other files in `doc/` as needed.
 
+## Searching the web
+
+If the user asks you to search the web, remember that you can: use curl and known search engines.
+
 ## Orchestration
 
 There is no built-in orchestration framework. `doc/main.md` is the single source of truth for what the project is, what needs to be done, and how agents should coordinate. If `doc/main.md` says to use multiple agents, use the `launch_agent` tool to spawn sibling dialogs. Each spawned agent is independent and flat — there is no parent/child hierarchy. Agents can read each other's dialog files (under `dialog/`) to see progress, avoid duplicate work, and coordinate. If you are unsure what to do, re-read `doc/main.md`.

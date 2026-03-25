@@ -2350,7 +2350,7 @@ var cloudSequence = [
 
    ['Cloud 1: Detect cloud mode via GET /auth/csrf', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs) {
       s.cloudAdminEmail  = (CONFIG.adminEmail || '').toLowerCase ();
-      s.cloudMemberEmail = 'member-' + testTimestamp () + '@test.vibey.dev';
+      s.cloudMemberEmail = 'member-' + testTimestamp () + '@buildwithvibey.com';
       s.cleanupKeys = [];
 
       // If server is in local mode, the response is {mode: 'LOCAL'}.
@@ -2465,7 +2465,7 @@ var cloudSequence = [
 
    ['Cloud 8: POST /auth/login with non-existent email returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
-      httpJson ('POST', '/auth/login', {email: 'nobody@nowhere.dev'}, function (error, status) {
+      httpJson ('POST', '/auth/login', {email: 'nobody@buildwithvibey.com'}, function (error, status) {
          if (error) return log ('Login bad email failed: ' + error.message);
          if (status !== 403) return log ('Expected 403 for non-existent email login, got ' + status);
          next ();
@@ -2629,7 +2629,7 @@ var cloudSequence = [
 
    ['Cloud 19: POST /admin/createUser without auth returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
-      httpJson ('POST', '/admin/createUser', {email: 'noauth@test.dev'}, function (error, status) {
+      httpJson ('POST', '/admin/createUser', {email: 'noauth@buildwithvibey.com'}, function (error, status) {
          if (error) return log ('Unauthenticated createUser failed: ' + error.message);
          // No users to bootstrap (admin exists) so this should be 403
          if (status !== 403) return log ('Expected 403 for unauthenticated createUser (users exist), got ' + status);
@@ -2663,7 +2663,7 @@ var cloudSequence = [
 
    ['Cloud 22: Non-admin cannot POST /admin/createUser', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
-      authJson ('POST', '/admin/createUser', {email: 'sneaky@test.dev'}, s.memberAuth, function (error, status) {
+      authJson ('POST', '/admin/createUser', {email: 'sneaky@buildwithvibey.com'}, s.memberAuth, function (error, status) {
          if (error) return log ('Non-admin createUser failed: ' + error.message);
          if (status !== 403) return log ('Expected 403 for non-admin createUser, got ' + status);
          next ();

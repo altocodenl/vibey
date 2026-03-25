@@ -955,10 +955,11 @@ Bigger refactors:
 
 Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 
-- Remove > context lines from client
+- Security: Show the automation API key only once at creation, then expose only metadata plus an explicit regenerate flow that rotates and re-reveals a new key once.
 - Re-test claude oauth locally and in cloud
+- Mobile friendly UI
+- "Continue in fresh dialog": manual compaction
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
-- Security: add explicit reveal/regenerate flows for reusable secrets when needed. Keep `GET /settings` metadata-only by default; do not return raw automation API keys or other reusable credentials unless the user explicitly requests a reveal/regeneration flow.
 - Demo videos
    - A 3D solar system I can rotate and zoom
    - A quick expense tracker
@@ -972,7 +973,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from t
 ### TODO later
 
 - Spin Hetzner engines and bind projects to them.
-- Put dialog state in memory [perhaps]
+- Put dialog state in memory [perhaps, but what about sockets]
 - Hosted services? (email, DB)
 - Billing: aligned pricing: an annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
 - Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
@@ -997,3 +998,6 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 - Search: `/` then `n`/`N`.
 - Commands: `:` enters command mode.
 
+## License
+
+Vibey is written by [Altocode](https://altocode.nl) and released into the public domain.

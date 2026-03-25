@@ -14,7 +14,7 @@ FOLDER="vibey"
 wc -l client.js client-css.js server.js test-client.js test-server.js website.js secret.js utils/deploy.sh
 
 if [ "$2" == "website" ] ; then
-   node ../website
+   node website
    scp website.html $HOST:/var/www/html
    exit 0
 fi

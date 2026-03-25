@@ -1800,6 +1800,16 @@
          return true;
       }],
 
+      ['Dialog 49ab: consumeStreamingChunk strips metadata lines from live streaming text', function () {
+         var state = {inToolChunk: false};
+         var consumed = consumeStreamingChunk ('hello\n> Context: used=30 limit=1000 percent=3%\n> Time: 2026-03-13T20:00:01Z - ...\nworld', state);
+         if (! consumed || type (consumed.text) !== 'string') return 'Expected consumed streaming text';
+         if (consumed.text.indexOf ('> Context') !== -1) return 'Context metadata leaked into streaming text';
+         if (consumed.text.indexOf ('> Time') !== -1) return 'Time metadata leaked into streaming text';
+         if (consumed.text.replace (/\s+/g, ' ').trim () !== 'hello world') return 'Expected stripped streaming text, got: ' + consumed.text;
+         return true;
+      }],
+
       ['Dialog 49b: Dialog UI renders two contiguous tool calls as two chat bubbles', function (done) {
          window._displaySplitProject = 'test-display-split-' + testTimestamp ();
          c.ajax ('post', 'projects', {}, {name: window._displaySplitProject}, function (error, rs) {
@@ -1912,6 +1922,17 @@
          return true;
       }],
 
+      ['Dialog 51b1: Finished streaming tool replaces its in-progress status line', function () {
+         var current = '';
+         var pending = '⏳ Run command — Check workspace';
+         current = appendStreamingStatusLine (current, pending);
+         current = replaceLastStreamingStatusLine (current, pending, '✓ Run command — Check workspace');
+         if (current.indexOf (pending) !== -1) return 'Finished tool should replace the pending status line';
+         if (current.indexOf ('✓ Run command — Check workspace') === -1) return 'Finished tool line missing after replacement';
+         if ((current.match (/Run command — Check workspace/g) || []).length !== 1) return 'Finished tool should appear only once after replacement';
+         return true;
+      }],
+
       ['Dialog 51b2: Interrupted write_file tool block still renders as a tool bubble with diff preview', function () {
          var content = '---\nTool request: write_file [call_live]\n> Description: Create pretty timeline\n\n{"description":"Create pretty timeline","path":"doc/main.md","content":"alpha\\nbeta"}';
          var split = splitAssistantContentBlocks (content);
@@ -1934,16 +1955,29 @@
 
       ['Dialog 51c: Live streaming keeps completed tool bubble separate from next in-progress tool', function (done) {
          var activeMarkdown = '# Dialog\n\n## User\n> Time: 2026-03-13T20:00:00Z\n\ninspect\n\n## Assistant\n> Model: gpt-5\n> Time: 2026-03-13T20:00:01Z - ...\n\n---\nTool request: run_command [call_done]\n> Description: First finished tool\n\n    {\n      "command": "pwd"\n    }\n\nResult:\n\n    {\n      "success": true,\n      "stdout": "/workspace"\n    }\n\n---\n\n---\nTool request: run_command [call_open]\n';
-         B.call ('set', 'tab', 'dialogs');
-         B.call ('set', 'currentProject', 'synthetic-live');
-         B.call ('set', 'files', ['dialog/20260313-200000-live-active.md']);
-         B.call ('set', 'currentFile', {name: 'dialog/20260313-200000-live-active.md', content: activeMarkdown, original: activeMarkdown});
-         B.call ('set', ['dialog', 'provider'], 'openai');
-         B.call ('set', ['dialog', 'model'], 'gpt-5.4');
-         B.call ('set', 'streamingDialogId', '20260313-200000-live');
-         B.call ('set', 'streaming', true);
-         B.call ('set', 'streamingMarkdown', activeMarkdown);
-         B.call ('set', 'streamingContent', '⏳ Run command — Second in-progress tool');
+         window._dialog51cApply = function () {
+            B.call ('set', 'loadingFile', false);
+            B.call ('set', 'optimisticUserMessage', null);
+            B.call ('set', 'tab', 'dialogs');
+            B.call ('set', 'currentProject', 'synthetic-live');
+            B.call ('set', 'files', ['dialog/20260313-200000-live-active.md']);
+            B.call ('set', 'currentFile', {name: 'dialog/20260313-200000-live-active.md', content: activeMarkdown, original: activeMarkdown});
+            B.call ('set', ['dialog', 'provider'], 'openai');
+            B.call ('set', ['dialog', 'model'], 'gpt-5.4');
+            B.call ('set', 'streamingDialogId', '20260313-200000-live');
+            B.call ('set', 'streaming', true);
+            B.call ('set', 'streamingMarkdown', activeMarkdown);
+            B.call ('set', 'streamingContent', '⏳ Run command — Second in-progress tool');
+         };
+         if (window._dialog51cTimer) clearInterval (window._dialog51cTimer);
+         window._dialog51cApply ();
+         window._dialog51cTimer = setInterval (window._dialog51cApply, 50);
+         setTimeout (function () {
+            if (window._dialog51cTimer) {
+               clearInterval (window._dialog51cTimer);
+               window._dialog51cTimer = null;
+            }
+         }, 400);
          done (MEDIUM_WAIT, POLL);
       }, function () {
          var toolHeaders = dale.go (document.querySelectorAll ('.chat-message.chat-tool .chat-content .tool-header'), function (node) {
@@ -1956,6 +1990,11 @@
          var streamingText = (streamingBubble.textContent || '').trim ();
          if (streamingText.indexOf ('Second in-progress tool') === -1) return 'Live streaming bubble missing second in-progress tool description';
          if (toolHeaders [0].indexOf ('Second in-progress tool') !== -1) return 'Completed tool bubble should not absorb the next in-progress tool';
+         if (window._dialog51cTimer) {
+            clearInterval (window._dialog51cTimer);
+            window._dialog51cTimer = null;
+         }
+         window._dialog51cApply = null;
          B.call ('set', 'streaming', false);
          B.call ('set', 'streamingMarkdown', null);
          B.call ('set', 'streamingContent', '');

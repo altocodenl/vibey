@@ -364,6 +364,13 @@ var parseStreamingToolHeader = function (text) {
    };
 };
 
+var stripStreamingMetadataLines = function (text) {
+   text = type (text) === 'string' ? text : '';
+   if (! text) return '';
+
+   return text.replace (/^>\s*(Id|Parent|Started|Provider|Model|Time|Usage(?: cumulative)?|Context|Resources)\s*:.*(?:\n|$)/gim, '');
+};
+
 var consumeStreamingChunk = function (piece, state) {
    piece = type (piece) === 'string' ? piece : '';
    state = state || {};
@@ -401,7 +408,7 @@ var consumeStreamingChunk = function (piece, state) {
       remaining = toolChunk.slice (toolCloseIndex + 5);
    }
 
-   return {text: visibleText, toolStarts: toolStarts};
+   return {text: stripStreamingMetadataLines (visibleText), toolStarts: toolStarts};
 };
 
 var getStreamingResumeContent = function (markdown) {
@@ -2347,7 +2354,9 @@ B.mrespond ([
                         var icon = (resultObj.success === false || resultObj.error) ? '✗' : '✓';
                         var resultLine = icon + ' ' + friendly + (description ? (' — ' + description) : '');
                         var currentRes = B.get ('streamingContent') || '';
-                        currentRes = appendStreamingStatusLine (currentRes, resultLine);
+                        var previousResultLine = tool.id ? streamingToolStatusLines [tool.id] : null;
+                        currentRes = replaceLastStreamingStatusLine (currentRes, previousResultLine, resultLine);
+                        if (tool.id) streamingToolStatusLines [tool.id] = resultLine;
                         B.call (x, 'set', 'streamingContent', currentRes);
                      }
                      else if (data.type === 'done') {
@@ -3119,7 +3128,7 @@ var toolContentUsesDiff = function (toolName, content, hasEditFile) {
 };
 
 var getStreamingMessageView = function (streamingMarkdown, streamingContent, expanded) {
-   var compactText = ((streamingContent || '').trim ()) || 'Thinking…';
+   var compactText = (stripStreamingMetadataLines (streamingContent || '').trim ()) || 'Thinking…';
    var fullText = compactText;
    var usesDiff = false;
 
