@@ -441,6 +441,12 @@
       return es;
    };
 
+   var getEventsByType = function (events, typeName) {
+      return dale.fil (events || [], undefined, function (event) {
+         if (event && event.type === typeName) return event;
+      });
+   };
+
    var LONG_WAIT    = 60000; // 1 min for LLM responses
    var MEDIUM_WAIT  = 15000;
    var SHORT_WAIT   = 3000;
@@ -2085,6 +2091,108 @@
       }, function () {
          if (window._dialogNavStart === null) return 'Dialog navigation controls not found';
          if (window._dialogNavEnd >= window._dialogNavStart) return 'Previous message button did not scroll upward';
+         return true;
+      }],
+
+      ['Dialog 52a: Create project for continue-in-fresh-dialog', function (done) {
+         window._compactProject = 'test-compact-' + testTimestamp ();
+         c.ajax ('post', 'projects', {}, {name: window._compactProject}, function (error, rs) {
+            window._compactCreate = {error: error, rs: rs};
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._compactCreate || {};
+         if (result.error) return 'Failed to create compaction project';
+         return true;
+      }],
+
+      ['Dialog 52b: Seed a source dialog for compaction', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._compactProject) + '/dialog', {}, {
+            provider: 'openai',
+            model: 'gpt-5.4',
+            slug: 'compaction-source',
+            prompt: 'Reply with exactly two short bullet points about manual compaction testing and then stop. Do not use any tools.'
+         }, function (error, rs) {
+            if (error || ! rs || ! rs.body || ! rs.body.dialogId) {
+               window._compactSeed = {error: error || 'missing dialogId', rs: rs};
+               return done (SHORT_WAIT, POLL);
+            }
+            window._compactSourceDialogId = rs.body.dialogId;
+            window._compactSourceFilename = rs.body.filename;
+            streamDialogEvents (window._compactProject, rs.body.dialogId, function (result) {
+               window._compactSeed = result;
+               done (LONG_WAIT, POLL);
+            });
+         });
+      }, function () {
+         var result = window._compactSeed || {};
+         if (result.error) return 'Failed to seed source dialog: ' + result.error;
+         var events = result.events || [];
+         if (! events.length) return 'Expected SSE events while seeding source dialog';
+         if (! getEventsByType (events, 'done').length) return 'Source dialog never finished';
+         return true;
+      }],
+
+      ['Dialog 52c: Open source dialog in UI', function (done) {
+         window.location.hash = '#/project/' + encodeURIComponent (window._compactProject) + '/dialogs/' + encodeURIComponent (window._compactSourceDialogId);
+         done (MEDIUM_WAIT, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file || ! file.name) return 'Source dialog did not load in UI';
+         var parsed = parseDialogFilename (file.name);
+         if (! parsed || parsed.dialogId !== window._compactSourceDialogId) return 'Unexpected source dialog loaded';
+         var button = findByText ('button', 'Fresh');
+         if (! button) return 'Fresh button not visible';
+         return true;
+      }],
+
+      ['Dialog 52d: Continue in fresh dialog from UI', function (done) {
+         window._compactFreshStart = Date.now ();
+         var button = findByText ('button', 'Fresh');
+         if (! button) return done (SHORT_WAIT, POLL);
+         button.click ();
+         done (LONG_WAIT * 2, POLL);
+      }, function () {
+         var file = B.get ('currentFile');
+         if (! file || ! file.name) return 'No dialog selected after continuing fresh';
+         var parsed = parseDialogFilename (file.name);
+         if (! parsed) return 'Current file is not a dialog after continuing fresh';
+         if (parsed.dialogId === window._compactSourceDialogId) return 'Still on the source dialog after continuing fresh';
+         if (B.get ('streaming')) return 'Fresh dialog is still streaming';
+         if ((B.get ('dialog', 'compaction') || null) !== null) return 'Compaction state should be cleared after handoff';
+         if ((file.content || '').indexOf ('This is a manual compaction handoff from dialog ' + window._compactSourceDialogId + '.') === -1) return 'Fresh dialog markdown is missing the handoff prompt';
+         window._compactFreshDialogId = parsed.dialogId;
+         return true;
+      }],
+
+      ['Dialog 52e: Source dialog got the compaction turn and project has both dialogs', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._compactProject) + '/dialog/' + encodeURIComponent (window._compactSourceDialogId), {}, '', function (error, rs) {
+            window._compactSourceDialog = {error: error, rs: rs};
+            c.ajax ('get', 'project/' + encodeURIComponent (window._compactProject) + '/dialogs', {}, '', function (error2, rs2) {
+               window._compactDialogs = {error: error2, rs: rs2};
+               done (MEDIUM_WAIT, POLL);
+            });
+         });
+      }, function () {
+         var source = window._compactSourceDialog || {};
+         if (source.error) return 'Failed to reload source dialog after compaction';
+         var md = source.rs && source.rs.body && source.rs.body.markdown || '';
+         if (md.indexOf ('Please compact this dialog for handoff into a fresh dialog.') === -1) return 'Source dialog is missing the compaction request turn';
+         var dialogs = window._compactDialogs && window._compactDialogs.rs && window._compactDialogs.rs.body;
+         if (type (dialogs) !== 'array') return 'Dialogs list missing after compaction';
+         var ids = dale.go (dialogs, function (item) {return item.dialogId;});
+         if (ids.indexOf (window._compactSourceDialogId) === -1) return 'Source dialog missing from dialogs list';
+         if (ids.indexOf (window._compactFreshDialogId) === -1) return 'Fresh dialog missing from dialogs list';
+         return true;
+      }],
+
+      ['Dialog 52f: Delete compaction test project', function (done) {
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._compactProject), {}, '', function (error) {
+            window._compactDeleted = ! error;
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         if (! window._compactDeleted) return 'Failed to delete compaction test project';
          return true;
       }],
 

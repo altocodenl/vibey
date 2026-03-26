@@ -75,6 +75,11 @@ var dialogDisplayLabel = function (filename) {
    return match ? match [1] : parsed.dialogId;
 };
 
+var freshDialogSlug = function (filename) {
+   var base = dialogDisplayLabel (filename || '') || 'dialog';
+   return base + '-fresh';
+};
+
 var MODEL_OPTIONS = [
    {provider: 'openai', model: 'gpt-5.4',                     label: 'OpenAI · gpt-5.4'},
    {provider: 'openai', model: 'gpt-5.2-codex',               label: 'OpenAI · gpt-5.2'},
@@ -109,6 +114,31 @@ var defaultModelForProvider = function (provider) {
       if (opt.provider === provider) return opt.model;
    });
    return found || MODEL_OPTIONS [0].model;
+};
+
+var COMPACTION_REQUEST_PROMPT = [
+   'Please compact this dialog for handoff into a fresh dialog.',
+   'Do not use any tools.',
+   'Write a concise handoff for another agent continuing the same work.',
+   'Include these sections:',
+   '- Current goal',
+   '- Work completed',
+   '- Important files, docs, commands, URLs, ports, tests, or errors to keep in mind',
+   '- Constraints, preferences, or decisions to preserve',
+   '- Open issues or risks',
+   '- Exact next steps',
+   'Output only the handoff, with short section headings.'
+].join ('\n');
+
+var buildFreshDialogPrompt = function (summary, sourceDialogId) {
+   summary = type (summary) === 'string' ? summary.trim () : '';
+   return [
+      'This is a manual compaction handoff from dialog ' + sourceDialogId + '.',
+      'Continue the work from the handoff below.',
+      'If you need more detail, you may read previous dialog files.',
+      '',
+      summary
+   ].join ('\n');
 };
 
 var hasAnyProvider = function (settings) {
@@ -1114,6 +1144,7 @@ B.mrespond ([
       B.call (x, 'set', [], {
          dialog: {
             autoStick: true,
+            compaction: null,
             input: '',
             model: 'gpt-5.4',
             provider: 'openai',
@@ -2135,6 +2166,81 @@ B.mrespond ([
       B.call (x, 'set', ['dialog', 'model'], parsed.model);
    }],
 
+   ['continue', 'freshDialog', function (x) {
+      var file = B.get ('currentFile');
+      var parsed = file && parseDialogFilename (file.name);
+      if (! parsed) return B.call (x, 'report', 'error', 'Open a dialog first.');
+      if (B.get ('streaming') || parsed.status === 'active') return B.call (x, 'report', 'error', 'Stop the current dialog before continuing in a fresh one.');
+      if (B.get ('dialog', 'compaction')) return B.call (x, 'report', 'error', 'Compaction is already in progress.');
+      if ((B.get ('dialog', 'input') || '').trim ()) return B.call (x, 'report', 'error', 'Clear the draft message before continuing in a fresh dialog.');
+
+      B.call (x, 'set', ['dialog', 'compaction'], {
+         sourceDialogId: parsed.dialogId,
+         sourceFilename: file.name,
+         provider: B.get ('dialog', 'provider') || 'openai',
+         model: B.get ('dialog', 'model') || defaultModelForProvider (B.get ('dialog', 'provider') || 'openai')
+      });
+      B.call (x, 'set', ['dialog', 'input'], COMPACTION_REQUEST_PROMPT);
+      B.call (x, 'send', 'message');
+   }],
+
+   ['finish', 'freshCompaction', function (x, sourceDialogId, sourceFilename) {
+      var project = B.get ('currentProject');
+      var compaction = B.get ('dialog', 'compaction') || {};
+      if (! project || ! sourceDialogId || compaction.sourceDialogId !== sourceDialogId) {
+         return B.call (x, 'set', ['dialog', 'compaction'], null);
+      }
+
+      fetch (projectPath (project, 'dialog/' + encodeURIComponent (sourceDialogId))).then (function (response) {
+         if (! response.ok) throw new Error ('Failed to load compacted dialog');
+         return response.json ();
+      }).then (function (data) {
+         var messages = (data && data.messages) || parseDialogContent ((data && data.markdown) || '');
+         var lastAssistant = dale.stopNot ((messages || []).slice ().reverse (), undefined, function (msg) {
+            if (msg && msg.role === 'assistant' && type (msg.content) === 'string' && msg.content.trim ()) return msg;
+         });
+
+         if (! lastAssistant || ! lastAssistant.content || ! lastAssistant.content.trim ()) throw new Error ('Compaction produced no handoff');
+
+         var payload = {
+            provider: compaction.provider || 'openai',
+            model: compaction.model || defaultModelForProvider (compaction.provider || 'openai'),
+            slug: freshDialogSlug (sourceFilename),
+            prompt: buildFreshDialogPrompt (lastAssistant.content, sourceDialogId)
+         };
+         var csrf = B.get ('cloudCsrf');
+         if (csrf) payload.csrf = csrf;
+
+         return fetch (projectPath (project, 'dialog'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify (payload)
+         });
+      }).then (function (response) {
+         if (! response.ok) return response.text ().then (function (text) {throw new Error (text || ('HTTP ' + response.status));});
+         return response.json ();
+      }).then (function (data) {
+         B.call (x, 'set', ['dialog', 'compaction'], null);
+         B.call (x, 'set', ['dialog', 'input'], '');
+         B.call (x, 'set', 'streaming', true);
+         B.call (x, 'set', 'streamingContent', '');
+         B.call (x, 'set', 'optimisticUserMessage', null);
+         B.call (x, 'set', 'contextWindow', null);
+         if (data && data.filename) {
+            B.call (x, 'set', ['currentFile', 'name'], data.filename);
+            B.call (x, 'load', 'files');
+            B.call (x, 'load', 'file', data.filename);
+         }
+         if (data && data.dialogId) B.call (x, 'start', 'dialogStream', data.dialogId, data.filename || null, null);
+      }).catch (function (error) {
+         B.call (x, 'set', ['dialog', 'compaction'], null);
+         B.call (x, 'set', 'streaming', false);
+         B.call (x, 'set', 'streamingContent', '');
+         B.call (x, 'set', 'streamingMarkdown', null);
+         B.call (x, 'report', 'error', 'Failed to continue in a fresh dialog: ' + error.message);
+      });
+   }],
+
    ['send', 'message', function (x) {
       var file = B.get ('currentFile');
       var input = B.get ('dialog', 'input');
@@ -2216,6 +2322,7 @@ B.mrespond ([
                B.call (x, 'start', 'dialogStream', dialogId, filename || streamFilename, originalInput);
             }
          }).catch (function (err) {
+            B.call (x, 'set', ['dialog', 'compaction'], null);
             B.call (x, 'report', 'error', 'Failed to send: ' + err.message);
             B.call (x, 'set', 'streaming', false);
             B.call (x, 'set', 'optimisticUserMessage', null);
@@ -2239,11 +2346,13 @@ B.mrespond ([
                   B.call (x, 'load', 'file', found.filename);
                }
                B.call (x, 'load', 'files');
+               B.call (x, 'set', ['dialog', 'compaction'], null);
                return B.call (x, 'report', 'error', 'This dialog is currently active. Stop it before sending a new message.');
             }
 
             runSend ();
          }).catch (function (err) {
+            B.call (x, 'set', ['dialog', 'compaction'], null);
             B.call (x, 'report', 'error', 'Failed to check dialog status: ' + err.message);
          });
       }
@@ -2285,6 +2394,7 @@ B.mrespond ([
       var streamingChunkState = {inToolChunk: false};
       var streamingToolDescriptions = {};
       var streamingToolStatusLines = {};
+      var compactionFollowUp = false;
 
       var finalize = function () {
          if (activeDialogStream && activeDialogStream.dialogId === dialogId) activeDialogStream = null;
@@ -2301,6 +2411,7 @@ B.mrespond ([
             if (targetFilename && latestParsed && latestParsed.dialogId === dialogId) B.call (x, 'load', 'file', targetFilename);
             B.call (x, 'load', 'files');
          }
+         if (compactionFollowUp) B.call (x, 'finish', 'freshCompaction', dialogId, targetFilename || filename);
       };
 
       fetch (projectPath (project, 'dialog/' + encodeURIComponent (dialogId) + '/stream'), {
@@ -2393,8 +2504,11 @@ B.mrespond ([
                      else if (data.type === 'done') {
                         if (data.result && data.result.filename) targetFilename = data.result.filename;
                         if (data.result && data.result.status === 'done') receivedContent = true;
+                        var compaction = B.get ('dialog', 'compaction') || {};
+                        if (compaction.sourceDialogId === dialogId && data.result && data.result.status === 'done' && ! data.result.interrupted) compactionFollowUp = true;
                      }
                      else if (data.type === 'error') {
+                        B.call (x, 'set', ['dialog', 'compaction'], null);
                         B.call (x, 'report', 'error', data.error);
                         if (originalInput) B.call (x, 'set', ['dialog', 'input'], originalInput);
                      }
@@ -2405,6 +2519,7 @@ B.mrespond ([
                read ();
             }).catch (function (error) {
                if (error && error.name === 'AbortError') return finalize ();
+               B.call (x, 'set', ['dialog', 'compaction'], null);
                B.call (x, 'report', 'error', 'Stream error: ' + error.message);
                if (originalInput) B.call (x, 'set', ['dialog', 'input'], originalInput);
                finalize ();
@@ -2414,6 +2529,7 @@ B.mrespond ([
          read ();
       }).catch (function (error) {
          if (error && error.name === 'AbortError') return finalize ();
+         B.call (x, 'set', ['dialog', 'compaction'], null);
          B.call (x, 'report', 'error', 'Stream error: ' + error.message);
          if (originalInput) B.call (x, 'set', ['dialog', 'input'], originalInput);
          finalize ();
@@ -2451,6 +2567,7 @@ B.mrespond ([
             B.call (x, 'set', 'streamingContent', '');
             B.call (x, 'set', 'streamingMarkdown', null);
             B.call (x, 'set', 'optimisticUserMessage', null);
+            B.call (x, 'set', ['dialog', 'compaction'], null);
 
             fetch (projectPath (B.get ('currentProject'), 'dialogs')).then (function (rs) {
                if (! rs.ok) return null;
@@ -3663,6 +3780,7 @@ views.dialogs = function () {
    return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['streamingMarkdown'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin'], ['viewportPhone'], ['mobileDialogsPanel']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, streamingMarkdown, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin, viewportPhone, mobileDialogsPanel) {
 
       dialog = dialog || {};
+      var compaction = dialog.compaction || null;
       var input = dialog.input;
       var model = dialog.model;
       var provider = dialog.provider;
@@ -3748,6 +3866,12 @@ views.dialogs = function () {
                      class: 'btn-small',
                      onclick: B.ev ('set', 'mobileDialogsPanel', 'dialogs')
                   }, 'Dialogs'] : '',
+                  isDialog ? ['button', {
+                     class: 'btn-small',
+                     title: 'Continue in a fresh dialog',
+                     onclick: B.ev ('continue', 'freshDialog'),
+                     disabled: noProvider || streaming || dialogIsActive || compaction || (input && input.trim ())
+                  }, compaction ? 'Compacting...' : 'Fresh'] : '',
                   ['button', {
                      class: 'btn-small',
                      title: 'Previous message',

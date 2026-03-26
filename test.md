@@ -335,6 +335,12 @@ Notes:
 52. **Previous/next message navigation buttons**:
     - Client: dialog header shows previous/next arrow buttons.
     - Client: clicking them scrolls the dialog area to the previous/next message.
+53. **Continue in fresh dialog (manual compaction)**:
+    - Client: when viewing a done dialog, a `Fresh` button is visible in the dialog header.
+    - Client: clicking it sends a fixed compaction prompt to the current dialog, waits for that turn to finish, then opens a brand-new dialog automatically.
+    - Client: the new dialog's first user prompt contains the handoff text prefixed with `This is a manual compaction handoff from dialog ...`.
+    - Client: the source dialog keeps the compaction turn in its markdown history.
+    - Client: after the handoff, compaction state is cleared and both source + fresh dialogs appear in the dialogs list.
 
 **Static app:**
 
