@@ -3251,6 +3251,7 @@ var routes = [
          ['head', [
             ['meta', {name: 'viewport', content: 'width=device-width,initial-scale=1'}],
             ['meta', {charset: 'utf-8'}],
+            CLOUD ? ['base', {href: '/app/'}] : '',
             ['title', 'vibey'],
             ['link', {rel: 'stylesheet', href: 'https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css'}],
             ['link', {rel: 'stylesheet', href: 'https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css'}],

@@ -4079,7 +4079,8 @@ views.projects = function () {
                   var pcolor = projectNameColor (displayName);
                   return ['div', {
                      class: 'project-card' + (viewportPhone ? ' project-card-phone' : ''),
-                     style: style ({'background-color': pcolor.bg, color: pcolor.text, border: 'none'})
+                     style: style ({'background-color': pcolor.bg, color: pcolor.text, border: 'none'}),
+                     onclick: viewportPhone ? undefined : B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
                   }, viewportPhone ? [
                      ['div', {
                         class: 'project-card-main-phone',
