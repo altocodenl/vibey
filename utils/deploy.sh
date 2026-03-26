@@ -16,9 +16,11 @@ wc -l client.js client-css.js server.js test-client.js test-server.js website.js
 if [ "$2" == "website" ] ; then
    node website
    scp website.html $HOST:/var/www/html
+   ssh $HOST "mkdir -p /var/www/html/video"
+   rsync -av video/ $HOST:/var/www/html/video/
    exit 0
 fi
 
-rsync -av . $HOST:$FOLDER
+rsync -av --exclude video . $HOST:$FOLDER
 ssh $HOST chown -R root /root/$FOLDER
 ssh $HOST "cd $FOLDER && node -e \"var fs=require('fs'); var path='secret.json'; var data=JSON.parse(fs.readFileSync(path, 'utf8')); data.domain='https://buildwithvibey.com/app'; fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\\n');\" && VIBEY_CLOUD=1 docker compose up --build -d"

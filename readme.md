@@ -466,6 +466,13 @@ Input area: provider select (Claude/OpenAI), textarea (Cmd+Enter to send), Send 
 
 At the top right of the dialog area, arrow buttons jump to the previous/next message inside the scroll area.
 
+When viewing a done dialog, the user can choose **Continue in fresh dialog**. The client implements this as a manual compaction flow:
+1. send a fixed handoff-summary prompt to the current dialog,
+2. wait for that compaction turn to finish,
+3. start a brand-new dialog whose first user prompt is the produced handoff text.
+
+This uses the existing dialog routes only — no special server compaction endpoint or extra tool call is required.
+
 User messages are rendered optimistically (shown immediately when sent).
 
 Message resources/tokens are shown from each section's `> Resources:` metadata line.
@@ -956,43 +963,56 @@ Bigger refactors:
 - Break up the two mega-views into smaller nested `B.view`s so that e.g. `dialog.input` changes only redraw the input area, not the entire dialog view. The B.views can be inline, no need to extract them to a separate variable. Bring state down to where it's needed, instead of up as in react.
 - The `setTimeout(fn, 0)` calls for auto-file-select (line 1261) and auto-scroll (line 980) are workarounds for ordering issues — replace with explicit sequencing in responders.
 
+### Mobile UX (implemented)
+
+The current client has a dedicated phone layout for viewports narrower than `768px`; desktop layout remains unchanged at `768px` and above.
+
+#### Navigation and layout
+
+- Phone uses a **single-pane layout** instead of the desktop multi-pane layout.
+- A persistent **bottom navigation** provides four primary entries: **Projects**, **Docs**, **Dialogs**, and **More**.
+- A phone-specific **top bar** shows the current surface and project context.
+- The **More** entry opens a phone-only secondary-actions sheet, including access to **Settings**, **Snapshots**, test runner, and logout, without changing desktop navigation.
+
+#### Docs on phone
+
+- The desktop left sidebar is replaced by phone-only sheets for:
+  - the **docs/files list**
+  - the **uploads list**
+- Docs use a single primary surface at a time: there is **no split editor/preview** on phone.
+- The editor header exposes explicit phone actions to:
+  - open the docs list
+  - open uploads
+  - toggle **Edit / Preview**
+  - **Save** while dirty
+- When no doc is selected, phone users get explicit actions to browse docs or uploads.
+- Uploads remain available on phone through the uploads sheet, including upload, selection, and preview.
+
+#### Dialogs on phone
+
+- The desktop dialog list sidebar is replaced by a phone-only **dialogs sheet**.
+- Dialogs keep the conversation as the primary surface, with an explicit button to open the dialog list.
+- The composer is **sticky above the keyboard** on phone.
+- Streaming keeps the same readable bubble rendering as desktop, avoiding blank-looking assistant bubbles.
+- Tool calls remain compact/collapsible in the chat UI, which keeps the mobile dialog surface readable.
+
+#### Projects, settings, and snapshots on phone
+
+- Projects use a phone-specific **card layout** with larger tap targets and explicit **Open** / **Delete** actions.
+- Settings-related surfaces use a phone-specific stacked-card layout with **full-width actions**.
+- Snapshots use phone-specific stacked cards and wrapped action buttons, without changing desktop snapshots behavior.
+- Destructive actions remain behind explicit buttons or confirmations.
+
+#### Mobile behavior details
+
+- The client tracks phone/desktop viewport mode and updates the UI when the viewport crosses the `768px` breakpoint.
+- Focused textareas and inputs are scrolled into view on phone to better handle the **soft keyboard**.
+- Phone-specific layout elements account for mobile viewport constraints, including safe bottom spacing for sticky controls.
+
 ## TODO now
 
-Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 
-- Mobile friendly UI
-   - [DONE] On phones, switch from the current multi-pane desktop layout to a single-pane layout: show one primary surface at a time.
-   - [DONE] Add a bottom navigation with 4 entries: Projects, Docs, Dialogs, More.
-   - Replace left sidebars with sheets/drawers on mobile:
-      - [DONE] Files list
-      - [DONE] Dialog list
-      - [DONE] Uploads
-      - [DONE] More menu
-         - [DONE] Add a phone-only More menu surface for secondary actions, without changing desktop navigation behavior.
-         - [DONE] Snapshots should use phone-only stacked cards/actions, without changing desktop snapshots behavior.
-      - Projects list
-   - Docs on mobile:
-      - [DONE] No split editor/preview.
-      - [DONE] Show either edit or preview, with a clear toggle.
-      - [DONE] Keep save visible while dirty.
-      - [DONE] Make the file list and uploads available from phone-only sheets/buttons, without changing desktop docs behavior.
-   - Dialogs on mobile:
-      - [DONE] Sticky composer above the keyboard.
-      - Tool calls collapsed by default.
-      - [DONE] Easy access to the dialog list from a phone-only sheet/button, without changing desktop dialogs behavior.
-      - [DONE] Keep streaming readable; never show cramped or blank-looking bubbles.
-   - Settings/Admin/Access on mobile:
-      - [DONE] Stack cards vertically.
-      - [DONE] Use full-width buttons.
-      - [DONE] Keep destructive actions inside explicit menus or confirmations.
-      - [DONE] Do this with phone-only layout changes, without changing desktop settings/admin/access behavior.
-   - [DONE] Use only 2 responsive modes:
-      - [DONE] phone: <768px
-      - [DONE] desktop: ≥768px
-   - [DONE] On phone, optimize for reading docs, reading dialogs, sending prompts, light editing, and project switching.
-   - [DONE] Projects on mobile should use phone-only card/action treatment with larger tap targets and explicit open/delete actions, without changing desktop project behavior.
-   - [DONE] Handle the soft keyboard properly: keep the focused textarea/composer visible, scroll focused inputs into view on phone, and avoid viewport-height glitches.
-- "Continue in fresh dialog": manual compaction
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
 - Demo videos
    - Tictactoe

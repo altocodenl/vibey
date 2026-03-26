@@ -1,8 +1,18 @@
 ## Vibey development notes
 
+### 2026-03-26
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
+
+- Please implement the compaction feature. First readme.md (spec), then test.md, then server (test & code), then client (test & code). I think we don't need a further tool call here, it'd be just a prebuilt prompt that tells the agent to make the compaction and with that text call the new agent.
+- Please fix going to an existing project when I click on its button.
+- Go to ~/Movies, find tictactoe.mov, create a new video putting it in that web quality and format, removing the last second, also removing seconds 40 to 55
+- Command to convert to web video: ffmpeg -i input.mov -vcodec libx264 -crf 23 -preset slow -pix_fmt yuv420p -movflags +faststart -an output.mp4
+- Please take ~/Movies/gdp.mov and make gdp.mp4 here in the video folder. Put a demo selector at the top of the videos to go to the next one, with a title on top of each and an arrow to go left right
+
 ### 2026-03-25
 
-Intro prompt: Hi! I'm building vibey. See please readme.md and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 
 - Please fix the client tests.
 - Please modify the server and client tests so that a noslow flag skips static and backend. Please make the client tests follow the order of the server ones.

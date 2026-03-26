@@ -69,6 +69,59 @@ var styles = css ([
       margin: '0 auto',
       'line-height': '1.6'
    }],
+   ['.demo-carousel', {
+      'margin-top': '32px'
+   }],
+   ['.demo-nav', {
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'center',
+      gap: '16px',
+      'margin-bottom': '16px'
+   }],
+   ['.demo-title', {
+      'font-size': '1rem',
+      'font-weight': '600',
+      color: C.textDim,
+      'min-width': '160px',
+      'text-align': 'center'
+   }],
+   ['.demo-arrow', {
+      background: 'transparent',
+      border: '1px solid ' + C.border,
+      'border-radius': '50%',
+      width: '36px',
+      height: '36px',
+      color: C.text,
+      'font-size': '1.4rem',
+      cursor: 'pointer',
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'center',
+      transition: 'border-color 0.15s, color 0.15s',
+      'font-family': font,
+      'line-height': '1'
+   }],
+   ['.demo-arrow:hover', {
+      'border-color': C.accent,
+      color: C.accent
+   }],
+   ['.demo-videos', {
+      position: 'relative'
+   }],
+   ['.demo-video', {
+      display: 'none'
+   }],
+   ['.demo-video.active', {
+      display: 'block'
+   }],
+   ['.hero-video', {
+      width: '100%',
+      'max-width': '740px',
+      'border-radius': '12px',
+      border: '1px solid ' + C.border,
+      'box-shadow': '0 8px 32px rgba(0, 0, 0, 0.4)'
+   }],
 
    // *** PILLARS ***
    ['.pillars', {
@@ -431,7 +484,27 @@ var copyScript = [
    '  button.setAttribute("aria-expanded", expanded ? "false" : "true");',
    '  body.hidden = expanded;',
    '  if (caret) caret.textContent = expanded ? "▾" : "▸";',
-   '});'
+   '});',
+   '(function() {',
+   '  var demos = [].slice.call(document.querySelectorAll(".demo-video"));',
+   '  var title = document.querySelector(".demo-title");',
+   '  var idx = 0;',
+   '  function show(i) {',
+   '    demos[idx].classList.remove("active");',
+   '    demos[idx].pause();',
+   '    idx = (i + demos.length) % demos.length;',
+   '    demos[idx].classList.add("active");',
+   '    if (!demos[idx].src || demos[idx].src === window.location.href) {',
+   '      var sources = {1: "https://buildwithvibey.com/video/gdp.mp4"};',
+   '      if (sources[idx]) demos[idx].src = sources[idx];',
+   '    }',
+   '    demos[idx].play();',
+   '    title.textContent = demos[idx].getAttribute("data-title");',
+   '  }',
+   '  show(0);',
+   '  document.querySelector(".demo-prev").addEventListener("click", function() { show(idx - 1); });',
+   '  document.querySelector(".demo-next").addEventListener("click", function() { show(idx + 1); });',
+   '})();'
 ].join ('\n');
 
 // *** HELPERS ***
@@ -480,6 +553,17 @@ var page = ['html', {lang: 'en'}, [
          ['div', {class: 'hero'}, [
             ['h1', ['LITERAL', '<em>Vibey</em>']],
             ['p', {class: 'tagline'}, 'Build with words, not code.'],
+            ['div', {class: 'demo-carousel'}, [
+               ['div', {class: 'demo-nav'}, [
+                  ['button', {class: 'demo-arrow demo-prev', 'aria-label': 'Previous demo'}, '‹'],
+                  ['span', {class: 'demo-title'}, ''],
+                  ['button', {class: 'demo-arrow demo-next', 'aria-label': 'Next demo'}, '›'],
+               ]],
+               ['div', {class: 'demo-videos'}, [
+                  ['video', {class: 'hero-video demo-video active', 'data-title': 'Tic Tac Toe', src: 'https://buildwithvibey.com/video/tictactoe.mp4', autoplay: true, muted: true, loop: true, playsinline: true}, ''],
+                  ['video', {class: 'hero-video demo-video', 'data-title': 'GDP Visualization', src: '', muted: true, loop: true, playsinline: true}, ''],
+               ]],
+            ]],
          ]],
 
          // *** AUDIENCE ***
