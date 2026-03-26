@@ -224,8 +224,8 @@ var renderMarkdownWithEmbeds = function (markdown, project) {
       var embedPath = embed.path || '/';
       if (embedPath [0] !== '/') embedPath = '/' + embedPath;
       var src = embed.port === 'static'
-         ? '/project/' + encodeURIComponent (project) + '/static' + embedPath
-         : '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embedPath;
+         ? 'project/' + encodeURIComponent (project) + '/static' + embedPath
+         : 'project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embedPath;
       var portLabel = embed.port === 'static' ? ('static' + embedPath) : (':' + embed.port + embedPath);
       html = html.replace (tag, lith.g (['div', {class: 'embed-container'}, [
          ['div', {class: 'embed-header'}, [
@@ -3422,8 +3422,8 @@ var renderChatContent = function (text, project, isDiff) {
             var embedPath = embed.path || '/';
             if (embedPath [0] !== '/') embedPath = '/' + embedPath;
             var src = embed.port === 'static'
-               ? '/project/' + encodeURIComponent (project) + '/static' + embedPath
-               : '/project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embedPath;
+               ? 'project/' + encodeURIComponent (project) + '/static' + embedPath
+               : 'project/' + encodeURIComponent (project) + '/proxy/' + embed.port + embedPath;
             var portLabel = embed.port === 'static' ? ('static' + embedPath) : (':' + embed.port + embedPath);
             result.push (['div', {class: 'embed-container', opaque: true}, [
                ['div', {class: 'embed-header'}, [
