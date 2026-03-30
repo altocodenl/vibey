@@ -582,27 +582,27 @@ var page = ['html', {lang: 'en'}, [
          // *** PILLARS ***
          ['div', {class: 'pillars'}, [
             ['h2', 'How is vibey different?'],
-            pillar (1, 'Everything is a document',
-               'Your description of what you\'re building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. <strong>There is no database.</strong>', true),
+            pillar (1, 'Communication as the basis',
+               '<em>Everything is a document.</em> Your description of what you\'re building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. <strong>There is no database.</strong>', true),
 
-            pillar (2, 'Everything in your browser',
-               'Your documents are not only text: use images, audio, and embed small apps in your documents. No terminal or dedicated native app required.'),
+            pillar (2, 'Connected through the web',
+               '<em>Everything in your browser.</em> Your documents are not only text: use images, audio, and embed small apps in your documents. Everything has an URL. No terminal or dedicated native app needed.'),
 
-            pillar (3, 'Safe YOLO',
-               'The agents don\'t ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. <strong>But</strong> each project is fully isolated in its own container and volume. A rogue agent\'s blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.'),
+            pillar (3, 'Autonomy with walls',
+               '<em>Agents run YOLO within a self-contained project.</em> The agents don\'t ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. <strong>But</strong> each project is fully isolated in its own container and volume. A rogue agent\'s blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.'),
 
-            pillar (4, 'BYOAI',
-               'Bring your own OpenAI/Anthropic credentials, whether personal or API keys.'),
+            pillar (4, 'Transparent',
+               '<em>Bring your own AI credentials,</em> whether personal or API keys. See every call that your agents make.'),
 
-            pillar (5, 'Open source',
-               'Both the local and cloud versions are open source.'),
+            pillar (5, 'Freedom',
+               'Vibey is open source. <a href="https://altocode.nl" style="color: ' + C.accent + '">Altocode</a>, the company behind Vibey cloud, is an <a href="https://altocode.nl/blog/altocode-is-an-openbound" style="color: ' + C.accent + '">openbound</a>.'),
 
          ]],
 
          // *** ADVENTURE ***
          ['div', {class: 'adventure'}, [
             ['h2', 'Choose your own adventure'],
-            ['p', {class: 'intro'}, 'After reading the five things above, choose how you want to run vibey.'],
+            ['p', {class: 'intro'}, 'Choose how you want to run vibey.'],
             ['div', {class: 'adventure-switcher'}, [
                ['button', {class: 'adventure-btn active', 'data-mode': 'local'}, 'I want to run vibey locally'],
                ['button', {class: 'adventure-btn', 'data-mode': 'cloud'}, 'I want to use vibey on the cloud']
