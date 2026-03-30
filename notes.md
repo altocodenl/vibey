@@ -1,5 +1,32 @@
 ## Vibey development notes
 
+### 2026-03-30
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+- Please change the trigger API to only take models, not providers. Also add gpt-4.1 and haiku 4.6
+- Also add an endpoint to expose models and their windows, and make the client fetch it. Please reorganize the object to be scoped as {anthropic: {...}, openai: {...}}
+- Please remove the provider parameter.
+
+### 2026-03-28
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+- I want triggers to be done through email. We can whitelist it if the API key is somewhere in the subject or the content of the email. The subject and body of the email would be in the trigger. Let's start by designing. I'm particularly interested in the MX/email receiving part of it. Ideally, it should be a special email, something like trigger+<USER ID>-<PROJECT SLUG>@buildwithvibey.com. Besides an MX record, what would I need to get it into node?
+- Good review. Don't implement anything, review these suggestions:
+   - Let's try to do it self-contained, as much as possible.
+   - Add a SMTP server inside a conditional on the server (if cloud is set to 1 and email is not disabled). Make it listen on port 25.
+   - Let's configure the email address to receive as a variable set in utils/deploy.sh, setting it now to `trigger@buildwithvibey.com`.
+   - To figure out the `+<ID>` part of the email (as in `trigger+<ID>@buildwithvibey.com`), let's do this: on project initialization, we create a crypto strong id and put it in redis. It maps to a string with the user id and the project slug. These keys will be named `trigger:<ID>`. We don't need API keys for this. When the project is deleted, the trigger id is also deleted from the DB.
+   - The email would be a trigger of the shape {from: ..., subject: ...., body: ...}, placed in the `data` property.
+   - Let's remove the vibey API keys (not the openai/anthropic keys, of course) completely for API triggers, and instead use this trigger ID.
+   - From the client, the trigger ID can be copied in two ways: for API: it gives you `Bearer: ID`. For email, it gives you `trigger+ID@buildwithvibey.com`. This is only shown in client mode.
+   - Change the trigger endpoint to POST /trigger only.
+   - When we get an email, we find the slug entry. If it exists, we do the trigger. Same goes for the incoming API call. The code for the email slug should also use what the API endpoint uses as much as possible.
+   - Let's allow for an autodetection of provider, if one is not present, for both email and API, find the providers that has live credentials (if both openai and claude are available, default to openai because the rate limits are higher).
+   - Let's also write a migration for 1) putting triggers on all existing projects (also those that are "asleep", by matching data volumes with a certain name pattern); 2) remove old API keys.
+- Please start implementing this in an orderly way: readme.md first, then test.md, then server (tests & code), then client (tests & code). Don't run it yet.
+
 ### 2026-03-26
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.

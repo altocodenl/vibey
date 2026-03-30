@@ -569,6 +569,17 @@ var DIALOG_SLUG = 'dialog-read-vibey';
 
 var dialogSequence = [
 
+   ['Dialog 0: GET /models returns provider-scoped model list', 'get', 'models', {}, '', 200, function (s, rq, rs) {
+      if (type (rs.body) !== 'object') return log ('Expected object body from GET /models');
+      if (! rs.body.openai || type (rs.body.openai) !== 'object') return log ('Missing openai key in models');
+      if (! rs.body.anthropic || type (rs.body.anthropic) !== 'object') return log ('Missing anthropic key in models');
+      if (! rs.body.openai ['gpt-5.4'] || ! rs.body.openai ['gpt-5.4'].context) return log ('Missing gpt-5.4 in openai models');
+      if (! rs.body.openai ['gpt-4.1'] || ! rs.body.openai ['gpt-4.1'].context) return log ('Missing gpt-4.1 in openai models');
+      if (! rs.body.anthropic ['claude-sonnet-4-6'] || ! rs.body.anthropic ['claude-sonnet-4-6'].context) return log ('Missing claude-sonnet-4-6 in anthropic models');
+      if (! rs.body.anthropic ['claude-haiku-4-6'] || ! rs.body.anthropic ['claude-haiku-4-6'].context) return log ('Missing claude-haiku-4-6 in anthropic models');
+      return true;
+   }],
+
    ['Dialog 1: GET / serves shell', 'get', '/', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'string') return log ('Expected HTML string body');
       if (rs.body.indexOf ('client.js') === -1) return log ('HTML shell missing client.js');
@@ -1353,68 +1364,127 @@ var dialogSequence = [
          return next ();
       }
 
-      var loginFresh = function () {
-         cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
-            if (loginError) {
-               s.skipDialogCloudTrigger = true;
-               return next ();
-            }
-            s.dialogCloudAuth = auth;
-            next ();
-         });
-      };
-
-      loginFresh ();
-   }],
-
-   ['Dialog 50: Cloud trigger creates dialog via API key', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-      var auth = s.dialogCloudAuth;
-      if (! auth) return log ('Missing dialog cloud auth');
-
-      authGet ('/settings', auth, function (settingsError, settingsStatus, settingsBody) {
-         if (settingsError) return log ('Dialog cloud GET /settings failed: ' + settingsError.message);
-         if (settingsStatus !== 200) return log ('Expected 200 from dialog cloud settings, got ' + settingsStatus);
-         if (! settingsBody || ! settingsBody.userApiKey) return log ('Expected userApiKey in dialog cloud settings');
-         if (! settingsBody.userApiKey.key) return log ('Expected first dialog cloud settings load to reveal raw api key');
-         if (settingsBody.userApiKey.lastUsed) return log ('Dialog cloud api key should start unused');
-
-         s.dialogCloudApiKey = settingsBody.userApiKey.key;
-
-         authJson ('POST', '/projects', {name: 'dialog-cloud-trigger-' + testTimestamp ()}, auth, function (projectError, projectStatus, projectBody) {
-            if (projectError) return log ('Dialog cloud project create failed: ' + projectError.message);
-            if (projectStatus !== 200) return log ('Expected 200 creating dialog cloud project, got ' + projectStatus);
-            if (! projectBody || ! projectBody.slug) return log ('Dialog cloud project create missing slug');
-            s.dialogCloudProjectSlug = projectBody.slug;
-
-            httpJson ('POST', '/project/' + encodeURIComponent (s.dialogCloudProjectSlug) + '/trigger', {
-               provider: 'openai',
-               prompt: 'Reply with the single word ok.',
-               slug: 'api-key-trigger'
-            }, function (triggerError, triggerStatus, triggerBody) {
-               if (triggerError) return log ('Dialog cloud trigger failed: ' + triggerError.message);
-               if (triggerStatus !== 202) return log ('Expected 202 from trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
-               if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad trigger response: ' + JSON.stringify (triggerBody));
-               s.dialogCloudTriggeredDialogId = triggerBody.dialogId;
-               next ();
-            }, {Authorization: 'Bearer ' + s.dialogCloudApiKey});
-         });
-      });
-   }],
-
-   ['Dialog 51: Cloud trigger updates lastUsed in settings', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-      authGet ('/settings', s.dialogCloudAuth, function (error, status, body) {
-         if (error) return log ('Dialog cloud GET /settings after trigger failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 from dialog cloud settings after trigger, got ' + status);
-         if (! body || ! body.userApiKey) return log ('Expected userApiKey in dialog cloud settings after trigger');
-         if (! body.userApiKey.lastUsed) return log ('Expected lastUsed after trigger');
+      cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
+         if (loginError) {
+            s.skipDialogCloudTrigger = true;
+            return next ();
+         }
+         s.dialogCloudAuth = auth;
          next ();
       });
    }],
 
-   ['Dialog 52: Cloud trigger cleanup project', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Dialog 50: Cloud trigger — create project and verify trigger ID in Redis', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+      var auth = s.dialogCloudAuth;
+      if (! auth) return log ('Missing dialog cloud auth');
+
+      authJson ('POST', '/projects', {name: 'dialog-cloud-trigger-' + testTimestamp ()}, auth, function (projectError, projectStatus, projectBody) {
+         if (projectError) return log ('Dialog cloud project create failed: ' + projectError.message);
+         if (projectStatus !== 200) return log ('Expected 200 creating dialog cloud project, got ' + projectStatus);
+         if (! projectBody || ! projectBody.slug) return log ('Dialog cloud project create missing slug');
+         s.dialogCloudProjectSlug = projectBody.slug;
+
+         // Look up trigger ID for this project
+         authGet ('/project/' + encodeURIComponent (s.dialogCloudProjectSlug) + '/trigger-id', auth, function (trigError, trigStatus, trigBody) {
+            if (trigError) return log ('GET trigger-id failed: ' + trigError.message);
+            if (trigStatus !== 200) return log ('Expected 200 from GET trigger-id, got ' + trigStatus);
+            if (! trigBody || ! trigBody.triggerId) return log ('Missing triggerId in response');
+            s.dialogCloudTriggerId = trigBody.triggerId;
+
+            // Verify Redis: trigger:<id> maps to userId:projectSlug
+            redisGet ('trigger:' + trigBody.triggerId, function (err, val) {
+               if (err || ! val) return log ('trigger:<id> not found in Redis');
+               // val should contain userId:projectSlug
+               if (val.indexOf (s.dialogCloudProjectSlug) === -1) return log ('trigger:<id> value does not contain project slug: ' + val);
+               next ();
+            });
+         });
+      });
+   }],
+
+   ['Dialog 51: Cloud trigger — POST /trigger with Bearer token creates dialog', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         prompt: 'Reply with the single word ok.',
+         slug: 'api-trigger'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerError) return log ('Dialog cloud trigger failed: ' + triggerError.message);
+         if (triggerStatus !== 202) return log ('Expected 202 from trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad trigger response: ' + JSON.stringify (triggerBody));
+         s.dialogCloudTriggeredDialogId = triggerBody.dialogId;
+         next ();
+      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
+   }],
+
+   ['Dialog 52: Cloud trigger — POST /trigger with data (email shape) creates dialog', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         data: {from: 'test@example.com', subject: 'Test trigger', body: 'Run echo hello'},
+         slug: 'email-trigger'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerError) return log ('Dialog cloud data trigger failed: ' + triggerError.message);
+         if (triggerStatus !== 202) return log ('Expected 202 from data trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad data trigger response: ' + JSON.stringify (triggerBody));
+         next ();
+      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
+   }],
+
+   ['Dialog 53: Cloud trigger — POST /trigger with explicit model resolves provider', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         model: 'gpt-4.1',
+         prompt: 'Reply with the single word ok.',
+         slug: 'model-trigger'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerError) return log ('Dialog cloud model trigger failed: ' + triggerError.message);
+         if (triggerStatus !== 202) return log ('Expected 202 from model trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad model trigger response: ' + JSON.stringify (triggerBody));
+         next ();
+      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
+   }],
+
+   ['Dialog 54: Cloud trigger — invalid trigger ID returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         prompt: 'test'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerStatus !== 403) return log ('Expected 403 for invalid trigger ID, got ' + triggerStatus);
+         next ();
+      }, {Authorization: 'Bearer invalid-trigger-id-12345'});
+   }],
+
+   ['Dialog 55: Cloud trigger — no prompt and no data returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         slug: 'empty-trigger'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerStatus !== 400) return log ('Expected 400 for missing prompt/data, got ' + triggerStatus);
+         next ();
+      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
+   }],
+
+   ['Dialog 56: Cloud trigger — unknown model returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipDialogCloudTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         model: 'not-a-real-model',
+         prompt: 'test'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerStatus !== 400) return log ('Expected 400 for unknown model, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         next ();
+      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
+   }],
+
+   ['Dialog 57: Cloud trigger — cleanup project and verify trigger ID removed', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipDialogCloudTrigger || ! s.dialogCloudProjectSlug) return next ();
+      var triggerId = s.dialogCloudTriggerId;
+
       var req = http.request ({
          hostname: 'localhost',
          port: 5353,
@@ -1423,7 +1493,13 @@ var dialogSequence = [
          headers: {Cookie: cookieHeader (s.dialogCloudAuth.cookies)}
       }, function (res) {
          res.on ('data', function () {});
-         res.on ('end', function () {next ();});
+         res.on ('end', function () {
+            // Verify trigger ID is removed from Redis
+            redisGet ('trigger:' + triggerId, function (err, val) {
+               if (val) return log ('trigger:<id> should be deleted after project deletion, but still exists: ' + val);
+               next ();
+            });
+         });
       });
       req.on ('error', function () {next ();});
       req.end ();
@@ -2415,29 +2491,13 @@ var cloudSequence = [
       });
    }],
 
-   ['Cloud 6: Config admin is marked as admin and gets a dedicated API key record', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 6: Config admin is marked as admin', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
       redisHgetall ('user:' + s.adminUserId, function (err, user) {
          if (err || ! user) return log ('Failed to read admin user from Redis');
          if (user.admin !== '1') return log ('Config admin should have admin=1, got: ' + user.admin);
          if (user.email !== s.cloudAdminEmail) return log ('Admin email mismatch');
-         if (user.apiKey) return log ('Admin user hash should not store apiKey anymore');
-         redisGet ('userapikey:' + s.adminUserId, function (lookupError, apiKey) {
-            if (lookupError || ! apiKey) return log ('Admin should have userapikey:<id> lookup entry');
-            redisHgetall ('apikey:' + apiKey, function (recordError, record) {
-               if (recordError || ! record) return log ('Admin api key record missing');
-               if (record.userId !== s.adminUserId) return log ('Admin api key record userId mismatch');
-               if (! record.createdAt) return log ('Admin api key record missing createdAt');
-               if (record.lastUsed !== '') return log ('Admin api key record lastUsed should start empty');
-               redisGet ('userapikeyreveal:' + s.adminUserId, function (revealError, revealKey) {
-                  if (revealError) return log ('Admin api key reveal lookup failed');
-                  if (revealKey !== apiKey) return log ('Admin api key reveal lookup should point to the current key');
-                  s.adminApiKey = apiKey;
-                  s.cleanupKeys.push ('userapikey:' + s.adminUserId, 'apikey:' + apiKey, 'userapikeyreveal:' + s.adminUserId);
-                  next ();
-               });
-            });
-         });
+         next ();
       });
    }],
 
@@ -2592,29 +2652,13 @@ var cloudSequence = [
       });
    }],
 
-   ['Cloud 17: Created user is not admin and gets a dedicated API key record', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 17: Created user is not admin', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
       redisHgetall ('user:' + s.memberUserId, function (err, user) {
          if (err || ! user) return log ('Failed to read member user from Redis');
          if (user.admin === '1') return log ('Normal user should not be admin');
          if (user.email !== s.cloudMemberEmail) return log ('Email mismatch');
-         if (user.apiKey) return log ('User hash should not store apiKey anymore');
-         redisGet ('userapikey:' + s.memberUserId, function (lookupError, apiKey) {
-            if (lookupError || ! apiKey) return log ('User should have userapikey:<id> lookup entry');
-            redisHgetall ('apikey:' + apiKey, function (recordError, record) {
-               if (recordError || ! record) return log ('User api key record missing');
-               if (record.userId !== s.memberUserId) return log ('User api key record userId mismatch');
-               if (! record.createdAt) return log ('User api key record missing createdAt');
-               if (record.lastUsed !== '') return log ('User api key record lastUsed should start empty');
-               redisGet ('userapikeyreveal:' + s.memberUserId, function (revealError, revealKey) {
-                  if (revealError) return log ('User api key reveal lookup failed');
-                  if (revealKey !== apiKey) return log ('User api key reveal lookup should point to the current key');
-                  s.memberApiKey = apiKey;
-                  s.cleanupKeys.push ('userapikey:' + s.memberUserId, 'apikey:' + apiKey, 'userapikeyreveal:' + s.memberUserId);
-                  next ();
-               });
-            });
-         });
+         next ();
       });
    }],
 
@@ -2706,83 +2750,12 @@ var cloudSequence = [
       });
    }],
 
-   ['Cloud 25a: First member GET /settings reveals automation API key once', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+   ['Cloud 25a: Member GET /settings has no userApiKey field', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
       if (s.skipCloud) return next ();
       authGet ('/settings', s.memberAuth, function (error, status, body) {
          if (error) return log ('Member GET /settings failed: ' + error.message);
          if (status !== 200) return log ('Expected 200 from member settings, got ' + status);
-         if (! body || ! body.userApiKey) return log ('Expected userApiKey in settings response');
-         if (body.userApiKey.key !== s.memberApiKey) return log ('First settings load should reveal the raw member api key exactly once');
-         if (! body.userApiKey.maskedKey) return log ('Settings userApiKey missing maskedKey');
-         if (! body.userApiKey.createdAt) return log ('Settings userApiKey missing createdAt');
-         if (body.userApiKey.lastUsed) return log ('Settings userApiKey.lastUsed should be empty before trigger use');
-         redisGet ('userapikeyreveal:' + s.memberUserId, function (revealError, revealKey) {
-            if (revealError) return log ('Failed to read member api key reveal marker');
-            if (revealKey) return log ('Settings first reveal should clear userapikeyreveal:<user-id>');
-            next ();
-         });
-      });
-   }],
-
-   ['Cloud 25b: Second member GET /settings hides raw automation API key', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipCloud) return next ();
-      authGet ('/settings', s.memberAuth, function (error, status, body) {
-         if (error) return log ('Member second GET /settings failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 from member settings second load, got ' + status);
-         if (! body || ! body.userApiKey) return log ('Expected userApiKey in second settings response');
-         if (body.userApiKey.key !== undefined) return log ('Second settings load should not return the raw userApiKey.key');
-         if (! body.userApiKey.maskedKey) return log ('Settings userApiKey missing maskedKey on second load');
-         next ();
-      });
-   }],
-
-   ['Cloud 25c: POST /settings/userApiKey/regenerate rotates and re-reveals the automation key', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipCloud) return next ();
-      var previousApiKey = s.memberApiKey;
-      authJson ('POST', '/settings/userApiKey/regenerate', {}, s.memberAuth, function (error, status, body) {
-         if (error) return log ('Member regenerate api key failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 from member api key regenerate, got ' + status + ' ' + JSON.stringify (body));
-         if (! body || ! body.userApiKey || ! body.userApiKey.key) return log ('Regenerate should return the new raw automation api key once');
-         if (body.userApiKey.key === previousApiKey) return log ('Regenerate should rotate to a different api key');
-         s.memberOldApiKey = previousApiKey;
-         s.memberApiKey = body.userApiKey.key;
-         redisGet ('userapikey:' + s.memberUserId, function (lookupError, lookupKey) {
-            if (lookupError) return log ('Failed to read member api key lookup after regenerate');
-            if (lookupKey !== s.memberApiKey) return log ('Member api key lookup should point to regenerated key');
-            redisHgetall ('apikey:' + s.memberApiKey, function (recordError, record) {
-               if (recordError || ! record) return log ('Regenerated member api key record missing');
-               if (record.userId !== s.memberUserId) return log ('Regenerated member api key userId mismatch');
-               redisHgetall ('apikey:' + previousApiKey, function (oldRecordError, oldRecord) {
-                  if (oldRecordError) return log ('Failed to read old member api key record after regenerate');
-                  if (oldRecord && oldRecord.userId) return log ('Old member api key record should be deleted after regenerate');
-                  s.cleanupKeys.push ('apikey:' + s.memberApiKey, 'userapikey:' + s.memberUserId, 'userapikeyreveal:' + s.memberUserId);
-                  next ();
-               });
-            });
-         });
-      });
-   }],
-
-   ['Cloud 25d: Old automation API key stops working immediately after regenerate', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipCloud) return next ();
-      httpJson ('POST', '/project/not-a-real-project/trigger', {
-         provider: 'openai',
-         prompt: 'Reply with ok.'
-      }, function (error, status, body) {
-         if (error) return log ('Old api key trigger request failed: ' + error.message);
-         if (status !== 403) return log ('Expected 403 from old api key after regenerate, got ' + status + ' ' + JSON.stringify (body));
-         next ();
-      }, {Authorization: 'Bearer ' + s.memberOldApiKey});
-   }],
-
-   ['Cloud 25e: GET /settings after regenerate returns metadata only', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipCloud) return next ();
-      authGet ('/settings', s.memberAuth, function (error, status, body) {
-         if (error) return log ('Member GET /settings after regenerate failed: ' + error.message);
-         if (status !== 200) return log ('Expected 200 from member settings after regenerate, got ' + status);
-         if (! body || ! body.userApiKey) return log ('Expected userApiKey after regenerate');
-         if (body.userApiKey.key !== undefined) return log ('Settings after regenerate should hide the raw userApiKey.key again');
-         if (! body.userApiKey.maskedKey) return log ('Settings after regenerate missing maskedKey');
+         if (body && body.userApiKey) return log ('Settings should not include userApiKey field');
          next ();
       });
    }],

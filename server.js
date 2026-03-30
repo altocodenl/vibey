@@ -122,69 +122,42 @@ var getUserById = async function (id) {
    return user;
 };
 
-var userApiKeyLookupKey = function (userId) {
-   return 'userapikey:' + userId;
+// *** PROJECT TRIGGER IDS ***
+
+var createProjectTrigger = async function (userId, projectSlug) {
+   var triggerId = generateToken (16);
+   await Redis ('set', 'trigger:' + triggerId, userId + ':' + projectSlug);
+   await Redis ('set', 'projecttrigger:' + userId + ':' + projectSlug, triggerId);
+   return triggerId;
 };
 
-var userApiKeyRedisKey = function (apiKey) {
-   return 'apikey:' + apiKey;
+var getProjectTrigger = async function (userId, projectSlug) {
+   return await Redis ('get', 'projecttrigger:' + userId + ':' + projectSlug);
 };
 
-var userApiKeyRevealKey = function (userId) {
-   return 'userapikeyreveal:' + userId;
+var lookupTrigger = async function (triggerId) {
+   if (! triggerId) return null;
+   var value = await Redis ('get', 'trigger:' + triggerId);
+   if (! value) return null;
+   var parts = value.split (':');
+   if (parts.length < 2) return null;
+   return {userId: parts [0], projectSlug: parts.slice (1).join (':')};
 };
 
-var createUserApiKeyRecord = async function (userId, createdAt) {
-   var apiKey = generateToken (24);
-   await Redis ('set', userApiKeyLookupKey (userId), apiKey);
-   await Redis ('set', userApiKeyRevealKey (userId), apiKey);
-   await Redis ('hmset', userApiKeyRedisKey (apiKey), 'userId', userId, 'createdAt', createdAt, 'lastUsed', '');
-   return apiKey;
+var deleteProjectTrigger = async function (userId, projectSlug) {
+   var triggerId = await Redis ('get', 'projecttrigger:' + userId + ':' + projectSlug);
+   if (triggerId) await Redis ('del', 'trigger:' + triggerId);
+   await Redis ('del', 'projecttrigger:' + userId + ':' + projectSlug);
 };
 
-var getApiKeyRecordByKey = async function (apiKey) {
-   if (! apiKey) return null;
-
-   var record = await Redis ('hgetall', userApiKeyRedisKey (apiKey));
-   if (! record || ! record.userId) return null;
-   record.key = apiKey;
-   return record;
-};
-
-var getUserApiKeyRecord = async function (userId) {
-   if (! userId) return null;
-
-   var apiKey = await Redis ('get', userApiKeyLookupKey (userId));
-   if (! apiKey) return null;
-   return await getApiKeyRecordByKey (apiKey);
-};
-
-var touchApiKeyRecord = async function (apiKey) {
-   var record = await getApiKeyRecordByKey (apiKey);
-   if (! record || ! record.userId) return null;
-   var now = new Date ().toISOString ();
-   await Redis ('hset', userApiKeyRedisKey (apiKey), 'lastUsed', now);
-   record.lastUsed = now;
-   return record;
-};
-
-var consumeUserApiKeyReveal = async function (userId) {
-   if (! userId) return null;
-   var apiKey = await Redis ('get', userApiKeyRevealKey (userId));
-   if (! apiKey) return null;
-   await Redis ('del', userApiKeyRevealKey (userId));
-   var currentApiKey = await Redis ('get', userApiKeyLookupKey (userId));
-   return currentApiKey === apiKey ? apiKey : null;
-};
-
-var regenerateUserApiKey = async function (userId) {
-   if (! userId) return null;
-   var previousApiKey = await Redis ('get', userApiKeyLookupKey (userId));
-   var now = new Date ().toISOString ();
-   var nextApiKey = await createUserApiKeyRecord (userId, now);
-   if (previousApiKey && previousApiKey !== nextApiKey) await Redis ('del', userApiKeyRedisKey (previousApiKey));
-   await Redis ('del', userApiKeyRevealKey (userId));
-   return await getApiKeyRecordByKey (nextApiKey);
+var resolveProvider = async function (rq) {
+   var config = await loadSettingsForRequest (rq);
+   var accounts = config.accounts || {};
+   var hasOpenAI = (accounts.openai && accounts.openai.apiKey) || (accounts.openaiOAuth && accounts.openaiOAuth.type === 'oauth');
+   var hasClaude = (accounts.claude && accounts.claude.apiKey) || (accounts.claudeOAuth && accounts.claudeOAuth.type === 'oauth');
+   if (hasOpenAI) return 'openai';
+   if (hasClaude) return 'claude';
+   return null;
 };
 
 var log = {
@@ -1717,15 +1690,34 @@ var upsertDocMainContextBlock = async function (projectName, filename) {
 // Sources:
 //   OpenAI: user-provided for gpt-5.4 (2026-03-09)
 //   Claude: docs.anthropic.com/en/docs/about-claude/models (200K standard)
-var CONTEXT_WINDOWS = {
-   'gpt-5.4':                    1050000,
-   'gpt-5.2-codex':              272000,
-   'claude-opus-4-6':            200000,
-   'claude-sonnet-4-6':          200000,
+var MODELS = {
+   openai: {
+      'gpt-5.4':           {context: 1000000},
+      'gpt-5.2':           {context: 272000},
+      'gpt-4.1':           {context: 1000000}
+   },
+   anthropic: {
+      'claude-opus-4-6':   {context: 1000000},
+      'claude-sonnet-4-6': {context: 200000},
+      'claude-haiku-4-6':  {context: 200000}
+   }
+};
+
+var providerFromModel = function (model) {
+   if (MODELS.openai [model]) return 'openai';
+   if (MODELS.anthropic [model]) return 'claude';
+   return null;
 };
 
 var getContextWindowSize = function (model) {
-   return CONTEXT_WINDOWS [model] || 200000;
+   var provider = providerFromModel (model);
+   if (! provider) return 200000;
+   var entry = (provider === 'claude' ? MODELS.anthropic : MODELS.openai) [model];
+   return entry ? entry.context : 200000;
+};
+
+var defaultModelForProvider = function (provider) {
+   return provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4';
 };
 
 // Tool definitions (written once, converted to both provider formats below)
@@ -2921,7 +2913,7 @@ var createDialogDraft = async function (projectName, provider, model, slug) {
    }
 
    projectName = validateProjectName (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+   var defaultModel = model || defaultModelForProvider (provider);
    var dialogId = await createDialogId (projectName, slug || 'dialog');
    var filename = buildDialogFilename (dialogId, 'done');
    var dialog = {
@@ -2950,7 +2942,7 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    }
 
    projectName = validateProjectName (projectName);
-   var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+   var defaultModel = model || defaultModelForProvider (provider);
    var dialogId = await createDialogId (projectName, slug);
    var dialog = {
       dialogId: dialogId,
@@ -3014,7 +3006,7 @@ var updateDialogTurn = async function (projectName, dialogId, status, prompt, pr
       if (resolvedProvider !== 'claude' && resolvedProvider !== 'openai') {
          throw new Error ('Unable to determine provider for dialog update');
       }
-      var resolvedModel = model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+      var resolvedModel = model || meta.model || defaultModelForProvider (resolvedProvider);
 
       try {
          var result = await runCompletion (projectName, dialog, resolvedProvider, resolvedModel, onChunk, abortSignal, rq);
@@ -3129,13 +3121,10 @@ var requestCsrfToken = function (rq) {
 
 // *** ROUTES ***
 
-var buildSettingsResponse = function (config, extra) {
+var buildSettingsResponse = function (config) {
    config = config || {};
-   extra = extra || {};
    var accounts = config.accounts || {};
    var editor = config.editor || {};
-   var userApiKey = extra.userApiKey || null;
-   var revealedUserApiKey = extra.revealedUserApiKey || '';
 
    return {
       openai: {
@@ -3154,12 +3143,6 @@ var buildSettingsResponse = function (config, extra) {
          loggedIn: !! (accounts.claudeOAuth && accounts.claudeOAuth.type === 'oauth'),
          expired: accounts.claudeOAuth ? Date.now () >= (accounts.claudeOAuth.expires || 0) : false
       },
-      userApiKey: userApiKey ? {
-         key: revealedUserApiKey || undefined,
-         maskedKey: maskApiKey (userApiKey.key || ''),
-         createdAt: userApiKey.createdAt || '',
-         lastUsed: userApiKey.lastUsed || ''
-      } : null,
       editor: {
          viMode: !! editor.viMode
       },
@@ -3201,7 +3184,6 @@ var createCloudUser = async function (email, isAdmin) {
 
    await Redis ('hmset', 'user:' + id, 'id', id, 'email', email, 'createdAt', now, 'lastActive', now, 'settings', '{}', 'admin', isAdmin ? '1' : '0');
    await Redis ('set', 'email:' + email, id);
-   await createUserApiKeyRecord (id, now);
    await Redis ('del', 'signup:' + email);
 
    try {
@@ -3231,8 +3213,6 @@ var ensureCloudAdminUser = async function () {
       var user = await Redis ('hgetall', 'user:' + userId);
       if (! user || ! user.id) throw new Error ('adminEmail points to missing user in Redis');
       if (user.admin !== '1') await Redis ('hset', 'user:' + userId, 'admin', '1');
-      var apiKey = await Redis ('get', 'userapikey:' + userId);
-      if (! apiKey) await createUserApiKeyRecord (userId, user.createdAt || new Date ().toISOString ());
       return userId;
    }
 
@@ -3418,15 +3398,21 @@ var routes = [
          userId = await Redis ('get', 'session:' + session);
       }
 
-      // Fall back to Bearer token auth (for API key endpoints like /trigger)
+      // Bearer token auth for POST /trigger — check before rejecting
       if (! userId) {
          var authHeader = rq.headers.authorization || '';
          var bearerMatch = authHeader.match (/^Bearer\s+(.+)$/i);
          if (bearerMatch) {
-            rq._bearerKey = bearerMatch [1];
-            if (rq.url.match (/\/trigger$/)) return rs.next ();
+            rq._bearerTriggerId = bearerMatch [1];
+            if (rq.url === '/trigger') return rs.next ();
          }
          return reply (rs, 403, {error: session ? 'session' : 'nocookie'});
+      }
+
+      // Also set _bearerTriggerId if cookie auth succeeded but Authorization header is present (for /trigger)
+      if (rq.url === '/trigger' && rq.headers.authorization) {
+         var triggerBearerMatch = rq.headers.authorization.match (/^Bearer\s+(.+)$/i);
+         if (triggerBearerMatch) rq._bearerTriggerId = triggerBearerMatch [1];
       }
 
       var user = await getUserById (userId);
@@ -3454,8 +3440,8 @@ var routes = [
       if (! CLOUD) return rs.next ();
       if (rq.url.match (/^\/auth\//)) return rs.next ();
       if (rq.url.match (/^\/public\//)) return rs.next ();
-      // Bearer-authenticated endpoints skip CSRF
-      if (rq._bearerKey) return rs.next ();
+      // Bearer-authenticated trigger endpoints skip CSRF
+      if (rq._bearerTriggerId) return rs.next ();
 
       if (type (rq.body) !== 'object') return reply (rs, 400, {error: 'body must be an object'});
       if (rq.body.csrf !== (rq.user || {}).csrf) return reply (rs, 403, {error: 'csrf'});
@@ -3475,7 +3461,7 @@ var routes = [
       if (! CLOUD) return rs.next ();
       if (rq.url.match (/^\/auth\//)) return rs.next ();
       if (rq.url.match (/^\/public\//)) return rs.next ();
-      if (rq._bearerKey) return rs.next ();
+      if (rq._bearerTriggerId) return rs.next ();
       var csrf = requestCsrfToken (rq);
       if (csrf !== (rq.user || {}).csrf) return reply (rs, 403, {error: 'csrf'});
       if (type (rq.body) === 'object' && rq.body) delete rq.body.csrf;
@@ -3530,9 +3516,7 @@ var routes = [
          try {
             var userData = await getUserById (rq.user.id);
             var settings = userData && userData.settings ? JSON.parse (userData.settings) : {};
-            var userApiKey = await getUserApiKeyRecord (rq.user.id);
-            var revealedUserApiKey = await consumeUserApiKeyReveal (rq.user.id);
-            return reply (rs, 200, buildSettingsResponse (settings, {userApiKey: userApiKey, revealedUserApiKey: revealedUserApiKey}));
+            return reply (rs, 200, buildSettingsResponse (settings));
          }
          catch (e) {
             return reply (rs, 500, {error: 'Failed to load settings'});
@@ -3557,20 +3541,6 @@ var routes = [
       applySettingsUpdate (CONFIG, rq.body);
       saveConfigJson ();
       reply (rs, 200, {ok: true});
-   }],
-
-   ['post', 'settings/userApiKey/regenerate', async function (rq, rs) {
-      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
-      if (! rq.user) return reply (rs, 403, {error: 'session'});
-      try {
-         var userData = await getUserById (rq.user.id);
-         var settings = userData && userData.settings ? JSON.parse (userData.settings) : {};
-         var userApiKey = await regenerateUserApiKey (rq.user.id);
-         return reply (rs, 200, buildSettingsResponse (settings, {userApiKey: userApiKey, revealedUserApiKey: userApiKey && userApiKey.key}));
-      }
-      catch (e) {
-         return reply (rs, 500, {error: 'Failed to regenerate automation API key'});
-      }
    }],
 
    // OAuth login: start flow
@@ -3757,60 +3727,70 @@ var routes = [
 
    // *** TRIGGER ***
 
-   ['post', 'project/:project/trigger', async function (rq, rs) {
+   ['get', 'models', function (rq, rs) {
+      reply (rs, 200, MODELS);
+   }],
+
+   ['get', 'project/:project/trigger-id', async function (rq, rs) {
+      if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
+      if (! rq.user) return reply (rs, 403, {error: 'session'});
+      var projectSlug = unscopeSlug (rq.data.params.project, rq);
+      var triggerId = await getProjectTrigger (rq.user.id, projectSlug);
+      if (! triggerId) return reply (rs, 404, {error: 'No trigger ID for project'});
+      reply (rs, 200, {triggerId: triggerId, domain: TRIGGER_EMAIL_DOMAIN || undefined});
+   }],
+
+   ['post', 'trigger', async function (rq, rs) {
       if (! CLOUD) return reply (rs, 404, {error: 'Not in cloud mode'});
 
-      // API key auth (Bearer token) — no CSRF needed
-      var apiKey = rq._bearerKey;
-      if (! apiKey) {
+      // Trigger ID auth (Bearer token)
+      var triggerId = rq._bearerTriggerId;
+      if (! triggerId) {
          var authHeader = rq.headers.authorization || '';
          var bearerMatch = authHeader.match (/^Bearer\s+(.+)$/i);
-         if (bearerMatch) apiKey = bearerMatch [1];
+         if (bearerMatch) triggerId = bearerMatch [1];
       }
-      if (! apiKey) return reply (rs, 403, {error: 'API key required'});
+      if (! triggerId) return reply (rs, 403, {error: 'Trigger ID required'});
 
-      // If user was already authenticated by session, verify API key.
-      // Otherwise, find the user through the dedicated API-key record.
-      var apiKeyRecord = await getApiKeyRecordByKey (apiKey);
-      if (! apiKeyRecord || ! apiKeyRecord.userId) return reply (rs, 403, {error: 'Invalid API key'});
+      var triggerInfo = await lookupTrigger (triggerId);
+      if (! triggerInfo) return reply (rs, 403, {error: 'Invalid trigger ID'});
 
-      var user;
-      if (rq.user) {
-         if (rq.user.id !== apiKeyRecord.userId) return reply (rs, 403, {error: 'Invalid API key'});
-         user = await getUserById (rq.user.id);
-         if (! user) return reply (rs, 403, {error: 'Invalid API key'});
+      var user = await getUserById (triggerInfo.userId);
+      if (! user) return reply (rs, 403, {error: 'Invalid trigger ID'});
+
+      rq.user = {id: user.id, email: user.email, admin: user.admin === '1'};
+
+      // Build prompt from body.prompt or body.data
+      var prompt = rq.body.prompt;
+      if (! prompt && rq.body.data && type (rq.body.data) === 'object') {
+         var data = rq.body.data;
+         prompt = 'Trigger' + (data.from ? ' from ' + data.from : '') + '\n\n' + (data.subject ? 'Subject: ' + data.subject + '\n\n' : '') + (data.body || '');
+      }
+      if (! prompt || type (prompt) !== 'string' || ! prompt.trim ()) return reply (rs, 400, {error: 'Either prompt or data is required'});
+
+      // Resolve model and provider: explicit model > autodetect
+      var model = rq.body.model;
+      var provider;
+      if (model && type (model) === 'string') {
+         provider = providerFromModel (model);
+         if (! provider) return reply (rs, 400, {error: 'Unknown model: ' + model});
       }
       else {
-         user = await getUserById (apiKeyRecord.userId);
-         if (! user) return reply (rs, 403, {error: 'Invalid API key'});
-         rq.user = {id: user.id, email: user.email, admin: user.admin === '1'};
+         provider = await resolveProvider (rq);
+         if (! provider) return reply (rs, 422, {error: 'No provider credentials configured'});
+         model = defaultModelForProvider (provider);
       }
 
-      await touchApiKeyRecord (apiKey);
-
-      if (stop (rs, [
-         ['provider', rq.body.provider, 'string'],
-         ['prompt', rq.body.prompt, 'string'],
-      ])) return;
-
-      if (rq.user && rq.data && rq.data.params && rq.data.params.project) {
-         var triggerPrefix = rq.user.id + '-';
-         if (rq.data.params.project.indexOf (triggerPrefix) !== 0) rq.data.params.project = triggerPrefix + rq.data.params.project;
-      }
-
-      var projectName = validProjectNameOrReply (rs, rq.data.params.project);
-      if (! projectName) return;
-
-      var slug = projectName;
+      var slug = triggerInfo.userId + '-' + triggerInfo.projectSlug;
 
       try {
-         var defaultModel = rq.body.model || (rq.body.provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+         var defaultModel = model;
          var dialogId = await createDialogId (slug, rq.body.slug || 'triggered', rs);
          if (dialogId === false) return;
          var filename = buildDialogFilename (dialogId, 'active');
          var dialog = {dialogId: dialogId, filename: filename, status: 'active', exists: false, markdown: '', metadata: {}};
-         await ensureDialogFile (slug, dialog, rq.body.provider, defaultModel);
-         await appendToDialog (slug, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + rq.body.prompt + '\n\n');
+         await ensureDialogFile (slug, dialog, provider, defaultModel);
+         await appendToDialog (slug, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt.trim () + '\n\n');
 
          var stream = beginActiveStream (slug, dialogId);
 
@@ -3819,7 +3799,7 @@ var routes = [
 
          (async function () {
             try {
-               var result = await runCompletion (slug, dialog, rq.body.provider, defaultModel, function (chunk) {
+               var result = await runCompletion (slug, dialog, provider, defaultModel, function (chunk) {
                   if (chunk && type (chunk) === 'object' && chunk.type) stream.emitter.emit ('event', chunk);
                   else stream.emitter.emit ('event', {type: 'chunk', content: chunk});
                }, stream.controller.signal, rq);
@@ -3869,6 +3849,8 @@ var routes = [
             await pfs.writeFile (slug, DOC_MAIN_FILE, '# ' + displayName + '\n');
          }
          await autoCommitApi (slug, 'POST', '/projects');
+         // Create trigger ID for the project (cloud mode)
+         if (CLOUD && rq.user) await createProjectTrigger (rq.user.id, unscopeSlug (slug, rq));
          // Return the unscoped slug to the client
          var clientSlug = unscopeSlug (slug, rq);
          reply (rs, 200, {ok: true, slug: clientSlug, name: displayName});
@@ -3904,6 +3886,8 @@ var routes = [
 
       if (settledPromises.length) await Promise.all (settledPromises);
 
+      // Delete trigger ID (cloud mode)
+      if (CLOUD && rq.user) await deleteProjectTrigger (rq.user.id, unscopeSlug (projectName, rq));
       await removeProjectContainer (projectName);
       reply (rs, 200, {ok: true, name: projectName});
    }],
@@ -4214,7 +4198,7 @@ var routes = [
       var slug = rq.body.slug;
 
       // Create the dialog file and set it to active
-      var defaultModel = model || (provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+      var defaultModel = model || defaultModelForProvider (provider);
       var dialogId;
       var filename;
       var dialog;
@@ -4373,7 +4357,7 @@ var routes = [
          delete DIALOG_START_LOCKS [lockKey];
          return reply (rs, 400, {error: 'Unable to determine provider for dialog update'});
       }
-      var resolvedModel = rq.body.model || meta.model || (resolvedProvider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.4');
+      var resolvedModel = rq.body.model || meta.model || defaultModelForProvider (resolvedProvider);
 
       // Set up active stream with emitter for fan-out
       var stream = beginActiveStream (projectName, dialogId);
@@ -4964,10 +4948,168 @@ cicek.logconsole = function (message) {
    }
 };
 
+// *** MIGRATION: triggers-v1 ***
+
+var runTriggersMigration = async function () {
+   if (! CLOUD) return;
+   var done = await Redis ('get', 'migration:triggers-v1');
+   if (done) return;
+
+   clog ('Running migration: triggers-v1');
+
+   // 1. Create trigger IDs for all existing projects (from volumes)
+   try {
+      var output = await execA ('docker volume ls --filter label=vibey=project --format "{{.Name}}"');
+      var volumes = output.trim ().split ('\n').filter (Boolean);
+      var count = 0;
+      await Promise.all (dale.go (volumes, function (volName) {
+         // Volume names: vibey-vol-<userId>-<projectSlug>
+         var match = volName.match (/^vibey-vol-(.+?)-(.+)$/);
+         if (! match) return;
+         var userId = match [1], projectSlug = match [2];
+         return (async function () {
+            var existing = await Redis ('get', 'projecttrigger:' + userId + ':' + projectSlug);
+            if (! existing) {
+               await createProjectTrigger (userId, projectSlug);
+               count++;
+            }
+         }) ();
+      }));
+      clog ('Migration triggers-v1: created ' + count + ' trigger IDs for existing projects');
+   }
+   catch (e) {
+      clog ('Migration triggers-v1: error scanning volumes:', e.message);
+   }
+
+   // 2. Remove old API key redis keys
+   try {
+      var patterns = ['userapikey:*', 'apikey:*', 'userapikeyreveal:*'];
+      var deleted = 0;
+      await Promise.all (dale.go (patterns, function (pattern) {
+         return (async function () {
+            var keys = await Redis ('keys', pattern);
+            if (keys && keys.length) {
+               await Promise.all (dale.go (keys, function (key) {
+                  deleted++;
+                  return Redis ('del', key);
+               }));
+            }
+         }) ();
+      }));
+      clog ('Migration triggers-v1: deleted ' + deleted + ' old API key redis keys');
+   }
+   catch (e) {
+      clog ('Migration triggers-v1: error cleaning old API keys:', e.message);
+   }
+
+   await Redis ('set', 'migration:triggers-v1', '1');
+   clog ('Migration triggers-v1 complete');
+};
+
+// *** SMTP SERVER (inbound email triggers) ***
+
+var TRIGGER_EMAIL_DOMAIN = process.env.VIBEY_TRIGGER_EMAIL_DOMAIN || '';
+
+var startSmtpServer = function () {
+   if (! CLOUD || DISABLE_EMAIL || ! TRIGGER_EMAIL_DOMAIN) return;
+
+   var SMTPServer = require ('smtp-server').SMTPServer;
+   var simpleParser = require ('mailparser').simpleParser;
+
+   var smtp = new SMTPServer ({
+      authOptional: true,
+      disabledCommands: ['STARTTLS'],
+      onRcptTo: function (address, session, cb) {
+         var match = address.address.match (/^trigger\+([^@]+)@(.+)$/i);
+         if (! match || match [2].toLowerCase () !== TRIGGER_EMAIL_DOMAIN.toLowerCase ()) return cb (new Error ('Unknown recipient'));
+         session.triggerId = match [1];
+         cb ();
+      },
+      onData: function (stream, session, cb) {
+         simpleParser (stream, function (err, parsed) {
+            if (err) return cb (err);
+            if (! session.triggerId) return cb (new Error ('No trigger ID'));
+
+            (async function () {
+               try {
+                  var triggerInfo = await lookupTrigger (session.triggerId);
+                  if (! triggerInfo) return cb (new Error ('Invalid trigger ID'));
+
+                  var user = await getUserById (triggerInfo.userId);
+                  if (! user) return cb (new Error ('Invalid trigger ID'));
+
+                  var fakeRq = {user: {id: user.id, email: user.email, admin: user.admin === '1'}};
+                  var provider = await resolveProvider (fakeRq);
+                  if (! provider) return cb (new Error ('No provider credentials configured'));
+
+                  var data = {
+                     from: parsed.from && parsed.from.text ? parsed.from.text : '',
+                     subject: parsed.subject || '',
+                     body: parsed.text || ''
+                  };
+
+                  var prompt = 'Trigger' + (data.from ? ' from ' + data.from : '') + '\n\n' + (data.subject ? 'Subject: ' + data.subject + '\n\n' : '') + (data.body || '');
+                  var slug = triggerInfo.userId + '-' + triggerInfo.projectSlug;
+                  var defaultModel = defaultModelForProvider (provider);
+
+                  var dialogId = await createDialogId (slug, 'email-trigger', null);
+                  if (dialogId === false) return cb (new Error ('Failed to create dialog'));
+                  var filename = buildDialogFilename (dialogId, 'active');
+                  var dialog = {dialogId: dialogId, filename: filename, status: 'active', exists: false, markdown: '', metadata: {}};
+                  await ensureDialogFile (slug, dialog, provider, defaultModel);
+                  await appendToDialog (slug, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt.trim () + '\n\n');
+
+                  var stream = beginActiveStream (slug, dialogId);
+
+                  // Fire and forget
+                  (async function () {
+                     try {
+                        var result = await runCompletion (slug, dialog, provider, defaultModel, function (chunk) {
+                           if (chunk && type (chunk) === 'object' && chunk.type) stream.emitter.emit ('event', chunk);
+                           else stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+                        }, stream.controller.signal, fakeRq);
+                        await setDialogStatus (slug, dialog, 'done', 'smtp/trigger/success');
+                        stream.emitter.emit ('event', {type: 'done', result: result});
+                        endActiveStream (slug, dialogId);
+                        stream.settle ();
+                     }
+                     catch (error) {
+                        try {
+                           var d = await loadDialog (slug, dialogId);
+                           if (d.exists) await setDialogStatus (slug, d, 'done', 'smtp/trigger/error');
+                        }
+                        catch (e) {}
+                        stream.emitter.emit ('event', {type: 'error', error: error.message});
+                        endActiveStream (slug, dialogId);
+                        stream.settle ();
+                     }
+                  }) ();
+
+                  cb ();
+               }
+               catch (e) {
+                  cb (e);
+               }
+            }) ();
+         });
+      }
+   });
+
+   smtp.listen (25, function () {
+      clog ('SMTP trigger server listening on port 25 (domain: ' + TRIGGER_EMAIL_DOMAIN + ')');
+   });
+
+   smtp.on ('error', function (err) {
+      clog ('SMTP server error:', err.message);
+   });
+};
+
 var startServer = async function () {
    if (CLOUD) await ensureCloudAdminUser ();
+   await runTriggersMigration ();
    cicek.listen ({port: port}, routes);
    clog ('vibey server running on port ' + port);
+   startSmtpServer ();
 };
 
 startServer ().catch (function (error) {

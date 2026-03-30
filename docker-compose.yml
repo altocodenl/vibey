@@ -4,6 +4,7 @@ services:
     ports:
       - "5353:5353"
       - "1455:1455"
+      - "25:25"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - vibey-data:/app/data
@@ -13,6 +14,7 @@ services:
       - VIBEY_DOCKER=1
       - VIBEY_CLOUD
       - VIBEY_DISABLE_EMAIL
+      - VIBEY_TRIGGER_EMAIL_DOMAIN
     network_mode: bridge
 
 volumes:

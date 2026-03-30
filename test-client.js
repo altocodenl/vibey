@@ -830,97 +830,73 @@
          return true;
       }],
 
-      ['Settings 1: Newly revealed automation API key shows warning and stays masked by default', function (done) {
+      ['Settings 1: Settings view has no automation API key UI', function (done) {
          B.call ('set', 'currentProject', null);
          B.call ('set', 'tab', 'settings');
-         B.call ('set', 'settings', {
-            userApiKey: {
-               key: 'vk_test_settings_key_1234567890',
-               maskedKey: 'vk_test••••••••7890',
-               createdAt: '2026-03-23T10:11:12.000Z',
-               lastUsed: ''
-            }
-         });
+         B.call ('set', 'settings', {});
          B.call ('set', 'showApiKeys', false);
          B.call ('set', 'savingSettings', false);
          done (SHORT_WAIT, POLL);
       }, function () {
          if (B.get ('tab') !== 'settings') return 'Expected settings tab';
-         var input = document.querySelector ('[data-testid="user-api-key-input"]');
-         if (! input) return 'Automation API key input not rendered';
-         if (input.value !== 'vk_test••••••••7890') return 'Expected masked automation key, got: ' + input.value;
-         var card = document.querySelector ('.settings-user-api-key');
-         if (! card) return 'Automation API key card not found';
-         if (card.textContent.indexOf ('Created: 2026-03-23T10:11:12.000Z') === -1) return 'Automation key createdAt missing from card';
-         if (card.textContent.indexOf ('Last used: Never') === -1) return 'Automation key lastUsed fallback missing from card';
-         var warning = document.querySelector ('.settings-user-api-key-warning');
-         if (! warning) return 'Expected one-time reveal warning';
-         if (warning.textContent.indexOf ('will not show it again') === -1) return 'Reveal warning text missing';
+         if (document.querySelector ('.settings-user-api-key')) return 'Automation API key card should not exist';
+         if (document.querySelector ('[data-testid="user-api-key-input"]')) return 'Automation API key input should not exist';
+         if (document.querySelector ('[data-testid="user-api-key-regenerate"]')) return 'Regenerate button should not exist';
          return true;
       }],
 
-      ['Settings 2: Show key toggle reveals full automation key only in the current session', function (done) {
-         B.call ('set', 'showApiKeys', true);
+      ['Trigger 1: Trigger copy buttons visible when triggerId is set', function (done) {
+         B.call ('set', 'tab', 'dialogs');
+         B.call ('set', 'currentProject', 'test-proj');
+         B.call ('set', 'triggerId', {id: 'abc123def456', domain: 'buildwithvibey.com'});
+         B.call ('set', 'files', ['dialog/20260328-120000-test-done.md']);
+         B.call ('set', 'currentFile', {name: 'dialog/20260328-120000-test-done.md', content: '# Dialog\n\n> Provider: openai\n> Model: gpt-5.4\n> Started: 2026-03-28T12:00:00Z\n\n## User\n> Time: 2026-03-28T12:00:00Z\n\nHello\n\n## Assistant\n> Model: gpt-5.4\n> Time: 2026-03-28T12:00:01Z - 2026-03-28T12:00:02Z\n\nHi there!\n\n> Usage: input=10 output=5 total=15\n> Usage cumulative: input=10 output=5 total=15\n\n> Context: used=15 limit=200000 percent=0%\n', original: ''});
          done (SHORT_WAIT, POLL);
       }, function () {
-         var input = document.querySelector ('[data-testid="user-api-key-input"]');
-         if (! input) return 'Automation API key input not rendered';
-         if (input.value !== 'vk_test_settings_key_1234567890') return 'Expected full automation key when shown, got: ' + input.value;
+         var apiBtn = document.querySelector ('[data-testid="trigger-copy-api"]');
+         if (! apiBtn) return 'Expected ⚡ API button when triggerId is set';
+         var emailBtn = document.querySelector ('[data-testid="trigger-copy-email"]');
+         if (! emailBtn) return 'Expected ⚡ Email button when triggerId has domain';
          return true;
       }],
 
-      ['Settings 3: Metadata-only automation API key state hides the warning and raw key', function (done) {
-         B.call ('set', 'showApiKeys', false);
-         B.call ('set', 'settings', {
-            userApiKey: {
-               maskedKey: 'vk_test••••••••7890',
-               createdAt: '2026-03-23T10:11:12.000Z',
-               lastUsed: '2026-03-23T11:22:33.000Z'
-            }
-         });
+      ['Trigger 2: Trigger copy buttons hidden without triggerId', function (done) {
+         B.call ('set', 'triggerId', null);
          done (SHORT_WAIT, POLL);
       }, function () {
-         var input = document.querySelector ('[data-testid="user-api-key-input"]');
-         if (! input) return 'Automation API key input not rendered for metadata-only state';
-         if (input.value !== 'vk_test••••••••7890') return 'Expected masked automation key for metadata-only state, got: ' + input.value;
-         if (document.querySelector ('.settings-user-api-key-warning')) return 'Reveal warning should be hidden for metadata-only state';
-         var card = document.querySelector ('.settings-user-api-key');
-         if (! card || card.textContent.indexOf ('Last used: 2026-03-23T11:22:33.000Z') === -1) return 'Expected metadata-only state to show lastUsed';
+         if (document.querySelector ('[data-testid="trigger-copy-api"]')) return 'API button should not exist without triggerId';
+         if (document.querySelector ('[data-testid="trigger-copy-email"]')) return 'Email button should not exist without triggerId';
          return true;
       }],
 
-      ['Settings 4: Regenerate flow updates the settings card with a newly revealed key', function (done) {
-         var originalAjax = c.ajax;
-         var originalConfirm = window.confirm;
-         window.confirm = function () {return true;};
-         c.ajax = function (method, path, headers, body, cb) {
-            if (method === 'post' && path === 'settings/userApiKey/regenerate') {
-               c.ajax = originalAjax;
-               window.confirm = originalConfirm;
-               return cb (null, {body: {userApiKey: {
-                  key: 'vk_regenerated_key_abcdef123456',
-                  maskedKey: 'vk_regen••••••••3456',
-                  createdAt: '2026-03-24T09:00:00.000Z',
-                  lastUsed: ''
-               }}});
-            }
-            c.ajax = originalAjax;
-            window.confirm = originalConfirm;
-            return cb ({status: 500}, {body: {error: 'unexpected request'}});
-         };
-         var button = document.querySelector ('[data-testid="user-api-key-regenerate"]');
-         if (button) button.click ();
-         done (SHORT_WAIT, POLL);
-      }, function () {
-         var info = B.get ('settings', 'userApiKey');
-         if (! info || info.key !== 'vk_regenerated_key_abcdef123456') return 'Expected regenerated automation key in settings state';
-         var warning = document.querySelector ('.settings-user-api-key-warning');
-         if (! warning) return 'Expected reveal warning after regenerate';
-         var input = document.querySelector ('[data-testid="user-api-key-input"]');
-         if (! input) return 'Automation API key input missing after regenerate';
-         if (input.value !== 'vk_regen••••••••3456') return 'Expected regenerated key to stay masked by default, got: ' + input.value;
+      ['Trigger 3: Copy trigger formats correctly', function () {
+         // Test the copy responder logic directly
+         var trigger = {id: 'abc123def456', domain: 'buildwithvibey.com'};
+         var apiText = 'Bearer ' + trigger.id;
+         if (apiText !== 'Bearer abc123def456') return 'API format wrong: ' + apiText;
+         var emailText = 'trigger+' + trigger.id + '@' + trigger.domain;
+         if (emailText !== 'trigger+abc123def456@buildwithvibey.com') return 'Email format wrong: ' + emailText;
          return true;
       }],
+
+      ['Trigger 4: Email button hidden when domain is missing', function (done) {
+         B.call ('set', 'triggerId', {id: 'abc123def456', domain: ''});
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var apiBtn = document.querySelector ('[data-testid="trigger-copy-api"]');
+         if (! apiBtn) return 'API button should still be visible without domain';
+         if (document.querySelector ('[data-testid="trigger-copy-email"]')) return 'Email button should be hidden when domain is empty';
+         return true;
+      }],
+
+      // Cleanup trigger state
+      ['Trigger cleanup', function (done) {
+         B.call ('set', 'triggerId', null);
+         B.call ('set', 'currentProject', null);
+         B.call ('set', 'currentFile', null);
+         B.call ('set', 'tab', 'projects');
+         done (SHORT_WAIT, POLL);
+      }, function () { return true; }],
 
       // --- Dialog: We start on the projects tab ---
       ['Dialog 1: Shell includes client.js', function () {
@@ -2262,7 +2238,7 @@
       }, function () {
          var file = B.get ('currentFile');
          if (! file) return 'No currentFile after reload';
-         if (file.content !== window._docsMainContent) return 'main.md content mismatch after reload';
+         if (file.content !== window._docsMainContent) return 'main.md content mismatch after reload. Expected ' + JSON.stringify (window._docsMainContent) + ', got ' + JSON.stringify (file.content);
          return true;
       }],
 

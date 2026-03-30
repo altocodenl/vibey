@@ -9,7 +9,9 @@
       "teishi":  "5.1.0",
       "redis":   "3.1.2",
       "nodemailer":               "6.9.16",
-      "nodemailer-ses-transport": "1.5.1"
+      "nodemailer-ses-transport": "1.5.1",
+      "smtp-server":              "3.13.6",
+      "mailparser":               "3.7.2"
    },
    "main": "server.js",
    "author": "Altocode <info@altocode.nl>",

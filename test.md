@@ -234,10 +234,8 @@ Notes:
 
 1. **Cloud mode — settings stored in Redis**: In cloud mode, `GET /settings` reads from `user:<id>` `settings` field in Redis (not `secret.json`). `POST /settings` writes to Redis. Verify round-trip.
 2. **Cloud mode — settings per user**: User A saves `{editor: {viMode: true}}`. User B's `GET /settings` does not include user A's vi mode setting.
-3. **Cloud mode — automation API key first reveal**: The first successful `GET /settings` after a cloud user is created includes `userApiKey.key` once, plus metadata. It also clears `userapikeyreveal:<user-id>`.
-4. **Cloud mode — automation API key stays hidden after first reveal**: A second `GET /settings` returns only `maskedKey`, `createdAt`, `lastUsed`, with no raw `key`.
-5. **Cloud mode — explicit regenerate flow**: `POST /settings/userApiKey/regenerate` rotates the key, deletes the old `apikey:<old-key>` record, returns the new raw key once, and makes the old Bearer token invalid immediately.
-6. **Local mode — settings in secret.json**: In local mode, `GET /settings` reads from `secret.json`. `POST /settings` writes to `secret.json`. Unchanged from current behavior.
+3. **Cloud mode — settings do not include old API key fields**: `GET /settings` response has no `userApiKey` field.
+4. **Local mode — settings in secret.json**: In local mode, `GET /settings` reads from `secret.json`. `POST /settings` writes to `secret.json`. Unchanged from current behavior.
 
 **Dialog:**
 
@@ -413,7 +411,7 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 
 *Bootstrap admin (no users exist):*
 5. `POST /admin/createUser` body `{email}` **without** session — **200** `{ok: true, id}`. Allowed because no users exist yet. First user is created as admin (`admin: '1'` in Redis).
-6. Verify via Redis: `user:<id>` hash has `admin: '1'`, `email` matches, `userapikey:<id>` exists, `apikey:<key>` exists, and `userapikeyreveal:<id>` points to that same key.
+6. Verify via Redis: `user:<id>` hash has `admin: '1'`, `email` matches.
 
 *Login flow:*
 7. `POST /auth/login` body `{email}` — **200** `{ok: true}`. OTP stored in Redis at `otp:<userId>`. Read OTP directly from Redis.
@@ -432,7 +430,7 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 
 *Admin — create user:*
 16. `POST /admin/createUser` body `{email}` with admin session + CSRF — **200** `{ok: true, id}`. Signup entry deleted from Redis.
-17. Verify via Redis: new user has `admin: '0'` (or absent), `userapikey:<id>` exists, `apikey:<key>` exists, and `userapikeyreveal:<id>` points to that key.
+17. Verify via Redis: new user has `admin: '0'` (or absent).
 18. `POST /admin/createUser` with duplicate email — **409** `{error: 'User already exists'}`.
 19. `POST /admin/createUser` without auth (users exist) — **403**.
 
@@ -461,10 +459,32 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 33. Re-login admin, delete the test project.
 34. Flush all test-created Redis keys.
 
-**Dialog (cloud trigger at end of suite):**
-- The API-key-trigger surface test now lives at the end of the Dialog suite.
-- In cloud mode it creates what it needs there, calls `POST /project/:project/trigger` with the user's Bearer token, and verifies `lastUsed` through `GET /settings`.
-- In local mode it is skipped.
+**Triggers (cloud mode, at end of Dialog suite):**
+- In cloud mode, trigger tests live at the end of the Dialog suite.
+- Tests:
+  1. Create a project. Verify `projecttrigger:<userId>:<slug>` exists in Redis and maps to a trigger ID. Verify `trigger:<triggerId>` maps back to `<userId>:<slug>`.
+  2. `POST /trigger` with `Authorization: Bearer <triggerId>`, body `{prompt: "echo hello", slug: "api-trigger"}` — returns `202 {ok: true, dialogId}`. Model and provider are autodetected.
+  3. `POST /trigger` with `Authorization: Bearer <triggerId>`, body `{data: {from: "test@example.com", subject: "Test trigger", body: "Run echo hello"}, slug: "email-trigger"}` — returns `202 {ok: true, dialogId}`. Model and provider are autodetected.
+  4. `POST /trigger` with explicit model `{model: "gpt-4.1", prompt: "echo hello"}` — returns `202`. Provider resolved from model name.
+  5. `POST /trigger` with invalid trigger ID — returns `403`.
+  6. `POST /trigger` with no `prompt` and no `data` — returns `400`.
+  7. `POST /trigger` with explicit invalid model (not in known models) — returns `400`.
+  8. Cleanup: delete the project. Verify `trigger:<id>` and `projecttrigger:<userId>:<slug>` are deleted from Redis.
+- In local mode, trigger tests are skipped.
+
+**Models endpoint:**
+
+1. `GET /models` — returns `{openai: {<model>: {context: <number>}, ...}, anthropic: {<model>: {context: <number>}, ...}}`. All known models are present.
+
+**Client: trigger copy buttons:**
+
+1. With `triggerId` set (id + domain), the ⚡ API and ⚡ Email buttons are visible in the dialogs header.
+2. Clicking ⚡ API copies `Bearer <id>` to the clipboard.
+3. Clicking ⚡ Email copies `trigger+<id>@<domain>` to the clipboard.
+4. Without `triggerId`, neither button is visible.
+
+**Triggers migration:**
+- Tested as part of server startup. Verified indirectly: after the migration runs, existing projects have `projecttrigger:*` entries in Redis, and `userapikey:*` / `apikey:*` / `userapikeyreveal:*` keys are gone.
 
 **Vi mode:** [COMMENTED OUT, BROKEN]
 
@@ -480,4 +500,4 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
   - Create project.
   - Write/read `doc/main.md`.
   - Overwrite it (simulating `:w`) and verify new content persists.
-- Cleanup: reset vi mode false, clear API key, delete project.
+- Cleanup: reset vi mode false, delete project.

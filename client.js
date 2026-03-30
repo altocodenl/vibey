@@ -80,22 +80,37 @@ var freshDialogSlug = function (filename) {
    return base + '-fresh';
 };
 
-var MODEL_OPTIONS = [
-   {provider: 'openai', model: 'gpt-5.4',                     label: 'OpenAI · gpt-5.4'},
-   {provider: 'openai', model: 'gpt-5.2-codex',               label: 'OpenAI · gpt-5.2'},
-   {provider: 'claude', model: 'claude-opus-4-6',              label: 'Claude · opus-4-6'},
-   {provider: 'claude', model: 'claude-sonnet-4-6',            label: 'Claude · sonnet-4-6'}
-];
-
-var CONTEXT_WINDOWS = {
-   'gpt-5.4': 1050000,
-   'gpt-5.2-codex': 272000,
-   'claude-opus-4-6': 200000,
-   'claude-sonnet-4-6': 200000
+// Fallback models — overwritten by GET /models on startup
+var MODELS = {
+   openai: {
+      'gpt-5.4':           {context: 1000000},
+      'gpt-5.2':           {context: 272000},
+      'gpt-4.1':           {context: 1000000}
+   },
+   anthropic: {
+      'claude-opus-4-6':   {context: 1000000},
+      'claude-sonnet-4-6': {context: 200000},
+      'claude-haiku-4-6':  {context: 200000}
+   }
 };
 
+var buildModelOptions = function () {
+   var options = [];
+   dale.go (MODELS.openai, function (info, model) {
+      options.push ({provider: 'openai', model: model, label: 'OpenAI · ' + model});
+   });
+   dale.go (MODELS.anthropic, function (info, model) {
+      options.push ({provider: 'claude', model: model, label: 'Claude · ' + model.replace (/^claude-/, '')});
+   });
+   return options;
+};
+
+var MODEL_OPTIONS = buildModelOptions ();
+
 var getContextWindowSize = function (model) {
-   return CONTEXT_WINDOWS [model] || 200000;
+   if (MODELS.openai [model]) return MODELS.openai [model].context;
+   if (MODELS.anthropic [model]) return MODELS.anthropic [model].context;
+   return 200000;
 };
 
 var modelOptionKey = function (opt) {
@@ -1186,6 +1201,7 @@ B.mrespond ([
          if (body && body.mode === 'LOCAL') {
             B.call (x, 'set', 'cloudMode', false);
             B.call (x, 'set', 'cloudAuth', 'local');
+            B.call (x, 'load', 'models');
             B.call (x, 'load', 'projects');
             B.call (x, 'load', 'settings');
             return B.call (x, 'read', 'hash');
@@ -1194,6 +1210,7 @@ B.mrespond ([
             B.call (x, 'set', 'cloudMode', true);
             B.call (x, 'set', 'cloudAuth', 'authenticated');
             B.call (x, 'set', 'cloudCsrf', body.csrf);
+            B.call (x, 'load', 'models');
             B.call (x, 'load', 'projects');
             B.call (x, 'load', 'settings');
             return B.call (x, 'read', 'hash');
@@ -1241,6 +1258,7 @@ B.mrespond ([
             }
          }
          if (parsed.project) B.call (x, 'load', 'files', parsed.project);
+         if (parsed.project) B.call (x, 'load', 'triggerId');
          B.call (x, 'apply', 'hashTarget');
       };
 
@@ -1582,6 +1600,34 @@ B.mrespond ([
 
    // *** SETTINGS ***
 
+   ['load', 'models', function (x) {
+      c.ajax ('get', 'models', {}, '', function (error, rs) {
+         if (error || ! rs.body || type (rs.body) !== 'object') return;
+         if (rs.body.openai) MODELS.openai = rs.body.openai;
+         if (rs.body.anthropic) MODELS.anthropic = rs.body.anthropic;
+         MODEL_OPTIONS = buildModelOptions ();
+      });
+   }],
+
+   ['copy', 'trigger', function (x, mode) {
+      var trigger = B.get ('triggerId');
+      if (! trigger || ! trigger.id) return;
+      var text = mode === 'email'
+         ? 'trigger+' + trigger.id + '@' + trigger.domain
+         : 'Bearer ' + trigger.id;
+      if (navigator.clipboard) navigator.clipboard.writeText (text);
+      // Silent copy — clipboard API handles it. No toast/notification needed.
+   }],
+
+   ['load', 'triggerId', function (x) {
+      var project = B.get ('currentProject');
+      if (! project) return B.call (x, 'set', 'triggerId', null);
+      B.call (x, 'get', 'project/' + encodeURIComponent (project) + '/trigger-id', {}, '', function (x, error, rs) {
+         if (error || ! rs.body || ! rs.body.triggerId) return B.call (x, 'set', 'triggerId', null);
+         B.call (x, 'set', 'triggerId', {id: rs.body.triggerId, domain: rs.body.domain || ''});
+      });
+   }],
+
    ['load', 'settings', function (x) {
       B.call (x, 'get', 'settings', {}, '', function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Failed to load settings');
@@ -1606,17 +1652,6 @@ B.mrespond ([
          if (error) return B.call (x, 'report', 'error', 'Failed to save settings');
          B.call (x, 'set', 'settingsEdits', {});
          B.call (x, 'load', 'settings');
-      });
-   }],
-
-   ['regenerate', 'userApiKey', function (x) {
-      if (! confirm ('Regenerate your automation API key? The current key will stop working immediately.')) return;
-      B.call (x, 'set', 'savingSettings', true);
-      B.call (x, 'post', 'settings/userApiKey/regenerate', {}, {}, function (x, error, rs) {
-         B.call (x, 'set', 'savingSettings', false);
-         if (error) return B.call (x, 'report', 'error', 'Failed to regenerate automation API key');
-         B.call (x, 'set', 'showApiKeys', false);
-         B.call (x, 'set', ['settings', 'userApiKey'], rs.body && rs.body.userApiKey ? rs.body.userApiKey : null);
       });
    }],
 
@@ -3777,7 +3812,7 @@ var formatMessageGauges = function (msg) {
 
 // Tool requests run automatically (no client-side gating)
 views.dialogs = function () {
-   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['streamingMarkdown'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin'], ['viewportPhone'], ['mobileDialogsPanel']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, streamingMarkdown, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin, viewportPhone, mobileDialogsPanel) {
+   return B.view ([['files'], ['currentFile'], ['loadingFile'], ['dialog'], ['streaming'], ['streamingContent'], ['streamingMarkdown'], ['optimisticUserMessage'], ['toolMessageExpanded'], ['currentProject'], ['viMode'], ['viState'], ['viOverlayChat'], ['settings'], ['contextWindow'], ['vibeyingSpin'], ['viewportPhone'], ['mobileDialogsPanel'], ['triggerId']], function (files, currentFile, loadingFile, dialog, streaming, streamingContent, streamingMarkdown, optimisticUserMessage, toolMessageExpanded, currentProject, viMode, viState, viOverlayChat, settings, contextWindow, vibeyingSpin, viewportPhone, mobileDialogsPanel, triggerId) {
 
       dialog = dialog || {};
       var compaction = dialog.compaction || null;
@@ -3881,7 +3916,19 @@ views.dialogs = function () {
                      class: 'btn-small',
                      title: 'Next message',
                      onclick: B.ev ('jump', 'chatMessage', 'next', {raw: 'event'})
-                  }, '↓']
+                  }, '↓'],
+                  triggerId && triggerId.id ? ['button', {
+                     class: 'btn-small',
+                     'data-testid': 'trigger-copy-api',
+                     title: 'Copy trigger Bearer token for API use',
+                     onclick: B.ev ('copy', 'trigger', 'api')
+                  }, '⚡ API'] : '',
+                  triggerId && triggerId.id && triggerId.domain ? ['button', {
+                     class: 'btn-small',
+                     'data-testid': 'trigger-copy-email',
+                     title: 'Copy trigger email address',
+                     onclick: B.ev ('copy', 'trigger', 'email')
+                  }, '⚡ Email'] : ''
                ]]
             ]],
             ['div', {class: 'chat-messages', onscroll: B.ev ('track', 'chatScroll', {raw: 'event'})}, [
@@ -4113,14 +4160,13 @@ views.projects = function () {
 };
 
 views.settings = function () {
-   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauth'], ['viMode'], ['settingsShowMore'], ['viewportPhone']], function (settingsData, edits, saving, showKeys, oauth, viMode, viewportPhone) {
+   return B.view ([['settings'], ['settingsEdits'], ['savingSettings'], ['showApiKeys'], ['oauth'], ['viMode'], ['settingsShowMore'], ['viewportPhone']], function (settingsData, edits, saving, showKeys, oauth, viMode, _showMore, viewportPhone) {
       settingsData = settingsData || {};
       edits = edits || {};
       var openai = settingsData.openai || {};
       var claude = settingsData.claude || {};
       var openaiOAuth = settingsData.openaiOAuth || {};
       var claudeOAuth = settingsData.claudeOAuth || {};
-      var userApiKey = settingsData.userApiKey || null;
       var settings = settingsData.editor || {};
       oauth = oauth || {};
       var oauthLoading = oauth.loading;
@@ -4241,53 +4287,6 @@ views.settings = function () {
          ]];
       };
 
-      var renderUserApiKey = function (info) {
-         if (! info || (! info.key && ! info.maskedKey)) return '';
-         var hasRawKey = !! info.key;
-         var display = hasRawKey ? (showKeys ? info.key : (info.maskedKey || '')) : (info.maskedKey || '');
-         var metaStyle = style ({color: '#9aa4bf', 'font-size': '12px'});
-         return ['div', {class: 'settings-user-api-key settings-card' + (viewportPhone ? ' settings-card-phone' : ''), style: style ({'background-color': '#16213e', 'border-radius': '8px', padding: '1.25rem', 'margin-bottom': '1rem'})}, [
-            ['div', {class: viewportPhone ? 'settings-card-header-phone' : '', style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '1rem', 'margin-bottom': '0.75rem'})}, [
-               ['div', [
-                  ['span', {style: style ({'font-weight': 'bold', 'font-size': '16px', color: '#94b8ff'})}, 'Automation API key'],
-                  ['div', {style: metaStyle}, 'Use as Bearer token for POST /project/:project/trigger']
-               ]],
-               ['div', {class: viewportPhone ? 'settings-row-phone settings-actions-phone' : '', style: style ({display: 'flex', gap: '0.5rem', 'align-items': 'center', 'flex-wrap': 'wrap', 'justify-content': 'flex-end'})}, [
-                  hasRawKey ? ['button', {
-                     class: 'btn-small',
-                     style: style ({'background-color': '#3a3a5f', color: '#c9d4ff'}),
-                     onclick: B.ev ('set', 'showApiKeys', ! showKeys)
-                  }, showKeys ? 'Hide key' : 'Show key'] : '',
-                  ['button', {
-                     class: 'btn-small',
-                     'data-testid': 'user-api-key-regenerate',
-                     style: style ({'background-color': '#6b3fa0', color: '#fff'}),
-                     onclick: B.ev ('regenerate', 'userApiKey'),
-                     disabled: saving
-                  }, saving ? 'Regenerating...' : 'Regenerate']
-               ]]
-            ]],
-            hasRawKey ? ['div', {
-               class: 'settings-user-api-key-warning',
-               style: style ({'background-color': '#2a2140', color: '#f7d774', padding: '0.75rem', 'border-radius': '6px', 'font-size': '12px', 'margin-bottom': '0.75rem'})
-            }, 'Copy this key now. For security, Vibey will not show it again.'] : '',
-            ['input', {
-               'data-testid': 'user-api-key-input',
-               type: hasRawKey && showKeys ? 'text' : 'password',
-               readOnly: true,
-               value: display,
-               style: style ({
-                  width: '100%', padding: '0.6rem', 'border-radius': '6px', border: 'none',
-                  'background-color': '#1a1a2e', color: '#eee', 'font-family': 'Monaco, Consolas, monospace', 'font-size': '13px', 'margin-bottom': '0.75rem'
-               })
-            }],
-            ['div', {style: style ({display: 'grid', gap: '0.35rem'})}, [
-               ['div', {style: metaStyle}, 'Created: ' + (info.createdAt || 'Unknown')],
-               ['div', {style: metaStyle}, 'Last used: ' + (info.lastUsed || 'Never')]
-            ]]
-         ]];
-      };
-
       var hasEdits = edits.openaiKey !== undefined || edits.claudeKey !== undefined;
       var showMore = B.get ('settingsShowMore');
 
@@ -4302,12 +4301,6 @@ views.settings = function () {
             ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Use your existing ChatGPT or Claude subscription. Logs in via OAuth — no API key needed.'],
             renderOAuthProvider ('openai', 'ChatGPT Plus/Pro', 'Use your ChatGPT subscription (Plus, Pro, Team)', openaiOAuth),
             renderOAuthProvider ('claude', 'Claude Pro/Max', 'Use your Anthropic Claude subscription (Pro, Max)', claudeOAuth),
-
-            userApiKey ? ['div', [
-               sectionTitle ('Automation'),
-               ['p', {style: style ({color: '#9aa4bf', 'font-size': '13px', 'margin-bottom': '1rem'})}, 'Your personal Vibey automation key. There is one per user.'],
-               renderUserApiKey (userApiKey)
-            ]] : '',
 
             // *** MORE BUTTON ***
             ['div', {style: style ({'margin-top': '1.5rem', 'text-align': 'center'})}, [

@@ -6,11 +6,11 @@ Build with words, not code.
 
 ## Vibey in a nutshell
 
-1. **Everything is a document**: your description of what you're building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. There is no database.
-2. **Everything in your browser**: your documents are not only text: use images, audio, and embed small apps in your documents. No terminal or dedicated native app required.
-3. **Safe YOLO**: the agents don't ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
-4. **BYOAI**: bring your own OpenAI/Anthropic credentials, whether personal or API keys.
-5. **Open source**: both the local and cloud versions are open source.
+1. **Communication as the basis:** *Everything is a document*. Your description of what you're building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. There is no database.
+2. **Connected through the web:** *Everything in your browser*. Your documents are not only text: use images, audio, and embed small apps in your documents. Everything has an URL. No terminal or dedicated native app needed.
+3. **Autonomy with walls**: *Agents run YOLO within a self-contained project*. The agents don't ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
+4. **Transparent**: *Bring your own AI credentials,* whether personal or API keys. See every call that your agents make.
+5. **Freedom**: Vibey is open source. Altocode, the company behind Vibey cloud, is an [openbound](https://altocode.nl/blog/altocode-is-an-openbound).
 
 ## Vibey is for those who don't code but want to
 
@@ -776,7 +776,7 @@ A catch-all route early in the route list handles session validation for cloud m
 7. Look up `csrf:<token>` and attach `rq.user.csrf`.
 8. Call `rs.next ()`.
 
-For `POST`/`PUT`/`DELETE` requests (except auth routes and Bearer-authenticated endpoints), a subsequent route validates the CSRF token against `rq.user.csrf`. For `POST`/`PUT` the client sends it in `rq.body.csrf`; for `DELETE` the server also accepts `X-CSRF-Token` or `?csrf=...`. On mismatch: `403 {error: 'csrf'}`. When present in the JSON body, the CSRF token is stripped before the route handler runs.
+For `POST`/`PUT`/`DELETE` requests (except auth routes and Bearer-authenticated trigger endpoints), a subsequent route validates the CSRF token against `rq.user.csrf`. For `POST`/`PUT` the client sends it in `rq.body.csrf`; for `DELETE` the server also accepts `X-CSRF-Token` or `?csrf=...`. On mismatch: `403 {error: 'csrf'}`. When present in the JSON body, the CSRF token is stripped before the route handler runs.
 
 ### Server: admin
 
@@ -785,10 +785,6 @@ For `POST`/`PUT`/`DELETE` requests (except auth routes and Bearer-authenticated 
 - `POST /admin/createUser` — approve a signup (admin-only). Body: `{email}`. Creates the user:
   - Generates a user id (`crypto.randomBytes(16).toString('hex')`).
   - Stores `user:<id>` hash with `{id, email, createdAt, lastActive, settings: '{}'}`.
-  - Generates one automation API key for the user.
-  - Stores `userapikey:<user-id>` → `<api-key>` for quick lookup from the user.
-  - Stores `apikey:<api-key>` hash with `{userId, createdAt, lastUsed}`.
-  - Marks the key as revealable once to that user via `userapikeyreveal:<user-id>` → `<api-key>`.
   - Stores `email:<email>` → `<user-id>` for email-to-id lookup.
   - Deletes `signup:<email>`.
   - Sends the user a welcome email with a login link.
@@ -812,21 +808,65 @@ In local mode, scoping is unchanged (no user id prefix).
 - In **local mode**, settings live in `secret.json` on disk (current behavior).
 - In **cloud mode**, settings live in the `settings` field of `user:<id>` in redis. `GET /settings` reads from redis; `POST /settings` writes to redis.
 - In cloud mode, OAuth credentials are also stored per-user inside that user's settings. Pending OAuth login state is stored in Redis with a TTL, keyed by user and provider, so concurrent users do not share OAuth flow state.
-- `GET /settings` returns masked provider keys and the automation API key metadata (`maskedKey`, `createdAt`, `lastUsed`). In cloud mode it may also include the raw automation API key exactly once immediately after user creation, in the first successful settings load for that user.
+- `GET /settings` returns masked provider keys (OpenAI/Anthropic). In cloud mode, also includes the project trigger ID for the currently open project (if any).
 
-### Server: API key
+### Server: triggers
 
-Each user has exactly one auto-generated automation API key. It is created at user creation time (`crypto.randomBytes(24).toString('hex')`) and stored in redis as its own hash:
+Each project has a unique, crypto-strong trigger ID generated at project creation time (`crypto.randomBytes(16).toString('hex')`). The trigger ID is stored in redis:
 
-- `userapikey:<user-id>` → `<api-key>`
-- `apikey:<api-key>` hash → `{userId, createdAt, lastUsed}`
-- `userapikeyreveal:<user-id>` → `<api-key>` while the current key is still eligible for its one-time reveal
+- `trigger:<id>` → `<userId>:<projectSlug>` — maps a trigger ID to the owning user and project.
+- `projecttrigger:<userId>:<projectSlug>` → `<trigger-id>` — reverse lookup from project to trigger ID.
 
-The key can be used as a `Bearer` token in the `Authorization` header as an alternative to cookie+CSRF authentication for automation endpoints.
+The trigger ID can be used in two ways:
 
-- `GET /settings` — in cloud mode, returns automation-key metadata (`maskedKey`, `createdAt`, `lastUsed`) and reveals the raw key only once when `userapikeyreveal:<user-id>` still points at the current key. After that response, the reveal marker is deleted and later `GET /settings` calls return metadata only.
-- `POST /settings/userApiKey/regenerate` — in cloud mode, rotates the user's automation API key immediately, deletes the old `apikey:<old-key>` record, stores the new one, and returns the new raw key once in the response together with fresh metadata. The previous key stops working right away.
-- `POST /project/:project/trigger` — trigger an agent on a project. Requires API key authentication (no cookie). Body: `{provider, prompt, slug?}`. Equivalent to `POST /project/:project/dialog` but returns immediately with `202 {ok: true, dialogId}` and no further response body. On success, the API key record's `lastUsed` field is updated. Designed for automation and webhooks.
+1. **API**: `POST /trigger` with `Authorization: Bearer <trigger-id>`. Body: `{model?, prompt?, slug?, data?}`. Returns `202 {ok: true, dialogId}`.
+2. **Email**: send an email to `trigger+<trigger-id>@<VIBEY_TRIGGER_EMAIL_DOMAIN>`. The email's `from`, `subject`, and `body` are placed in the `data` property and used to construct the prompt.
+
+If `model` is specified, the provider is derived from the model name (e.g. `gpt-*` → OpenAI, `claude-*` → Anthropic). If the model is unknown, the trigger returns `400`. If `model` is not specified, the server autodetects: it checks the user's settings for configured providers (OpenAI API key or OAuth, Anthropic API key or OAuth). If both are available, OpenAI is preferred (higher rate limits). If neither is available, the trigger returns `422`.
+
+The prompt is constructed as follows:
+- If `prompt` is present in the body, use it directly.
+- If `data` is present, construct the prompt from `data`: `"Trigger from <from>\n\nSubject: <subject>\n\n<body>"`.
+- If neither `prompt` nor `data` is present, return `400`.
+
+#### Models endpoint
+
+`GET /models` — returns the list of known models, scoped by provider:
+
+```json
+{
+  "openai": {
+    "gpt-5.4": {"context": 1000000},
+    "gpt-5.2": {"context": 272000},
+    "gpt-4.1": {"context": 1000000}
+  },
+  "anthropic": {
+    "claude-opus-4-6": {"context": 1000000},
+    "claude-sonnet-4-6": {"context": 200000},
+    "claude-haiku-4-6": {"context": 200000}
+  }
+}
+```
+
+The client fetches this on startup to populate the model selector and context window sizes.
+
+#### SMTP server (cloud mode)
+
+When `VIBEY_CLOUD=1` and `VIBEY_DISABLE_EMAIL` is not set, vibey starts an embedded SMTP server on port 25 using the `smtp-server` npm package. The trigger email domain is configured via the `VIBEY_TRIGGER_EMAIL_DOMAIN` environment variable (set in `utils/deploy.sh`).
+
+The SMTP server:
+1. Validates `rcptTo` against the pattern `trigger+<id>@<domain>`.
+2. Parses the email with `mailparser`.
+3. Extracts `{from, subject, body}` into a `data` object.
+4. Calls the same shared `executeTrigger` function used by `POST /trigger`.
+
+#### Migration: triggers-v1
+
+On server startup, if the `migration:triggers-v1` key does not exist in redis:
+1. Scan Docker volumes matching the name pattern `vibey-vol-*` to find all existing projects (including sleeping ones without running containers).
+2. For each volume, parse the userId and project slug from the volume name. Generate a trigger ID and store `trigger:<id>` and `projecttrigger:<userId>:<slug>`.
+3. Remove all old API key redis keys: scan and delete `userapikey:*`, `apikey:*`, `userapikeyreveal:*`.
+4. Set `migration:triggers-v1` → `1` in redis.
 
 ### Server: public access
 
@@ -856,10 +896,10 @@ All cloud state lives in redis. Key schema:
 | `csrf:<token>` | string | 7 days | `<session-id>` |
 | `otp:<user-id>` | string | 10 min | `<6-digit code>` |
 | `signup:<email>` | hash | — | `email`, `createdAt` |
-| `userapikey:<user-id>` | string | — | `<api-key>` — quick lookup for the user's single automation key |
-| `apikey:<key>` | hash | — | `userId`, `createdAt`, `lastUsed` |
-| `userapikeyreveal:<user-id>` | string | — | `<api-key>` while the current key can still be revealed once |
+| `trigger:<id>` | string | — | `<userId>:<projectSlug>` — maps trigger ID to user and project |
+| `projecttrigger:<userId>:<projectSlug>` | string | — | `<trigger-id>` — reverse lookup from project to trigger ID |
 | `access:<user-id>` | hash | — | `<project>:<path>` → `ALL` or JSON array of user ids |
+| `migration:triggers-v1` | string | — | `1` when migration has run |
 
 ### Client: auth
 
@@ -1013,6 +1053,10 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
 
+- Test triggers, review changes.
+- Add lighter models: gpt4.1, claude sonnet. Autodetect provider, no need to pass it.
+- Use server logs and client event logs to optimize performance, particularly in the client which is slow in mobile.
+- Add cron triggers.
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
 - Demo videos
    - Tictactoe

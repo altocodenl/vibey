@@ -23,4 +23,4 @@ fi
 
 rsync -av --exclude video . $HOST:$FOLDER
 ssh $HOST chown -R root /root/$FOLDER
-ssh $HOST "cd $FOLDER && node -e \"var fs=require('fs'); var path='secret.json'; var data=JSON.parse(fs.readFileSync(path, 'utf8')); data.domain='https://buildwithvibey.com/app'; fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\\n');\" && VIBEY_CLOUD=1 docker compose up --build -d"
+ssh $HOST "cd $FOLDER && node -e \"var fs=require('fs'); var path='secret.json'; var data=JSON.parse(fs.readFileSync(path, 'utf8')); data.domain='https://buildwithvibey.com/app'; fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\\n');\" && VIBEY_CLOUD=1 VIBEY_TRIGGER_EMAIL_DOMAIN=buildwithvibey.com docker compose up --build -d"
