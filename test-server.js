@@ -1349,161 +1349,8 @@ var dialogSequence = [
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DIALOG_PROJECT)) return log ('Project still exists after final deletion');
       return true;
-   }],
-
-   ['Dialog 49: Cloud trigger setup', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (rs.code === 200 && rs.body && rs.body.mode === 'LOCAL') {
-         s.skipDialogCloudTrigger = true;
-         return next ();
-      }
-      if (rs.code !== 403 && rs.code !== 200) return log ('Expected 403 or 200 from auth/csrf, got ' + rs.code);
-
-      s.dialogCloudAdminEmail = (CONFIG.adminEmail || '').toLowerCase ();
-      if (! s.dialogCloudAdminEmail) {
-         s.skipDialogCloudTrigger = true;
-         return next ();
-      }
-
-      cloudLogin (s.dialogCloudAdminEmail, function (loginError, auth) {
-         if (loginError) {
-            s.skipDialogCloudTrigger = true;
-            return next ();
-         }
-         s.dialogCloudAuth = auth;
-         next ();
-      });
-   }],
-
-   ['Dialog 50: Cloud trigger — create project and verify trigger ID in Redis', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-      var auth = s.dialogCloudAuth;
-      if (! auth) return log ('Missing dialog cloud auth');
-
-      authJson ('POST', '/projects', {name: 'dialog-cloud-trigger-' + testTimestamp ()}, auth, function (projectError, projectStatus, projectBody) {
-         if (projectError) return log ('Dialog cloud project create failed: ' + projectError.message);
-         if (projectStatus !== 200) return log ('Expected 200 creating dialog cloud project, got ' + projectStatus);
-         if (! projectBody || ! projectBody.slug) return log ('Dialog cloud project create missing slug');
-         s.dialogCloudProjectSlug = projectBody.slug;
-
-         // Look up trigger ID for this project
-         authGet ('/project/' + encodeURIComponent (s.dialogCloudProjectSlug) + '/trigger-id', auth, function (trigError, trigStatus, trigBody) {
-            if (trigError) return log ('GET trigger-id failed: ' + trigError.message);
-            if (trigStatus !== 200) return log ('Expected 200 from GET trigger-id, got ' + trigStatus);
-            if (! trigBody || ! trigBody.triggerId) return log ('Missing triggerId in response');
-            s.dialogCloudTriggerId = trigBody.triggerId;
-
-            // Verify Redis: trigger:<id> maps to userId:projectSlug
-            redisGet ('trigger:' + trigBody.triggerId, function (err, val) {
-               if (err || ! val) return log ('trigger:<id> not found in Redis');
-               // val should contain userId:projectSlug
-               if (val.indexOf (s.dialogCloudProjectSlug) === -1) return log ('trigger:<id> value does not contain project slug: ' + val);
-               next ();
-            });
-         });
-      });
-   }],
-
-   ['Dialog 51: Cloud trigger — POST /trigger with Bearer token creates dialog', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-
-      httpJson ('POST', '/trigger', {
-         prompt: 'Reply with the single word ok.',
-         slug: 'api-trigger'
-      }, function (triggerError, triggerStatus, triggerBody) {
-         if (triggerError) return log ('Dialog cloud trigger failed: ' + triggerError.message);
-         if (triggerStatus !== 202) return log ('Expected 202 from trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
-         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad trigger response: ' + JSON.stringify (triggerBody));
-         s.dialogCloudTriggeredDialogId = triggerBody.dialogId;
-         next ();
-      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
-   }],
-
-   ['Dialog 52: Cloud trigger — POST /trigger with data (email shape) creates dialog', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-
-      httpJson ('POST', '/trigger', {
-         data: {from: 'test@example.com', subject: 'Test trigger', body: 'Run echo hello'},
-         slug: 'email-trigger'
-      }, function (triggerError, triggerStatus, triggerBody) {
-         if (triggerError) return log ('Dialog cloud data trigger failed: ' + triggerError.message);
-         if (triggerStatus !== 202) return log ('Expected 202 from data trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
-         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad data trigger response: ' + JSON.stringify (triggerBody));
-         next ();
-      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
-   }],
-
-   ['Dialog 53: Cloud trigger — POST /trigger with explicit model resolves provider', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-
-      httpJson ('POST', '/trigger', {
-         model: 'gpt-4.1',
-         prompt: 'Reply with the single word ok.',
-         slug: 'model-trigger'
-      }, function (triggerError, triggerStatus, triggerBody) {
-         if (triggerError) return log ('Dialog cloud model trigger failed: ' + triggerError.message);
-         if (triggerStatus !== 202) return log ('Expected 202 from model trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
-         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad model trigger response: ' + JSON.stringify (triggerBody));
-         next ();
-      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
-   }],
-
-   ['Dialog 54: Cloud trigger — invalid trigger ID returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-
-      httpJson ('POST', '/trigger', {
-         prompt: 'test'
-      }, function (triggerError, triggerStatus, triggerBody) {
-         if (triggerStatus !== 403) return log ('Expected 403 for invalid trigger ID, got ' + triggerStatus);
-         next ();
-      }, {Authorization: 'Bearer invalid-trigger-id-12345'});
-   }],
-
-   ['Dialog 55: Cloud trigger — no prompt and no data returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-
-      httpJson ('POST', '/trigger', {
-         slug: 'empty-trigger'
-      }, function (triggerError, triggerStatus, triggerBody) {
-         if (triggerStatus !== 400) return log ('Expected 400 for missing prompt/data, got ' + triggerStatus);
-         next ();
-      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
-   }],
-
-   ['Dialog 56: Cloud trigger — unknown model returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger) return next ();
-
-      httpJson ('POST', '/trigger', {
-         model: 'not-a-real-model',
-         prompt: 'test'
-      }, function (triggerError, triggerStatus, triggerBody) {
-         if (triggerStatus !== 400) return log ('Expected 400 for unknown model, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
-         next ();
-      }, {Authorization: 'Bearer ' + s.dialogCloudTriggerId});
-   }],
-
-   ['Dialog 57: Cloud trigger — cleanup project and verify trigger ID removed', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
-      if (s.skipDialogCloudTrigger || ! s.dialogCloudProjectSlug) return next ();
-      var triggerId = s.dialogCloudTriggerId;
-
-      var req = http.request ({
-         hostname: 'localhost',
-         port: 5353,
-         path: '/projects/' + encodeURIComponent (s.dialogCloudProjectSlug),
-         method: 'DELETE',
-         headers: {Cookie: cookieHeader (s.dialogCloudAuth.cookies)}
-      }, function (res) {
-         res.on ('data', function () {});
-         res.on ('end', function () {
-            // Verify trigger ID is removed from Redis
-            redisGet ('trigger:' + triggerId, function (err, val) {
-               if (val) return log ('trigger:<id> should be deleted after project deletion, but still exists: ' + val);
-               next ();
-            });
-         });
-      });
-      req.on ('error', function () {next ();});
-      req.end ();
    }]
+
 ];
 
 // *** DOCS ***
@@ -1516,192 +1363,192 @@ var SECOND_CONTENT = '# Notes\n\nSome notes here.\n';
 
 var docSequence = [
 
-   ['Docs 1: Create project', 'post', 'projects', {}, {name: DOCS_PROJECT}, 200, function (s, rq, rs) {
+   ['Doc 1: Create project', 'post', 'projects', {}, {name: DOCS_PROJECT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
       if (rs.body.slug !== DOCS_PROJECT) return log ('Unexpected project slug');
       return true;
    }],
 
-   ['Docs 2: Write doc/main.md', 'post', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, {content: INITIAL_CONTENT}, 200, function (s, rq, rs) {
+   ['Doc 2: Write doc/main.md', 'post', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, {content: INITIAL_CONTENT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       if (rs.body.name !== 'doc/main.md') return log ('Unexpected filename returned');
       return true;
    }],
 
-   ['Docs 3: Read doc/main.md round-trip', 'get', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
+   ['Doc 3: Read doc/main.md round-trip', 'get', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
       if (rs.body.name !== 'doc/main.md') return log ('Unexpected name: ' + rs.body.name);
       if (rs.body.content !== INITIAL_CONTENT) return log ('Content mismatch. Got: ' + JSON.stringify (rs.body.content));
       return true;
    }],
 
-   ['Docs 4: List includes doc/main.md', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 4: List includes doc/main.md', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (! inc (rs.body, 'doc/main.md')) return log ('doc/main.md not in file list');
       return true;
    }],
 
-   ['Docs 5: Overwrite doc/main.md', 'post', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, {content: UPDATED_CONTENT}, 200, function (s, rq, rs) {
+   ['Doc 5: Overwrite doc/main.md', 'post', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, {content: UPDATED_CONTENT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File overwrite failed');
       return true;
    }],
 
-   ['Docs 6: Read updated content', 'get', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
+   ['Doc 6: Read updated content', 'get', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       if (rs.body.content !== UPDATED_CONTENT) return log ('Updated content mismatch. Got: ' + JSON.stringify (rs.body.content));
       return true;
    }],
 
-   ['Docs 7: Write second doc', 'post', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, {content: SECOND_CONTENT}, 200, function (s, rq, rs) {
+   ['Doc 7: Write second doc', 'post', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, {content: SECOND_CONTENT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Second file write failed');
       return true;
    }],
 
-   ['Docs 8: List includes both docs', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 8: List includes both docs', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (! inc (rs.body, 'doc/main.md')) return log ('doc/main.md missing from list');
       if (! inc (rs.body, SECOND_DOC)) return log (SECOND_DOC + ' missing from list');
       return true;
    }],
 
-   ['Docs 9: Read second doc', 'get', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, '', 200, function (s, rq, rs) {
+   ['Doc 9: Read second doc', 'get', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, '', 200, function (s, rq, rs) {
       if (rs.body.content !== SECOND_CONTENT) return log ('Second doc content mismatch');
       return true;
    }],
 
-   ['Docs 10: Delete second doc', 'delete', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, '', 200, function (s, rq, rs) {
+   ['Doc 10: Delete second doc', 'delete', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File deletion failed');
       return true;
    }],
 
-   ['Docs 11: notes.md gone, main.md remains', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 11: notes.md gone, main.md remains', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (inc (rs.body, SECOND_DOC)) return log (SECOND_DOC + ' still in list after deletion');
       if (! inc (rs.body, 'doc/main.md')) return log ('doc/main.md disappeared');
       return true;
    }],
 
-   ['Docs 12: main.md still has updated content', 'get', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
+   ['Doc 12: main.md still has updated content', 'get', 'project/' + DOCS_PROJECT + '/file/doc/main.md', {}, '', 200, function (s, rq, rs) {
       if (rs.body.content !== UPDATED_CONTENT) return log ('doc/main.md content changed unexpectedly');
       return true;
    }],
 
-   ['Docs 13: Deleted file returns 404', 'get', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, '', 404],
+   ['Doc 13: Deleted file returns 404', 'get', 'project/' + DOCS_PROJECT + '/file/' + SECOND_DOC, {}, '', 404],
 
-   ['Docs 14: Invalid name returns 400', 'post', 'project/' + DOCS_PROJECT + '/file/bad..name.md', {}, {content: 'x'}, 400],
+   ['Doc 14: Invalid name returns 400', 'post', 'project/' + DOCS_PROJECT + '/file/bad..name.md', {}, {content: 'x'}, 400],
 
-   ['Docs 15: Outside managed folders returns 400', 'post', 'project/' + DOCS_PROJECT + '/file/bad.txt', {}, {content: 'x'}, 400],
+   ['Doc 15: Outside managed folders returns 400', 'post', 'project/' + DOCS_PROJECT + '/file/bad.txt', {}, {content: 'x'}, 400],
 
    // Special characters in filenames
 
-   ['Docs 16a: Write doc with spaces in name', 'post', 'project/' + DOCS_PROJECT + '/file/doc/my%20notes.md', {}, {content: '# My Notes\n'}, 200, function (s, rq, rs) {
+   ['Doc 16a: Write doc with spaces in name', 'post', 'project/' + DOCS_PROJECT + '/file/doc/my%20notes.md', {}, {content: '# My Notes\n'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Write failed');
       return true;
    }],
 
-   ['Docs 16a: Read doc with spaces', 'get', 'project/' + DOCS_PROJECT + '/file/doc/my%20notes.md', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16a: Read doc with spaces', 'get', 'project/' + DOCS_PROJECT + '/file/doc/my%20notes.md', {}, '', 200, function (s, rq, rs) {
       if (rs.body.content !== '# My Notes\n') return log ('Content mismatch');
       return true;
    }],
 
-   ['Docs 16a: Listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16a: Listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (! inc (rs.body, 'doc/my notes.md')) return log ('doc/my notes.md not in list');
       return true;
    }],
 
-   ['Docs 16a: Delete doc with spaces', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/my%20notes.md', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16a: Delete doc with spaces', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/my%20notes.md', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Delete failed');
       return true;
    }],
 
-   ['Docs 16a: Gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16a: Gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (inc (rs.body, 'doc/my notes.md')) return log ('doc/my notes.md still in list');
       return true;
    }],
 
-   ['Docs 16b: Write doc with accented name', 'post', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('café.md'), {}, {content: '# Café\n'}, 200, function (s, rq, rs) {
+   ['Doc 16b: Write doc with accented name', 'post', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('café.md'), {}, {content: '# Café\n'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Write failed');
       return true;
    }],
 
-   ['Docs 16b: Read doc with accented name', 'get', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('café.md'), {}, '', 200, function (s, rq, rs) {
+   ['Doc 16b: Read doc with accented name', 'get', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('café.md'), {}, '', 200, function (s, rq, rs) {
       if (rs.body.content !== '# Café\n') return log ('Content mismatch');
       return true;
    }],
 
-   ['Docs 16b: Listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16b: Listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (! inc (rs.body, 'doc/café.md')) return log ('doc/café.md not in list');
       return true;
    }],
 
-   ['Docs 16b: Delete doc with accented name', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('café.md'), {}, '', 200, function (s, rq, rs) {
+   ['Doc 16b: Delete doc with accented name', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('café.md'), {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Delete failed');
       return true;
    }],
 
-   ['Docs 16b: Gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16b: Gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (inc (rs.body, 'doc/café.md')) return log ('doc/café.md still in list');
       return true;
    }],
 
-   ['Docs 16c: Write doc with non-Latin name', 'post', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('日本語.md'), {}, {content: '# 日本語\n'}, 200, function (s, rq, rs) {
+   ['Doc 16c: Write doc with non-Latin name', 'post', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('日本語.md'), {}, {content: '# 日本語\n'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Write failed');
       return true;
    }],
 
-   ['Docs 16c: Read doc with non-Latin name', 'get', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('日本語.md'), {}, '', 200, function (s, rq, rs) {
+   ['Doc 16c: Read doc with non-Latin name', 'get', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('日本語.md'), {}, '', 200, function (s, rq, rs) {
       if (rs.body.content !== '# 日本語\n') return log ('Content mismatch');
       return true;
    }],
 
-   ['Docs 16c: Listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16c: Listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (! inc (rs.body, 'doc/日本語.md')) return log ('doc/日本語.md not in list');
       return true;
    }],
 
-   ['Docs 16c: Delete doc with non-Latin name', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('日本語.md'), {}, '', 200, function (s, rq, rs) {
+   ['Doc 16c: Delete doc with non-Latin name', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/' + encodeURIComponent ('日本語.md'), {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Delete failed');
       return true;
    }],
 
-   ['Docs 16c: Gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 16c: Gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (inc (rs.body, 'doc/日本語.md')) return log ('doc/日本語.md still in list');
       return true;
    }],
 
-   ['Docs 17a: Write nested managed doc path', 'post', 'project/' + DOCS_PROJECT + '/file/doc/nested/plan.md', {}, {content: '# Nested Plan\n\nTesting nested managed path writes.\n'}, 200, function (s, rq, rs) {
+   ['Doc 17a: Write nested managed doc path', 'post', 'project/' + DOCS_PROJECT + '/file/doc/nested/plan.md', {}, {content: '# Nested Plan\n\nTesting nested managed path writes.\n'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Nested managed write failed');
       if (rs.body.name !== 'doc/nested/plan.md') return log ('Unexpected nested filename returned');
       return true;
    }],
 
-   ['Docs 17b: Read nested managed doc path', 'get', 'project/' + DOCS_PROJECT + '/file/doc/nested/plan.md', {}, '', 200, function (s, rq, rs) {
+   ['Doc 17b: Read nested managed doc path', 'get', 'project/' + DOCS_PROJECT + '/file/doc/nested/plan.md', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
       if (rs.body.name !== 'doc/nested/plan.md') return log ('Unexpected nested filename: ' + rs.body.name);
       if (rs.body.content !== '# Nested Plan\n\nTesting nested managed path writes.\n') return log ('Nested content mismatch');
       return true;
    }],
 
-   ['Docs 17c: Nested managed doc listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 17c: Nested managed doc listed in files', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (! inc (rs.body, 'doc/nested/plan.md')) return log ('doc/nested/plan.md not in list');
       return true;
    }],
 
-   ['Docs 17d: Delete nested managed doc path', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/nested/plan.md', {}, '', 200, function (s, rq, rs) {
+   ['Doc 17d: Delete nested managed doc path', 'delete', 'project/' + DOCS_PROJECT + '/file/doc/nested/plan.md', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Nested managed delete failed');
       return true;
    }],
 
-   ['Docs 17e: Nested managed doc gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
+   ['Doc 17e: Nested managed doc gone from list', 'get', 'project/' + DOCS_PROJECT + '/files', {}, '', 200, function (s, rq, rs) {
       if (inc (rs.body, 'doc/nested/plan.md')) return log ('doc/nested/plan.md still in list');
       return true;
    }],
 
-   ['Docs 18: Delete project', 'delete', 'projects/' + DOCS_PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Doc 18: Delete project', 'delete', 'projects/' + DOCS_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
 
-   ['Docs 19: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Doc 19: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DOCS_PROJECT)) return log ('Project still exists after deletion');
       return true;
@@ -1721,14 +1568,14 @@ var TEXT_CONTENT_BASE64 = Buffer.from ('Hello from uploads test!\nLine 2.\n').to
 
 var uploadSequence = [
 
-   ['Uploads 1: Create project', 'post', 'projects', {}, {name: UPLOADS_PROJECT}, 200, function (s, rq, rs) {
+   ['Upload 1: Create project', 'post', 'projects', {}, {name: UPLOADS_PROJECT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
       return true;
    }],
 
    // *** Upload an image (data URL format) ***
 
-   ['Uploads 2: Upload image via data URL', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'test-image.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
+   ['Upload 2: Upload image via data URL', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'test-image.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
       if (rs.body.name !== 'test-image.png') return log ('Upload name mismatch: ' + rs.body.name);
       if (type (rs.body.size) !== 'integer' || rs.body.size < 1) return log ('Upload size should be a positive integer, got: ' + rs.body.size);
@@ -1740,7 +1587,7 @@ var uploadSequence = [
 
    // *** List uploads — image should be present ***
 
-   ['Uploads 3: List uploads includes image', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
+   ['Upload 3: List uploads includes image', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (rs.body.length < 1) return log ('Expected at least 1 upload, got ' + rs.body.length);
       var found = dale.stopNot (rs.body, undefined, function (entry) {
@@ -1755,7 +1602,7 @@ var uploadSequence = [
 
    // *** Fetch the uploaded image and verify bytes + Content-Type ***
 
-   ['Uploads 4: Fetch uploaded image', 'get', 'project/' + UPLOADS_PROJECT + '/upload/test-image.png', {}, '', 200, function (s, rq, rs, next) {
+   ['Upload 4: Fetch uploaded image', 'get', 'project/' + UPLOADS_PROJECT + '/upload/test-image.png', {}, '', 200, function (s, rq, rs, next) {
       httpGet (5353, '/project/' + UPLOADS_PROJECT + '/upload/test-image.png', function (error, status, body) {
          if (error) return log ('Fetch upload failed: ' + error.message);
          if (status !== 200) return log ('Expected 200, got ' + status);
@@ -1765,7 +1612,7 @@ var uploadSequence = [
    }],
 
    // Verify Content-Type via raw HTTP request
-   ['Uploads 5: Verify image Content-Type header', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs, next) {
+   ['Upload 5: Verify image Content-Type header', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs, next) {
       var req = http.request ({
          hostname: 'localhost',
          port: 5353,
@@ -1784,7 +1631,7 @@ var uploadSequence = [
 
    // *** Upload a non-media file ***
 
-   ['Uploads 6: Upload text file', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'notes.txt', content: TEXT_CONTENT_BASE64, contentType: 'text/plain'}, 200, function (s, rq, rs) {
+   ['Upload 6: Upload text file', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'notes.txt', content: TEXT_CONTENT_BASE64, contentType: 'text/plain'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
       if (rs.body.name !== 'notes.txt') return log ('Upload name mismatch: ' + rs.body.name);
       if (rs.body.contentType !== 'text/plain') return log ('Upload contentType mismatch: ' + rs.body.contentType);
@@ -1794,7 +1641,7 @@ var uploadSequence = [
 
    // *** List uploads — both entries ***
 
-   ['Uploads 7: List uploads includes both entries', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
+   ['Upload 7: List uploads includes both entries', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (rs.body.length < 2) return log ('Expected at least 2 uploads, got ' + rs.body.length);
       var names = dale.go (rs.body, function (entry) {return entry.name;});
@@ -1805,7 +1652,7 @@ var uploadSequence = [
 
    // *** Fetch the text file and verify content ***
 
-   ['Uploads 8: Fetch text file content', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs, next) {
+   ['Upload 8: Fetch text file content', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs, next) {
       var req = http.request ({
          hostname: 'localhost',
          port: 5353,
@@ -1827,7 +1674,7 @@ var uploadSequence = [
 
    // *** Upload with spaces in filename ***
 
-   ['Uploads 9: Upload file with spaces in name', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'my screenshot 2026.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
+   ['Upload 9: Upload file with spaces in name', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'my screenshot 2026.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
       if (rs.body.name !== 'my screenshot 2026.png') return log ('Upload name mismatch: ' + rs.body.name);
       if (rs.body.contentType !== 'image/png') return log ('Upload contentType mismatch: ' + rs.body.contentType);
@@ -1836,7 +1683,7 @@ var uploadSequence = [
       return true;
    }],
 
-   ['Uploads 10: List uploads includes spaced filename', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
+   ['Upload 10: List uploads includes spaced filename', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var found = dale.stopNot (rs.body, undefined, function (entry) {
          if (entry.name === 'my screenshot 2026.png') return entry;
@@ -1846,7 +1693,7 @@ var uploadSequence = [
    }],
 
    // Fetch file with spaces — must percent-encode the name in the URL
-   ['Uploads 11: Fetch file with spaces in name', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs, next) {
+   ['Upload 11: Fetch file with spaces in name', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs, next) {
       var req = http.request ({
          hostname: 'localhost',
          port: 5353,
@@ -1865,7 +1712,7 @@ var uploadSequence = [
 
    // *** Upload with dots and dashes (edge-case valid names) ***
 
-   ['Uploads 12: Upload file with dots and dashes', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'my-file.v2.backup.txt', content: TEXT_CONTENT_BASE64, contentType: 'text/plain'}, 200, function (s, rq, rs) {
+   ['Upload 12: Upload file with dots and dashes', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'my-file.v2.backup.txt', content: TEXT_CONTENT_BASE64, contentType: 'text/plain'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
       if (rs.body.name !== 'my-file.v2.backup.txt') return log ('Upload name mismatch: ' + rs.body.name);
       return true;
@@ -1873,19 +1720,19 @@ var uploadSequence = [
 
    // *** Upload with path traversal should fail ***
 
-   ['Uploads 13: Upload with .. in name returns 400', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: '../etc/passwd', content: TEXT_CONTENT_BASE64}, 400],
+   ['Upload 13: Upload with .. in name returns 400', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: '../etc/passwd', content: TEXT_CONTENT_BASE64}, 400],
 
    // *** Upload with backslash should fail ***
 
-   ['Uploads 14: Upload with backslash returns 400', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'sub\\file.txt', content: TEXT_CONTENT_BASE64}, 400],
+   ['Upload 14: Upload with backslash returns 400', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'sub\\file.txt', content: TEXT_CONTENT_BASE64}, 400],
 
    // *** Upload with leading slash should fail ***
 
-   ['Uploads 15: Upload with leading slash returns 400', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: '/absolute.txt', content: TEXT_CONTENT_BASE64}, 400],
+   ['Upload 15: Upload with leading slash returns 400', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: '/absolute.txt', content: TEXT_CONTENT_BASE64}, 400],
 
    // *** Upload with nested path is allowed ***
 
-   ['Uploads 16: Upload with slash in name succeeds', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'nested/evil.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
+   ['Upload 16: Upload with slash in name succeeds', 'post', 'project/' + UPLOADS_PROJECT + '/upload', {}, {name: 'nested/evil.png', content: TINY_PNG_DATA_URL, contentType: 'image/png'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected object body');
       if (rs.body.name !== 'nested/evil.png') return log ('Upload name mismatch: ' + rs.body.name);
       return true;
@@ -1893,7 +1740,7 @@ var uploadSequence = [
 
    // *** List should now have 5 valid uploads ***
 
-   ['Uploads 17: List uploads has all valid entries', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
+   ['Upload 17: List uploads has all valid entries', 'get', 'project/' + UPLOADS_PROJECT + '/uploads', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var names = dale.go (rs.body, function (entry) {return entry.name;});
       if (! inc (names, 'test-image.png')) return log ('test-image.png missing');
@@ -1907,16 +1754,16 @@ var uploadSequence = [
 
    // *** Fetch nonexistent upload returns 404 ***
 
-   ['Uploads 18: Fetch nonexistent upload returns 404', 'get', 'project/' + UPLOADS_PROJECT + '/upload/nonexistent.png', {}, '', 404],
+   ['Upload 18: Fetch nonexistent upload returns 404', 'get', 'project/' + UPLOADS_PROJECT + '/upload/nonexistent.png', {}, '', 404],
 
    // *** Cleanup ***
 
-   ['Uploads 19: Delete project', 'delete', 'projects/' + UPLOADS_PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Upload 19: Delete project', 'delete', 'projects/' + UPLOADS_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
 
-   ['Uploads 20: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Upload 20: Project removed from list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, UPLOADS_PROJECT)) return log ('Project still exists after deletion');
       return true;
@@ -2761,6 +2608,36 @@ var cloudSequence = [
    }],
 
 
+   // *** TRIGGER-ID ACCESS CONTROL ***
+
+   ['Cloud 25b: Owner can read trigger-id for own project', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud || ! s.adminProjectSlug) return next ();
+      authGet ('/project/' + encodeURIComponent (s.adminProjectSlug) + '/trigger-id', s.adminAuth, function (error, status, body) {
+         if (error) return log ('Admin GET trigger-id failed: ' + error.message);
+         if (status !== 200) return log ('Expected 200 from owner trigger-id, got ' + status);
+         if (! body || ! body.triggerId) return log ('Missing triggerId in owner response');
+         next ();
+      });
+   }],
+
+   ['Cloud 25c: Other user cannot read trigger-id for someone else\'s project', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud || ! s.adminProjectSlug) return next ();
+      authGet ('/project/' + encodeURIComponent (s.adminProjectSlug) + '/trigger-id', s.memberAuth, function (error, status, body) {
+         if (error) return log ('Member GET trigger-id request failed: ' + error.message);
+         if (status !== 404) return log ('Expected 404 when member reads admin trigger-id, got ' + status);
+         next ();
+      });
+   }],
+
+   ['Cloud 25d: Unauthenticated request to trigger-id returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipCloud || ! s.adminProjectSlug) return next ();
+      httpRequest ('GET', '/project/' + encodeURIComponent (s.adminProjectSlug) + '/trigger-id', '', {}, function (error, status) {
+         if (error) return log ('Unauthenticated trigger-id request failed: ' + error.message);
+         if (status !== 403) return log ('Expected 403 for unauthenticated trigger-id, got ' + status);
+         next ();
+      });
+   }],
+
    // *** ACCESS & PUBLIC ROUTES ***
 
    ['Cloud 26: GET /access returns empty rules initially', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
@@ -2886,24 +2763,24 @@ var SNAP_EXTRA_CONTENT = '# Notes\n\nSome extra notes.\n';
 
 var snapshotsSequence = [
 
-   ['Snapshots 1: Create project', 'post', 'projects', {}, {name: SNAPSHOTS_PROJECT}, 200, function (s, rq, rs) {
+   ['Snapshot 1: Create project', 'post', 'projects', {}, {name: SNAPSHOTS_PROJECT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project creation failed');
       return true;
    }],
 
-   ['Snapshots 2: Write doc/main.md', 'post', 'project/' + SNAPSHOTS_PROJECT + '/file/doc/main.md', {}, {content: SNAP_DOC_CONTENT}, 200, function (s, rq, rs) {
+   ['Snapshot 2: Write doc/main.md', 'post', 'project/' + SNAPSHOTS_PROJECT + '/file/doc/main.md', {}, {content: SNAP_DOC_CONTENT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File write failed');
       return true;
    }],
 
-   ['Snapshots 3: Write extra file', 'post', 'project/' + SNAPSHOTS_PROJECT + '/file/' + SNAP_EXTRA_FILE, {}, {content: SNAP_EXTRA_CONTENT}, 200, function (s, rq, rs) {
+   ['Snapshot 3: Write extra file', 'post', 'project/' + SNAPSHOTS_PROJECT + '/file/' + SNAP_EXTRA_FILE, {}, {content: SNAP_EXTRA_CONTENT}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Extra file write failed');
       return true;
    }],
 
    // *** Create a snapshot ***
 
-   ['Snapshots 4: Create snapshot with label', 'post', 'project/' + SNAPSHOTS_PROJECT + '/snapshot', {}, {label: 'before refactor'}, 200, function (s, rq, rs) {
+   ['Snapshot 4: Create snapshot with label', 'post', 'project/' + SNAPSHOTS_PROJECT + '/snapshot', {}, {label: 'before refactor'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('Expected snapshot entry object');
       if (! rs.body.id) return log ('Snapshot missing id');
       if (normalizeProjectSlugForMode (rs.body.project) !== SNAPSHOTS_PROJECT) return log ('Snapshot project mismatch: ' + rs.body.project);
@@ -2918,7 +2795,7 @@ var snapshotsSequence = [
 
    // *** List snapshots ***
 
-   ['Snapshots 5: List snapshots includes our snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+   ['Snapshot 5: List snapshots includes our snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var found = dale.stopNot (rs.body, undefined, function (snap) {
          if (snap.id === s.snapshotId) return snap;
@@ -2930,13 +2807,13 @@ var snapshotsSequence = [
 
    // *** Create a second snapshot (no label) ***
 
-   ['Snapshots 6: Create second snapshot without label', 'post', 'project/' + SNAPSHOTS_PROJECT + '/snapshot', {}, {}, 200, function (s, rq, rs) {
+   ['Snapshot 6: Create second snapshot without label', 'post', 'project/' + SNAPSHOTS_PROJECT + '/snapshot', {}, {}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || ! rs.body.id) return log ('Second snapshot creation failed');
       s.snapshotId2 = rs.body.id;
       return true;
    }],
 
-   ['Snapshots 7: List snapshots has two entries', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+   ['Snapshot 7: List snapshots has two entries', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var ids = dale.go (rs.body, function (snap) {return snap.id;});
       if (! inc (ids, s.snapshotId)) return log ('First snapshot missing');
@@ -2948,13 +2825,13 @@ var snapshotsSequence = [
 
    // *** Download snapshot ***
 
-   ['Snapshots 8: Download placeholder snapshot returns 404', 'get', 'snapshots/' + 'placeholder' + '/download', {}, '', 404, function (s, rq, rs) {
+   ['Snapshot 8: Download placeholder snapshot returns 404', 'get', 'snapshots/' + 'placeholder' + '/download', {}, '', 404, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || ! rs.body.error) return log ('Expected error message');
       return true;
    }],
 
    // Verify download via httpGet for dynamic path
-   ['Snapshots 9: Download snapshot (dynamic path)', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 9: Download snapshot (dynamic path)', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
       httpGet (5353, '/snapshots/' + encodeURIComponent (s.snapshotId) + '/download', function (error, status, body) {
          if (error) return log ('Download failed: ' + error.message);
          if (status !== 200) return log ('Download returned status ' + status);
@@ -2965,7 +2842,7 @@ var snapshotsSequence = [
 
    // *** Restore snapshot as new project ***
 
-   ['Snapshots 10: Restore snapshot as new project', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 10: Restore snapshot as new project', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
       var body = JSON.stringify ({name: 'Restored Snapshot Test'});
       var req = http.request ({
          hostname: 'localhost',
@@ -2996,14 +2873,14 @@ var snapshotsSequence = [
    }],
 
    // Verify restored project appears in project list
-   ['Snapshots 11: Restored project in list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Snapshot 11: Restored project in list', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (! projectListHasSlug (rs.body, s.restoredSlug)) return log ('Restored project not in list: ' + s.restoredSlug);
       return true;
    }],
 
    // Verify restored project has the same files
-   ['Snapshots 12: Restored project has both files', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 12: Restored project has both files', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
       httpGet (5353, '/project/' + s.restoredSlug + '/files', function (error, status, body) {
          if (error || status !== 200) return log ('Failed to list restored files');
          try {
@@ -3017,7 +2894,7 @@ var snapshotsSequence = [
    }],
 
    // Verify restored file content matches original
-   ['Snapshots 13: Restored doc/main.md matches original', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 13: Restored doc/main.md matches original', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
       httpGet (5353, '/project/' + s.restoredSlug + '/file/doc/main.md', function (error, status, body) {
          if (error || status !== 200) return log ('Failed to read restored doc/main.md');
          try {
@@ -3029,7 +2906,7 @@ var snapshotsSequence = [
       });
    }],
 
-   ['Snapshots 14: Restored notes.md matches original', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 14: Restored notes.md matches original', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
       httpGet (5353, '/project/' + s.restoredSlug + '/file/' + SNAP_EXTRA_FILE, function (error, status, body) {
          if (error || status !== 200) return log ('Failed to read restored notes.md');
          try {
@@ -3043,13 +2920,13 @@ var snapshotsSequence = [
 
    // *** Modify original project, verify snapshot is unaffected ***
 
-   ['Snapshots 15: Modify original doc/main.md', 'post', 'project/' + SNAPSHOTS_PROJECT + '/file/doc/main.md', {}, {content: '# Modified After Snapshot\n'}, 200, function (s, rq, rs) {
+   ['Snapshot 15: Modify original doc/main.md', 'post', 'project/' + SNAPSHOTS_PROJECT + '/file/doc/main.md', {}, {content: '# Modified After Snapshot\n'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('File overwrite failed');
       return true;
    }],
 
    // Restored project should still have original content
-   ['Snapshots 16: Restored project unaffected by original modification', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 16: Restored project unaffected by original modification', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
       httpGet (5353, '/project/' + s.restoredSlug + '/file/doc/main.md', function (error, status, body) {
          if (error || status !== 200) return log ('Failed to read restored doc/main.md after modification');
          try {
@@ -3063,7 +2940,7 @@ var snapshotsSequence = [
 
    // *** Delete a snapshot ***
 
-   ['Snapshots 17: Delete second snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 17: Delete second snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
       var req = http.request ({
          hostname: 'localhost',
          port: 5353,
@@ -3085,7 +2962,7 @@ var snapshotsSequence = [
       req.end ();
    }],
 
-   ['Snapshots 18: List snapshots no longer has deleted snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+   ['Snapshot 18: List snapshots no longer has deleted snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var ids = dale.go (rs.body, function (snap) {return snap.id;});
       if (inc (ids, s.snapshotId2)) return log ('Deleted snapshot still in list');
@@ -3095,12 +2972,12 @@ var snapshotsSequence = [
 
    // *** Snapshot survives project deletion ***
 
-   ['Snapshots 19: Delete original project', 'delete', 'projects/' + SNAPSHOTS_PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Snapshot 19: Delete original project', 'delete', 'projects/' + SNAPSHOTS_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Project deletion failed');
       return true;
    }],
 
-   ['Snapshots 20: Snapshot still in list after project deletion', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+   ['Snapshot 20: Snapshot still in list after project deletion', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var found = dale.stopNot (rs.body, undefined, function (snap) {
          if (snap.id === s.snapshotId) return snap;
@@ -3111,21 +2988,21 @@ var snapshotsSequence = [
 
    // *** Delete nonexistent snapshot returns error ***
 
-   ['Snapshots 21: Delete nonexistent snapshot returns 400', 'delete', 'snapshots/nonexistent-id-12345', {}, '', 400, function (s, rq, rs) {
+   ['Snapshot 21: Delete nonexistent snapshot returns 400', 'delete', 'snapshots/nonexistent-id-12345', {}, '', 400, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || ! rs.body.error) return log ('Expected error message');
       return true;
    }],
 
    // *** Download nonexistent snapshot returns 404 ***
 
-   ['Snapshots 22: Download nonexistent snapshot returns 404', 'get', 'snapshots/nonexistent-id-12345/download', {}, '', 404, function (s, rq, rs) {
+   ['Snapshot 22: Download nonexistent snapshot returns 404', 'get', 'snapshots/nonexistent-id-12345/download', {}, '', 404, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || ! rs.body.error) return log ('Expected error message');
       return true;
    }],
 
    // *** Cleanup ***
 
-   ['Snapshots 23: Delete restored project', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 23: Delete restored project', 'get', 'projects', {}, '', 200, function (s, rq, rs, next) {
       if (! s.restoredSlug) return next ();
       var req = http.request ({
          hostname: 'localhost',
@@ -3142,7 +3019,7 @@ var snapshotsSequence = [
    }],
 
    // Clean up remaining snapshot
-   ['Snapshots 24: Delete first snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
+   ['Snapshot 24: Delete first snapshot', 'get', 'snapshots', {}, '', 200, function (s, rq, rs, next) {
       var req = http.request ({
          hostname: 'localhost',
          port: 5353,
@@ -3157,7 +3034,7 @@ var snapshotsSequence = [
       req.end ();
    }],
 
-   ['Snapshots 25: Snapshots list is clean', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
+   ['Snapshot 25: Snapshots list is clean', 'get', 'snapshots', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       var ours = dale.fil (rs.body, undefined, function (snap) {
          if (normalizeProjectSlugForMode (snap.project) === SNAPSHOTS_PROJECT) return snap;
@@ -3309,12 +3186,273 @@ var autogitSequence = [
 
 ];
 
+// *** TRIGGERS ***
+
+var triggerSequence = [
+
+   ['Trigger 1: Cloud trigger setup', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (rs.code === 200 && rs.body && rs.body.mode === 'LOCAL') {
+         s.skipTrigger = true;
+         return next ();
+      }
+      if (rs.code !== 403 && rs.code !== 200) return log ('Expected 403 or 200 from auth/csrf, got ' + rs.code);
+
+      s.triggerAdminEmail = (CONFIG.adminEmail || '').toLowerCase ();
+      if (! s.triggerAdminEmail) {
+         s.skipTrigger = true;
+         return next ();
+      }
+
+      cloudLogin (s.triggerAdminEmail, function (loginError, auth) {
+         if (loginError) {
+            s.skipTrigger = true;
+            return next ();
+         }
+         s.triggerAuth = auth;
+
+         // Resolve userId for later Redis checks
+         redisGet ('email:' + s.triggerAdminEmail, function (err, userId) {
+            if (err || ! userId) {
+               s.skipTrigger = true;
+               return next ();
+            }
+            s.triggerUserId = userId;
+
+            // Save original settings for restore
+            redisExec ('HGET ' + JSON.stringify ('user:' + userId) + ' settings', function (err2, raw) {
+               s.triggerOriginalSettings = raw || '{}';
+               next ();
+            });
+         });
+      });
+   }],
+
+   ['Trigger 2: Create project and verify trigger ID in Redis', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      authJson ('POST', '/projects', {name: 'trigger-test-' + testTimestamp ()}, s.triggerAuth, function (projectError, projectStatus, projectBody) {
+         if (projectError) return log ('Trigger project create failed: ' + projectError.message);
+         if (projectStatus !== 200) return log ('Expected 200 creating trigger project, got ' + projectStatus);
+         if (! projectBody || ! projectBody.slug) return log ('Trigger project create missing slug');
+         s.triggerProjectSlug = projectBody.slug;
+
+         authGet ('/project/' + encodeURIComponent (s.triggerProjectSlug) + '/trigger-id', s.triggerAuth, function (trigError, trigStatus, trigBody) {
+            if (trigError) return log ('GET trigger-id failed: ' + trigError.message);
+            if (trigStatus !== 200) return log ('Expected 200 from GET trigger-id, got ' + trigStatus);
+            if (! trigBody || ! trigBody.triggerId) return log ('Missing triggerId in response');
+            s.triggerId = trigBody.triggerId;
+
+            redisGet ('trigger:' + trigBody.triggerId, function (err, val) {
+               if (err || ! val) return log ('trigger:<id> not found in Redis');
+               if (val.indexOf (s.triggerProjectSlug) === -1) return log ('trigger:<id> value does not contain project slug: ' + val);
+
+               redisGet ('projecttrigger:' + s.triggerUserId + ':' + s.triggerProjectSlug, function (err2, val2) {
+                  if (err2 || val2 !== s.triggerId) return log ('projecttrigger reverse lookup mismatch: expected ' + s.triggerId + ', got ' + val2);
+                  next ();
+               });
+            });
+         });
+      });
+   }],
+
+   ['Trigger 3: POST /trigger with Bearer token creates dialog', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         prompt: 'Reply with the single word ok.',
+         slug: 'api-trigger'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerError) return log ('Trigger failed: ' + triggerError.message);
+         if (triggerStatus !== 202) return log ('Expected 202 from trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad trigger response: ' + JSON.stringify (triggerBody));
+         next ();
+      }, {Authorization: 'Bearer ' + s.triggerId});
+   }],
+
+   ['Trigger 4: POST /trigger with data (email shape) creates dialog', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         data: {from: 'test@example.com', subject: 'Test trigger', body: 'Run echo hello'},
+         slug: 'email-trigger'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerError) return log ('Data trigger failed: ' + triggerError.message);
+         if (triggerStatus !== 202) return log ('Expected 202 from data trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad data trigger response: ' + JSON.stringify (triggerBody));
+         next ();
+      }, {Authorization: 'Bearer ' + s.triggerId});
+   }],
+
+   ['Trigger 5: POST /trigger with explicit model resolves provider', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         model: 'gpt-4.1',
+         prompt: 'Reply with the single word ok.',
+         slug: 'model-trigger'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerError) return log ('Model trigger failed: ' + triggerError.message);
+         if (triggerStatus !== 202) return log ('Expected 202 from model trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         if (! triggerBody || triggerBody.ok !== true || ! triggerBody.dialogId) return log ('Bad model trigger response: ' + JSON.stringify (triggerBody));
+         next ();
+      }, {Authorization: 'Bearer ' + s.triggerId});
+   }],
+
+   ['Trigger 6: Invalid trigger ID returns 403', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         prompt: 'test'
+      }, function (triggerError, triggerStatus) {
+         if (triggerStatus !== 403) return log ('Expected 403 for invalid trigger ID, got ' + triggerStatus);
+         next ();
+      }, {Authorization: 'Bearer invalid-trigger-id-12345'});
+   }],
+
+   ['Trigger 7: No prompt and no data returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         slug: 'empty-trigger'
+      }, function (triggerError, triggerStatus) {
+         if (triggerStatus !== 400) return log ('Expected 400 for missing prompt/data, got ' + triggerStatus);
+         next ();
+      }, {Authorization: 'Bearer ' + s.triggerId});
+   }],
+
+   ['Trigger 8: Unknown model returns 400', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         model: 'not-a-real-model',
+         prompt: 'test'
+      }, function (triggerError, triggerStatus) {
+         if (triggerStatus !== 400) return log ('Expected 400 for unknown model, got ' + triggerStatus);
+         next ();
+      }, {Authorization: 'Bearer ' + s.triggerId});
+   }],
+
+   ['Trigger 9: Autodetect prefers OpenAI when both providers available', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      httpJson ('POST', '/trigger', {
+         prompt: 'Reply with the single word ok.',
+         slug: 'autodetect-both'
+      }, function (triggerError, triggerStatus, triggerBody) {
+         if (triggerError) return log ('Autodetect-both trigger failed: ' + triggerError.message);
+         if (triggerStatus !== 202) return log ('Expected 202 from autodetect-both trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+         if (! triggerBody || ! triggerBody.dialogId) return log ('Missing dialogId from autodetect-both trigger');
+
+         // Dialog file is written before 202 but may need a moment to be readable via docker exec
+         var attempts = 0;
+         var readDialog = function () {
+            authGet ('/project/' + encodeURIComponent (s.triggerProjectSlug) + '/dialog/' + encodeURIComponent (triggerBody.dialogId), s.triggerAuth, function (err, status, body) {
+               if ((err || status !== 200 || ! body || ! body.markdown) && attempts < 10) {
+                  attempts++;
+                  return setTimeout (readDialog, 500);
+               }
+               if (err || status !== 200 || ! body || ! body.markdown) return log ('Could not read autodetect-both dialog after ' + attempts + ' attempts, status=' + status);
+               if (body.markdown.indexOf ('Provider: openai') === -1) return log ('Autodetect should prefer openai when both available, got: ' + body.markdown.slice (0, 200));
+               next ();
+            });
+         };
+         readDialog ();
+      }, {Authorization: 'Bearer ' + s.triggerId});
+   }],
+
+   ['Trigger 10: Autodetect falls back to Claude when only Claude configured', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      var settings = {};
+      try {settings = JSON.parse (s.triggerOriginalSettings);} catch (e) {}
+      var claudeOnly = {accounts: {}};
+      if (settings.accounts && settings.accounts.claude) claudeOnly.accounts.claude = settings.accounts.claude;
+      if (settings.accounts && settings.accounts.claudeOAuth) claudeOnly.accounts.claudeOAuth = settings.accounts.claudeOAuth;
+
+      redisExec ('HSET ' + JSON.stringify ('user:' + s.triggerUserId) + ' settings ' + JSON.stringify (JSON.stringify (claudeOnly)), function (err) {
+         if (err) return log ('Could not set Claude-only settings');
+
+         httpJson ('POST', '/trigger', {
+            prompt: 'Reply with the single word ok.',
+            slug: 'autodetect-claude'
+         }, function (triggerError, triggerStatus, triggerBody) {
+            if (triggerError) return log ('Autodetect-claude trigger failed: ' + triggerError.message);
+            if (triggerStatus !== 202) return log ('Expected 202 from autodetect-claude trigger, got ' + triggerStatus + ' ' + JSON.stringify (triggerBody));
+
+            var attempts = 0;
+            var readDialog = function () {
+               authGet ('/project/' + encodeURIComponent (s.triggerProjectSlug) + '/dialog/' + encodeURIComponent (triggerBody.dialogId), s.triggerAuth, function (err2, status, body) {
+                  if ((err2 || status !== 200 || ! body || ! body.markdown) && attempts < 10) {
+                     attempts++;
+                     return setTimeout (readDialog, 500);
+                  }
+                  if (err2 || status !== 200 || ! body || ! body.markdown) return log ('Could not read autodetect-claude dialog after ' + attempts + ' attempts, status=' + status);
+                  if (body.markdown.indexOf ('Provider: claude') === -1) return log ('Autodetect should fall back to claude when only Claude configured, got: ' + body.markdown.slice (0, 200));
+
+                  redisExec ('HSET ' + JSON.stringify ('user:' + s.triggerUserId) + ' settings ' + JSON.stringify (s.triggerOriginalSettings), function () {
+                     next ();
+                  });
+               });
+            };
+            readDialog ();
+         }, {Authorization: 'Bearer ' + s.triggerId});
+      });
+   }],
+
+   ['Trigger 11: 422 when no provider credentials configured', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger) return next ();
+
+      redisExec ('HSET ' + JSON.stringify ('user:' + s.triggerUserId) + ' settings ' + JSON.stringify (JSON.stringify ({accounts: {}})), function (err) {
+         if (err) return log ('Could not clear provider settings');
+
+         httpJson ('POST', '/trigger', {
+            prompt: 'Reply with the single word ok.',
+            slug: 'no-creds'
+         }, function (triggerError, triggerStatus) {
+            if (triggerStatus !== 422) return log ('Expected 422 when no provider credentials, got ' + triggerStatus);
+
+            // Restore settings
+            redisExec ('HSET ' + JSON.stringify ('user:' + s.triggerUserId) + ' settings ' + JSON.stringify (s.triggerOriginalSettings), function () {
+               next ();
+            });
+         }, {Authorization: 'Bearer ' + s.triggerId});
+      });
+   }],
+
+   ['Trigger 12: Cleanup — delete project and verify both Redis keys removed', 'get', 'auth/csrf', {}, '', '*', function (s, rq, rs, next) {
+      if (s.skipTrigger || ! s.triggerProjectSlug) return next ();
+
+      var req = http.request ({
+         hostname: 'localhost',
+         port: 5353,
+         path: '/projects/' + encodeURIComponent (s.triggerProjectSlug),
+         method: 'DELETE',
+         headers: {Cookie: cookieHeader (s.triggerAuth.cookies), 'X-CSRF-Token': s.triggerAuth.csrf}
+      }, function (res) {
+         res.on ('data', function () {});
+         res.on ('end', function () {
+            if (res.statusCode !== 200) return log ('Expected 200 from project delete, got ' + res.statusCode);
+            redisGet ('trigger:' + s.triggerId, function (err, val) {
+               if (val) return log ('trigger:<id> should be deleted after project deletion, but still exists: ' + val);
+               redisGet ('projecttrigger:' + s.triggerUserId + ':' + s.triggerProjectSlug, function (err2, val2) {
+                  if (val2) return log ('projecttrigger:<userId>:<slug> should be deleted, but still exists: ' + val2);
+                  next ();
+               });
+            });
+         });
+      });
+      req.on ('error', function () {next ();});
+      req.end ();
+   }]
+
+];
+
 // *** RUNNER ***
 
 // Suite order matches readme.md test suites section.
-var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'dialog', 'static', 'backend'];
+var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'trigger', 'dialog', 'static', 'backend'];
 var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud'];
-var NOSLOW_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'dialog'];
+var NOSLOW_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', /*vi, */'trigger', 'dialog'];
 
 var allSuites = {
    project:  projectSequence,
@@ -3324,6 +3462,7 @@ var allSuites = {
    autogit:  autogitSequence,
    cloud:    cloudSequence,
    dialog:   dialogSequence,
+   trigger:  triggerSequence,
    static:   staticSequence,
    backend:  backendSequence,
    vi:       viSequence

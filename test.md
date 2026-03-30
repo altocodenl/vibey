@@ -18,9 +18,9 @@ Run the client tests the same way, using `test-client.js` instead:
 
 Note: if you change `test-client.js`, rebuild/restart vibey before running the client tests. The browser loads the test bundle from the running vibey server/container, so local file edits are not enough on their own.
 
-Available server suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `cloud`, `dialog`, `static`, `backend`, `vi`.
+Available server suite names: `project`, `doc`, `upload`, `snapshot`, `autogit`, `cloud`, `dialog`, `trigger`, `static`, `backend`, `vi`.
 
-Available client suite names: `project`, `doc`, `docs`, `upload`, `uploads`, `snapshot`, `snapshots`, `dialog`, `static`, `backend`, `vi`, `settings`, `cloud`.
+Available client suite names: `project`, `doc`, `upload`, `snapshot`, `dialog`, `trigger`, `static`, `backend`, `vi`, `settings`, `cloud`.
 
 Notes:
 - Client `cloud` is an alias for the settings/API-key surface tests.
@@ -444,6 +444,11 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 24. Member `GET /projects` — admin's project does **not** appear.
 25. `GET /projects` without auth — **403**.
 
+*Trigger-id access control:*
+25b. Owner `GET /project/:project/trigger-id` — **200** with `triggerId`.
+25c. Member `GET /project/:project/trigger-id` on admin's project — **404** (scoped, so trigger not found for wrong user).
+25d. Unauthenticated `GET /project/:project/trigger-id` — **403**.
+
 *Access:*
 26. `GET /access` with admin session — **200** `{rules: {}}` (initially empty).
 27. `POST /access` body `{rules: {"<slug>:static/": "ALL"}}` — **200** `{ok: true}`.
@@ -469,7 +474,10 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
   5. `POST /trigger` with invalid trigger ID — returns `403`.
   6. `POST /trigger` with no `prompt` and no `data` — returns `400`.
   7. `POST /trigger` with explicit invalid model (not in known models) — returns `400`.
-  8. Cleanup: delete the project. Verify `trigger:<id>` and `projecttrigger:<userId>:<slug>` are deleted from Redis.
+  8. Autodetect prefers OpenAI: clear user settings to have both providers, trigger without model — verify the dialog header contains `Provider: openai`.
+  9. Autodetect falls back to Claude: clear OpenAI credentials from user settings so only Claude remains, trigger without model — verify the dialog header contains `Provider: claude`. Restore settings afterward.
+  10. No provider credentials: clear all provider credentials from user settings, trigger without model — returns `422`. Restore settings afterward.
+  11. Cleanup: delete the project. Verify both `trigger:<id>` and `projecttrigger:<userId>:<slug>` are deleted from Redis.
 - In local mode, trigger tests are skipped.
 
 **Models endpoint:**
@@ -479,9 +487,10 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 **Client: trigger copy buttons:**
 
 1. With `triggerId` set (id + domain), the ⚡ API and ⚡ Email buttons are visible in the dialogs header.
-2. Clicking ⚡ API copies `Bearer <id>` to the clipboard.
-3. Clicking ⚡ Email copies `trigger+<id>@<domain>` to the clipboard.
+2. Clicking ⚡ API writes `Bearer <id>` to the clipboard via the `copy trigger` responder.
+3. Clicking ⚡ Email writes `trigger+<id>@<domain>` to the clipboard via the `copy trigger` responder.
 4. Without `triggerId`, neither button is visible.
+5. With `triggerId` set but empty `domain`, ⚡ API is visible but ⚡ Email is hidden.
 
 **Triggers migration:**
 - Tested as part of server startup. Verified indirectly: after the migration runs, existing projects have `projecttrigger:*` entries in Redis, and `userapikey:*` / `apikey:*` / `userapikeyreveal:*` keys are gone.

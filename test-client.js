@@ -869,17 +869,32 @@
          return true;
       }],
 
-      ['Trigger 3: Copy trigger formats correctly', function () {
-         // Test the copy responder logic directly
-         var trigger = {id: 'abc123def456', domain: 'buildwithvibey.com'};
-         var apiText = 'Bearer ' + trigger.id;
-         if (apiText !== 'Bearer abc123def456') return 'API format wrong: ' + apiText;
-         var emailText = 'trigger+' + trigger.id + '@' + trigger.domain;
-         if (emailText !== 'trigger+abc123def456@buildwithvibey.com') return 'Email format wrong: ' + emailText;
+      ['Trigger 3: Copy trigger API responder writes Bearer format to clipboard', function (done) {
+         B.call ('set', 'triggerId', {id: 'abc123def456', domain: 'buildwithvibey.com'});
+         window._clipboardWritten = null;
+         var origClipboard = navigator.clipboard;
+         Object.defineProperty (navigator, 'clipboard', {value: {writeText: function (text) {window._clipboardWritten = text; return Promise.resolve ();}}, configurable: true});
+         B.call ('copy', 'trigger', 'api');
+         Object.defineProperty (navigator, 'clipboard', {value: origClipboard, configurable: true});
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         if (window._clipboardWritten !== 'Bearer abc123def456') return 'Expected clipboard to contain "Bearer abc123def456", got: ' + JSON.stringify (window._clipboardWritten);
          return true;
       }],
 
-      ['Trigger 4: Email button hidden when domain is missing', function (done) {
+      ['Trigger 4: Copy trigger email responder writes trigger+id@domain to clipboard', function (done) {
+         window._clipboardWritten = null;
+         var origClipboard = navigator.clipboard;
+         Object.defineProperty (navigator, 'clipboard', {value: {writeText: function (text) {window._clipboardWritten = text; return Promise.resolve ();}}, configurable: true});
+         B.call ('copy', 'trigger', 'email');
+         Object.defineProperty (navigator, 'clipboard', {value: origClipboard, configurable: true});
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         if (window._clipboardWritten !== 'trigger+abc123def456@buildwithvibey.com') return 'Expected clipboard to contain "trigger+abc123def456@buildwithvibey.com", got: ' + JSON.stringify (window._clipboardWritten);
+         return true;
+      }],
+
+      ['Trigger 5: Email button hidden when domain is empty', function (done) {
          B.call ('set', 'triggerId', {id: 'abc123def456', domain: ''});
          done (SHORT_WAIT, POLL);
       }, function () {
@@ -2197,7 +2212,7 @@
       // *** DOCS ***
       // =============================================
 
-      ['Docs 1: Create project for docs editing', function (done) {
+      ['Doc 1: Create project for docs editing', function (done) {
          window._docsProject = 'test-docs-' + testTimestamp ();
          createProjectThroughModal (window._docsProject);
          done (MEDIUM_WAIT, POLL);
@@ -2210,7 +2225,7 @@
          return true;
       }],
 
-      ['Docs 1a: Navigate to docs after project creation', function (done) {
+      ['Doc 1a: Navigate to docs after project creation', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2219,7 +2234,7 @@
          return true;
       }],
 
-      ['Docs 2: Create doc/main.md via prompt', function (done) {
+      ['Doc 2: Create doc/main.md via prompt', function (done) {
          mockPrompt ('main.md');
          B.call ('create', 'file');
          done (MEDIUM_WAIT, POLL);
@@ -2232,7 +2247,7 @@
          return true;
       }],
 
-      ['Docs 3: Reload main.md and verify round-trip', function (done) {
+      ['Doc 3: Reload main.md and verify round-trip', function (done) {
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2242,13 +2257,13 @@
          return true;
       }],
 
-      ['Docs 4: Files list includes doc/main.md', function () {
+      ['Doc 4: Files list includes doc/main.md', function () {
          var item = findByText ('.file-name', 'main');
          if (! item) return 'main not found in sidebar';
          return true;
       }],
 
-      ['Docs 4a: Sidebar hides .md extension', function () {
+      ['Doc 4a: Sidebar hides .md extension', function () {
          var items = document.querySelectorAll ('.file-name');
          for (var i = 0; i < items.length; i++) {
             var text = (items [i].textContent || '').trim ();
@@ -2257,7 +2272,7 @@
          return true;
       }],
 
-      ['Docs 4b: Editor header hides .md extension', function () {
+      ['Doc 4b: Editor header hides .md extension', function () {
          var header = document.querySelector ('.editor-filename');
          if (! header) return 'No editor-filename element found';
          var text = (header.textContent || '').trim ();
@@ -2266,7 +2281,7 @@
          return true;
       }],
 
-      ['Docs 4c: Default file selection is doc/main.md', function (done) {
+      ['Doc 4c: Default file selection is doc/main.md', function (done) {
          // Clear currentFile and reload files — should auto-select main.md
          B.call ('set', 'currentFile', null);
          B.call ('load', 'files');
@@ -2278,7 +2293,7 @@
          return true;
       }],
 
-      ['Docs 5: Overwrite main.md with updated content', function (done) {
+      ['Doc 5: Overwrite main.md with updated content', function (done) {
          var newContent = '# Main\n\nUpdated content for testing.\n';
          B.call ('set', ['currentFile', 'content'], newContent);
          B.call ('save', 'file');
@@ -2291,7 +2306,7 @@
          return true;
       }],
 
-      ['Docs 6: Reload main.md and verify updated content', function (done) {
+      ['Doc 6: Reload main.md and verify updated content', function (done) {
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2301,7 +2316,7 @@
          return true;
       }],
 
-      ['Docs 7: Create doc/notes.md', function (done) {
+      ['Doc 7: Create doc/notes.md', function (done) {
          mockPrompt ('notes.md');
          B.call ('create', 'file');
          done (MEDIUM_WAIT, POLL);
@@ -2312,7 +2327,7 @@
          return true;
       }],
 
-      ['Docs 8: Files list includes main.md and notes.md', function (done) {
+      ['Doc 8: Files list includes main.md and notes.md', function (done) {
          done (SHORT_WAIT, POLL);
       }, function () {
          var mainItem = findByText ('.file-name', 'main');
@@ -2322,7 +2337,7 @@
          return true;
       }],
 
-      ['Docs 8a: Create doc/refresh.md via API while away from Docs', function (done) {
+      ['Doc 8a: Create doc/refresh.md via API while away from Docs', function (done) {
          B.call ('navigate', 'hash', '#/projects');
          c.ajax ('post', 'project/' + encodeURIComponent (window._docsProject) + '/file/doc/refresh.md', {}, {
             content: '# refresh\n\nCreated while not viewing docs.\n'
@@ -2336,7 +2351,7 @@
          return true;
       }],
 
-      ['Docs 8b: Switching back to Docs refreshes the sidebar', function (done) {
+      ['Doc 8b: Switching back to Docs refreshes the sidebar', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2349,7 +2364,7 @@
          return true;
       }],
 
-      ['Docs 8c: Delete doc/refresh.md via API while away from Docs', function (done) {
+      ['Doc 8c: Delete doc/refresh.md via API while away from Docs', function (done) {
          B.call ('navigate', 'hash', '#/projects');
          c.ajax ('delete', 'project/' + encodeURIComponent (window._docsProject) + '/file/' + encodeURIComponent ('doc/refresh.md'), {}, '', function (error) {
             window._docsRefreshDeleteError = error ? (error.status || error.message || true) : null;
@@ -2360,7 +2375,7 @@
          return true;
       }],
 
-      ['Docs 8d: Returning to Docs removes deleted refresh.md from the sidebar', function (done) {
+      ['Doc 8d: Returning to Docs removes deleted refresh.md from the sidebar', function (done) {
          B.call ('navigate', 'hash', '#/project/' + encodeURIComponent (window._docsProject) + '/docs');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2373,7 +2388,7 @@
          return true;
       }],
 
-      ['Docs 9: Read notes.md and verify content', function (done) {
+      ['Doc 9: Read notes.md and verify content', function (done) {
          B.call ('load', 'file', 'doc/notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2383,7 +2398,7 @@
          return true;
       }],
 
-      ['Docs 10: Delete doc/notes.md', function (done) {
+      ['Doc 10: Delete doc/notes.md', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'file', 'doc/notes.md');
@@ -2394,7 +2409,7 @@
          return true;
       }],
 
-      ['Docs 11: Files list shows main.md only', function () {
+      ['Doc 11: Files list shows main.md only', function () {
          var notesItem = findByText ('.file-name', 'notes');
          if (notesItem) return 'notes still in sidebar after deletion';
          var mainItem = findByText ('.file-name', 'main');
@@ -2402,7 +2417,7 @@
          return true;
       }],
 
-      ['Docs 12: main.md still has updated content', function (done) {
+      ['Doc 12: main.md still has updated content', function (done) {
          B.call ('load', 'file', 'doc/main.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2412,7 +2427,7 @@
          return true;
       }],
 
-      ['Docs 13: Loading deleted notes.md returns no selection', function (done) {
+      ['Doc 13: Loading deleted notes.md returns no selection', function (done) {
          B.call ('load', 'file', 'doc/notes.md');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2421,7 +2436,7 @@
          return true;
       }],
 
-      ['Docs 14: Invalid filename bad..name.md returns 400', function (done) {
+      ['Doc 14: Invalid filename bad..name.md returns 400', function (done) {
          var project = window._docsProject;
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent ('bad..name.md'), {}, {
             content: 'bad'
@@ -2434,7 +2449,7 @@
          return true;
       }],
 
-      ['Docs 15: Invalid filename bad.txt returns 400', function (done) {
+      ['Doc 15: Invalid filename bad.txt returns 400', function (done) {
          var project = window._docsProject;
          c.ajax ('post', 'project/' + encodeURIComponent (project) + '/file/' + encodeURIComponent ('bad.txt'), {}, {
             content: 'bad'
@@ -2447,7 +2462,7 @@
          return true;
       }],
 
-      ['Docs 16: Special filenames round-trip (spaces, accents, non-Latin)', function (done) {
+      ['Doc 16: Special filenames round-trip (spaces, accents, non-Latin)', function (done) {
          var project = window._docsProject;
          var files = [
             {name: 'doc/my notes.md', content: '# my notes\n\nHello.\n'},
@@ -2488,7 +2503,7 @@
          return true;
       }],
 
-      ['Docs 17: Nested path round-trip: doc/nested/plan.md', function (done) {
+      ['Doc 17: Nested path round-trip: doc/nested/plan.md', function (done) {
          var project = window._docsProject;
          var filename = 'doc/nested/plan.md';
          var content = '# plan\n\nNested.\n';
@@ -2516,7 +2531,7 @@
          return true;
       }],
 
-      ['Docs 18: Delete docs project via UI', function (done) {
+      ['Doc 18: Delete docs project via UI', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._docsProject);
@@ -2527,7 +2542,7 @@
          return true;
       }],
 
-      ['Docs 19: Projects list no longer shows deleted docs project', function (done) {
+      ['Doc 19: Projects list no longer shows deleted docs project', function (done) {
          B.call ('load', 'projects');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -2540,7 +2555,7 @@
       // *** UPLOADS ***
       // =============================================
 
-      ['Uploads 1: Create project for uploads', function (done) {
+      ['Upload 1: Create project for uploads', function (done) {
          window._uploadsProject = 'test-uploads-' + testTimestamp ();
          createProjectThroughModal (window._uploadsProject);
          done (MEDIUM_WAIT, POLL);
@@ -2549,7 +2564,7 @@
          return B.get ('currentProject') === window._uploadsProject || 'Failed to create uploads project';
       }],
 
-      ['Uploads 2: Upload test-image.png via data URL', function (done) {
+      ['Upload 2: Upload test-image.png via data URL', function (done) {
          var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: 'test-image.png',
@@ -2568,7 +2583,7 @@
          return true;
       }],
 
-      ['Uploads 3: Uploads list includes test-image.png metadata', function (done) {
+      ['Upload 3: Uploads list includes test-image.png metadata', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/uploads', {}, '', function (error, rs) {
             window._uploadsUploads = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -2584,7 +2599,7 @@
          return true;
       }],
 
-      ['Uploads 4: Fetch test-image.png bytes', function (done) {
+      ['Upload 4: Fetch test-image.png bytes', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload/test-image.png', {}, '', function (error, rs) {
             window._uploadsUploadFetch = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -2600,14 +2615,14 @@
          return true;
       }],
 
-      ['Uploads 5: test-image.png content-type is image/png', function () {
+      ['Upload 5: test-image.png content-type is image/png', function () {
          var rs = (window._uploadsUploadFetch || {}).rs || {};
          var contentType = rs.xhr && rs.xhr.getResponseHeader ? rs.xhr.getResponseHeader ('Content-Type') : '';
          if (contentType && contentType.indexOf ('image/png') === -1) return 'Expected image/png content-type, got ' + contentType;
          return true;
       }],
 
-      ['Uploads 6: Upload notes.txt via API', function (done) {
+      ['Upload 6: Upload notes.txt via API', function (done) {
          var text = 'Hello from uploads test!';
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: 'notes.txt',
@@ -2625,7 +2640,7 @@
          return true;
       }],
 
-      ['Uploads 7: Uploads list includes test-image.png + notes.txt', function (done) {
+      ['Upload 7: Uploads list includes test-image.png + notes.txt', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/uploads', {}, '', function (error, rs) {
             window._uploadsUploads = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -2640,7 +2655,7 @@
          return true;
       }],
 
-      ['Uploads 8: Fetch notes.txt and verify content-type', function (done) {
+      ['Upload 8: Fetch notes.txt and verify content-type', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload/notes.txt', {}, '', function (error, rs) {
             window._uploadsNotesFetch = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -2658,7 +2673,7 @@
          return true;
       }],
 
-      ['Uploads 9: Upload my screenshot 2026.png', function (done) {
+      ['Upload 9: Upload my screenshot 2026.png', function (done) {
          var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: 'my screenshot 2026.png',
@@ -2674,7 +2689,7 @@
          return true;
       }],
 
-      ['Uploads 10: Uploads list includes my screenshot 2026.png', function (done) {
+      ['Upload 10: Uploads list includes my screenshot 2026.png', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/uploads', {}, '', function (error, rs) {
             window._uploadsUploads = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -2687,7 +2702,7 @@
          return true;
       }],
 
-      ['Uploads 11: Fetch spaced filename upload returns image/png', function (done) {
+      ['Upload 11: Fetch spaced filename upload returns image/png', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload/' + encodeURIComponent ('my screenshot 2026.png'), {}, '', function (error, rs) {
             window._uploadsSpaceFetch = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
@@ -2703,7 +2718,7 @@
          return true;
       }],
 
-      ['Uploads 12: Upload my-file.v2.backup.txt', function (done) {
+      ['Upload 12: Upload my-file.v2.backup.txt', function (done) {
          var text = 'Hello from backups.';
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: 'my-file.v2.backup.txt',
@@ -2718,7 +2733,7 @@
          return true;
       }],
 
-      ['Uploads 13: Invalid upload name ../etc/passwd returns 400', function (done) {
+      ['Upload 13: Invalid upload name ../etc/passwd returns 400', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: '../etc/passwd',
             content: btoa ('bad'),
@@ -2732,7 +2747,7 @@
          return true;
       }],
 
-      ['Uploads 14: Invalid upload name sub\\file.txt returns 400', function (done) {
+      ['Upload 14: Invalid upload name sub\\file.txt returns 400', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: 'sub\\file.txt',
             content: btoa ('bad'),
@@ -2746,7 +2761,7 @@
          return true;
       }],
 
-      ['Uploads 15: Invalid upload name /absolute.txt returns 400', function (done) {
+      ['Upload 15: Invalid upload name /absolute.txt returns 400', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: '/absolute.txt',
             content: btoa ('bad'),
@@ -2760,7 +2775,7 @@
          return true;
       }],
 
-      ['Uploads 16: Upload nested/evil.png (subdir allowed)', function (done) {
+      ['Upload 16: Upload nested/evil.png (subdir allowed)', function (done) {
          var dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PyqZ0wAAAABJRU5ErkJggg==';
          c.ajax ('post', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload', {}, {
             name: 'nested/evil.png',
@@ -2775,7 +2790,7 @@
          return true;
       }],
 
-      ['Uploads 17: Uploads list contains exactly 5 valid entries', function (done) {
+      ['Upload 17: Uploads list contains exactly 5 valid entries', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/uploads', {}, '', function (error, rs) {
             window._uploadsUploads = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -2791,7 +2806,7 @@
          return true;
       }],
 
-      ['Uploads 18: Fetch nonexistent upload returns 404', function (done) {
+      ['Upload 18: Fetch nonexistent upload returns 404', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._uploadsProject) + '/upload/nonexistent.png', {}, '', function (error, rs) {
             window._uploadsMissingStatus = error ? error.status : null;
             done (SHORT_WAIT, POLL);
@@ -2801,7 +2816,7 @@
          return true;
       }],
 
-      ['Uploads 19: Delete uploads project', function (done) {
+      ['Upload 19: Delete uploads project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._uploadsProject);
@@ -2812,7 +2827,7 @@
          return true;
       }],
 
-      ['Uploads 20: Projects list no longer shows deleted project', function (done) {
+      ['Upload 20: Projects list no longer shows deleted project', function (done) {
          B.call ('load', 'projects');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -3553,7 +3568,7 @@
       // *** SNAPSHOTS ***
       // =============================================
 
-      ['Snapshots 1: Create project for snapshots', function (done) {
+      ['Snapshot 1: Create project for snapshots', function (done) {
          window._snapshotsProject = 'test-snapshots-' + testTimestamp ();
          createProjectThroughModal (window._snapshotsProject);
          done (MEDIUM_WAIT, POLL);
@@ -3562,19 +3577,19 @@
          return B.get ('currentProject') === window._snapshotsProject || 'Failed to create flow #7 project';
       }],
 
-      ['Snapshots 2: Write doc/main.md', function (done) {
+      ['Snapshot 2: Write doc/main.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._snapshotsProject) + '/file/doc/main.md', {}, {content: '# Snapshot Test\n\nThis content should survive a snapshot and restore.\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['Snapshots 3: Write extra file doc/notes.md', function (done) {
+      ['Snapshot 3: Write extra file doc/notes.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._snapshotsProject) + '/file/doc/notes.md', {}, {content: '# Notes\n\nSome extra notes.\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['Snapshots 4: Create snapshot with label "before refactor"', function (done) {
+      ['Snapshot 4: Create snapshot with label "before refactor"', function (done) {
          mockPrompt ('before refactor');
          window._vibeyExpectedAlerts = window._vibeyExpectedAlerts || [];
          window._vibeyExpectedAlerts.push ('Snapshot created: before refactor');
@@ -3585,7 +3600,7 @@
          return true;
       }],
 
-      ['Snapshots 5: Snapshot appears in list with label', function (done) {
+      ['Snapshot 5: Snapshot appears in list with label', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -3602,7 +3617,7 @@
          return true;
       }],
 
-      ['Snapshots 6: Create second snapshot without label', function (done) {
+      ['Snapshot 6: Create second snapshot without label', function (done) {
          mockPrompt ('');
          window._vibeyExpectedAlerts = window._vibeyExpectedAlerts || [];
          window._vibeyExpectedAlerts.push (/^Snapshot created: /);
@@ -3613,7 +3628,7 @@
          return true;
       }],
 
-      ['Snapshots 7: Two snapshots in list ordered newest-first', function (done) {
+      ['Snapshot 7: Two snapshots in list ordered newest-first', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -3627,7 +3642,7 @@
          return true;
       }],
 
-      ['Snapshots 8: Download placeholder snapshot returns 404', function (done) {
+      ['Snapshot 8: Download placeholder snapshot returns 404', function (done) {
          c.ajax ('get', 'snapshots/placeholder/download', {}, '', function (error) {
             window._snapshotsDownloadMissing = error ? error.status : null;
             done (SHORT_WAIT, POLL);
@@ -3637,7 +3652,7 @@
          return true;
       }],
 
-      ['Snapshots 9: Download first snapshot returns data', function (done) {
+      ['Snapshot 9: Download first snapshot returns data', function (done) {
          c.ajax ('get', 'snapshots/' + encodeURIComponent (window._snapshotsSnapshotId) + '/download', {}, '', function (error, rs) {
             window._snapshotsDownloadError = error ? error.status : null;
             window._snapshotsDownloadBody = rs && rs.body ? rs.body : '';
@@ -3649,7 +3664,7 @@
          return true;
       }],
 
-      ['Snapshots 10: Restore snapshot as new project', function (done) {
+      ['Snapshot 10: Restore snapshot as new project', function (done) {
          mockPrompt ('Restored Snapshot Test');
          B.call ('restore', 'snapshot', window._snapshotsSnapshotId, window._snapshotsSnapshotProjectName);
          done (MEDIUM_WAIT, POLL);
@@ -3662,7 +3677,7 @@
          return true;
       }],
 
-      ['Snapshots 11: Projects list includes restored project', function (done) {
+      ['Snapshot 11: Projects list includes restored project', function (done) {
          c.ajax ('get', 'projects', {}, '', function (error, rs) {
             window._snapshotsProjectList = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -3676,7 +3691,7 @@
          return true;
       }],
 
-      ['Snapshots 12: Restored project has both files', function (done) {
+      ['Snapshot 12: Restored project has both files', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._snapshotsRestoredProject) + '/files', {}, '', function (error, rs) {
             window._snapshotsRestoredFiles = error ? null : (rs.body || []);
             done (SHORT_WAIT, POLL);
@@ -3689,7 +3704,7 @@
          return true;
       }],
 
-      ['Snapshots 13: Restored doc/main.md matches original', function (done) {
+      ['Snapshot 13: Restored doc/main.md matches original', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._snapshotsRestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._snapshotsRestoredContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -3699,7 +3714,7 @@
          return true;
       }],
 
-      ['Snapshots 14: Restored doc/notes.md matches original', function (done) {
+      ['Snapshot 14: Restored doc/notes.md matches original', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._snapshotsRestoredProject) + '/file/doc/notes.md', {}, '', function (error, rs) {
             window._snapshotsRestoredNotes = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -3709,13 +3724,13 @@
          return true;
       }],
 
-      ['Snapshots 15: Modify original project doc/main.md', function (done) {
+      ['Snapshot 15: Modify original project doc/main.md', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._snapshotsProject) + '/file/doc/main.md', {}, {content: '# Modified After Snapshot\n'}, function () {
             done (SHORT_WAIT, POLL);
          });
       }, function () {return true;}],
 
-      ['Snapshots 16: Restored project unaffected by original modification', function (done) {
+      ['Snapshot 16: Restored project unaffected by original modification', function (done) {
          c.ajax ('get', 'project/' + encodeURIComponent (window._snapshotsRestoredProject) + '/file/doc/main.md', {}, '', function (error, rs) {
             window._snapshotsCheckContent = (rs && rs.body && rs.body.content) || '';
             done (SHORT_WAIT, POLL);
@@ -3725,7 +3740,7 @@
          return true;
       }],
 
-      ['Snapshots 17: Delete second snapshot', function (done) {
+      ['Snapshot 17: Delete second snapshot', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'snapshot', window._snapshotsSnapshotId2);
@@ -3734,7 +3749,7 @@
          return true;
       }],
 
-      ['Snapshots 18: Deleted snapshot gone from list', function (done) {
+      ['Snapshot 18: Deleted snapshot gone from list', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -3745,7 +3760,7 @@
          return true;
       }],
 
-      ['Snapshots 19: Delete original project', function (done) {
+      ['Snapshot 19: Delete original project', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'project', window._snapshotsProject);
@@ -3754,7 +3769,7 @@
          return true;
       }],
 
-      ['Snapshots 20: Snapshot still in list after project deletion', function (done) {
+      ['Snapshot 20: Snapshot still in list after project deletion', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -3766,7 +3781,7 @@
          return true;
       }],
 
-      ['Snapshots 21: Delete nonexistent snapshot returns 400', function (done) {
+      ['Snapshot 21: Delete nonexistent snapshot returns 400', function (done) {
          c.ajax ('delete', 'snapshots/nonexistent-id-12345', {}, '', function (error) {
             window._snapshotsDeleteMissing = error ? error.status : null;
             done (SHORT_WAIT, POLL);
@@ -3776,7 +3791,7 @@
          return true;
       }],
 
-      ['Snapshots 22: Download nonexistent snapshot returns 404', function (done) {
+      ['Snapshot 22: Download nonexistent snapshot returns 404', function (done) {
          c.ajax ('get', 'snapshots/nonexistent-id-12345/download', {}, '', function (error) {
             window._snapshotsDownloadMissing2 = error ? error.status : null;
             done (SHORT_WAIT, POLL);
@@ -3786,7 +3801,7 @@
          return true;
       }],
 
-      ['Snapshots 23: Delete restored project', function (done) {
+      ['Snapshot 23: Delete restored project', function (done) {
          if (! window._snapshotsRestoredProject) return done ();
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
@@ -3796,7 +3811,7 @@
          return true;
       }],
 
-      ['Snapshots 24: Delete first snapshot', function (done) {
+      ['Snapshot 24: Delete first snapshot', function (done) {
          var originalConfirm = window.confirm;
          window.confirm = function () {window.confirm = originalConfirm; return true;};
          B.call ('delete', 'snapshot', window._snapshotsSnapshotId);
@@ -3805,7 +3820,7 @@
          return true;
       }],
 
-      ['Snapshots 25: No snapshots left for this flow', function (done) {
+      ['Snapshot 25: No snapshots left for this flow', function (done) {
          B.call ('load', 'snapshots');
          done (MEDIUM_WAIT, POLL);
       }, function () {
@@ -3824,13 +3839,10 @@
    // Match test-server suite order as closely as possible on the client.
    // Client mappings: doc -> docs, upload -> uploads, snapshot -> snapshots, cloud -> settings.
    // Client-only vi stays last because server doesn't currently run it in the default order.
-   var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', 'dialog', 'static', 'backend', 'vi'];
+   var SUITE_ORDER = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', 'trigger', 'dialog', 'static', 'backend', 'vi'];
    var FAST_SUITES = ['project', 'doc', 'upload', 'snapshot', 'cloud'];
-   var NOSLOW_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', 'dialog', 'vi'];
+   var NOSLOW_SUITES = ['project', 'doc', 'upload', 'snapshot', 'autogit', 'cloud', 'trigger', 'dialog', 'vi'];
    var SUITE_ALIASES = {
-      doc: ['docs'],
-      upload: ['uploads'],
-      snapshot: ['snapshots'],
       cloud: ['settings'],
       autogit: []
    };
