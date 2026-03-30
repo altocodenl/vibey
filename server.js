@@ -1699,7 +1699,7 @@ var MODELS = {
    anthropic: {
       'claude-opus-4-6':   {context: 1000000},
       'claude-sonnet-4-6': {context: 200000},
-      'claude-haiku-4-6':  {context: 200000}
+      'claude-haiku-4-5':  {context: 200000}
    }
 };
 

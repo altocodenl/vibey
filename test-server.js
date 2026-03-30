@@ -576,7 +576,7 @@ var dialogSequence = [
       if (! rs.body.openai ['gpt-5.4'] || ! rs.body.openai ['gpt-5.4'].context) return log ('Missing gpt-5.4 in openai models');
       if (! rs.body.openai ['gpt-4.1'] || ! rs.body.openai ['gpt-4.1'].context) return log ('Missing gpt-4.1 in openai models');
       if (! rs.body.anthropic ['claude-sonnet-4-6'] || ! rs.body.anthropic ['claude-sonnet-4-6'].context) return log ('Missing claude-sonnet-4-6 in anthropic models');
-      if (! rs.body.anthropic ['claude-haiku-4-6'] || ! rs.body.anthropic ['claude-haiku-4-6'].context) return log ('Missing claude-haiku-4-6 in anthropic models');
+      if (! rs.body.anthropic ['claude-haiku-4-5'] || ! rs.body.anthropic ['claude-haiku-4-5'].context) return log ('Missing claude-haiku-4-5 in anthropic models');
       return true;
    }],
 

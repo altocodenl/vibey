@@ -843,7 +843,7 @@ The prompt is constructed as follows:
   "anthropic": {
     "claude-opus-4-6": {"context": 1000000},
     "claude-sonnet-4-6": {"context": 200000},
-    "claude-haiku-4-6": {"context": 200000}
+    "claude-haiku-4-5": {"context": 200000}
   }
 }
 ```
@@ -1051,12 +1051,11 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 ## TODO now
 
-Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs.
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
 
-- Test triggers, review changes.
-- Add lighter models: gpt4.1, claude sonnet. Autodetect provider, no need to pass it.
-- Use server logs and client event logs to optimize performance, particularly in the client which is slow in mobile.
+- Test triggers.
 - Add cron triggers.
+- Use server logs and client event logs to optimize performance, particularly in the client which is slow in mobile.
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
 - Demo videos
    - Tictactoe
