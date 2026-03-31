@@ -1180,6 +1180,12 @@ B.mrespond ([
             open: false,
             name: ''
          },
+         triggerApiModal: {
+            open: false,
+            endpoint: '',
+            authorization: '',
+            curl: ''
+         },
          viewportPhone: isPhoneViewport (),
          tab: 'projects',
          uploads: [],
@@ -1317,6 +1323,10 @@ B.mrespond ([
 
    ['report', 'error', function (x, error) {
       alert (type (error) === 'string' ? error : JSON.stringify (error));
+   }],
+
+   ['report', 'success', function (x, message) {
+      alert (type (message) === 'string' ? message : JSON.stringify (message));
    }],
 
    ['reset', 'chatInput', function (x) {
@@ -1615,8 +1625,42 @@ B.mrespond ([
       var text = mode === 'email'
          ? 'trigger+' + trigger.id + '@' + trigger.domain
          : 'Bearer ' + trigger.id;
-      if (navigator.clipboard) navigator.clipboard.writeText (text);
-      // Silent copy — clipboard API handles it. No toast/notification needed.
+      var label = mode === 'email' ? 'Email copied to clipboard' : 'API token copied to clipboard';
+      var path = (window.location.pathname || '/').replace (/[^/]*$/, '');
+      var endpoint = window.location.origin + path + 'trigger';
+
+      if (! navigator.clipboard || ! navigator.clipboard.writeText) {
+         return B.call (x, 'report', 'error', 'Clipboard copy is not supported in this browser');
+      }
+
+      navigator.clipboard.writeText (text).then (function () {
+         if (mode === 'api') {
+            return B.call (x, 'set', 'triggerApiModal', {
+               open: true,
+               endpoint: endpoint,
+               authorization: 'Authorization: Bearer ' + trigger.id,
+               curl: "curl -X POST " + JSON.stringify (endpoint) + " -H " + JSON.stringify ('Authorization: Bearer ' + trigger.id) + " -H " + JSON.stringify ('Content-Type: application/json') + " -d " + JSON.stringify ('{"prompt":"Hello from a trigger"}')
+            });
+         }
+         B.call (x, 'report', 'success', label);
+      }).catch (function () {
+         B.call (x, 'report', 'error', 'Failed to copy to clipboard');
+      });
+   }],
+
+   ['close', 'triggerApiModal', function (x) {
+      B.call (x, 'set', 'triggerApiModal', {open: false, endpoint: '', authorization: '', curl: ''});
+   }],
+
+   ['copy', 'text', function (x, text, label) {
+      if (! navigator.clipboard || ! navigator.clipboard.writeText) {
+         return B.call (x, 'report', 'error', 'Clipboard copy is not supported in this browser');
+      }
+      navigator.clipboard.writeText (text || '').then (function () {
+         B.call (x, 'report', 'success', (label || 'Text') + ' copied to clipboard');
+      }).catch (function () {
+         B.call (x, 'report', 'error', 'Failed to copy to clipboard');
+      });
    }],
 
    ['load', 'triggerId', function (x) {
@@ -4468,8 +4512,21 @@ views.auth = function () {
 };
 
 views.main = function () {
-   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton'], ['projectModal'], ['cloudMode'], ['cloudAuth'], ['viewportPhone'], ['mobileMoreMenu']], function (tab, currentProject, testButton, projectModal, cloudMode, cloudAuth, viewportPhone, mobileMoreMenu) {
+   return B.view ([['tab'], ['currentProject'], ['settings', 'testButton'], ['projectModal'], ['triggerApiModal'], ['cloudMode'], ['cloudAuth'], ['viewportPhone'], ['mobileMoreMenu']], function (tab, currentProject, testButton, projectModal, triggerApiModal, cloudMode, cloudAuth, viewportPhone, mobileMoreMenu) {
       projectModal = projectModal || {open: false, name: ''};
+      triggerApiModal = triggerApiModal || {open: false, endpoint: '', authorization: '', curl: ''};
+      var snippetLabelStyle = style ({'font-size': '12px', color: '#9aa4bf', 'margin-bottom': '0.35rem'});
+      var snippetBoxStyle = style ({margin: '0 0 0.9rem 0', padding: '0.8rem', 'border-radius': '10px', background: '#0f1720', color: '#d7e3ff', overflow: 'auto', 'white-space': 'pre-wrap', 'word-break': 'break-all'});
+      var snippetCurlStyle = style ({margin: 0, padding: '0.8rem', 'border-radius': '10px', background: '#0f1720', color: '#d7e3ff', overflow: 'auto', 'white-space': 'pre-wrap', 'word-break': 'break-word'});
+      var renderSnippet = function (title, value, copyLabel, isLast) {
+         return ['div', {style: style ({'margin-bottom': isLast ? 0 : '0.9rem'})}, [
+            ['div', {style: style ({display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '0.5rem', 'margin-bottom': '0.35rem'})}, [
+               ['div', {style: snippetLabelStyle}, title],
+               ['button', {class: 'btn-small', onclick: B.ev ('copy', 'text', value, copyLabel)}, 'Copy']
+            ]],
+            ['pre', {style: isLast ? snippetCurlStyle : snippetBoxStyle}, value]
+         ]];
+      };
       if (cloudMode && cloudAuth === 'guest') return ['div', {class: 'container'}, [
          ['style', window.vibeyCSS],
          views.auth ()
@@ -4565,6 +4622,19 @@ views.main = function () {
                   ['button', {class: 'primary', onclick: B.ev ('submit', 'projectModal'), disabled: ! ((projectModal.name || '').trim ())}, 'Create project']
                ]]
             ]]
+         ]] : '',
+         triggerApiModal.open ? ['div', {class: 'modal-backdrop', onclick: B.ev ('close', 'triggerApiModal')}, [
+            ['div', {class: 'modal-card project-modal-card', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'project-modal-kicker'}, 'Trigger API'],
+               ['div', {class: 'project-modal-title'}, 'API token copied'],
+               ['div', {class: 'project-modal-subtitle'}, 'Use these snippets to fire the project trigger.'],
+               renderSnippet ('POST endpoint', triggerApiModal.endpoint, 'Endpoint'),
+               renderSnippet ('Authorization header', triggerApiModal.authorization, 'Authorization header'),
+               renderSnippet ('curl example', triggerApiModal.curl, 'curl example', true),
+               ['div', {class: 'modal-actions'}, [
+                  ['button', {class: 'primary', onclick: B.ev ('close', 'triggerApiModal')}, 'Close']
+               ]]
+            ]]
          ]] : ''
       ]];
 
@@ -4630,6 +4700,19 @@ views.main = function () {
                ['div', {class: 'modal-actions'}, [
                   ['button', {class: 'btn-small', onclick: B.ev ('close', 'projectModal')}, 'Cancel'],
                   ['button', {class: 'primary', onclick: B.ev ('submit', 'projectModal'), disabled: ! ((projectModal.name || '').trim ())}, 'Create project']
+               ]]
+            ]]
+         ]] : '',
+         triggerApiModal.open ? ['div', {class: 'modal-backdrop', onclick: B.ev ('close', 'triggerApiModal')}, [
+            ['div', {class: 'modal-card project-modal-card', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'project-modal-kicker'}, 'Trigger API'],
+               ['div', {class: 'project-modal-title'}, 'API token copied'],
+               ['div', {class: 'project-modal-subtitle'}, 'Use these snippets to fire the project trigger.'],
+               renderSnippet ('POST endpoint', triggerApiModal.endpoint, 'Endpoint'),
+               renderSnippet ('Authorization header', triggerApiModal.authorization, 'Authorization header'),
+               renderSnippet ('curl example', triggerApiModal.curl, 'curl example', true),
+               ['div', {class: 'modal-actions'}, [
+                  ['button', {class: 'primary', onclick: B.ev ('close', 'triggerApiModal')}, 'Close']
                ]]
             ]]
          ]] : ''

@@ -861,6 +861,15 @@ var isNoSuchContainerError = function (error) {
    return text.includes ('no such container');
 };
 
+var isContainerNotRunningError = function (error) {
+   var text = dockerErrorText (error);
+   return text.includes ('is not running') || text.includes ('container state improper');
+};
+
+var isRecoverableProjectContainerError = function (error) {
+   return isNoSuchContainerError (error) || isContainerNotRunningError (error);
+};
+
 var isAlreadyRunningContainerError = function (error) {
    var text = dockerErrorText (error);
    return text.includes ('is already running');
@@ -936,7 +945,7 @@ var withProjectContainerRecovery = async function (projectName, rs, fn) {
       return await fn ();
    }
    catch (error) {
-      if (! isNoSuchContainerError (error)) throw error;
+      if (! isRecoverableProjectContainerError (error)) throw error;
    }
 
    if (! (await ensureProjectContainer (projectName, {createVolume: false}))) {
@@ -947,7 +956,7 @@ var withProjectContainerRecovery = async function (projectName, rs, fn) {
       return await fn ();
    }
    catch (error) {
-      if (isNoSuchContainerError (error)) return replyProjectMissing (rs);
+      if (isRecoverableProjectContainerError (error)) return replyProjectMissing (rs);
       throw error;
    }
 };
@@ -1007,14 +1016,14 @@ var dockerExec = async function (projectName, command, rs) {
    };
 
    var result = await run ();
-   if (! result.error || ! isNoSuchContainerError (result.error)) return result;
+   if (! result.error || ! isRecoverableProjectContainerError (result.error)) return result;
 
    if (! (await ensureProjectContainer (projectName, {createVolume: false}))) {
       return replyProjectMissing (rs);
    }
 
    result = await run ();
-   if (result.error && isNoSuchContainerError (result.error)) return replyProjectMissing (rs);
+   if (result.error && isRecoverableProjectContainerError (result.error)) return replyProjectMissing (rs);
    return result;
 };
 
@@ -4948,64 +4957,6 @@ cicek.logconsole = function (message) {
    }
 };
 
-// *** MIGRATION: triggers-v1 ***
-
-var runTriggersMigration = async function () {
-   if (! CLOUD) return;
-   var done = await Redis ('get', 'migration:triggers-v1');
-   if (done) return;
-
-   clog ('Running migration: triggers-v1');
-
-   // 1. Create trigger IDs for all existing projects (from volumes)
-   try {
-      var output = await execA ('docker volume ls --filter label=vibey=project --format "{{.Name}}"');
-      var volumes = output.trim ().split ('\n').filter (Boolean);
-      var count = 0;
-      await Promise.all (dale.go (volumes, function (volName) {
-         // Volume names: vibey-vol-<userId>-<projectSlug>
-         var match = volName.match (/^vibey-vol-(.+?)-(.+)$/);
-         if (! match) return;
-         var userId = match [1], projectSlug = match [2];
-         return (async function () {
-            var existing = await Redis ('get', 'projecttrigger:' + userId + ':' + projectSlug);
-            if (! existing) {
-               await createProjectTrigger (userId, projectSlug);
-               count++;
-            }
-         }) ();
-      }));
-      clog ('Migration triggers-v1: created ' + count + ' trigger IDs for existing projects');
-   }
-   catch (e) {
-      clog ('Migration triggers-v1: error scanning volumes:', e.message);
-   }
-
-   // 2. Remove old API key redis keys
-   try {
-      var patterns = ['userapikey:*', 'apikey:*', 'userapikeyreveal:*'];
-      var deleted = 0;
-      await Promise.all (dale.go (patterns, function (pattern) {
-         return (async function () {
-            var keys = await Redis ('keys', pattern);
-            if (keys && keys.length) {
-               await Promise.all (dale.go (keys, function (key) {
-                  deleted++;
-                  return Redis ('del', key);
-               }));
-            }
-         }) ();
-      }));
-      clog ('Migration triggers-v1: deleted ' + deleted + ' old API key redis keys');
-   }
-   catch (e) {
-      clog ('Migration triggers-v1: error cleaning old API keys:', e.message);
-   }
-
-   await Redis ('set', 'migration:triggers-v1', '1');
-   clog ('Migration triggers-v1 complete');
-};
-
 // *** SMTP SERVER (inbound email triggers) ***
 
 var TRIGGER_EMAIL_DOMAIN = process.env.VIBEY_TRIGGER_EMAIL_DOMAIN || '';
@@ -5106,7 +5057,6 @@ var startSmtpServer = function () {
 
 var startServer = async function () {
    if (CLOUD) await ensureCloudAdminUser ();
-   await runTriggersMigration ();
    cicek.listen ({port: port}, routes);
    clog ('vibey server running on port ' + port);
    startSmtpServer ();
