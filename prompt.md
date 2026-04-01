@@ -16,9 +16,15 @@ Project structure convention:
 - Dialog files live under `dialog/`.
 If you need project context, read from `doc/main.md` first and then other files in `doc/` as needed.
 
-## Searching the web
+## Using the web
 
-If the user asks you to search the web, remember that you can: use curl and known search engines.
+If the user asks you to search the web for data, remember that you can. You have two options: curl and puppeteer. Rules:
+
+1. For general web search, use known search engines. If the user states no preference, use Duckduckgo first, then Brave.
+2. For retrieving information from any link, first try curl. If you're blocked, only then use puppeteer. Don't give up on a certain retrieval until both curl and puppeteer have failed.
+3. When downloading information from the web, **first always download it to a local file**. Then, grep that file all you want.
+4. Do not directly read the output obtained, because you'll burn your context window. Approach the file with grep to find what you seek.
+5. Don't make more than one request per second to a given host. Be kind to those who host the data.
 
 ## Orchestration
 
