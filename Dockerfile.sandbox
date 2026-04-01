@@ -1,7 +1,28 @@
 # Vibey project sandbox container
 FROM node:22-alpine
 
-RUN apk add --no-cache git curl bash zip ripgrep python3
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV NODE_PATH=/usr/local/lib/node_modules
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+RUN apk add --no-cache \
+  git \
+  curl \
+  bash \
+  zip \
+  ripgrep \
+  python3 \
+  chromium \
+  nss \
+  freetype \
+  harfbuzz \
+  ca-certificates \
+  ttf-freefont \
+  font-noto \
+  font-noto-cjk
+
+RUN if [ -x /usr/bin/chromium ] && [ ! -e /usr/bin/chromium-browser ]; then ln -s /usr/bin/chromium /usr/bin/chromium-browser; fi
+RUN npm install -g puppeteer --unsafe-perm=true
 
 WORKDIR /workspace
 
