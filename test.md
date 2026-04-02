@@ -339,6 +339,15 @@ Notes:
     - Client: the new dialog's first user prompt contains the handoff text prefixed with `This is a manual compaction handoff from dialog ...`.
     - Client: the source dialog keeps the compaction turn in its markdown history.
     - Client: after the handoff, compaction state is cleared and both source + fresh dialogs appear in the dialogs list.
+54. **Spawning an agent with `launch_agent`**:
+    - `POST /project/:p/dialog` (prompt instructing the model to use `launch_agent` exactly once) — parent dialog returns JSON immediately.
+    - `GET /project/:p/dialog/:id/stream` (parent) — stream finishes with `done` and includes a `tool_request` event for `launch_agent` plus a successful `tool_result` whose payload contains `launched.dialogId`, `filename`, `status`, `provider`, and `model`.
+    - `GET /project/:p/dialog/:id` (parent) — markdown contains a `launch_agent` tool block with a `Result:` section.
+    - **Non-blocking launch**: when the spawned agent is intentionally slow, the parent dialog still finishes first; `GET /project/:p/dialogs` shows the spawned sibling dialog present and still `active` while the launcher is already `done`.
+    - `GET /project/:p/dialog/:spawnedId/stream` (spawned dialog) — stream finishes with `done`.
+    - `GET /project/:p/dialog/:spawnedId` — spawned dialog markdown contains its user prompt and assistant reply.
+    - Client: `launch_agent` tool bubbles render a compact description by default and, when expanded, show the spawned agent summary (provider/model/slug + prompt preview + launched dialog result) instead of raw JSON clutter.
+    - Client: after a dialog spawns an agent, the spawned sibling dialog appears in the dialogs list and can be opened from the UI.
 
 **Static app:**
 

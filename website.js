@@ -539,7 +539,7 @@ var page = ['html', {lang: 'en'}, [
    ['head', [
       ['meta', {charset: 'utf-8'}],
       ['meta', {name: 'viewport', content: 'width=device-width, initial-scale=1'}],
-      ['title', 'Vibey — Build with words, not code.'],
+      ['title', 'Vibey — Turn your words into actions.'],
       ['meta', {name: 'description', content: 'An agentic interface where everything is a document, everything runs in your browser, and agents work at full speed inside safe containers.'}],
       ['link', {rel: 'preconnect', href: 'https://fonts.googleapis.com'}],
       ['link', {rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: ''}],
@@ -552,7 +552,7 @@ var page = ['html', {lang: 'en'}, [
       ['div', {class: 'wrap'}, [
          ['div', {class: 'hero'}, [
             ['h1', ['LITERAL', '<em>Vibey</em>']],
-            ['p', {class: 'tagline'}, 'Build with words, not code.'],
+            ['p', {class: 'tagline'}, 'Turn your words into actions.'],
             ['div', {class: 'demo-carousel'}, [
                ['div', {class: 'demo-nav'}, [
                   ['button', {class: 'demo-arrow demo-prev', 'aria-label': 'Previous demo'}, '‹'],

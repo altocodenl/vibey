@@ -1339,13 +1339,98 @@ var dialogSequence = [
       return true;
    }],
 
+   ['Dialog 47: launch_agent spawns a sibling dialog', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
+         provider: 'openai',
+         model: 'gpt-5.2-codex',
+         prompt: 'Use launch_agent exactly once. Spawn a sibling agent with provider openai, model gpt-5.2-codex, slug spawned-agent-test, and prompt "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools." After launching it, briefly say that you spawned it. Do not use any other tools.',
+         slug: 'spawn-parent-test'
+      }, function (error, code, body) {
+         if (error) return log ('POST /dialog failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200, got ' + code);
+         if (! body || ! body.dialogId) return log ('Missing parent dialogId');
+         s.spawnParentDialogId = body.dialogId;
+
+         collectSSE (DIALOG_PROJECT, body.dialogId, function (streamError, events) {
+            if (streamError) return log ('Parent SSE stream error: ' + streamError.message);
+            if (! getEventsByType (events, 'done').length) return log ('Expected done event for parent dialog');
+            var toolRequests = dale.fil (getEventsByType (events, 'tool_request'), undefined, function (ev) {
+               if (ev.tool && ev.tool.name === 'launch_agent') return ev;
+            });
+            if (toolRequests.length !== 1) return log ('Expected exactly one launch_agent tool_request event, got ' + toolRequests.length);
+            var toolResults = dale.fil (getEventsByType (events, 'tool_result'), undefined, function (ev) {
+               if (ev.tool && ev.tool.name === 'launch_agent') return ev;
+            });
+            if (toolResults.length !== 1) return log ('Expected exactly one launch_agent tool_result event, got ' + toolResults.length);
+            var launched = (((toolResults [0] || {}).tool || {}).result || {}).launched;
+            if (type (launched) !== 'object' || ! launched.dialogId) return log ('launch_agent result missing launched dialog payload');
+            if (launched.provider !== 'openai') return log ('Expected spawned provider openai, got ' + launched.provider);
+            if (launched.model !== 'gpt-5.2-codex') return log ('Expected spawned model gpt-5.2-codex, got ' + launched.model);
+            if (! launched.filename || launched.filename.indexOf ('-active.md') === -1 && launched.filename.indexOf ('-done.md') === -1) return log ('Unexpected spawned filename: ' + launched.filename);
+            s.spawnChildDialogId = launched.dialogId;
+            next ();
+         });
+      });
+   }],
+
+   ['Dialog 48: Parent markdown stores launch_agent tool block', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fetchDialogMarkdown (DIALOG_PROJECT, s.spawnParentDialogId, function (error, md) {
+         if (error) return log ('Could not fetch parent dialog: ' + error.message);
+         if (! hasToolMention (md, 'launch_agent')) return log ('Missing launch_agent in parent dialog markdown');
+         if (! hasResultMarker (md)) return log ('launch_agent block missing Result section');
+         if (md.indexOf ('spawned-agent-test') === -1) return log ('Missing spawned slug in parent markdown');
+         if (md.indexOf ('sleep 5 && echo CHILD READY') === -1) return log ('Missing spawned prompt content in parent markdown');
+         next ();
+      });
+   }],
+
+   ['Dialog 49: launch_agent is non-blocking for the parent', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      var started = Date.now ();
+      var poll = function () {
+         httpGet (5353, '/project/' + DIALOG_PROJECT + '/dialogs', function (error, status, body) {
+            if (error) return log ('GET /dialogs failed: ' + error.message);
+            if (status !== 200) return log ('Expected 200, got ' + status);
+            var dialogs = JSON.parse (body);
+            var parentEntry = dale.stopNot (dialogs, undefined, function (d) {
+               if (d.dialogId === s.spawnParentDialogId) return d;
+            });
+            var childEntry = dale.stopNot (dialogs, undefined, function (d) {
+               if (d.dialogId === s.spawnChildDialogId) return d;
+            });
+            if (! parentEntry) return log ('Parent dialog missing from dialogs list');
+            if (! childEntry) return log ('Spawned dialog missing from dialogs list');
+            if (parentEntry.status === 'done' && childEntry.status === 'active') return next ();
+            if (Date.now () - started > 10000) return log ('Expected parent done while spawned child still active, got parent=' + parentEntry.status + ' child=' + childEntry.status);
+            setTimeout (poll, 200);
+         });
+      };
+      poll ();
+   }],
+
+   ['Dialog 50: Spawned sibling dialog finishes', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      collectSSE (DIALOG_PROJECT, s.spawnChildDialogId, function (streamError, events) {
+         if (streamError) return log ('Spawned dialog SSE stream error: ' + streamError.message);
+         if (! getEventsByType (events, 'done').length) return log ('Expected done event for spawned dialog');
+         next ();
+      });
+   }],
+
+   ['Dialog 51: Spawned dialog markdown has prompt and assistant reply', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
+      fetchDialogMarkdown (DIALOG_PROJECT, s.spawnChildDialogId, function (error, md) {
+         if (error) return log ('Could not fetch spawned dialog: ' + error.message);
+         if (md.indexOf ('sleep 5 && echo CHILD READY') === -1) return log ('Spawned dialog missing user prompt');
+         if (md.indexOf ('CHILD READY') === -1) return log ('Spawned dialog missing assistant reply');
+         next ();
+      });
+   }],
+
    // Cleanup
-   ['Dialog 47: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
+   ['Dialog 52: Cleanup delete', 'delete', 'projects/' + DIALOG_PROJECT, {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object' || rs.body.ok !== true) return log ('Cleanup deletion failed');
       return true;
    }],
 
-   ['Dialog 48: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
+   ['Dialog 53: Confirm gone', 'get', 'projects', {}, '', 200, function (s, rq, rs) {
       if (type (rs.body) !== 'array') return log ('Expected array');
       if (projectListHasSlug (rs.body, DIALOG_PROJECT)) return log ('Project still exists after final deletion');
       return true;

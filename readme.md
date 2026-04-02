@@ -2,7 +2,7 @@
 
 > "Thou shalt not make a machine in the likeness of a human mind." -- Orange Catholic Bible
 
-Build with words, not code.
+Turn your words into actions.
 
 ## Vibey in a nutshell
 
@@ -1053,15 +1053,12 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
 
-- Test triggers.
-- Add cron triggers.
+- Demo videos
+   - Fitness tracker with update
+   - Online research
+   - Better GDP graphs example
 - Use server logs and client event logs to optimize performance, particularly in the client which is slow in mobile.
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
-- Demo videos
-   - Tictactoe
-   - Online research
-   - CSV data analysis
-   - Fitness tracker
 - Literate clanking: server.md & client.md
    - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
       - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
@@ -1070,6 +1067,13 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 
 ### TODO later
 
+- Fix uploads /app prefix
+- Poll new dialogs
+- Pass a model in the trigger (email & API)
+- Use 4.1 with API token, only show it if there is one
+- Add test for launching agent
+- Add cron triggers.
+- How would vibey apps look like? Basically, shareable docs that you can browse, and which have been audited.
 - Spin Hetzner engines and bind projects to them.
 - Put dialog state in memory [perhaps, but what about sockets]
 - Hosted services? (email, DB)

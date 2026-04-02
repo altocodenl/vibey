@@ -2831,6 +2831,7 @@ views.files = function () {
          if (! upload) return '';
          var contentType = upload.contentType || '';
          var url = upload.url || '';
+         if (url [0] === '/') url = url.slice (1);
          var meta = [
             ['div', {class: 'upload-meta-line'}, ['Name: ', upload.name || '']],
             ['div', {class: 'upload-meta-line'}, ['Type: ', contentType || 'unknown']],
@@ -3107,13 +3108,24 @@ var roleDisplayName = function (role) {
 
 var formatToolResultPreview = function (obj, maxStreamLines) {
    if (type (obj) !== 'object' || ! obj) return null;
-   if (obj.stdout === undefined && obj.stderr === undefined && obj.success === undefined && obj.message === undefined && obj.error === undefined) return null;
+   if (obj.stdout === undefined && obj.stderr === undefined && obj.success === undefined && obj.message === undefined && obj.error === undefined && obj.launched === undefined) return null;
 
    var parts = [];
 
    // Error or message (these are the main feedback lines)
    if (obj.error !== undefined) parts.push ('error: ' + previewValueText (obj.error));
    if (obj.message !== undefined) parts.push (previewValueText (obj.message));
+
+   if (type (obj.launched) === 'object' && obj.launched) {
+      var launched = obj.launched;
+      var launchSummary = 'launched: ' + (launched.dialogId || '[unknown dialog]');
+      var launchDetails = [];
+      if (launched.status) launchDetails.push ('status=' + launched.status);
+      if (launched.provider) launchDetails.push ('provider=' + launched.provider);
+      if (launched.model) launchDetails.push ('model=' + launched.model);
+      if (launched.filename) launchDetails.push ('file=' + launched.filename);
+      parts.push (launchSummary + (launchDetails.length ? '\n' + launchDetails.join ('\n') : ''));
+   }
 
    // stdout — show content directly, skip if empty
    var stdout = type (obj.stdout) === 'string' ? obj.stdout.replace (/\r/g, '') : '';

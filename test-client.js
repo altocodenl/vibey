@@ -2187,6 +2187,146 @@
          return true;
       }],
 
+      ['Dialog 52g: launch_agent tool bubbles render compact and expanded summaries', function () {
+         var sampleBlock = '---\nTool request: launch_agent [call_spawn]\n> Description: Spawn a sibling agent to verify launch flow\n\n    {\n      "provider": "openai",\n      "model": "gpt-5.2-codex",\n      "slug": "spawned-agent-test",\n      "prompt": "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools."\n    }\n\nResult:\n\n    {\n      "success": true,\n      "launched": {\n        "dialogId": "20260402-120000-spawned-agent-test",\n        "filename": "dialog/20260402-120000-spawned-agent-test-active.md",\n        "status": "active",\n        "provider": "openai",\n        "model": "gpt-5.2-codex"\n      }\n    }\n\n---';
+         var compact = formatToolBlocksForMessage (sampleBlock, true, {});
+         var full = formatToolBlocksForMessage (sampleBlock, false, {});
+         if (compact.indexOf ('Spawn a sibling agent to verify launch flow') === -1) return 'Compact launch_agent view missing description';
+         if (compact.indexOf ('spawned-agent-test') !== -1) return 'Compact launch_agent view should hide raw details';
+         if (full.indexOf ('⚡ openai/gpt-5.2-codex [spawned-agent-test]') === -1) return 'Expanded launch_agent view missing provider/model/slug summary';
+         if (full.indexOf ('sleep 5 && echo CHILD READY') === -1) return 'Expanded launch_agent view missing prompt preview';
+         if (full.indexOf ('20260402-120000-spawned-agent-test') === -1) return 'Expanded launch_agent view missing launched dialog result';
+         return true;
+      }],
+
+      ['Dialog 52h: Create project for launch_agent flow', function (done) {
+         window._spawnProject = 'test-spawn-' + testTimestamp ();
+         c.ajax ('post', 'projects', {}, {name: window._spawnProject}, function (error, rs) {
+            window._spawnCreate = {error: error, rs: rs};
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         var result = window._spawnCreate || {};
+         if (result.error) return 'Failed to create launch_agent test project';
+         return true;
+      }],
+
+      ['Dialog 52i: Parent dialog uses launch_agent exactly once', function (done) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._spawnProject) + '/dialog', {}, {
+            provider: 'openai',
+            model: 'gpt-5.2-codex',
+            slug: 'spawn-parent-test',
+            prompt: 'Use launch_agent exactly once. Spawn a sibling agent with provider openai, model gpt-5.2-codex, slug spawned-agent-test, and prompt "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools." After launching it, briefly say that you spawned it. Do not use any other tools.'
+         }, function (error, rs) {
+            if (error || ! rs || ! rs.body || ! rs.body.dialogId) {
+               window._spawnParentStream = {error: error || 'missing dialogId', rs: rs};
+               return done (SHORT_WAIT, POLL);
+            }
+            window._spawnParentDialogId = rs.body.dialogId;
+            streamDialogEvents (window._spawnProject, rs.body.dialogId, function (result) {
+               window._spawnParentStream = result;
+               var toolResults = dale.fil ((result || {}).events || [], undefined, function (ev) {
+                  if (ev.type === 'tool_result' && ev.tool && ev.tool.name === 'launch_agent') return ev;
+               });
+               var launched = toolResults.length ? (((toolResults [0] || {}).tool || {}).result || {}).launched : null;
+               if (launched && launched.dialogId) window._spawnChildDialogId = launched.dialogId;
+               if (launched && launched.filename) window._spawnChildFilename = launched.filename;
+               done (LONG_WAIT, POLL);
+            });
+         });
+      }, function () {
+         var result = window._spawnParentStream || {};
+         if (result.error) return 'Parent launch_agent dialog failed: ' + result.error;
+         var events = result.events || [];
+         if (! getEventsByType (events, 'done').length) return 'Parent launch_agent dialog never finished';
+         var toolRequests = dale.fil (events, undefined, function (ev) {
+            if (ev.type === 'tool_request' && ev.tool && ev.tool.name === 'launch_agent') return ev;
+         });
+         if (toolRequests.length !== 1) return 'Expected exactly one launch_agent tool_request, got ' + toolRequests.length;
+         if (! window._spawnChildDialogId) return 'Missing spawned child dialog id from tool_result';
+         return true;
+      }],
+
+      ['Dialog 52j: launch_agent is non-blocking and parent bubble renders in UI', function (done) {
+         c.ajax ('get', 'project/' + encodeURIComponent (window._spawnProject) + '/dialog/' + encodeURIComponent (window._spawnParentDialogId), {}, '', function (error, rs) {
+            window._spawnParentMarkdown = {error: error, rs: rs};
+            var started = Date.now ();
+            var poll = function () {
+               c.ajax ('get', 'project/' + encodeURIComponent (window._spawnProject) + '/dialogs', {}, '', function (error2, rs2) {
+                  if (error2) {
+                     window._spawnDialogs = {error: error2, rs: rs2};
+                     return done (MEDIUM_WAIT, POLL);
+                  }
+                  window._spawnDialogs = {error: error2, rs: rs2};
+                  var dialogs = rs2.body || [];
+                  var parent = dale.stopNot (dialogs, undefined, function (item) {if (item.dialogId === window._spawnParentDialogId) return item;});
+                  var child = dale.stopNot (dialogs, undefined, function (item) {if (item.dialogId === window._spawnChildDialogId) return item;});
+                  if (parent && child && parent.status === 'done' && child.status === 'active') {
+                     window.location.hash = '#/project/' + encodeURIComponent (window._spawnProject) + '/dialogs/' + encodeURIComponent (window._spawnParentDialogId);
+                     return done (MEDIUM_WAIT, POLL);
+                  }
+                  if (Date.now () - started > 12000) {
+                     window.location.hash = '#/project/' + encodeURIComponent (window._spawnProject) + '/dialogs/' + encodeURIComponent (window._spawnParentDialogId);
+                     return done (MEDIUM_WAIT, POLL);
+                  }
+                  setTimeout (poll, 200);
+               });
+            };
+            poll ();
+         });
+      }, function () {
+         var parentResult = window._spawnParentMarkdown || {};
+         if (parentResult.error) return 'Failed to reload parent launch_agent dialog';
+         var md = parentResult.rs && parentResult.rs.body && (parentResult.rs.body.markdown || parentResult.rs.body.content) || '';
+         if (md.indexOf ('Tool request: launch_agent') === -1) return 'Parent markdown missing launch_agent tool block';
+         var dialogs = window._spawnDialogs && window._spawnDialogs.rs && window._spawnDialogs.rs.body;
+         if (type (dialogs) !== 'array') return 'Dialogs list missing for launch_agent project';
+         var ids = dale.go (dialogs, function (item) {return item.dialogId;});
+         if (ids.indexOf (window._spawnParentDialogId) === -1) return 'Parent dialog missing from dialogs list';
+         if (ids.indexOf (window._spawnChildDialogId) === -1) return 'Spawned child dialog missing from dialogs list';
+         var parent = dale.stopNot (dialogs, undefined, function (item) {if (item.dialogId === window._spawnParentDialogId) return item;});
+         var child = dale.stopNot (dialogs, undefined, function (item) {if (item.dialogId === window._spawnChildDialogId) return item;});
+         if (! parent || parent.status !== 'done') return 'Parent dialog should already be done while rendering launch_agent UI';
+         if (! child || child.status !== 'active') return 'Spawned child should still be active to prove non-blocking launch';
+         var toolHeaders = dale.go (document.querySelectorAll ('.chat-message.chat-tool .chat-content .tool-header'), function (node) {
+            return (node.textContent || '').trim ();
+         });
+         if (! toolHeaders.length) return 'Expected a rendered launch_agent tool bubble';
+         var launchHeader = dale.stopNot (toolHeaders, undefined, function (text) {
+            if (text.indexOf ('Launch agent') !== -1) return text;
+         });
+         if (! launchHeader) return 'Could not find launch_agent tool bubble in rendered dialog';
+         return true;
+      }],
+
+      ['Dialog 52k: Spawned sibling dialog can be opened directly once its id is known', function (done) {
+         streamDialogEvents (window._spawnProject, window._spawnChildDialogId, function (result) {
+            window._spawnChildStream = result;
+            window.location.hash = '#/project/' + encodeURIComponent (window._spawnProject) + '/dialogs/' + encodeURIComponent (window._spawnChildDialogId);
+            done (LONG_WAIT, POLL);
+         });
+      }, function () {
+         var stream = window._spawnChildStream || {};
+         if (stream.error) return 'Spawned child dialog stream failed: ' + stream.error;
+         if (! getEventsByType (stream.events || [], 'done').length) return 'Spawned child dialog never finished';
+         var file = B.get ('currentFile');
+         if (! file || ! file.name) return 'Spawned dialog did not load in UI';
+         var parsed = parseDialogFilename (file.name);
+         if (! parsed || parsed.dialogId !== window._spawnChildDialogId) return 'Unexpected dialog loaded after opening spawned sibling';
+         if ((file.content || '').indexOf ('CHILD READY') === -1) return 'Spawned dialog markdown missing assistant reply in UI';
+         return true;
+      }],
+
+      ['Dialog 52l: Delete launch_agent test project', function (done) {
+         c.ajax ('delete', 'projects/' + encodeURIComponent (window._spawnProject), {}, '', function (error) {
+            window._spawnDeleted = ! error;
+            done (MEDIUM_WAIT, POLL);
+         });
+      }, function () {
+         if (! window._spawnDeleted) return 'Failed to delete launch_agent test project';
+         return true;
+      }],
+
       ['Dialog 53: Delete description test project', function (done) {
          c.ajax ('delete', 'projects/' + encodeURIComponent (window._descProject), {}, '', function (error, rs) {
             window._descDeleted = ! error;

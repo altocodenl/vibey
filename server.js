@@ -1930,7 +1930,7 @@ var executeTool = async function (toolName, toolInput, projectName, rs, rq) {
       }
 
       try {
-         var result = await startDialogTurn (projectName, toolInput.provider, toolInput.prompt.trim (), toolInput.model, toolInput.slug, null, null, rq);
+         var result = await startDialogTurnAsync (projectName, toolInput.provider, toolInput.prompt.trim (), toolInput.model, toolInput.slug, rq);
          return await finalizeTool ({
             success: true,
             launched: {
@@ -2945,7 +2945,7 @@ var createDialogDraft = async function (projectName, provider, model, slug) {
    };
 };
 
-var startDialogTurn = async function (projectName, provider, prompt, model, slug, onChunk, abortSignal, rq) {
+var prepareDialogTurn = async function (projectName, provider, prompt, model, slug) {
    if (provider !== 'claude' && provider !== 'openai') {
       throw new Error ('Unknown provider: ' + provider + '. Use "claude" or "openai".');
    }
@@ -2965,8 +2965,24 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    await ensureDialogFile (projectName, dialog, provider, defaultModel);
    await appendToDialog (projectName, dialog.filename, '## User\n> Time: ' + new Date ().toISOString () + '\n\n' + prompt + '\n\n');
 
+   return {projectName: projectName, provider: provider, defaultModel: defaultModel, dialogId: dialogId, dialog: dialog};
+};
+
+var runStartedDialogTurn = async function (projectName, dialog, provider, defaultModel, onChunk, abortSignal, rq, contextLabel) {
+   contextLabel = contextLabel || 'startDialogTurn';
+   return await runCompletion (projectName, dialog, provider, defaultModel, onChunk, abortSignal, rq).then (async function (result) {
+      await setDialogStatus (projectName, dialog, 'done', contextLabel + '/success');
+      result.filename = dialog.filename;
+      result.status = dialog.status;
+      return result;
+   });
+};
+
+var startDialogTurn = async function (projectName, provider, prompt, model, slug, onChunk, abortSignal, rq) {
+   var prepared = await prepareDialogTurn (projectName, provider, prompt, model, slug);
+
    // Register active stream so /stream endpoint can connect
-   var stream = beginActiveStream (projectName, dialogId);
+   var stream = beginActiveStream (prepared.projectName, prepared.dialogId);
    var wrappedOnChunk = function (chunk) {
       if (chunk && type (chunk) === 'object' && chunk.type) {
          stream.emitter.emit ('event', chunk);
@@ -2978,24 +2994,71 @@ var startDialogTurn = async function (projectName, provider, prompt, model, slug
    };
 
    try {
-      var result = await runCompletion (projectName, dialog, provider, defaultModel, wrappedOnChunk, abortSignal || stream.controller.signal, rq);
-      await setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/success');
-      result.filename = dialog.filename;
-      result.status = dialog.status;
+      var result = await runStartedDialogTurn (prepared.projectName, prepared.dialog, prepared.provider, prepared.defaultModel, wrappedOnChunk, abortSignal || stream.controller.signal, rq, 'startDialogTurn');
       stream.emitter.emit ('event', {type: 'done', result: result});
-      endActiveStream (projectName, dialogId);
+      endActiveStream (prepared.projectName, prepared.dialogId);
       return result;
    }
    catch (error) {
       try {
-         await setDialogStatus (projectName, dialog, 'done', 'startDialogTurn/error');
+         await setDialogStatus (prepared.projectName, prepared.dialog, 'done', 'startDialogTurn/error');
       }
       catch (statusError) {
       }
       stream.emitter.emit ('event', {type: 'error', error: error.message});
-      endActiveStream (projectName, dialogId);
+      endActiveStream (prepared.projectName, prepared.dialogId);
       throw error;
    }
+};
+
+var startDialogTurnAsync = async function (projectName, provider, prompt, model, slug, rq) {
+   var prepared = await prepareDialogTurn (projectName, provider, prompt, model, slug);
+   var stream = beginActiveStream (prepared.projectName, prepared.dialogId);
+
+   (async function () {
+      try {
+         var result = await runStartedDialogTurn (prepared.projectName, prepared.dialog, prepared.provider, prepared.defaultModel, function (chunk) {
+            if (chunk && type (chunk) === 'object' && chunk.type) stream.emitter.emit ('event', chunk);
+            else stream.emitter.emit ('event', {type: 'chunk', content: chunk});
+         }, stream.controller.signal, rq, 'startDialogTurnAsync');
+         stream.emitter.emit ('event', {type: 'done', result: result});
+      }
+      catch (error) {
+         if (error && error.name === 'AbortError') {
+            try {
+               var activeAfterAbort = getActiveStream (prepared.projectName, prepared.dialogId);
+               var requestedStatus = activeAfterAbort && activeAfterAbort.requestedStatus ? activeAfterAbort.requestedStatus : 'done';
+               var dialogAfterAbort = await loadDialog (prepared.projectName, prepared.dialogId);
+               if (dialogAfterAbort.exists) await setDialogStatus (prepared.projectName, dialogAfterAbort, requestedStatus, 'startDialogTurnAsync/abort');
+               stream.emitter.emit ('event', {type: 'done', result: {dialogId: prepared.dialogId, filename: dialogAfterAbort.filename, status: requestedStatus, interrupted: true}});
+            }
+            catch (interruptError) {
+               stream.emitter.emit ('event', {type: 'error', error: interruptError.message});
+            }
+         }
+         else {
+            try {
+               var dialogAfterError = await loadDialog (prepared.projectName, prepared.dialogId);
+               if (dialogAfterError.exists) await setDialogStatus (prepared.projectName, dialogAfterError, 'done', 'startDialogTurnAsync/error');
+            }
+            catch (statusError) {
+            }
+            stream.emitter.emit ('event', {type: 'error', error: error.message});
+         }
+      }
+      finally {
+         endActiveStream (prepared.projectName, prepared.dialogId);
+         stream.settle ();
+      }
+   }) ();
+
+   return {
+      dialogId: prepared.dialogId,
+      filename: prepared.dialog.filename,
+      status: prepared.dialog.status,
+      provider: prepared.provider,
+      model: prepared.defaultModel
+   };
 };
 
 var updateDialogTurn = async function (projectName, dialogId, status, prompt, provider, model, onChunk, abortSignal, rq) {

@@ -1,5 +1,29 @@
 ## Vibey development notes
 
+### 2026-04-01
+
+Waiting for the LLM is the new compiling.
+
+Random idea: run LLM models in the browser with wasm. Or even with JS. We could fit at least a 1GB model in those fat 2026 browser tabs.
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+Prompts:
+- Add a prompt for installing puppeteer by default for searching the web.
+- Please make agent launching to be non-blocking.
+- Please add tests for this last feature.
+
+### 2026-03-31
+
+Convergence and idempotence as the same. Whether you require time or operations, you go to the same state, eventually. This also works at the source because from TODIS' perspective, time is reflected (or rather, embodied) by action.
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+- I want a confirmation when I copy the email.
+- I want a modal when I copy the API, that opens up and shows two things: the POST /whatever and the authorization header.
+
+- Please remove the migration code since we're done with it.
+
 ### 2026-03-30
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
