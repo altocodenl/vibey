@@ -1,0 +1,19 @@
+#!/bin/sh
+
+if [ "$1" = "prod" ] ; then
+   HOST="root@136.243.174.166"
+else
+   echo "Must specify environment (prod)"
+   exit 1
+fi
+
+FOLDER="vibey"
+TAIL_LINES="${2:-200}"
+SERVICE="$3"
+
+COMMAND="cd $FOLDER && docker compose logs --tail=$TAIL_LINES -f"
+if [ -n "$SERVICE" ] ; then
+   COMMAND="$COMMAND $SERVICE"
+fi
+
+ssh $HOST "$COMMAND"

@@ -1067,7 +1067,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 
 ### TODO later
 
-- Fix uploads /app prefix
+- Delete upload
 - Poll new dialogs
 - Pass a model in the trigger (email & API)
 - Use 4.1 with API token, only show it if there is one

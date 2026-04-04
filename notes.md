@@ -1,5 +1,26 @@
 ## Vibey development notes
 
+### 2026-04-04
+
+From Nate B Jones:
+"I mapped the infrastructure underneath the features and extracted the design primitives that determine whether an agentic system actually works in production. What I found is that the LLM call is maybe 20% of Claude Code. The other 80% is plumbing: session persistence, permission pipelines, context budget management, tool registries, security stacks, error recovery."
+
+"Every “how to build agents” tutorial on the internet stops at the demo stage: get the prompt right, wire up tool calling, ship it. And then it breaks in production in ways nobody warned you about. Sessions don’t survive crashes, tools run without permission, context windows overflow, costs spiral, and there’s no way to tell what went wrong."
+
+### 2026-04-03
+
+If a task is deterministic, only the trigger should be done by an agent.
+
+Describe the implementation until you can recreate the implementation fully from the description.
+
+What is working:
+- Documents (docs & dialogs).
+- Docker below, based on data volumes. Gives isolation & flexibility.
+
+What sucks:
+- The dialog experience while streaming.
+- Opacity to know if things are running in the background or not.
+
 ### 2026-04-01
 
 Waiting for the LLM is the new compiling.
