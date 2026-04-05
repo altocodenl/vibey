@@ -85,7 +85,7 @@ var MODELS = {
    openai: {
       'gpt-5.4':           {context: 1000000},
       'gpt-5.2':           {context: 272000},
-      'gpt-4.1':           {context: 1000000}
+      'gpt-4.1':           {context: 1000000, apiKeyOnly: true}
    },
    anthropic: {
       'claude-opus-4-6':   {context: 1000000},

@@ -838,7 +838,7 @@ The prompt is constructed as follows:
   "openai": {
     "gpt-5.4": {"context": 1000000},
     "gpt-5.2": {"context": 272000},
-    "gpt-4.1": {"context": 1000000}
+    "gpt-4.1": {"context": 1000000, "apiKeyOnly": true}
   },
   "anthropic": {
     "claude-opus-4-6": {"context": 1000000},
@@ -849,6 +849,8 @@ The prompt is constructed as follows:
 ```
 
 The client fetches this on startup to populate the model selector and context window sizes.
+
+Some models are marked `apiKeyOnly: true` — they require a provider API key and cannot be used through OAuth/fixed-rate subscriptions. The `GET /models` endpoint filters these out when the user has no API key for the corresponding provider (i.e. the model won't appear in the response). When such a model is selected for a dialog, the server uses the API key directly, bypassing OAuth even if OAuth credentials are available.
 
 #### SMTP server (cloud mode)
 

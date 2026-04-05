@@ -694,7 +694,7 @@ var clearOAuthCredential = async function (provider, rq) {
    await saveSettingsForRequest (rq, settings);
 };
 
-var getApiKey = async function (provider, rq) {
+var getApiKey = async function (provider, rq, apiKeyOnly) {
    var config = await loadSettingsForRequest (rq);
    var accounts = config.accounts || {};
 
@@ -721,8 +721,8 @@ var getApiKey = async function (provider, rq) {
    }
 
    if (provider === 'openai') {
-      // 1. OAuth subscription (preferred)
-      if (accounts.openaiOAuth && accounts.openaiOAuth.type === 'oauth') {
+      // 1. OAuth subscription (preferred) — skip for apiKeyOnly models
+      if (! apiKeyOnly && accounts.openaiOAuth && accounts.openaiOAuth.type === 'oauth') {
          var cred = accounts.openaiOAuth;
          if (Date.now () >= cred.expires) {
             try {
@@ -1703,7 +1703,7 @@ var MODELS = {
    openai: {
       'gpt-5.4':           {context: 1000000},
       'gpt-5.2':           {context: 272000},
-      'gpt-4.1':           {context: 1000000}
+      'gpt-4.1':           {context: 1000000, apiKeyOnly: true}
    },
    anthropic: {
       'claude-opus-4-6':   {context: 1000000},
@@ -2573,7 +2573,8 @@ var chatWithOpenAI = async function (projectName, messages, model, onChunk, abor
       tools: OPENAI_TOOLS
    };
 
-   var auth = await getApiKey ('openai', rq);
+   var modelInfo = MODELS.openai [model];
+   var auth = await getApiKey ('openai', rq, modelInfo && modelInfo.apiKeyOnly);
    var apiUrl = 'https://api.openai.com/v1/chat/completions';
    var headers = {
       'Content-Type': 'application/json',
@@ -3799,8 +3800,20 @@ var routes = [
 
    // *** TRIGGER ***
 
-   ['get', 'models', function (rq, rs) {
-      reply (rs, 200, MODELS);
+   ['get', 'models', async function (rq, rs) {
+      var config = await loadSettingsForRequest (rq);
+      var accounts = config.accounts || {};
+      var hasOpenAIKey = !! (accounts.openai && accounts.openai.apiKey);
+
+      var filtered = {};
+      dale.go (MODELS, function (models, provider) {
+         filtered [provider] = {};
+         dale.go (models, function (info, model) {
+            if (info.apiKeyOnly && provider === 'openai' && ! hasOpenAIKey) return;
+            filtered [provider] [model] = info;
+         });
+      });
+      reply (rs, 200, filtered);
    }],
 
    ['get', 'project/:project/trigger-id', async function (rq, rs) {

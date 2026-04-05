@@ -491,7 +491,9 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 
 **Models endpoint:**
 
-1. `GET /models` — returns `{openai: {<model>: {context: <number>}, ...}, anthropic: {<model>: {context: <number>}, ...}}`. All known models are present.
+1. `GET /models` — returns `{openai: {<model>: {context: <number>}, ...}, anthropic: {<model>: {context: <number>}, ...}}`. All known models are present (including `apiKeyOnly` models when the user has an API key).
+2. `GET /models` without an OpenAI API key — `apiKeyOnly` models (like `gpt-4.1`) are excluded from the response.
+3. `GET /models` with an OpenAI API key — `apiKeyOnly` models (like `gpt-4.1`) are included in the response with `apiKeyOnly: true`.
 
 **Client: trigger copy buttons:**
 

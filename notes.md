@@ -1,5 +1,11 @@
 ## Vibey development notes
 
+### 2026-04-05
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+- Can you make gpt4.1 displayable only if there's an OpenAI API key available? It cannot be used by fixed rate per month accounts. And if it's selected, please use the API key.
+
 ### 2026-04-04
 
 From Nate B Jones:

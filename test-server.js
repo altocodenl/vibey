@@ -574,10 +574,42 @@ var dialogSequence = [
       if (! rs.body.openai || type (rs.body.openai) !== 'object') return log ('Missing openai key in models');
       if (! rs.body.anthropic || type (rs.body.anthropic) !== 'object') return log ('Missing anthropic key in models');
       if (! rs.body.openai ['gpt-5.4'] || ! rs.body.openai ['gpt-5.4'].context) return log ('Missing gpt-5.4 in openai models');
-      if (! rs.body.openai ['gpt-4.1'] || ! rs.body.openai ['gpt-4.1'].context) return log ('Missing gpt-4.1 in openai models');
       if (! rs.body.anthropic ['claude-sonnet-4-6'] || ! rs.body.anthropic ['claude-sonnet-4-6'].context) return log ('Missing claude-sonnet-4-6 in anthropic models');
       if (! rs.body.anthropic ['claude-haiku-4-5'] || ! rs.body.anthropic ['claude-haiku-4-5'].context) return log ('Missing claude-haiku-4-5 in anthropic models');
+      // gpt-4.1 is apiKeyOnly — should be absent when no OpenAI API key is set
+      var hasOpenAIKey = !! (CONFIG.accounts && CONFIG.accounts.openai && CONFIG.accounts.openai.apiKey);
+      if (hasOpenAIKey) {
+         if (! rs.body.openai ['gpt-4.1'] || ! rs.body.openai ['gpt-4.1'].context) return log ('Expected gpt-4.1 present when API key is set');
+         if (! rs.body.openai ['gpt-4.1'].apiKeyOnly) return log ('Expected gpt-4.1 to have apiKeyOnly: true');
+      } else {
+         if (rs.body.openai ['gpt-4.1']) return log ('Expected gpt-4.1 absent when no API key is set');
+      }
       return true;
+   }],
+
+   ['Dialog 0b: GET /models with API key includes apiKeyOnly models', 'get', 'models', {}, '', 200, function (s, rq, rs, next) {
+      // Set an OpenAI API key, then check gpt-4.1 appears
+      httpJson ('POST', '/settings', {openaiKey: 'sk-test-models-apikey'}, function (error, code) {
+         if (error) return log ('POST /settings failed: ' + error.message);
+         if (code !== 200) return log ('Expected 200 from POST /settings, got ' + code);
+         httpRequest ('GET', '/models', '', {}, function (error2, code2, text2) {
+            if (error2) return log ('GET /models failed: ' + error2.message);
+            if (code2 !== 200) return log ('Expected 200 from GET /models, got ' + code2);
+            var body2 = JSON.parse (text2);
+            if (! body2 || ! body2.openai || ! body2.openai ['gpt-4.1']) return log ('Expected gpt-4.1 present after setting API key');
+            if (! body2.openai ['gpt-4.1'].apiKeyOnly) return log ('Expected gpt-4.1.apiKeyOnly to be true');
+            // Clean up: remove the API key
+            httpJson ('POST', '/settings', {openaiKey: ''}, function (error3, code3) {
+               if (error3) return log ('POST /settings cleanup failed: ' + error3.message);
+               httpRequest ('GET', '/models', '', {}, function (error4, code4, text4) {
+                  if (error4) return log ('GET /models after cleanup failed: ' + error4.message);
+                  var body4 = JSON.parse (text4);
+                  if (body4 && body4.openai && body4.openai ['gpt-4.1']) return log ('Expected gpt-4.1 absent after clearing API key');
+                  next ();
+               });
+            });
+         });
+      });
    }],
 
    ['Dialog 1: GET / serves shell', 'get', '/', {}, '', 200, function (s, rq, rs) {
@@ -3372,7 +3404,7 @@ var triggerSequence = [
       if (s.skipTrigger) return next ();
 
       httpJson ('POST', '/trigger', {
-         model: 'gpt-4.1',
+         model: 'gpt-5.2',
          prompt: 'Reply with the single word ok.',
          slug: 'model-trigger'
       }, function (triggerError, triggerStatus, triggerBody) {
