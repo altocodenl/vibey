@@ -999,12 +999,9 @@ var dockerExec = async function (projectName, command, rs) {
    var name = containerName (projectName);
    // Escape single quotes in command for sh -c
    var escaped = command.replace (/'/g, "'\\''");
-   // Use setsid so that backgrounded processes (e.g. `node server.js &`) survive
-   // the docker exec session ending. Without setsid, docker kills orphaned children
-   // when the sh process exits.
    var run = function () {
       return new Promise (function (resolve) {
-         exec ('docker exec ' + name + " setsid sh -c '" + escaped + "'", {timeout: 30000, maxBuffer: 1024 * 1024}, function (error, stdout, stderr) {
+         exec ('docker exec ' + name + " sh -c '" + escaped + "'", {timeout: 300000, maxBuffer: 4 * 1024 * 1024}, function (error, stdout, stderr) {
             if (error) {
                error.stdout = stdout;
                error.stderr = stderr;

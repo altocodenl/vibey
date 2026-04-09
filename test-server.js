@@ -2074,7 +2074,7 @@ var DOC_MAIN_BACKEND = [
    '- `app.js`: a simple React tictactoe with a 3x3 grid of buttons, X/O turns, and a winner check.',
    '- The page title or heading must include "tictactoe" (case-insensitive).',
    '- No build step. Do not install React locally; use the CDN scripts in `index.html`.',
-   '- Start the server only after installing Express. Run it with `node server.js > /tmp/tictactoe-server.log 2>&1 &` so it stays alive in the background and logs are captured.',
+   '- Start the server only after installing Express. Run it with `nohup node server.js > /tmp/tictactoe-server.log 2>&1 &` so it stays alive in the background and logs are captured.',
    '- After starting the server, verify it is running (for example with `ps aux | grep node` or `curl http://localhost:4000/`).',
    '',
 ].join ('\n') + '\n';
@@ -2100,7 +2100,7 @@ var backendSequence = [
 
    // Fire the orchestrator and let it build the game + start the server
    ['Backend 4: Fire "please start" (non-blocking)', 'get', 'project/' + BACKEND_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
-      fireDialog (BACKEND_PROJECT, s.backendDialogId, 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000 serving static files from /workspace), index.html, and app.js in /workspace root. Do not re-fetch docs after the first read. Before running the server, install Express in /workspace with npm (for example `npm init -y || true` and `npm install express`). Do not install React locally; use CDN scripts only. Then start the server with `node server.js > /tmp/tictactoe-server.log 2>&1 &`, verify it is running or that `curl http://localhost:4000/` succeeds, and only then update doc/main.md with an embed block (port 4000, title Tictactoe, height 500).', function (error) {
+      fireDialog (BACKEND_PROJECT, s.backendDialogId, 'Please start. Read doc/main.md once, then implement immediately: create server.js (Express on port 4000 serving static files from /workspace), index.html, and app.js in /workspace root. Do not re-fetch docs after the first read. Before running the server, install Express in /workspace with npm (for example `npm init -y || true` and `npm install express`). Do not install React locally; use CDN scripts only. Then start the server with `nohup node server.js > /tmp/tictactoe-server.log 2>&1 &`, verify it is running or that `curl http://localhost:4000/` succeeds, and only then update doc/main.md with an embed block (port 4000, title Tictactoe, height 500).', function (error) {
          if (error) return log ('Failed to fire dialog: ' + error.message);
          next ();
       });

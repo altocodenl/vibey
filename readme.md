@@ -435,7 +435,7 @@ Markdown is the source of truth. No server-side state. Restart-safe by design.
 
 The LLM always receives four tools:
 
-- `run_command` - run a shell command (30s timeout, 1MB max output). Use for reading files (`cat`), listing directories (`ls`), HTTP requests (`curl`), git, and anything else the shell can do. Takes `{description, command}`.
+- `run_command` - run a shell command (300s timeout, 4MB max output). Use for reading files (`cat`), listing directories (`ls`), HTTP requests (`curl`), git, and anything else the shell can do. Takes `{description, command}`.
 - `write_file` - create or overwrite a file. Takes `{description, path, content}`. Bypasses the shell so content with quotes, backticks, template literals, etc. is written cleanly.
 - `edit_file` - surgical find-and-replace. Takes `{description, path, old_string, new_string}`. `old_string` must appear exactly once in the file; if it appears zero times or more than once, the tool returns an error asking for more context. The LLM should read the file first (`cat` via `run_command`) before editing.
 - `launch_agent` - spawn another top-level dialog (flat structure, no subagent tree). Takes `{description, provider, model, prompt, slug?}` and is equivalent to `POST /project/:project/dialog`.
@@ -659,7 +659,7 @@ Every project runs in its own Docker container with its own named volume. Vibey 
 ### Container details
 
 - **Vibey container**: runs the vibey server. Has access to the Docker socket to manage project containers. Published port: 5353 (host).
-- **Project containers**: one per project. Named `vibey-proj-<name>`. Main process is `/bin/sh` — a living shell session that keeps the container alive and can parent long-running processes (e.g., `node server.js &` started by an agent). No published ports — only reachable by vibey via the `vibey-net` Docker network.
+- **Project containers**: one per project. Named `vibey-proj-<name>`. Main process is `/bin/sh` — a living shell session that keeps the container alive. Long-running child processes must be launched explicitly in a way that survives the shell returning, for example `nohup node server.js >/tmp/app.log 2>&1 &`. No published ports — only reachable by vibey via the `vibey-net` Docker network.
 - **Project volumes**: one named volume per project (`vibey-vol-<name>`), mounted at `/workspace` inside the project container. This is the project's entire world. All agent work (code, data, servers) lives here.
 - **Sandbox image**: `vibey-sandbox:latest` — a base image with common tools (node, npm, git, curl, etc.) that all project containers use.
 
@@ -701,7 +701,7 @@ Agent prompt says: *"Your working directory is /workspace. If you run a server, 
 
 ### Tool execution
 
-- `run_command`: already runs via `docker exec` in the project container. No change needed.
+- `run_command`: already runs via `docker exec` in the project container. Commands are not detached automatically; if an agent wants a process to keep running after the command returns, it must launch it explicitly in the background with redirection (for example `nohup ... >/tmp/app.log 2>&1 &`).
 - `write_file`: goes through `projectFS.writeFile` (pipes content into the container).
 - `edit_file`: `projectFS.readFile` → find/replace in vibey's memory → `projectFS.writeFile`.
 - `launch_agent`: spawns a new dialog in the same project container (same container, new dialog file).
@@ -1055,6 +1055,10 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
 
+- remove mkdir -p
+- See the files, not just the uploads. remove the specialness of the uploads folder. the files is everything except the dialogs and docs. Show folders too as show/hide, but don't nest them with indent. Just do it by name. Same goes for the files, put the paths in each file.
+- Remove commands being shown in duplicate when streaming
+- Update contents of textarea when switching between files
 - Demo videos
    - Fitness tracker with update
    - Online research

@@ -383,7 +383,7 @@ This project is intentionally kept alive so the embedded game remains available.
    - Client: Seed backend-app constraints into `doc/main.md` (current client flow seeds via API).
 3. `POST /project/:project/dialog/new` — create orchestrator draft.
    - Client: Create a new dialog draft in the Dialogs tab.
-4. Fire `"please start"` (non-blocking), instructing the agent to install Express with npm, start the server with logs redirected, verify it is running, and then add the embed block.
+4. Fire `"please start"` (non-blocking), instructing the agent to install Express with npm, start the server with `nohup` and logs redirected, verify it is running, and then add the embed block.
    - Client: Send `please start` from chat input and continue without waiting for completion.
 5. Poll `GET /project/:project/proxy/4000/` until HTML includes React, `app.js`, and `tictactoe` markers.
    - Client: Verify proxied app route is reachable and contains expected markers.
@@ -398,7 +398,7 @@ This project is intentionally kept alive so the embedded game remains available.
 10. `GET /project/:project/file/doc/main.md` — verify embed block includes `port 4000`.
    - Client: Open `doc/main.md` and confirm `port 4000` embed syntax.
 
-Keep this project running intentionally so the embedded backend app stays playable.
+Keep this project running intentionally so the embedded backend app stays playable. Because commands are not detached automatically, long-running processes in this suite should be launched explicitly with `nohup ... >/tmp/... 2>&1 &`.
 
 11. **Cloud mode — public proxy app**: Publish the proxied app via `POST /access` with `{project: slug, path: "proxy/4000/", visibility: "ALL"}`. Without session cookie, `GET /public/<userId>/<slug>/proxy/4000/` — **200**, returns game HTML. `POST /public/<userId>/<slug>/proxy/4000/api/move` (if the app supports it) — **200** (mutating requests through published proxy are allowed; blast radius is limited to the project).
 12. **Cloud mode — unpublished proxy route**: `GET /public/<userId>/<slug>/proxy/4000/admin` where only `/` was published — returns **200** (sub-paths under a published prefix are accessible). `GET /public/<userId>/<slug>/proxy/5000/` (different port, not published) — **404**.
