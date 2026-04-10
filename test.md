@@ -502,6 +502,7 @@ The suite detects the server mode via `GET /auth/csrf`. If the response is `{mod
 3. Clicking ⚡ Email writes `trigger+<id>@<domain>` to the clipboard via the `copy trigger` responder.
 4. Without `triggerId`, neither button is visible.
 5. With `triggerId` set but empty `domain`, ⚡ API is visible but ⚡ Email is hidden.
+6. Clicking ⚡ API opens the Trigger API modal. The modal's `curl` snippet contains both `"prompt"` and `"model"`, so the user can see that a model can optionally be passed in the request body.
 
 **Triggers migration:**
 - Tested as part of server startup. Verified indirectly: after the migration runs, existing projects have `projecttrigger:*` entries in Redis, and `userapikey:*` / `apikey:*` / `userapikeyreveal:*` keys are gone.

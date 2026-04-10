@@ -1,5 +1,41 @@
 ## Vibey development notes
 
+### 2026-04-10
+
+https://www.mempalace.tech/story
+"They spent months building. The design principle was radical in its simplicity: store everything verbatim. Don't summarize. Don't extract. Don't let an LLM rewrite your memories before filing them away. Just keep the raw conversations, index them properly, and make them searchable."
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+- Let's start doing annotated source code for client.js. Take the example of what's done in server.md. Let's do the first 50 lines.
+- Put the projectNameColor inside an object `h` defined with `var h = {}`. Call the function `h.projectColor`. At the top, state what it takes in and what it produces out. Change the shape of the output to be `{fg: ..., bg: ...}`.
+- Please remove the for loop on this function, use dale.go (dale.times (n), ...
+- Please remove the comment in the function, also in the code chunk in client.md. All prose should be in client.md.
+- Let's see if we can get rid of DOC_DIR. For now, let's hardcode it, then we'll refactor those helpers. Same for DIALOG_DIR. Then do a chunk of 20-30 lines more annotated.
+- Remove please the section headers for each helper. Let's just have a ## Helpers section. Then change the isDialogFile and isDocFile to simply isDialog and isDoc. Remove the check for type string, the input should always be a string, right? Please check.
+- Fantastic. Remove those checks talking about the call sites and how they are all strings, they don't belong there, just in our interaction. Take isDirtyDoc, isSameDocTarget and put them after the isDialog and isDoc. Update the annotated file to cover them. Be more succint.
+- Read the annotated source code of teishi, this should be the level of detail. It's in node_modules/teishi/readme.md
+- Please redo the helpers section up to what we have, in that style.
+- Put these helpers bound to h.
+- Remove outright support for legacy dialogs. They're always in dialog/
+- Intersperse the commentary and the code, rather than putting full functions when these are over a few lines, or the lines are dense. Copy the style of teishi's annotated source code.
+
+- Do we allow to specify the model when doing an API call to the project?
+- Please update the client modal for the API call to reflect the possibility to add a model.
+
+### 2026-04-09
+
+TODO: no bubbles, use full colors on the tile
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+### 2026-04-08
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+
+- Is there something that times out a command run by an agent? I experience that if I run a command inside the docker, with /bin/bash, it takes 30 seconds and works. But when the agent calls it, it stops after three seconds, without the agent putting a timeout.
+- When you need to launch a long-running process that should keep running after the command returns (for example a dev server), start it explicitly in the background with shell backgrounding and output redirection, for example `nohup npm start >/tmp/app.log 2>&1 &`. Commands are not detached automatically.
+
 ### 2026-04-05
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).

@@ -1633,7 +1633,7 @@ B.mrespond ([
                open: true,
                endpoint: endpoint,
                authorization: 'Authorization: Bearer ' + trigger.id,
-               curl: "curl -X POST " + JSON.stringify (endpoint) + " -H " + JSON.stringify ('Authorization: Bearer ' + trigger.id) + " -H " + JSON.stringify ('Content-Type: application/json') + " -d " + JSON.stringify ('{"prompt":"Hello from a trigger","model":"claude-opus-4-6"}')
+               curl: "curl -X POST " + JSON.stringify (endpoint) + " -H " + JSON.stringify ('Authorization: Bearer ' + trigger.id) + " -H " + JSON.stringify ('Content-Type: application/json') + " -d " + JSON.stringify ('{"prompt":"Hello from a trigger","model":"gpt-5.4"}')
             });
          }
          B.call (x, 'report', 'success', label);

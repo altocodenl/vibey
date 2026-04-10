@@ -862,6 +862,13 @@ The SMTP server:
 3. Extracts `{from, subject, body}` into a `data` object.
 4. Calls the same shared `executeTrigger` function used by `POST /trigger`.
 
+### Client: triggers
+
+When a project has a `triggerId`, the dialogs header shows two buttons:
+
+- **⚡ API** — copies `Bearer <trigger-id>` to the clipboard and opens a Trigger API modal with three copyable snippets: the POST endpoint, the `Authorization` header, and a ready-to-run `curl` example. The `curl` example body includes both `prompt` and `model` so users see that the model can be specified optionally (provider is derived from the model name; when omitted, the server autodetects).
+- **⚡ Email** — copies `trigger+<trigger-id>@<domain>` to the clipboard. Hidden when the trigger email domain is empty.
+
 #### Migration: triggers-v1
 
 On server startup, if the `migration:triggers-v1` key does not exist in redis:
@@ -1055,8 +1062,13 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
 
-- remove mkdir -p
-- See the files, not just the uploads. remove the specialness of the uploads folder. the files is everything except the dialogs and docs. Show folders too as show/hide, but don't nest them with indent. Just do it by name. Same goes for the files, put the paths in each file.
+
+- Please allow specifying of a model in the subject of an email in the trigger.
+- Remove the bubble, color the whole thing, use the entire space of the text.
+- See the files, not just the uploads. remove the specialness of the uploads folder. the files is everything except the dialogs and docs. Show folders too as show/hide, but don't nest them with indent. Just do it by name. Same goes for the files, put the paths in each file. Little folder icon.
+- Debug stalled dialog
+- Stream tool execution while it's happening
+- Add mkdir -p as a fallback
 - Remove commands being shown in duplicate when streaming
 - Update contents of textarea when switching between files
 - Demo videos

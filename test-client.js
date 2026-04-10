@@ -884,10 +884,14 @@
 
       ['Trigger 4: Copy trigger email responder writes trigger+id@domain to clipboard', function (done) {
          window._clipboardWritten = null;
+         window._vibeyExpectedAlerts = window._vibeyExpectedAlerts || [];
+         window._vibeyExpectedAlerts.push ('Email copied to clipboard');
          var origClipboard = navigator.clipboard;
          Object.defineProperty (navigator, 'clipboard', {value: {writeText: function (text) {window._clipboardWritten = text; return Promise.resolve ();}}, configurable: true});
          B.call ('copy', 'trigger', 'email');
-         Object.defineProperty (navigator, 'clipboard', {value: origClipboard, configurable: true});
+         setTimeout (function () {
+            Object.defineProperty (navigator, 'clipboard', {value: origClipboard, configurable: true});
+         }, 50);
          done (SHORT_WAIT, POLL);
       }, function () {
          if (window._clipboardWritten !== 'trigger+abc123def456@buildwithvibey.com') return 'Expected clipboard to contain "trigger+abc123def456@buildwithvibey.com", got: ' + JSON.stringify (window._clipboardWritten);
@@ -904,8 +908,29 @@
          return true;
       }],
 
+      ['Trigger 6: Copy trigger API opens modal with model in curl example', function (done) {
+         B.call ('set', 'triggerApiModal', {open: false, endpoint: '', authorization: '', curl: ''});
+         B.call ('set', 'triggerId', {id: 'abc123def456', domain: 'buildwithvibey.com'});
+         var origClipboard = navigator.clipboard;
+         Object.defineProperty (navigator, 'clipboard', {value: {writeText: function () {return Promise.resolve ();}}, configurable: true});
+         B.call ('copy', 'trigger', 'api');
+         setTimeout (function () {
+            Object.defineProperty (navigator, 'clipboard', {value: origClipboard, configurable: true});
+         }, 50);
+         done (SHORT_WAIT, POLL);
+      }, function () {
+         var modal = B.get ('triggerApiModal');
+         if (! modal || ! modal.open) return 'Expected triggerApiModal to be open after copy trigger api';
+         if (typeof modal.curl !== 'string' || ! modal.curl) return 'Expected modal.curl to be a non-empty string';
+         if (modal.curl.indexOf ('prompt') === -1) return 'Expected curl example to contain "prompt", got: ' + modal.curl;
+         if (modal.curl.indexOf ('model') === -1) return 'Expected curl example to contain "model", got: ' + modal.curl;
+         if (modal.curl.indexOf ('gpt-5.4') === -1) return 'Expected curl example to contain an example model value, got: ' + modal.curl;
+         return true;
+      }],
+
       // Cleanup trigger state
       ['Trigger cleanup', function (done) {
+         B.call ('set', 'triggerApiModal', {open: false, endpoint: '', authorization: '', curl: ''});
          B.call ('set', 'triggerId', null);
          B.call ('set', 'currentProject', null);
          B.call ('set', 'currentFile', null);
