@@ -9,13 +9,17 @@ var type = teishi.type;
 var inc = teishi.inc;
 var style = lith.css.style;
 
-var projectNameColor = function (name) {
+var h = {};
+
+h.projectColor = function (name) {
    var hash = 0;
-   for (var i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt (i)) | 0;
+   var n = name.length;
+   dale.go (dale.times (n, 0), function (i) {
+      hash = ((hash << 5) - hash + name.charCodeAt (i)) | 0;
+   });
    var hue = ((hash % 360) + 360) % 360;
    var sat = 55, lit = 45;
    var bg = 'hsl(' + hue + ', ' + sat + '%, ' + lit + '%)';
-   // HSL to RGB to compute WCAG relative luminance
    var s = sat / 100, l = lit / 100;
    var c = (1 - Math.abs (2 * l - 1)) * s;
    var x = c * (1 - Math.abs ((hue / 60) % 2 - 1));
@@ -29,54 +33,52 @@ var projectNameColor = function (name) {
    else                { r1 = c; g1 = 0; b1 = x; }
    var toLinear = function (v) { return v <= 0.03928 ? v / 12.92 : Math.pow ((v + 0.055) / 1.055, 2.4); };
    var luminance = 0.2126 * toLinear (r1 + m) + 0.7152 * toLinear (g1 + m) + 0.0722 * toLinear (b1 + m);
-   var textColor = luminance > 0.35 ? '#1a1a2e' : '#f5f7ff';
-   return {bg: bg, text: textColor};
+   var fg = luminance > 0.35 ? '#1a1a2e' : '#f5f7ff';
+   return {fg: fg, bg: bg};
 };
 
-var DOC_DIR = 'doc/';
-var DIALOG_DIR = 'dialog/';
-
-var isDialogFile = function (name) {
-   return type (name) === 'string' && name.indexOf (DIALOG_DIR) === 0;
+h.isDialog = function (name) {
+   return name.indexOf ('dialog/') === 0;
 };
 
-var isDocFile = function (name) {
-   return type (name) === 'string' && name.indexOf (DOC_DIR) === 0;
+h.isDoc = function (name) {
+   return name.indexOf ('doc/') === 0;
 };
 
-var parseDialogFilename = function (filename) {
+h.isDirtyDoc = function (file) {
+   return file && ! h.isDialog (file.name) && file.content !== file.original;
+};
+
+h.isSameDocTarget = function (parsed, file, currentProject) {
+   return parsed && parsed.tab === 'docs' && parsed.target && file && parsed.project === currentProject && normalizeDocFilename (parsed.target) === file.name;
+};
+
+h.parseDialogFilename = function (filename) {
    filename = filename || '';
+   if (filename.indexOf ('dialog/') !== 0) return null;
 
-   // New format: dialog/<dialogId>-<status>.md
-   if (filename.indexOf (DIALOG_DIR) === 0) {
-      var short = filename.slice (DIALOG_DIR.length);
-      var match = short.match (/^(.+)\-(active|done)\.md$/);
-      if (! match) return null;
-      return {dialogId: match [1], status: match [2]};
-   }
-
-   // Legacy format (backward compatibility): dialog-<dialogId>-<status>.md
-   var legacy = filename.match (/^dialog\-(.+)\-(active|done)\.md$/);
-   if (! legacy) return null;
-   return {dialogId: legacy [1], status: legacy [2]};
+   var short = filename.slice ('dialog/'.length);
+   var match = short.match (/^(.+)\-(active|done)\.md$/);
+   if (! match) return null;
+   return {dialogId: match [1], status: match [2]};
 };
 
-var statusIcon = function (status) {
+h.statusIcon = function (status) {
    if (status === 'active')  return '🟣';
    if (status === 'done')    return '🟢';
    return '•';
 };
 
-var dialogDisplayLabel = function (filename) {
-   var parsed = parseDialogFilename (filename);
+h.dialogDisplayLabel = function (filename) {
+   var parsed = h.parseDialogFilename (filename);
    if (! parsed) return filename;
 
    var match = parsed.dialogId.match (/^\d{8}\-\d{6}\-(.+)$/);
    return match ? match [1] : parsed.dialogId;
 };
 
-var freshDialogSlug = function (filename) {
-   var base = dialogDisplayLabel (filename || '') || 'dialog';
+h.freshDialogSlug = function (filename) {
+   var base = h.dialogDisplayLabel (filename || '') || 'dialog';
    return base + '-fresh';
 };
 
@@ -168,14 +170,14 @@ var hasAnyProvider = function (settings) {
 var normalizeDocFilename = function (name) {
    name = (name || '').trim ();
    if (! name) return '';
-   if (name.indexOf (DOC_DIR) === 0) return name;
+   if (name.indexOf ('doc/') === 0) return name;
    if (name.slice (-3) !== '.md') name = name + '.md';
-   return DOC_DIR + name;
+   return 'doc/' + name;
 };
 
 var docDisplayName = function (name) {
    if (type (name) !== 'string') return name;
-   if (name.indexOf (DOC_DIR) === 0) name = name.slice (DOC_DIR.length);
+   if (name.indexOf ('doc/') === 0) name = name.slice ('doc/'.length);
    if (name.slice (-3) === '.md') name = name.slice (0, -3);
    return name;
 };
@@ -260,7 +262,7 @@ var buildHash = function (project, tab, currentFile) {
    tab = tab === 'dialogs' ? 'dialogs' : 'docs';
    if (! currentFile || ! currentFile.name) return '#/project/' + encodeURIComponent (project) + '/' + tab;
 
-   var parsed = parseDialogFilename (currentFile.name);
+   var parsed = h.parseDialogFilename (currentFile.name);
 
    if (tab === 'dialogs') {
       if (! parsed) return '#/project/' + encodeURIComponent (project) + '/dialogs';
@@ -330,14 +332,6 @@ var projectDisplayName = function (slug) {
          return match;
       }
    });
-};
-
-var isDirtyDoc = function (file) {
-   return file && ! isDialogFile (file.name) && file.content !== file.original;
-};
-
-var isSameDocTarget = function (parsed, file, currentProject) {
-   return parsed && parsed.tab === 'docs' && parsed.target && file && parsed.project === currentProject && normalizeDocFilename (parsed.target) === file.name;
 };
 
 var getChatMessagesNode = function () {
@@ -1239,7 +1233,7 @@ B.mrespond ([
 
       var parsed = readHashTarget ();
       var currentFile = B.get ('currentFile');
-      var leavingDirtyDoc = isDirtyDoc (currentFile) && ! isSameDocTarget (parsed, currentFile, B.get ('currentProject'));
+      var leavingDirtyDoc = h.isDirtyDoc (currentFile) && ! h.isSameDocTarget (parsed, currentFile, B.get ('currentProject'));
 
       var applyParsed = function () {
          B.call (x, 'set', 'tab', parsed.tab);
@@ -1254,7 +1248,7 @@ B.mrespond ([
          if (! parsed.project || ! parsed.target) {
             // Also clear if the file doesn't match the tab we're switching to
             if (existingFile && parsed.project) {
-               var fileIsDialog = isDialogFile (existingFile.name);
+               var fileIsDialog = h.isDialog (existingFile.name);
                if ((parsed.tab === 'docs' && fileIsDialog) || (parsed.tab === 'dialogs' && ! fileIsDialog)) {
                   B.call (x, 'set', 'currentFile', null);
                }
@@ -1286,7 +1280,7 @@ B.mrespond ([
    ['navigate', 'hash', function (x, hash) {
       var parsed = readHashTarget (hash);
       var currentFile = B.get ('currentFile');
-      var leavingDirtyDoc = isDirtyDoc (currentFile) && ! isSameDocTarget (parsed, currentFile, B.get ('currentProject'));
+      var leavingDirtyDoc = h.isDirtyDoc (currentFile) && ! h.isSameDocTarget (parsed, currentFile, B.get ('currentProject'));
 
       var go = function () {
          if (window.location.hash !== hash) window.location.hash = hash;
@@ -1304,7 +1298,7 @@ B.mrespond ([
 
       if (parsed.tab === 'dialogs') {
          var wanted = dale.stopNot (files, undefined, function (file) {
-            var p = parseDialogFilename (file);
+            var p = h.parseDialogFilename (file);
             if (p && p.dialogId === parsed.target) return file;
          });
          if (wanted) {
@@ -1365,7 +1359,7 @@ B.mrespond ([
    ['sync', 'vibeyingSpinner', function (x) {
       var streaming = B.get ('streaming');
       var currentFile = B.get ('currentFile');
-      var parsed = currentFile && currentFile.name ? parseDialogFilename (currentFile.name) : null;
+      var parsed = currentFile && currentFile.name ? h.parseDialogFilename (currentFile.name) : null;
       var dialogIsActive = parsed && parsed.status === 'active';
       var shouldSpin = streaming || dialogIsActive;
 
@@ -1398,7 +1392,7 @@ B.mrespond ([
 
    ['confirm', 'leaveCurrentDoc', function (x, onContinue, onCancel) {
       var currentFile = B.get ('currentFile');
-      if (! isDirtyDoc (currentFile)) return onContinue && onContinue ();
+      if (! h.isDirtyDoc (currentFile)) return onContinue && onContinue ();
 
       var name = docDisplayName (currentFile.name);
       var save = confirm ('You have unsaved changes in ' + name + '. Save before leaving?');
@@ -1639,7 +1633,7 @@ B.mrespond ([
                open: true,
                endpoint: endpoint,
                authorization: 'Authorization: Bearer ' + trigger.id,
-               curl: "curl -X POST " + JSON.stringify (endpoint) + " -H " + JSON.stringify ('Authorization: Bearer ' + trigger.id) + " -H " + JSON.stringify ('Content-Type: application/json') + " -d " + JSON.stringify ('{"prompt":"Hello from a trigger"}')
+               curl: "curl -X POST " + JSON.stringify (endpoint) + " -H " + JSON.stringify ('Authorization: Bearer ' + trigger.id) + " -H " + JSON.stringify ('Content-Type: application/json') + " -d " + JSON.stringify ('{"prompt":"Hello from a trigger","model":"claude-opus-4-6"}')
             });
          }
          B.call (x, 'report', 'success', label);
@@ -1792,11 +1786,11 @@ B.mrespond ([
          // Sync currentFile.name with the authoritative filename from the server
          // (dialog files get renamed when status changes, e.g. done→active)
          var cf = B.get ('currentFile');
-         if (cf && isDialogFile (cf.name)) {
-            var cfParsed = parseDialogFilename (cf.name);
+         if (cf && h.isDialog (cf.name)) {
+            var cfParsed = h.parseDialogFilename (cf.name);
             if (cfParsed) {
                var match = dale.stopNot (rs.body || [], undefined, function (f) {
-                  var fp = parseDialogFilename (f);
+                  var fp = h.parseDialogFilename (f);
                   if (fp && fp.dialogId === cfParsed.dialogId) return f;
                });
                if (match && match !== cf.name) {
@@ -1820,14 +1814,14 @@ B.mrespond ([
             var next = null;
             if (tab === 'docs') {
                // Prefer doc/main.md, fall back to first doc file
-               if (files.indexOf (DOC_DIR + 'main.md') !== -1) next = DOC_DIR + 'main.md';
+               if (files.indexOf ('doc/main.md') !== -1) next = 'doc/main.md';
                else next = dale.stopNot (files, undefined, function (name) {
-                  if (isDocFile (name)) return name;
+                  if (h.isDoc (name)) return name;
                });
             }
             else {
                next = dale.stopNot (files, undefined, function (name) {
-                  if (isDialogFile (name)) return name;
+                  if (h.isDialog (name)) return name;
                });
             }
             if (next) B.call (x, 'load', 'file', next);
@@ -1855,7 +1849,7 @@ B.mrespond ([
       B.call (x, 'set', 'hashTarget', null);
 
       // Protect unsaved local edits from late/background reloads of the same file.
-      if (isDirtyDoc (currentFile) && currentFile.name === name) return;
+      if (h.isDirtyDoc (currentFile) && currentFile.name === name) return;
 
       var proceed = function () {
          var tabAtRequest = B.get ('tab');
@@ -1869,9 +1863,9 @@ B.mrespond ([
 
             // Prevent late in-flight responses from clobbering unsaved edits.
             var latest = B.get ('currentFile');
-            if (isDirtyDoc (latest) && latest.name === rs.body.name) return;
+            if (h.isDirtyDoc (latest) && latest.name === rs.body.name) return;
 
-            var dialogFile = isDialogFile (rs.body.name);
+            var dialogFile = h.isDialog (rs.body.name);
             var currentTab = B.get ('tab');
             // Only switch tabs if the user hasn't navigated away since the request
             if (currentTab === tabAtRequest) {
@@ -1919,7 +1913,7 @@ B.mrespond ([
 
                // If dialog is active, attach to the SSE stream — but only if this
                // dialog is still the one currently selected when the status check returns.
-               var parsedDialog = parseDialogFilename (rs.body.name) || {};
+               var parsedDialog = h.parseDialogFilename (rs.body.name) || {};
                if (parsedDialog.dialogId) {
                   fetch (projectPath (project, 'dialog/' + encodeURIComponent (parsedDialog.dialogId))).then (function (resp) {
                      if (! resp.ok) return null;
@@ -1928,7 +1922,7 @@ B.mrespond ([
                      if (! data) return;
 
                      var latestFile = B.get ('currentFile');
-                     var latestParsed = latestFile && latestFile.name ? parseDialogFilename (latestFile.name) : null;
+                     var latestParsed = latestFile && latestFile.name ? h.parseDialogFilename (latestFile.name) : null;
                      if (! latestParsed || latestParsed.dialogId !== parsedDialog.dialogId) return;
 
                      if (data.filename && data.filename !== rs.body.name) {
@@ -1955,7 +1949,7 @@ B.mrespond ([
          });
       };
 
-      if (isDirtyDoc (currentFile) && currentFile.name !== name) {
+      if (h.isDirtyDoc (currentFile) && currentFile.name !== name) {
          return B.call (x, 'confirm', 'leaveCurrentDoc', proceed);
       }
 
@@ -2026,7 +2020,7 @@ B.mrespond ([
          B.call (x, 'write', 'hash');
       };
 
-      if (! force && isDirtyDoc (B.get ('currentFile'))) return B.call (x, 'confirm', 'leaveCurrentDoc', proceed);
+      if (! force && h.isDirtyDoc (B.get ('currentFile'))) return B.call (x, 'confirm', 'leaveCurrentDoc', proceed);
       proceed ();
    }],
 
@@ -2247,7 +2241,7 @@ B.mrespond ([
 
    ['continue', 'freshDialog', function (x) {
       var file = B.get ('currentFile');
-      var parsed = file && parseDialogFilename (file.name);
+      var parsed = file && h.parseDialogFilename (file.name);
       if (! parsed) return B.call (x, 'report', 'error', 'Open a dialog first.');
       if (B.get ('streaming') || parsed.status === 'active') return B.call (x, 'report', 'error', 'Stop the current dialog before continuing in a fresh one.');
       if (B.get ('dialog', 'compaction')) return B.call (x, 'report', 'error', 'Compaction is already in progress.');
@@ -2284,7 +2278,7 @@ B.mrespond ([
          var payload = {
             provider: compaction.provider || 'openai',
             model: compaction.model || defaultModelForProvider (compaction.provider || 'openai'),
-            slug: freshDialogSlug (sourceFilename),
+            slug: h.freshDialogSlug (sourceFilename),
             prompt: buildFreshDialogPrompt (lastAssistant.content, sourceDialogId)
          };
          var csrf = B.get ('cloudCsrf');
@@ -2331,7 +2325,7 @@ B.mrespond ([
       var model = B.get ('dialog', 'model') || defaultModelForProvider (provider);
       if (! input || ! input.trim ()) return;
 
-      var parsed = file && parseDialogFilename (file.name);
+      var parsed = file && h.parseDialogFilename (file.name);
       var originalInput = input.trim ();
 
       var runSend = function () {
@@ -2345,7 +2339,7 @@ B.mrespond ([
 
          // Optimistically update filename to active status so the UI shows 🟣 immediately
          if (parsed && parsed.status === 'done') {
-            var activeFilename = DIALOG_DIR + parsed.dialogId + '-active.md';
+            var activeFilename = 'dialog/' + parsed.dialogId + '-active.md';
             B.call (x, 'set', ['currentFile', 'name'], activeFilename);
             // Update file in the sidebar list too
             var files = B.get ('files') || [];
@@ -2463,7 +2457,7 @@ B.mrespond ([
       var baseMarkdown = '';
       var currentFile = B.get ('currentFile');
       if (currentFile && currentFile.name) {
-         var parsedCurrent = parseDialogFilename (currentFile.name);
+         var parsedCurrent = h.parseDialogFilename (currentFile.name);
          if (parsedCurrent && parsedCurrent.dialogId === dialogId) baseMarkdown = currentFile.content || '';
       }
       B.call (x, 'set', 'streamingMarkdown', baseMarkdown);
@@ -2486,7 +2480,7 @@ B.mrespond ([
          // generation running on the server.
          if (receivedContent) {
             var latestFile = B.get ('currentFile');
-            var latestParsed = latestFile && latestFile.name ? parseDialogFilename (latestFile.name) : null;
+            var latestParsed = latestFile && latestFile.name ? h.parseDialogFilename (latestFile.name) : null;
             if (targetFilename && latestParsed && latestParsed.dialogId === dialogId) B.call (x, 'load', 'file', targetFilename);
             B.call (x, 'load', 'files');
          }
@@ -2624,7 +2618,7 @@ B.mrespond ([
    // Submit tool decisions to PUT /dialog
    ['stop', 'dialog', function (x) {
       var file = B.get ('currentFile');
-      var parsed = file && parseDialogFilename (file.name);
+      var parsed = file && h.parseDialogFilename (file.name);
       if (! parsed) return;
 
       if (activeDialogStream && activeDialogStream.dialogId === parsed.dialogId) {
@@ -2812,7 +2806,7 @@ var views = {};
 views.files = function () {
    return B.view ([['files'], ['currentFile'], ['loadingFile'], ['savingFile'], ['editorPreview'], ['currentProject'], ['viMode'], ['viState'], ['viCursor'], ['viOverlayEditor'], ['uploads'], ['currentUpload'], ['uploading'], ['viewportPhone'], ['mobileDocsPanel']], function (files, currentFile, loadingFile, savingFile, editorPreview, currentProject, viMode, viState, viCursor, viOverlayEditor, uploads, currentUpload, uploading, viewportPhone, mobileDocsPanel) {
       var docFiles = dale.fil (files || [], undefined, function (name) {
-         if (isDocFile (name)) return name;
+         if (h.isDoc (name)) return name;
       });
       var isDirty = currentFile && currentFile.content !== currentFile.original;
       var hasEmbeds = currentFile && type (currentFile.content) === 'string' && currentFile.content.indexOf ('əəembed') !== -1;
@@ -3879,14 +3873,14 @@ views.dialogs = function () {
       var voiceSupported = dialog.voiceSupported;
 
       var dialogFiles = dale.fil (files, undefined, function (f) {
-         if (isDialogFile (f)) return f;
+         if (h.isDialog (f)) return f;
       });
 
-      var isDialog = currentFile && isDialogFile (currentFile.name);
-      var currentDialogParsed = isDialog ? (parseDialogFilename (currentFile.name) || {}) : {};
-      var dialogIsActive = isDialog && currentDialogParsed.status === 'active';
-      var effectiveDialogContent = isDialog ? ((streaming && streamingMarkdown) ? streamingMarkdown : currentFile.content) : '';
-      var parsedMessages = isDialog ? parseDialogContent (effectiveDialogContent) : [];
+      var currentIsDialog = currentFile && h.isDialog (currentFile.name);
+      var currentDialogParsed = currentIsDialog ? (h.parseDialogFilename (currentFile.name) || {}) : {};
+      var dialogIsActive = currentIsDialog && currentDialogParsed.status === 'active';
+      var effectiveDialogContent = currentIsDialog ? ((streaming && streamingMarkdown) ? streamingMarkdown : currentFile.content) : '';
+      var parsedMessages = currentIsDialog ? parseDialogContent (effectiveDialogContent) : [];
       var messages = expandDisplayMessages (parsedMessages);
       var liveStreamingMessage = streaming ? (((streamingContent || '').trim ()) || 'Thinking…') : '';
       var liveRawMessage = null;
@@ -3930,13 +3924,13 @@ views.dialogs = function () {
          dialogFiles && dialogFiles.length > 0
             ? dale.go (dialogFiles, function (name) {
                var isActive = currentFile && currentFile.name === name;
-               var parsedDialog = parseDialogFilename (name) || {status: null};
-               var displayName = dialogDisplayLabel (name);
+               var parsedDialog = h.parseDialogFilename (name) || {status: null};
+               var displayName = h.dialogDisplayLabel (name);
                return ['div', {
                   class: 'file-item' + (isActive ? ' file-item-active' : ''),
                   onclick: viewportPhone ? B.ev (['load', 'file', name], ['set', 'mobileDialogsPanel', null]) : B.ev ('load', 'file', name)
                }, [
-                  ['span', {class: 'dialog-name'}, statusIcon (parsedDialog.status) + ' ' + displayName],
+                  ['span', {class: 'dialog-name'}, h.statusIcon (parsedDialog.status) + ' ' + displayName],
                   ['span', {
                      class: 'file-delete',
                      onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
@@ -3951,13 +3945,13 @@ views.dialogs = function () {
          // Chat area
          ['div', {class: 'chat-container' + (viewportPhone ? ' chat-container-phone' : '')}, [
             ['div', {class: 'editor-header' + (viewportPhone ? ' editor-header-phone' : '')}, [
-               ['span', {class: 'editor-filename'}, isDialog ? (statusIcon ((parseDialogFilename (currentFile.name) || {}).status) + ' ' + dialogDisplayLabel (currentFile.name)) : 'New dialog'],
+               ['span', {class: 'editor-filename'}, currentIsDialog ? (h.statusIcon ((h.parseDialogFilename (currentFile.name) || {}).status) + ' ' + h.dialogDisplayLabel (currentFile.name)) : 'New dialog'],
                ['div', {style: style ({display: 'flex', gap: '0.45rem', 'margin-left': 'auto', 'flex-wrap': 'wrap'})}, [
                   viewportPhone ? ['button', {
                      class: 'btn-small',
                      onclick: B.ev ('set', 'mobileDialogsPanel', 'dialogs')
                   }, 'Dialogs'] : '',
-                  isDialog ? ['button', {
+                  currentIsDialog ? ['button', {
                      class: 'btn-small',
                      title: 'Continue in a fresh dialog',
                      onclick: B.ev ('continue', 'freshDialog'),
@@ -3990,7 +3984,7 @@ views.dialogs = function () {
             ['div', {class: 'chat-messages', onscroll: B.ev ('track', 'chatScroll', {raw: 'event'})}, [
                visibleMessages.length ? dale.go (visibleMessages, function (msg, msgIndex) {
                   var gauges = formatMessageGauges (msg);
-                  var parsed = parseDialogFilename ((currentFile || {}).name || '') || {};
+                  var parsed = h.parseDialogFilename ((currentFile || {}).name || '') || {};
                   var expandKey = messageToolExpansionKey (parsed.dialogId, msgIndex, msg.content);
                   var expanded = !! ((toolMessageExpanded || {}) [expandKey]);
                   var toolContentView = getMessageToolContentView (msg.content, expanded);
@@ -4146,7 +4140,7 @@ views.dialogs = function () {
                   onclick: B.ev ('send', 'message'),
                   disabled: noProvider || streaming || dialogIsActive || ! (input && input.trim ())
                }, streaming ? 'Sending...' : 'Send'],
-               ((streaming || dialogIsActive) && isDialog) ? ['button', {
+               ((streaming || dialogIsActive) && currentIsDialog) ? ['button', {
                   style: style ({'background-color': '#e67e22', color: 'white'}),
                   onclick: B.ev ('stop', 'dialog')
                }, 'Stop'] : ''
@@ -4179,10 +4173,10 @@ views.projects = function () {
                ? ['div', {class: 'projects-list'}, dale.go (projects, function (project) {
                   var slug = type (project) === 'object' ? project.slug : project;
                   var displayName = type (project) === 'object' ? project.name : project;
-                  var pcolor = projectNameColor (displayName);
+                  var pcolor = h.projectColor (displayName);
                   return ['div', {
                      class: 'project-card' + (viewportPhone ? ' project-card-phone' : ''),
-                     style: style ({'background-color': pcolor.bg, color: pcolor.text, border: 'none'}),
+                     style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}),
                      onclick: viewportPhone ? undefined : B.ev ('navigate', 'hash', '#/project/' + encodeURIComponent (slug) + '/docs')
                   }, viewportPhone ? [
                      ['div', {
