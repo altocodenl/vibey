@@ -1,5 +1,79 @@
 ## Vibey development notes
 
+### 2026-04-14
+
+Doing a clean rewrite of the client, will call it `cclient.js`. It's refreshing to hand code again. I wonder if I could make an LLM code like this, or approximately.
+
+I'm realizing that what makes this code different is that it reduces the number of possibilities at every step. It really limits the data flows to exactly what they should be, so it's much easier to understand what's going on simply because the number of possibilities is so low.
+
+Take the read hash rfun (responder function): we only allow a few views, and we validate things in one proper order. Then, it's clear what views we need.
+
+- Let's please take client-css.js and take all the raw color strings and put them in window.colors, then reference it from there.
+- We're going to start clean in cclient.js. Take the auth views and use tachyons for everything, replicating the style. If you need colors, put them in a new file called cclient-css.js. Rather than create a lot of CSS, see how much of this you can do with tachyons.
+- Nicely done! Now inline every class string that you only use once.
+- Thanks! Please now do the same thing for the projects view, so it looks like the one on cclient.js but without custom css.
+- Please finish views.main, adding the elements for the snackbar view, as well as a good wrapper for the other views.
+- Please iterate the colors of client.js and client-css.js, and make them into tachyon like classes, in a style block in cclient.js.
+
+- Please consider cclient.js, which is written manually, and client.js, which was created with agents. Note the vast difference in simplicity. How can I prompt agents to write more like cclient.js? Is it even possible?
+
+claude:
+"The viable vibe-coder playbook is narrower than the term suggests:
+
+  1. Stay in the agent's training distribution. Standard stacks (Next, Rails, Django, Express) where the defaults are domain-correct. Idiosyncratic stacks
+  like this one are vibe-hostile — the agent has no prior and invents.
+  2. Keep per-project scope small enough that rewrite is cheaper than repair. When the project circles, throw it away and re-prompt from a one-page spec. This
+   is the only reset mechanism available without grip.
+  3. Treat tests as the oracle, not the code. If it passes, ship; if it fails, revert, don't repair. Repairing without grip is how circles start.
+  4. Accept that the code will look like everyone else's agent-generated code. Vibe coding is opting into the agent's mean. If you wanted cclient.js you
+  wouldn't be vibe coding.
+  5. Know when to stop. At some point the project outgrows the window and you either develop grip or hand it to someone who has it. There's no "vibe code
+  forever" path for non-trivial systems — it's a phase, not a methodology.
+
+  The uncomfortable part: the skill ceiling for pure vibe coding is the agent's skill ceiling, minus the accumulated drift. That's a real ceiling, and it's
+  lower than people advertising the term suggest. The people who are apparently vibe-coding successfully for years are almost always coding with grip and
+  underselling it — the "vibes" are informed pattern-matching built on top of actual understanding."
+
+### 2026-04-13
+
+Anthropic launched a product for long-running agent workflows. In essence, vibey solves the same problem: the craetive context, the living structure that agents can perform work on.
+
+https://www.anthropic.com/engineering/managed-agents
+"Managed Agents follow the same pattern. We virtualized the components of an agent: a session (the append-only log of everything that happened), a harness (the loop that calls Claude and routes Claude’s tool calls to the relevant infrastructure), and a sandbox (an execution environment where Claude can run code and edit files). This allows the implementation of each to be swapped without disturbing the others. We're opinionated about the shape of these interfaces, not about what runs behind them."
+"But by coupling everything into one container, we ran into an old infrastructure problem: we’d adopted a pet. In the pets-vs-cattle analogy, a pet is a named, hand-tended individual you can’t afford to lose, while cattle are interchangeable. In our case, the server became that pet; if a container failed, the session was lost. If a container was unresponsive, we had to nurse it back to health."
+But why? The container can be stable. A process within can be a problem, but not the container. And the agent can go in and poke, through the main vibey process.
+
+"Nursing containers meant debugging unresponsive stuck sessions. Our only window in was the WebSocket event stream, but that couldn’t tell us where failures arose, which meant that a bug in the harness, a packet drop in the event stream, or a container going offline all presented the same. To figure out what went wrong, an engineer had to open a shell inside the container, but because that container often also held user data, that approach essentially meant we lacked the ability to debug."
+Maybe that's the key with vibey, that the agents operate on the container but are not in the container. The container can fail and the agent can still work with it. Well, the container doesn't fail: it is just a docker container.
+
+"Recovering from harness failure. The harness also became cattle. Because the session log sits outside the harness, nothing in the harness needs to survive a crash."
+but how bad can it be so that you would lose the files too? I guess in an extreme case you could recreate the container from the data volume.
+
+"The security boundary. In the coupled design, any untrusted code that Claude generated was run in the same container as credentials—so a prompt injection only had to convince Claude to read its own environment. Once an attacker has those tokens, they can spawn fresh, unrestricted sessions and delegate work to them."
+your openai/claude creds are not in there, but you can definitely spawn agents. So this will be tricky in vibey.
+
+"Prior work has explored ways to address this by storing context as an object that lives outside the context window. For example, context can be an object in a REPL that the LLM programmatically accesses by writing code to filter or slice it."
+But isn't it obvious that it should be a file? A markdown file?
+
+"That dead time is expressed in time-to-first-token (TTFT), which measures how long a session waits between accepting work and producing its first response token. TTFT is the latency the user most acutely feels."
+
+"Meta-harness design means being opinionated about the interfaces around Claude: we expect that Claude will need the ability to manipulate state (the session) and perform computation (the sandbox). We also expect that Claude will require the ability to scale to many brains and many hands. We designed the interfaces so that these can be run reliably and securely over long time horizons. But we make no assumptions about the number or location of brains or hands that Claude will need."
+
+The agent is the engine and the driver. The harness is what distributes force and direction. The context is the rest of the car and the road.
+
+- chatgpt: interact with AI over text/chat in the web.
+- claude code: AI that can do things from your terminal.
+- openclaw: AI that can do things anywhere from your computer.
+- vibey: AI that can do things in your web spaces.
+
+The key of vibey is that you can create web spaces for yourself and others. And these are more flexible and workable than typical applications. They run on the software of natural language.
+
+The concept of personal software, which I was thinking about as one of the goals of vibey, already exists! This is exactly what I meant: https://leerob.com/personal-software
+
+LLMs are not structure preserving! They seem to be quite oblivious to the structure of what is in there; at least the current crop of models. You really have to point it out to them.
+
+So difficult to disentangle the LLM code in the client. Everything is complicated, at every layer. Will try with a clean rewrite.
+
 ### 2026-04-10
 
 https://www.mempalace.tech/story

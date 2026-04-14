@@ -1063,6 +1063,9 @@ The current client has a dedicated phone layout for viewports narrower than `768
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
 
 
+- The structure of vibey should be understandable at a glance, by virtue of having very few things: 1) settings as just one wheelie that creates a modal, rather than a view; 2) main should be green and highlighted; 3) hide all the other buttons, snapshots or anything else. Just keep the ray for connection, always visible, not just on dialog. For projects, just click on vibey, or go back. Logout yes. Make the doc autosaved.
+- The commands done by the agent should be beautiful, readable and understandable.
+- Replace view/edit with hand and eye.
 - Please allow specifying of a model in the subject of an email in the trigger.
 - Remove the bubble, color the whole thing, use the entire space of the text.
 - See the files, not just the uploads. remove the specialness of the uploads folder. the files is everything except the dialogs and docs. Show folders too as show/hide, but don't nest them with indent. Just do it by name. Same goes for the files, put the paths in each file. Little folder icon.
@@ -1082,6 +1085,9 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
       - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
       - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
       - The UI redraws synchronously because of gotoB, so there should be
+
+- Server refactor
+   - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
 
 ### TODO later
 
@@ -1117,6 +1123,41 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 - Editing: `x`, `dd`, `yy`, `p`, `u`, `Ctrl-r`.
 - Search: `/` then `n`/`N`.
 - Commands: `:` enters command mode.
+
+## Refactored client (cclient.js)
+
+- common UI elements
+- report working
+- auth working
+- projects working, with delete
+
+### State
+
+```
+auth email "<email entered in the login/signupform>"
+     signupRequested "<0|1>" // Whether a signup was just requested
+     otp "<otp code entered in the login form>"
+     otpRequested "<0|1>" // Whether the OTP request was sent
+csrf "<CSRF token>"
+model <local|cloud> // Determines if we're in local vibey or cloud vibey.
+models anthropic "<model name>" context <size of context window in tokens>
+                 ...
+       openai "<model name> context <size of context window in tokens>
+              ...
+projects 1 name "<project name>"
+           slug "<project slug>"
+snackbar color <color>
+         message <message>
+         timeout "<JS timeout to clear the snackbar>"
+settings claude hasKey <0|1>
+         claudeOAuth expired <0|1>
+                     loggedIn <0|1>
+         openai hasKey <0|1>
+         openaiOAuth expired <0|1>
+                     loggedIn <0|1>
+         testButton <0|1>
+view "<view name>"
+```
 
 ## License
 
