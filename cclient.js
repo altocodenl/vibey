@@ -249,8 +249,8 @@ views.auth = function (page) {
             oninput: B.ev ('set', ['auth', 'email']),
             class: inputClass
          }],
-         signupRequested ? ['div', {class: 'mb3 text-success'}, 'Invite requested. Thank you for your interest!'] : '',
-         ['button', {class: buttonClass, onclick: B.ev ('signup', [], email)}, 'Request invite']
+         auth.signupRequested ? ['div', {class: 'mb3 text-success'}, 'Invite requested. Thank you for your interest!'] : '',
+         ['button', {class: buttonClass, onclick: B.ev ('signup', [], auth.email)}, 'Request invite']
       ]], ['div', {class: linkWrap}, [
          ['a', {href: '#/login', class: linkClass}, 'Already have access? Log in']
       ]]);
