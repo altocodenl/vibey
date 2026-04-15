@@ -77,8 +77,7 @@ B.mrespond ([
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error && error.status === 403 && x.path [0].indexOf ('auth/') !== 0) {
-            B.call (x, 'rem', [], dale.keys (B.get ()));
-            B.call (x, 'get', 'csrf');
+            B.call (x, 'rem', [], dale.fil (dale.keys (B.get ()), 'mode', (v) => v));
             B.call (x, 'navigate', 'login');
          }
 
@@ -109,7 +108,7 @@ B.mrespond ([
 
    ['login', [], function (x, email) {
       if (! email) return B.call (x, 'report', 'error', 'Please enter your email');
-      B.call (x, 'post', 'login', {email: email.trim ().toLowerCase ()}, function (x, error) {
+      B.call (x, 'post', 'auth/login', {email: email.trim ().toLowerCase ()}, function (x, error) {
          if (error) return B.call (x, 'report', 'error', 'Failed to send login code');
          B.call (x, 'set', ['auth', 'otpRequested'], true);
       });
@@ -119,6 +118,8 @@ B.mrespond ([
       if (! email || ! otp) return B.call (x, 'report', 'error', 'Please enter your email and code');
       B.call (x, 'post', 'auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
          if (error) return B.call (x, 'report', 'error', 'Invalid code');
+
+         B.call (x, 'set', 'csrf', rs.body.csrf);
 
          B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
@@ -132,6 +133,13 @@ B.mrespond ([
       B.call (x, 'post', 'auth/signup', {email: email.trim ().toLowerCase ()}, function (x, error) {
          if (error) return B.call (x, 'report', 'error', 'Failed to request invite');
          B.call (x, 'set', ['auth', 'signupRequested'], true);
+      });
+   }],
+
+   ['logout', [], function (x) {
+      B.call (x, 'post', 'auth/logout', {}, function (x, error) {
+         B.call (x, 'rem', [], dale.fil (dale.keys (B.get ()), 'mode', (v) => v));
+         B.call (x, 'navigate', 'login');
       });
    }],
 
@@ -149,8 +157,8 @@ B.mrespond ([
 
 // *** VIEWS ***
 
-var CSS = {
-   vars: {
+var css = {
+   colors: {
       appBg:        '#1a1a2e',
       surface:      '#16213e',
       inputBg:      '#0f1530',
@@ -168,52 +176,87 @@ var CSS = {
       warning:      '#ffff00',
       dark:         '#333'
    },
-   style: [
-      ['body', {
-         'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-         margin: 0,
-         padding: 0,
-         'background-color': '#1a1a2e',
-         color: '#eee',
-         height: '100vh'
-      }],
-      ['.bg-app-bg', {'background-color': '#1a1a2e'}],
-      ['.bg-surface', {'background-color': '#16213e'}],
-      ['.bg-input', {'background-color': '#0f1530'}],
-      ['.bg-primary', {'background-color': '#4a69bd'}],
-      ['.hover-bg-primary-hover:hover', {'background-color': '#1e3799'}],
-      ['.near-text', {color: '#eee'}],
-      ['.text-bright', {color: '#f5f7ff'}],
-      ['.text-muted', {color: '#9aa4bf'}],
-      ['.text-soft', {color: '#bac4e2'}],
-      ['.light-blue', {color: '#94b8ff'}],
-      ['.hover-white:hover', {color: '#fff'}],
-      ['.b-border', {'border-color': 'rgba(148, 184, 255, 0.22)'}],
-      ['.text-success', {color: '#04E762'}],
-      ['.bg-success', {'background-color': '#04E762'}],
-      ['.bg-error', {'background-color': '#D33E43'}],
-      ['.bg-warning', {'background-color': '#ffff00'}],
-      ['.bg-dark', {'background-color': '#333'}],
-      ['.shadow-primary', {'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'}],
-      ['.outline-0:focus', {outline: 'none'}],
-      ['.placeholder-text-muted::placeholder', {color: '#9aa4bf', opacity: 1}]
-   ]
-};
+   input:      'db w-100 pa3 mb3 br2 ba b-border bg-input text-bright outline-0 placeholder-text-muted',
+   button:     'pa3 br2 bn bg-primary hover-bg-primary-hover white fw6 pointer',
+   buttonWide: 'db w-100 pa3 br2 bn bg-primary hover-bg-primary-hover white fw6 pointer',
+}
+
+css.style = [
+   ['body', {
+      'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      margin: 0,
+      padding: 0,
+      'background-color': css.colors.appBg,
+      color: css.colors.text,
+      height: '100vh'
+   }],
+   ['.bg-app-bg', {'background-color': css.colors.appBg}],
+   ['.bg-surface', {'background-color': css.colors.surface}],
+   ['.bg-input', {'background-color': css.colors.inputBg}],
+   ['.bg-primary', {'background-color': css.colors.primary}],
+   ['.hover-bg-primary-hover:hover', {'background-color': css.colors.primaryHover}],
+   ['.near-text', {color: css.colors.text}],
+   ['.text-bright', {color: css.colors.textBright}],
+   ['.text-muted', {color: css.colors.textMuted}],
+   ['.text-soft', {color: css.colors.textSoft}],
+   ['.light-blue', {color: css.colors.link}],
+   ['.hover-white:hover', {color: css.colors.white}],
+   ['.b-border', {'border-color': css.colors.border}],
+   ['.text-success', {color: css.colors.success}],
+   ['.bg-success', {'background-color': css.colors.success}],
+   ['.bg-error', {'background-color': css.colors.error}],
+   ['.bg-warning', {'background-color': css.colors.warning}],
+   ['.bg-dark', {'background-color': css.colors.dark}],
+   ['.shadow-primary', {'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'}],
+   ['.outline-0:focus', {outline: 'none'}],
+   ['.placeholder-text-muted::placeholder', {color: css.colors.textMuted, opacity: '1'}],
+
+   ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
+
+   ['.spinny', {
+      display: 'inline-block',
+      width: '2ch',
+      'text-align': 'center',
+      color: css.colors.primary,
+      'font-family': 'monospace',
+      'font-size': '2.5rem',
+      'font-weight': '700',
+      'line-height': 1
+   }],
+
+   ['.spinny:before', {
+      content: '"|"',
+      animation: 'spinny 0.8s steps(1) infinite'
+   }],
+]
 
 var views = {};
 
 views.main = function () {
    return B.view ([['view'], ['snackbar']], function (view, snackbar) {
-      var current = views [view];
-      var snackbarClass = snackbar && snackbar.type === 'ok' ? 'bg-success black' : snackbar && snackbar.type === 'warning' ? 'bg-warning black' : snackbar && snackbar.type === 'error' ? 'bg-error white' : 'bg-dark white';
       return ['div', {class: 'relative min-vh-100'}, [
-         ['style', CSS.style],
-         current ? ['div', {class: 'min-vh-100'}, [current ()]] : ['div'],
-         snackbar ? ['div', {class: 'fixed left-0 right-0 bottom-0 pa3 pa4-ns', style: style ({'z-index': 2000})}, [
-            ['div', {
-               class: 'center mw7 br3 shadow-4 pa3 ph4-ns fw5 lh-copy tc ' + snackbarClass
-            }, snackbar.message || '']
-         ]] : ''
+         ['style', css.style],
+
+         (function () {
+            var current = views [view];
+            return current ? ['div', {class: 'min-vh-100'}, [current ()]] : ['div'];
+         }) (),
+
+         (function () {
+            var snackbarClass = snackbar && snackbar.type === 'ok' ? 'bg-success black' : snackbar && snackbar.type === 'warning' ? 'bg-warning black' : snackbar && snackbar.type === 'error' ? 'bg-error white' : 'bg-dark white';
+
+            if (snackbar) return ['div', {class: 'fixed left-0 right-0 bottom-0 pa3 pa4-ns', style: style ({'z-index': 2000})}, [
+               ['div', {
+                  class: 'center mw7 br3 shadow-4 pa3 ph4-ns fw5 lh-copy tc ' + snackbarClass
+               }, snackbar.message || '']
+            ]];
+         }) (),
+
+         ! inc (['login', 'signup'], view) ? ['button', {
+            class: css.button + ' absolute top-0 right-0 mt3 mr3 mt4-ns mr4-ns pa2 ph3',
+            style: style ({'z-index': 1000}),
+            onclick: B.ev ('logout', [])
+         }, 'Logout'] : ''
       ]];
    });
 }
@@ -224,10 +267,8 @@ views.auth = function (page) {
    return B.view ('auth', function (auth) {
       auth = auth || {};
 
-      var inputClass  = 'db w-100 pa3 mb3 br2 ba b-border bg-input text-bright outline-0 placeholder-text-muted';
-      var buttonClass = 'db w-100 pa3 br2 bn bg-primary hover-bg-primary-hover white fw6 pointer';
-      var linkWrap    = 'mt4 tc';
-      var linkClass   = 'link light-blue hover-white';
+      var linkWrap  = 'mt4 tc';
+      var linkClass = 'link light-blue hover-white';
 
       var card = function (title, subtitle, body, footer) {
          return ['div', {class: 'min-vh-100 flex items-center justify-center pa4 bg-app-bg'}, [
@@ -247,10 +288,10 @@ views.auth = function (page) {
             value: auth.email,
             placeholder: 'you@example.com',
             oninput: B.ev ('set', ['auth', 'email']),
-            class: inputClass
+            class: css.input
          }],
          auth.signupRequested ? ['div', {class: 'mb3 text-success'}, 'Invite requested. Thank you for your interest!'] : '',
-         ['button', {class: buttonClass, onclick: B.ev ('signup', [], auth.email)}, 'Request invite']
+         ['button', {class: css.buttonWide, onclick: B.ev ('signup', [], auth.email)}, 'Request invite']
       ]], ['div', {class: linkWrap}, [
          ['a', {href: '#/login', class: linkClass}, 'Already have access? Log in']
       ]]);
@@ -261,18 +302,18 @@ views.auth = function (page) {
             value: auth.email,
             placeholder: 'you@example.com',
             oninput: B.ev ('set', ['auth', 'email']),
-            class: inputClass
+            class: css.input
          }],
-         ['button', {class: buttonClass + ' mb3', onclick: B.ev ('login', [], auth.email)}, auth.otpRequested ? 'Send another code' : 'Send code'],
+         ['button', {class: css.buttonWide + ' mb3', onclick: B.ev ('login', [], auth.email)}, auth.otpRequested ? 'Send another code' : 'Send code'],
          auth.otpRequested ? ['div', [
             ['input', {
                type: 'text',
                value: auth.otp,
                placeholder: '6-digit code',
                oninput: B.ev ('set', ['auth', 'otp']),
-               class: inputClass
+               class: css.input
             }],
-            ['button', {class: buttonClass, onclick: B.ev ('verify', [], auth.email, auth.otp)}, 'Verify']
+            ['button', {class: css.buttonWide, onclick: B.ev ('verify', [], auth.email, auth.otp)}, 'Verify']
          ]] : ''
       ]], ['div', {class: linkWrap}, [
          ['a', {href: '#/signup', class: linkClass}, 'Need an invite? Request access']
@@ -280,7 +321,7 @@ views.auth = function (page) {
    });
 }
 
-dale.go (['login', 'signup'], function (v) {views [v] = function () {return views.auth (v)}});
+dale.go (['login', 'signup'], (v) => views [v] = () => views.auth (v));
 
 // *** PROJECTS ***
 
@@ -316,26 +357,31 @@ views.projects = function () {
             ]],
             ['div', {class: 'flex justify-center mb4'}, [
                ['button', {
-                  class: 'db w-100 mw6 pa3 ph4 br3 bn bg-primary hover-bg-primary-hover white f4 fw6 pointer shadow-primary',
+                  class: css.buttonWide + ' mw6 ph4 f4 shadow-primary',
                   onclick: B.ev ('create', 'project')
                }, '+ New project']
             ]],
-            projects && projects.length ? ['div', dale.go (projects || [], function (project) {
-               var slug = type (project) === 'object' ? project.slug : project;
-               var displayName = type (project) === 'object' ? project.name : project;
-               var pcolor = projectColor (displayName);
-               return ['div', {
-                  class: 'flex justify-between items-center pa3 br3 mb3 pointer',
-                  style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}) ,
-                  onclick: B.ev ('navigate', 'project/' + encodeURIComponent (slug) + '/docs')
-               }, [
-                  ['span', {class: 'f4 fw6 lh-copy'}, displayName],
-                  ['span', {
-                     class: 'f2 lh-solid o-70 pointer',
-                     onclick: B.ev ('delete', 'project', slug, {raw: 'event'})
-                  }, '×']
-               ]];
-            })] : ['div', {class: 'tc f4 text-muted pv3'}, 'No projects yet']
+            (function () {
+               if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
+
+               if (projects.length) return ['div', dale.go (projects || [], function (project) {
+                  var slug = type (project) === 'object' ? project.slug : project;
+                  var displayName = type (project) === 'object' ? project.name : project;
+                  var pcolor = projectColor (displayName);
+                  return ['div', {
+                     class: 'flex justify-between items-center pa3 br3 mb3 pointer',
+                     style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}) ,
+                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (slug) + '/docs')
+                  }, [
+                     ['span', {class: 'f4 fw6 lh-copy'}, displayName],
+                     ['span', {
+                        class: 'f2 lh-solid o-70 pointer',
+                        onclick: B.ev ('delete', 'project', slug, {raw: 'event'})
+                     }, '×']
+                  ]];
+               })];
+               return ['div', {class: 'tc f4 text-muted pv3'}, 'No projects yet'];
+            }) (),
          ]]
       ]];
    });

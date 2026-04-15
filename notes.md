@@ -1,5 +1,61 @@
 ## Vibey development notes
 
+### 2026-04-15
+
+I'm rewriting vibey not just for quality, but to make it unfold as a living thing. It will have few parts, and those will work well with what already exists.
+
+Maybe Kapor's wisdom about IBM (they're doing things with little ego, so they will succeed) is that he saw that the IBM PC had a lot of structure preservation.
+
+https://blog.waleson.com/2026/03/three-thoughts-on-dark-code.html
+"Will my codebase become an unholy mess if no one looks at the code?: Yes, this is an unsolved problem.
+Will there be new programming languages if humans don't care about code anymore?: Doubtful, and that's a shame!
+Dark Code is already here: In enterprises no one knows the code anyways."
+
+chatgpt: web GUI, introduces llms (talk)
+claude code: local CLI, introduces agents (do)
+openclaw: local GUI, works on everything
+vibey: web GUI, introduces documents, yolo, containers, autogit
+
+https://techtrenches.dev/p/the-human-cost-of-10x-how-ai-is-physically
+"Sonar’s CEO identified the hidden danger: AI models are getting better at avoiding obvious bugs and security holes, but structural flaws now constitute more than 90% of issues. You’re being lulled into a false sense of security. The easy problems get solved. The hard problems get hidden beneath clean-looking code that passes every automated check. And the people who can find them are buried under a volume of output that exceeds human cognitive bandwidth by design."
+
+https://techtrenches.dev/p/the-autonomy-illusion
+"The “autonomous AI” headline is selling a capability that doesn’t exist yet in any production-grade form. What exists is AI that dramatically accelerates skilled humans. If those humans stay in the loop, understand what they’re reviewing, and maintain the judgment to catch confident errors before they cascade."
+
+https://llama.gs/blog/index.php/2026/04/10/friday-archaeology-a-communist-apple-ii-and-fourteen-years-of-not-knowing-what-youre-testing/
+"In this climate of expensive credulity naïveté, I thought we might spend a Friday doing something that we do on Fridays: looking backwards. Reverse engineering — the art of taking something apart to understand what it does — is the intellectual opposite of the current AI approach to technology, which is to build something enormous, declare it transformative, and hope nobody asks what it actually computes."
+
+"The point is not that Bulgaria copied Apple. The point is that reverse engineering — understanding a design well enough to reproduce and adapt it — was how an entire generation of engineers learned computing. We didn’t have access to Stanford or MIT. We had schematics, soldering irons, and a cheerful disregard for intellectual property law that was, in fairness, philosophically consistent with the economic system. The Правец was my first computer. Everything I know about hardware starts there: with a 6502, 48 kilobytes of RAM, and a cassette recorder that worked when it felt like it."
+
+https://llama.gs/blog/
+"Bitcoin miners are liquidating their holdings to pivot into AI hosting. The machines that wasted electricity producing imaginary money will now waste it producing imaginary intelligence. Anthropic has secured 3.5 gigawatts of compute — the consumption of three and a half million households — to serve language models."
+
+https://robbyonrails.com/articles/2026/04/14/your-codebase-doesnt-care-how-it-got-written/
+"Those DIY systems birthed a whole industry. Our industry. Much of what we’ve built our careers on exists because someone who was dangerously just-enough motivated built something with the tools available to them."
+
+https://techtrenches.dev/p/the-great-software-quality-collapse
+"We're living through the greatest software quality crisis in computing history. A Calculator leaks 32GB of RAM. AI assistants delete production databases. Companies spend $364 billion to avoid fixing fundamental problems.
+
+This isn't sustainable. Physics doesn't negotiate. Energy is finite. Hardware has limits."
+
+It's funny how agents don't really have agency.
+
+https://mariozechner.at/posts/2026-03-25-thoughts-on-slowing-the-fuck-down/#toc_2
+"All of this compounds into an unrecoverable mess of complexity. The exact same mess you find in human-made enterprise codebases. Those arrive at that state because the pain is distributed over a massive amount of people. The individual suffering doesn't pass the threshold of "I need to fix this". The individual might not even have the means to fix things. And organizations have super high pain tolerance. But human-made enterprise codebases take years to get there. The organization slowly evolves along with the complexity in a demented kind of synergy and learns how to deal with it.
+With agents and a team of 2 humans, you can get to that complexity within weeks."
+
+the system adds bone to the weakest part. This is what I feel about not planning, and working in the moment: you can go faster, and in the right direction, step-wise.
+
+Focusing on a few, important things, as a project or company: isn't that the essence of the fundamental process?
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- Please add the logout button, see views.main in cclient.js
+- Please use the colors of CSS.colors in the CSS.style
+- Let's extract some main components from client.js and client-css.js. Rather than doing it like we did before in those files, we'll just take the tachyons classes and put them as CSS.X, where X could be a button, or something else. Try with inputs and buttons.
+- Can you make a loading animation that is the clockwise rotating bar? | / - \. Put it when projects hasn't loaded. But make it loadable as a CSS thing from elsewhere. What if it's a self-contained view function with its own state?
+
+
 ### 2026-04-14
 
 Doing a clean rewrite of the client, will call it `cclient.js`. It's refreshing to hand code again. I wonder if I could make an LLM code like this, or approximately.

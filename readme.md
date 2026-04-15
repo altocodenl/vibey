@@ -1060,34 +1060,27 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 ## TODO now
 
-Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. For puppeteer, use the global puppeteer, don't install it. When modifying the client tests, you also need to rebuild vibey because they are served through the server. When running tests, don't grep or tail, so I can see the output while it runs. When working on a change, first modify readme.md, then test.md, then the server (tests & code), then the client (tests & code).
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
 
-
-- The structure of vibey should be understandable at a glance, by virtue of having very few things: 1) settings as just one wheelie that creates a modal, rather than a view; 2) main should be green and highlighted; 3) hide all the other buttons, snapshots or anything else. Just keep the ray for connection, always visible, not just on dialog. For projects, just click on vibey, or go back. Logout yes. Make the doc autosaved.
-- The commands done by the agent should be beautiful, readable and understandable.
-- Replace view/edit with hand and eye.
+- UI
+   - The structure of vibey should be understandable at a glance, by virtue of having very few things: 1) settings as just one wheelie that creates a modal, rather than a view; 2) main should be green and highlighted; 3) hide all the other buttons, snapshots or anything else. Just keep the ray for connection, always visible, not just on dialog. For projects, just click on vibey, or go back. Logout yes. Make the doc autosaved.
+   - The commands done by the agent should be beautiful, readable and understandable.
+   - Replace view/edit with hand and eye.
+   - Remove the bubble, color the whole thing, use the entire space of the text.
+   - See the files, not just the uploads. remove the specialness of the uploads folder. the files is everything except the dialogs and docs. Show folders too as show/hide, but don't nest them with indent. Just do it by name. Same goes for the files, put the paths in each file. Little folder icon.
+   - Stream tool execution while it's happening
+   - Remove commands being shown in duplicate when streaming
+   - Debug stalled dialog
+   - Update contents of textarea when switching between files
+- Server refactor
+   - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
 - Please allow specifying of a model in the subject of an email in the trigger.
-- Remove the bubble, color the whole thing, use the entire space of the text.
-- See the files, not just the uploads. remove the specialness of the uploads folder. the files is everything except the dialogs and docs. Show folders too as show/hide, but don't nest them with indent. Just do it by name. Same goes for the files, put the paths in each file. Little folder icon.
-- Debug stalled dialog
-- Stream tool execution while it's happening
 - Add mkdir -p as a fallback
-- Remove commands being shown in duplicate when streaming
-- Update contents of textarea when switching between files
 - Demo videos
    - Fitness tracker with update
    - Online research
    - Better GDP graphs example
-- Use server logs and client event logs to optimize performance, particularly in the client which is slow in mobile.
 - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
-- Literate clanking: server.md & client.md
-   - Refactor client: proper store organization, improve rfuns (remove almost all timeouts), improve vfuns (bring state down)
-      - Properly organize the store, using nested objects. Everything related to dialog state (except the list of dialogs) should be on a single object. Same for loading, it should be an object. Same for current.
-      - If a variable's value is used in one place and it's not a magic value, use it inline instead wherever it is needed. Make the code more flowing.
-      - The UI redraws synchronously because of gotoB, so there should be
-
-- Server refactor
-   - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
 
 ### TODO later
 
