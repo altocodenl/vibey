@@ -71,7 +71,7 @@ B.mrespond ([
       var cb   = x.verb === 'get' ? arg1 : arg2;
 
       if (B.get ('csrf')) {
-         if (x.path === 'delete') headers ['X-CSRF-Token'] = B.get ('csrf');
+         if (x.verb === 'delete') headers ['X-CSRF-Token'] = B.get ('csrf');
          else body.csrf = B.get ('csrf');
       }
 
@@ -380,6 +380,7 @@ views.projects = function () {
                      }, '×']
                   ]];
                })];
+
                return ['div', {class: 'tc f4 text-muted pv3'}, 'No projects yet'];
             }) (),
          ]]
