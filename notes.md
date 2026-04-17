@@ -1,5 +1,17 @@
 ## Vibey development notes
 
+### 2026-04-16
+
+Spreadsheets are successful perhaps because they allow living structure to form. They are habitable and modifiable in ways that most software is not. They can be built piecemeal, as a process.
+
+How can vibey support living structure? How can it be a medium for living structure?
+
+Also thinking about the social component: most programs are social, same with documents. Collaboration and communication should be built-in. It'd be possible to imagine dialogs just between humans, without AI, within vibey.
+
+- "Creativity comes about when we discover the new within a structure already latent in the present. (...) our most wonderful creations come about, when we draw them as extensions and enhancements of what exists already." -- Christopher Alexander
+
+If we can only generate, that means that living structure is chomsky-1, context-sensitive. We cannot create things in parallel. We need to make change by change in a single way. But how can this ever work? How do we tell that two areas are far apart enough that they can evolve in parallel?
+
 ### 2026-04-15
 
 I'm rewriting vibey not just for quality, but to make it unfold as a living thing. It will have few parts, and those will work well with what already exists.
