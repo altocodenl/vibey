@@ -33,8 +33,8 @@ B.mrespond ([
 
       if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
 
-      if (inc (loggedViews, hash [0]) && ! B.get ('csrf')) return B.call (x, 'navigate', 'login');
-      if (inc (authViews,   hash [0]) &&   B.get ('csrf')) return B.call (x, 'navigate', 'projects');
+      if (inc (loggedViews, hash [0]) && ! B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'login');
+      if (inc (authViews,   hash [0]) &&   B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'projects');
 
       if (hash.length > 1) {
          if (hash [0] !== 'projects') return B.call (x, 'navigate', 'projects');
@@ -45,19 +45,23 @@ B.mrespond ([
       B.call (x, 'set', 'view', hash [0]);
    }],
 
-   // *** REPORT ***
+   ['stop', 'propagation', function (x, ev) {
+      ev.stopPropagation ();
+   }],
 
-   ['report', '*', function (x, message) {
+   // *** SNACKBAR ***
+
+   ['snackbar', '*', function (x, message) {
       var type = x.path [0];
 
       var snackbar = B.get ('snackbar');
       if (snackbar) {
          if (snackbar.timeout) clearTimeout (snackbar.timeout);
-         B.call (x, 'rem', 'snackbar');
+         B.call (x, 'rem', [], 'snackbar');
       }
 
       var timeout = setTimeout (function () {
-         B.call (x, 'rem', 'snackbar');
+         B.call (x, 'rem', [], 'snackbar');
       }, 4000);
 
       B.call (x, 'set', 'snackbar', {type: type, message: message, timeout: timeout});
@@ -67,12 +71,12 @@ B.mrespond ([
 
    [/^(get|post|put|delete)$/, '*', function (x, arg1, arg2) {
       var headers = {};
-      var body = x.verb === 'get' ? ''   : arg1;
-      var cb   = x.verb === 'get' ? arg1 : arg2;
+      var body = teishi.inc (['get', 'delete'], x.verb) ? ''   : arg1;
+      var cb   = teishi.inc (['get', 'delete'], x.verb) ? arg1 : arg2;
 
-      if (B.get ('csrf')) {
-         if (x.verb === 'delete') headers ['X-CSRF-Token'] = B.get ('csrf');
-         else body.csrf = B.get ('csrf');
+      if (B.get ('auth', 'csrf')) {
+         if (x.verb === 'delete') headers ['X-CSRF-Token'] = B.get ('auth', 'csrf');
+         else body.csrf = B.get ('auth', 'csrf');
       }
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
@@ -91,13 +95,13 @@ B.mrespond ([
 
       B.call (x, 'get', 'auth/csrf', function (x, error, rs) {
 
-         if (error && error.status !== 403) return B.call (x, 'report', 'error', 'Error when reaching the server');
+         if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
          B.call (x, 'set', 'mode', rs && rs.body.mode === 'LOCAL' ? 'local' : 'cloud');
 
          if (error && error.status === 403) return B.call (x, 'navigate', 'login');
 
-         if (rs.body.mode !== 'LOCAL') B.call (x, 'set', 'csrf', rs.body.csrf);
+         if (rs.body.mode !== 'LOCAL') B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
 
          B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
@@ -107,19 +111,19 @@ B.mrespond ([
    }],
 
    ['login', [], function (x, email) {
-      if (! email) return B.call (x, 'report', 'error', 'Please enter your email');
+      if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
       B.call (x, 'post', 'auth/login', {email: email.trim ().toLowerCase ()}, function (x, error) {
-         if (error) return B.call (x, 'report', 'error', 'Failed to send login code');
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to send login code');
          B.call (x, 'set', ['auth', 'otpRequested'], true);
       });
    }],
 
    ['verify', [], function (x, email, otp) {
-      if (! email || ! otp) return B.call (x, 'report', 'error', 'Please enter your email and code');
+      if (! email || ! otp) return B.call (x, 'snackbar', 'error', 'Please enter your email and code');
       B.call (x, 'post', 'auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
-         if (error) return B.call (x, 'report', 'error', 'Invalid code');
+         if (error) return B.call (x, 'snackbar', 'error', 'Invalid code');
 
-         B.call (x, 'set', 'csrf', rs.body.csrf);
+         B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
 
          B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
@@ -129,9 +133,9 @@ B.mrespond ([
    }],
 
    ['signup', [], function (x, email) {
-      if (! email) return B.call (x, 'report', 'error', 'Please enter your email');
+      if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
       B.call (x, 'post', 'auth/signup', {email: email.trim ().toLowerCase ()}, function (x, error) {
-         if (error) return B.call (x, 'report', 'error', 'Failed to request invite');
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to request invite');
          B.call (x, 'set', ['auth', 'signupRequested'], true);
       });
    }],
@@ -148,11 +152,48 @@ B.mrespond ([
    ...dale.go (['models', 'projects', 'settings'], function (entity) {
       return ['load', entity, function (x) {
          B.call (x, 'get', entity, function (x, error, rs) {
-            if (error) return B.call (x, 'report', 'error', 'There was a problem loading ' + entity);
+            if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + entity);
             B.call (x, 'set', entity, rs.body);
          });
       }];
    }),
+
+   // *** PROJECTS ***
+
+   ['create', 'project', function (x) {
+      var name = B.get ('new', 'project').trim ();
+      if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a project name');
+
+      B.call (x, 'post', 'projects', {name: name}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
+         B.call (x, 'rem', 'new', 'project');
+         B.call (x, 'load', 'projects');
+      });
+   }],
+
+   ['remove', 'project', function (x, project) {
+      if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
+
+      B.call (x, 'delete', 'projects/' + project.slug, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete project');
+         B.call (x, 'load', 'projects');
+         B.call (x, 'snackbar', 'ok', 'Project deleted');
+      });
+   }],
+
+   ['keydown', [], function (x, ev) {
+      if (B.get ('new', 'project') === undefined) return;
+      if (ev.key === 'Enter') {
+         B.call (x, 'create', 'project');
+         B.call (x, 'rem', 'new', 'project');
+      }
+   }],
+
+   ['change', ['new', 'project'], {priority: -1000}, function (x) {
+      if (B.get ('new', 'project') !== undefined) c ('.project-modal-input') [0].focus ();
+   }],
+
+
 ]);
 
 // *** VIEWS ***
@@ -227,6 +268,49 @@ css.style = [
    ['.spinny:before', {
       content: '"|"',
       animation: 'spinny 0.8s steps(1) infinite'
+   }],
+
+   ['.modal-backdrop', {
+      position: 'fixed',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'center',
+      padding: 24,
+      'background-color': 'rgba(8, 12, 28, 0.74)',
+      'z-index': 3000
+   }],
+   ['.modal-card', {
+      width: 1,
+      'max-width': 560,
+      padding: 28,
+      'border-radius': 18,
+      border: '1px solid ' + css.colors.border,
+      'background-color': css.colors.surface,
+      'box-shadow': '0 28px 80px rgba(0, 0, 0, 0.38)'
+   }],
+   ['.project-modal-kicker', {
+      'font-size': '0.78rem',
+      'font-weight': '700',
+      'letter-spacing': '0.12em',
+      'text-transform': 'uppercase',
+      color: css.colors.link,
+      'margin-bottom': 10
+   }],
+   ['.project-modal-title', {
+      'font-size': '1.9rem',
+      'font-weight': '700',
+      color: css.colors.textBright,
+      'margin-bottom': 8
+   }],
+   ['.modal-actions', {
+      display: 'flex',
+      gap: 12,
+      'justify-content': 'flex-end',
+      'margin-top': 20
    }],
 ]
 
@@ -349,41 +433,57 @@ views.projects = function () {
       return projectColors [sum % projectColors.length];
    }
 
-   return B.view ('projects', function (projects) {
+   return B.view ([['projects'], ['new', 'project']], function (projects, newProject) {
       return ['div', {class: 'min-vh-100 flex justify-center pa3 pa4-ns bg-app-bg'}, [
-         ['div', {class: 'w-100', style: style ({'max-width': '880px'})}, [
+         ['div', {class: 'w-100', style: style ({'max-width': 880})}, [
             ['div', {class: 'tc mb4'}, [
                ['div', {class: 'f2 fw7 text-bright'}, 'Projects']
             ]],
             ['div', {class: 'flex justify-center mb4'}, [
                ['button', {
                   class: css.buttonWide + ' mw6 ph4 f4 shadow-primary',
-                  onclick: B.ev ('create', 'project')
+                  onclick: B.ev ('set', ['new', 'project'], '')
                }, '+ New project']
             ]],
             (function () {
                if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
 
                if (projects.length) return ['div', dale.go (projects || [], function (project) {
-                  var slug = type (project) === 'object' ? project.slug : project;
-                  var displayName = type (project) === 'object' ? project.name : project;
-                  var pcolor = projectColor (displayName);
+                  var pcolor = projectColor (project.name);
                   return ['div', {
                      class: 'flex justify-between items-center pa3 br3 mb3 pointer',
                      style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}) ,
-                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (slug) + '/docs')
+                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.slug) + '/docs')
                   }, [
-                     ['span', {class: 'f4 fw6 lh-copy'}, displayName],
+                     ['span', {class: 'f4 fw6 lh-copy'}, project.name],
                      ['span', {
                         class: 'f2 lh-solid o-70 pointer',
-                        onclick: B.ev ('delete', 'project', slug, {raw: 'event'})
+                        onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'project', project])
                      }, '×']
                   ]];
                })];
 
                return ['div', {class: 'tc f4 text-muted pv3'}, 'No projects yet'];
             }) (),
-         ]]
+         ]],
+         newProject !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'project')}, [
+            ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
+               ['div', {class: 'project-modal-kicker'}, 'New project'],
+               ['div', {class: 'project-modal-title'}, 'Name your next world...'],
+               ['input', {
+                  class: css.input + ' mb0 project-modal-input',
+                  type: 'text',
+                  placeholder: 'I have this idea',
+                  value: newProject,
+                  oninput: B.ev ('set', ['new', 'project']),
+                  onkeydown: B.ev ('keydown', [], {raw: 'event'})
+               }],
+               ['div', {class: 'modal-actions'}, [
+                  ['button', {class: css.button, onclick: B.ev ('rem', 'new', 'project')}, 'Cancel'],
+                  ['button', {class: css.button, onclick: B.ev ('create', 'project'), disabled: ! ((newProject || '').trim ())}, 'Create project']
+               ]]
+            ]]
+         ]] : ''
       ]];
    });
 }

@@ -1,5 +1,121 @@
 ## Vibey development notes
 
+### 2026-04-20
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. After that...
+
+- Please port the new project modal we have in client.js to cclient.js. Try to make a minimal lift. cclient should be *clean* (I'll clean it later afterwards anyway).
+- Why delete project takes a project slug? Please inspect the server.
+- I'm getting a 404 when deleting a project. Is it because its container is down? Shouldn't then the server delete the volume? Please inspect.
+- How did we do the autofocus in client.js? Don't change anything
+
+https://simonwillison.net/
+"Opus 4.7 uses the same pricing is Opus 4.6 - $5 per million input tokens and $25 per million output tokens - but this token inflation means we can expect it to be around 40% more expensive."
+
+https://news.ycombinator.com/item?id=47793411
+"EmanuelB
+I can't notice any difference to 4.6 from 3 weeks ago, except that this model burns way more tokens, and produces much longer plans. To me it seem like this model is just the same as 4.6 but with a bigger token budget on all effort levels. I guess this is one way how Anthropic plans to make their business profitable.
+During the past weeks of lobotomized opus, I tried a few different open weight models side by side with "opus 4.6" on the same issue. The open weights outperformed opus 4.6, and did it way faster and cheaper. I tried the same problem against Opus 4.7 today and it did manage to find one additional edge case that is not critical, but should be logged. So based on my experience, the open weight models managed to solve the exact problem I needed fixed, while Opus 4.7 seem to think a bit more freely at the bigger picture. However Opus 4.7 also consumed way more tokens at a higher price, so the price difference was 10-20x higher on Opus compared to the open weights models. I will use Opus for code review and minor final fixes, and let the open weights models do the heavy lifting from now on. I need a coding setup I can rely on, and clearly Anthropic is not reliable enough to rely on.
+Why pay 200$ to randomly get rug-pulled with no warning, when I can pay 20$ for 90% of the intelligence with reliable and higher performance?"
+
+https://sleepingrobots.com/dreams/stop-using-ollama/
+"All of this makes more sense when you look at the incentive structure. Ollama is a Y Combinator-backed (W21) startup, founded by engineers who previously built a Docker GUI that was acquired by Docker Inc. The playbook is familiar: wrap an existing open-source project in a user-friendly interface, build a user base, raise money, then figure out monetization."
+
+https://www.dbreunig.com/2026/04/14/cybersecurity-is-proof-of-work-now.html
+"This chart suggests an interesting security economy: to harden a system we need to spend more tokens discovering exploits than attackers spend exploiting them.
+AISI budgeted 100M tokens for each attempt. That’s $12,500 per Mythos attempt, $125k for all ten runs. Worryingly, none of the models given a 100M budget showed signs of diminishing returns. “Models continue making progress with increased token budgets across the token budgets tested,” AISI notes.
+
+If Mythos continues to find exploits so long as you keep throwing money at it, security is reduced to a brutally simple equation: to harden a system you need to spend more tokens discovering exploits than attackers will spend exploiting them."
+
+How could you have multiple processes creating structure-preserving transformations without them stepping on each other? How can you evolve an unfolded whole without single-tracking everything and without losing consistency?
+
+Alexander: "The law states simply this: ALL the well-ordered complex systems we know in the world, all those anyway that we view as highly successful, are GENERATED structures, not fabricated structures."
+
+Good diffs should be structure preserving.
+
+Can agents see the wholeness and unfold it? I doubt it, but I wonder.
+
+#### Unfolding sequence for the client
+
+1. Have the base HTMl ready with the libraries: tachyons, normalize, gotoB.
+2. Create a base view and mount it.
+3. Create an array to put in responders.
+4. Put basic navigation in place: a native responder to handle URL changes as an event call; a responder to handle navigation.
+5. Put a responder to make calls to the server.
+6. Put a responder to make the first call to the server, to find out the mode and get the csrf token.
+7. Use the csrf token in the responder that makes calls to the server.
+8. If on cloud mode and with no token, send the user to the login/signup views.
+9. Put the login/signup views.
+10. Let the signup view send a request invite.
+11. Let the login view allow the user to log in.
+12. Put the projects view as the view to go if the user is logged in, or if they are in local mode and there is no need to log in.
+13. Add a modal to create a new project.
+
+### 2026-04-18
+
+I asked Claude to bring programming projects that use Christopher Alexander's *Nature of Order*:
+
+```
+Alexander's earlier *A Pattern Language* (1977) was absorbed wholesale by the software world — it seeded the Gang of Four's design patterns, wikis, and agile. His later four-volume *The Nature of Order* (2002–2004) has had a quieter, more recent reception. The projects below engage specifically with *Nature of Order* concepts: **centers**, **wholeness**, the **15 fundamental properties of living structure**, **structure-preserving transformations**, and **generative codes** (not just patterns).
+
+## Direct applications to software
+
+### The Nature of Software (the.natureof.software)
+A book-length, still-evolving online work that maps *Nature of Order* onto code. It treats source code as a field of centers at many scales (tokens, expressions, functions, modules, packages), then walks through each of the 15 properties and argues that code is unusually well-suited to Alexandrian analysis because it is already discrete — the "centers" are literally named. Good starting point if you want a systematic translation rather than an essay.
+
+### Ben Christel — "The 15 Properties in Software" (multi-part series)
+Probably the most concrete attempt. Christel takes each of the 15 properties one at a time (Strong Centers, Boundaries, Levels of Scale, Alternating Repetition, Positive Space, Good Shape, Local Symmetries, Deep Interlock & Ambiguity, Contrast, Gradients, Roughness, Echoes, The Void, Simplicity & Inner Calm, Not-Separateness) and gives code-level examples of each. Originally on Substack, mirrored on his neocities site. His companion essay *Alexander's Surprising Solution* argues that Alexander's late-career answer — step-by-step unfolding guided by a feeling for wholeness — is what distinguishes *Nature of Order* from the earlier pattern-language approach that software inherited.
+
+### Tomas Petricek — "The Timeless Way of Programming" (2022)
+Academic-adjacent essay from a programming-language researcher. Petricek argues that the software community took the wrong half of Alexander — the patterns — and left behind the harder, more important half: the "quality without a name," generative unfolding, and structure-preserving transformations. Applies these to PL design and to how we evaluate programming environments (Smalltalk, spreadsheets, notebooks) rather than to individual programs.
+
+### Stefan Lesser — "Notes on The Nature of Order" (nature-of-order.stefan-lesser.com)
+A working notebook rather than a finished book. Lesser is translating *Nature of Order* into design and software vocabulary, chapter by chapter. Notable posts: *Beauty in Code*, *Ontology as Grammar*, *Symmetry and Recursion as Repetition*, *Mechanical-rationalist World View*. He also connects Alexander to John Vervaeke's "meaning crisis" work — useful if you want the philosophical scaffolding, less so if you want code examples.
+
+### Richard P. Gabriel — *Patterns of Software* (1996)
+The predecessor to all of the above. Written before the final volumes of *Nature of Order* were published, but already engaging with Alexander's late thinking on habitability, piecemeal growth, and the quality without a name. Gabriel reads Alexander as a critic of the very patterns movement Gabriel himself helped start. Free full PDF at dreamsongs.com; foreword is by Alexander.
+
+### Jim Coplien — "Symmetry Breaking in Software Patterns" (GCSE 2000)
+Coplien formalizes patterns as acts of symmetry breaking, explicitly drawing on Alexander's treatment of symmetry in *Nature of Order* Book 1. The paper argues that a pattern is always a compensation for a gap in the language's geometry — the pattern is what you have to write because the language will not let the symmetry stand on its own. Useful if you want the theoretical bridge between Alexander's geometric properties and concrete language design.
+
+### Takashi Iba / Keio Iba Lab — Pattern Languages for the Creative Society
+Iba's group at Keio has produced dozens of pattern languages (for learning, presenting, collaborating, living) explicitly grounded in all four volumes of *Nature of Order*, not just *A Pattern Language*. Their paper *Understanding Christopher Alexander's Fifteen Properties via Visualization* (PURPLSOC 2014) is a useful index of the 15 properties with visual examples. Iba Lab is one of the few groups treating *Nature of Order* as current research material rather than historical influence.
+
+### "Bringing Design Patterns to Life" (Taylor & Francis, 2023)
+Peer-reviewed HCI paper applying living-structure theory to interaction design. More about UX than code, but it's one of the few recent academic venues where *Nature of Order* is the explicit framework rather than background.
+
+## Projects by Alexander himself
+
+### Gatemaker (1996, with Greg Bryant)
+Alexander's own software collaboration — an environment for generating architectural layouts by applying structure-preserving transformations, i.e., an attempt to *implement* the central mechanism of *Nature of Order* as software. Sparsely documented now, but important as the one project Alexander personally led. Precedes Book 2 (*The Process of Creating Life*) and clearly informed it.
+
+### Generative Codes (livingneighborhoods.org)
+Not code in the programming sense, but an explicit attempt to define rules-of-unfolding as computable sequences. Alexander, Mehaffy, and others describe a generative code as "a system of explicit steps for creating a social-spatial fabric, which defines the end product not by specifying the end-product itself, but by defining the steps that must be used to reach the end product" — essentially an algorithm over urban form. Alexander's 1996 OOPSLA keynote made this bridge explicit, telling the software audience that what they were doing and what he was doing were "a deeper coincidence."
+
+## Adjacent: Salingaros, Mehaffy, P2P-Urbanism
+Nikos Salingaros (co-editor of *Nature of Order*) and Michael Mehaffy have written repeatedly on Alexander's morphogenesis as a theory of computation, and run a P2P-Urbanism movement that borrows explicitly from open-source software. Mehaffy co-authored a paper with Ward Cunningham (wiki's inventor) arguing that wiki is a curated generative process in Alexander's sense. These are closer to urbanism than programming, but they're the richest vein of *Nature of Order*-as-computation thinking outside software proper.
+
+## Indirect lineage — predates *Nature of Order*
+Wikis, agile, scrum, and the GoF design patterns all descend from *A Pattern Language* (1977) and *The Timeless Way of Building* (1979), not from *Nature of Order* (2002–2004). They are sometimes cited in this context but the specific *Nature of Order* concepts — 15 properties, centers, structure-preserving transformations — are not their source.
+
+## Sources
+- [The Nature of Software](https://the.natureof.software/introduction)
+- [Ben Christel — 15 Properties of Living Structure in Software (neocities mirror)](https://benchristel.neocities.org/posts/alexandrian-software/)
+- [The 15 Properties in Software, Part 1 (Substack)](https://bensguide.substack.com/p/the-15-properties-in-software-part)
+- [Ben Christel — Alexander's Surprising Solution](https://bensguide.substack.com/p/the-alexandrian-solution)
+- [Tomas Petricek — The Timeless Way of Programming](https://tomasp.net/blog/2022/timeless-way/)
+- [Stefan Lesser — Notes on The Nature of Order](http://nature-of-order.stefan-lesser.com/about-this-project)
+- [Stefan Lesser — Beauty in Code](http://nature-of-order.stefan-lesser.com/beauty-in-code)
+- [Richard P. Gabriel — Patterns of Software (full PDF)](https://www.dreamsongs.com/Files/PatternsOfSoftware.pdf)
+- [Jim Coplien — Symmetry Breaking in Software Patterns (ACM)](https://dl.acm.org/doi/10.5555/645417.652068)
+- [Takashi Iba — Understanding the Fifteen Properties via Visualization (PDF)](https://web.sfc.keio.ac.jp/~iba/papers/PURPLSOC14_Properties.pdf)
+- [Iba Lab publications](https://web.sfc.keio.ac.jp/~iba/books.html)
+- [Bringing Design Patterns to Life (HCI, 2023)](https://www.tandfonline.com/doi/full/10.1080/10447318.2023.2262285)
+- [Christopher Alexander — Wikipedia (Gatemaker, software influence)](https://en.wikipedia.org/wiki/Christopher_Alexander)
+- [Alexander et al. — Generative Codes (PDF)](https://www.livingneighborhoods.org/library/generativecodesv10.pdf)
+- [Nikos Salingaros — Contributions to Architecture and Complexity](https://applied.math.utsa.edu/~yxk833/contr.arch.html)
+```
+
 ### 2026-04-16
 
 Spreadsheets are successful perhaps because they allow living structure to form. They are habitable and modifiable in ways that most software is not. They can be built piecemeal, as a process.

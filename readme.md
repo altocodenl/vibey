@@ -1072,8 +1072,10 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
    - Remove commands being shown in duplicate when streaming
    - Debug stalled dialog
    - Update contents of textarea when switching between files
+   - Show more than 65k in textarea when initalizing it
 - Server refactor
    - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
+   - Make DELETE /project to take a project name and not a project slug
 - Please allow specifying of a model in the subject of an email in the trigger.
 - Add mkdir -p as a fallback
 - Demo videos
@@ -1127,16 +1129,17 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 ### State
 
 ```
-auth email "<email entered in the login/signupform>"
-     signupRequested "<0|1>" // Whether a signup was just requested
+auth csrf "<CSRF token>"
+     email "<email entered in the login/signupform>"
      otp "<otp code entered in the login form>"
      otpRequested "<0|1>" // Whether the OTP request was sent
-csrf "<CSRF token>"
-model <local|cloud> // Determines if we're in local vibey or cloud vibey.
+     signupRequested "<0|1>" // Whether a signup was just requested
+mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 models anthropic "<model name>" context <size of context window in tokens>
                  ...
        openai "<model name> context <size of context window in tokens>
               ...
+new project "<project name>" // Enables the new project modal
 projects 1 name "<project name>"
            slug "<project slug>"
 snackbar color <color>
