@@ -2942,7 +2942,8 @@ views.files = function () {
                         onkeyup: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                         onclick: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
                         onscroll: viMode ? B.ev ('vi', 'cursor', {raw: 'event'}) : undefined,
-                        onfocus: 'window.keepMobileInputVisible && window.keepMobileInputVisible (this)'
+                        onfocus: 'window.keepMobileInputVisible && window.keepMobileInputVisible (this)',
+                        value: currentFile.content
                      }, currentFile.content],
                      (viMode && viState.mode !== 'insert' && viOverlayEditor && viOverlayEditor.visible) ? ['div', {
                         class: 'vi-cursor-overlay',
