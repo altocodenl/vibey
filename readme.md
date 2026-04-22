@@ -1063,6 +1063,8 @@ The current client has a dedicated phone layout for viewports narrower than `768
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
 
 - UI
+   - Tabs!
+   - Unify dialogs and docs and files into one view, but make docs and dialogs distinct.
    - The structure of vibey should be understandable at a glance, by virtue of having very few things: 1) settings as just one wheelie that creates a modal, rather than a view; 2) main should be green and highlighted; 3) hide all the other buttons, snapshots or anything else. Just keep the ray for connection, always visible, not just on dialog. For projects, just click on vibey, or go back. Logout yes. Make the doc autosaved.
    - The commands done by the agent should be beautiful, readable and understandable.
    - Replace view/edit with hand and eye.
@@ -1076,6 +1078,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 - Server refactor
    - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
    - Make DELETE /project to take a project name and not a project slug
+   - Don't display slugs for projects, just use project names and let the slugs be an internal thing, resolved inside past the router.
 - Please allow specifying of a model in the subject of an email in the trigger.
 - Add mkdir -p as a fallback
 - Demo videos
@@ -1134,12 +1137,15 @@ auth csrf "<CSRF token>"
      otp "<otp code entered in the login form>"
      otpRequested "<0|1>" // Whether the OTP request was sent
      signupRequested "<0|1>" // Whether a signup was just requested
+files 1 "<filename 1>" // List of files for current project
+      ...
 mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 models anthropic "<model name>" context <size of context window in tokens>
                  ...
        openai "<model name> context <size of context window in tokens>
               ...
 new project "<project name>" // Enables the new project modal
+project "<project slug>" // The current project selected
 projects 1 name "<project name>"
            slug "<project slug>"
 snackbar color <color>

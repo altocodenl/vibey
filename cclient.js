@@ -37,12 +37,21 @@ B.mrespond ([
       if (inc (authViews,   hash [0]) &&   B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'projects');
 
       if (hash.length > 1) {
-         if (hash [0] !== 'projects') return B.call (x, 'navigate', 'projects');
+         if (hash [0] !== 'project') return B.call (x, 'navigate', 'projects');
          var projectViews = ['doc', 'dialog', 'file'];
          if (! inc (projectViews, hash [2])) return B.call (x, 'navigate', 'projects');
+         B.call (x, 'set', 'project', hash [1]);
       }
 
       B.call (x, 'set', 'view', hash [0]);
+
+      B.call (x, 'load', 'models');
+      B.call (x, 'load', 'projects');
+      B.call (x, 'load', 'settings');
+
+      if (hash [0] === 'project') {
+         B.call (x, 'load', 'files', hash [1]);
+      }
    }],
 
    ['stop', 'propagation', function (x, ev) {
@@ -103,10 +112,7 @@ B.mrespond ([
 
          if (rs.body.mode !== 'LOCAL') B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
 
-         B.call (x, 'load', 'models');
-         B.call (x, 'load', 'projects');
-         B.call (x, 'load', 'settings');
-         B.call (x, 'navigate', 'projects');
+         B.call (x, 'read', 'hash');
       });
    }],
 
@@ -160,12 +166,21 @@ B.mrespond ([
 
    // *** PROJECTS ***
 
+   ['load', 'files', function (x, project) {
+      B.call (x, 'get', 'project/' + encodeURIComponent (project) + '/files', function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
+         B.call (x, 'set', 'files', rs.body);
+      });
+   }],
+
    ['create', 'project', function (x) {
       var name = B.get ('new', 'project').trim ();
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a project name');
 
+      B.call (x, 'snackbar', 'ok', 'Creating new project...');
       B.call (x, 'post', 'projects', {name: name}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
+      B.call (x, 'snackbar', 'ok', 'Project created');
          B.call (x, 'rem', 'new', 'project');
          B.call (x, 'load', 'projects');
       });
@@ -312,6 +327,38 @@ css.style = [
       'justify-content': 'flex-end',
       'margin-top': 20
    }],
+   ['.project-shell', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: 24,
+      padding: 24,
+      'min-height': '100vh',
+      'box-sizing': 'border-box'
+   }],
+   ['.project-main', {
+      display: 'grid',
+      'grid-template-columns': '38.2fr 61.8fr',
+      gap: 24,
+      flex: 1,
+      width: 1,
+      'min-height': 0,
+      'box-sizing': 'border-box'
+   }],
+   ['.project-pane', {
+      padding: 24,
+      'border-radius': 18,
+      border: '1px solid ' + css.colors.border,
+      'background-color': css.colors.surface,
+      'box-shadow': '0 20px 60px rgba(0, 0, 0, 0.22)',
+      'box-sizing': 'border-box',
+      'min-height': 0
+   }],
+   ['.project-pane-left', {
+      'min-width': 0
+   }],
+   ['.project-pane-right', {
+      'min-width': 0
+   }],
 ]
 
 var views = {};
@@ -337,7 +384,7 @@ views.main = function () {
          }) (),
 
          ! inc (['login', 'signup'], view) ? ['button', {
-            class: css.button + ' absolute top-0 right-0 mt3 mr3 mt4-ns mr4-ns pa2 ph3',
+            class: css.button + ' absolute top-0 right-0 mt3 mr3 mt4-ns mr4-ns pa2 ph3 f6',
             style: style ({'z-index': 1000}),
             onclick: B.ev ('logout', [])
          }, 'Logout'] : ''
@@ -453,7 +500,7 @@ views.projects = function () {
                   return ['div', {
                      class: 'flex justify-between items-center pa3 br3 mb3 pointer',
                      style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}) ,
-                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.slug) + '/docs')
+                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.slug) + '/doc')
                   }, [
                      ['span', {class: 'f4 fw6 lh-copy'}, project.name],
                      ['span', {
@@ -484,6 +531,30 @@ views.projects = function () {
                ]]
             ]]
          ]] : ''
+      ]];
+   });
+}
+
+views.project = function () {
+   return B.view ('project', function (project) {
+      return ['div', {class: 'project-shell bg-app-bg'}, [
+         ['div', {class: 'f2 fw7 text-bright'}, project],
+         ['div', {class: 'project-main'}, [
+            B.view ('files', function (files) {
+               return ['div', {class: 'project-pane project-pane-left'}, [
+                  ['div', {class: 'f5 fw6 text-bright mb3'}, 'Files'],
+                  ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file) {
+                     return ['div', {class: 'mb2 pb2', style: style ({'border-bottom': '1px solid ' + css.colors.border})}, [
+                        ['div', {class: 'text-bright fw5 lh-copy'}, file],
+                     ]];
+                  })]
+               ]];
+            }),
+            ['div', {class: 'project-pane project-pane-right'}, [
+               ['div', {class: 'f5 fw6 text-bright mb2'}, 'Right'],
+               ['div', {class: 'text-muted lh-copy'}, 'This is the wide pane.']
+            ]]
+         ]]
       ]];
    });
 }

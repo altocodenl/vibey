@@ -1,5 +1,64 @@
 ## Vibey development notes
 
+### 2026-04-22
+
+interesting that parametrized queries emerged as a performance improvement. The key to the process is to separate code and data. Redis does this by default, so it doesn't need parametrized queries.
+
+https://gist.github.com/chitchcock/1281611
+"You wouldn't really think that an online bookstore needs to be an extensible, programmable platform. Would you?"
+"I'm not really sure how Bezos came to this realization -- the insight that he can't build one product and have it be right for everyone. But it doesn't matter, because he gets it. There's actually a formal name for this phenomenon. It's called Accessibility, and it's the most important thing in the computing world."
+"A product is useless without a platform, or more precisely and accurately, a platform-less product will always be replaced by an equivalent platform-ized product."
+"Larry Tesler may have convinced Bezos that he was no Steve Jobs, but Bezos realized that he didn't need to be a Steve Jobs in order to provide everyone with the right products: interfaces and workflows that they liked and felt at ease with. He just needed to enable third-party developers to do it, and it would happen automatically."
+"We don't get Platforms, and we don't get Accessibility. The two are basically the same thing, because platforms solve accessibility. A platform is accessibility."
+"Amazon was a product company too, so it took an out-of-band force to make Bezos understand the need for a platform. That force was their evaporating margins; he was cornered and had to think of a way out. But all he had was a bunch of engineers and all these computers... if only they could be monetized somehow... you can see how he arrived at AWS, in hindsight."
+
+a unix utility is a platform. It's a call. It's open ended. AWS is about calls that you can do, to use parts to build things, rather than buying in onto the entire pirate ship lego.
+
+Seeing parallels here:
+- The scarcity of good sequences (Alexander).
+- Well formed formulas vs true formulas
+- Real numbers vs natural numbers
+- Complex systems vs simple systems
+
+What are the useful parts?
+- Markdown docs: list/create/delete/rename, read, edit
+- Dialog with LLM (and perhaps humans): list/create/delete/rename, read, send message, receive message. Message can also be a file or image.
+- Project (container): list/create/delete/rename, run command. Autofeature: autogit
+- Engine: where a project runs. list/create/delete/resize.
+- Auth: signup/login/logout (otp email, otp sms, password, passkey, 3rd party oauth), auth/authz
+- Files: list/create/delete/rename, update (with or without version). Autofeatures: automatic de-dup, de-dup by chunks.
+- Photos: builds on top of files. Tag, show near duplicates. Share, but where?
+- Email: send & receive
+- API calls: send & receive
+
+I'm thinking of the iphone: a few powerful features, done well in one place.
+
+I'm trying to build a FS abstraction that has versioning, chunking in built. And globally shared blobs so that we can save on space.
+Arbitrary chunking throws away the information of when and how the file was created. The heuristic is that chunking based on diff can give you great compression for minimal complexity.
+
+Two use cases to cover them all:
+- Big binaries that are shared by different projects
+- Mid-size text file (10mb-100mb) with ten appends per second.
+
+Cloud-wise, the requirements are:
+- Globally de-dupped.
+- Autocompressed if compressible.
+- Replicated in N places.
+- Low, fixed cost of storage.
+- Free download up to a certain point; metered download after another point.
+
+And it should hook directly to the containers.
+
+Thompson started Unix with files for a reason.
+
+- In cclient.js, take the project view and create a main area with two parts: a left part and a right part. Use the golden ratio to determine their proportions. The left one should be the narrow one.
+- Make the logout button a bit smaller so it doesn't touch the right pane.
+- There should be some space between the right pane and the right edge of the screen, like there is on the left
+- Write a responder to get the files for a project
+- Replace the contents of the left pane with a list of the files for the current project.
+
+I'm doing unidirectional data flow by making all page changes be on the URL, and then read the state from there.
+
 ### 2026-04-20
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. After that...
