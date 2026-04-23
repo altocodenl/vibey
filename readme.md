@@ -1124,10 +1124,9 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 
 ## Refactored client (cclient.js)
 
-- common UI elements
-- report working
-- auth working
-- projects working, with delete
+- unslugify project name
+- back button to go back to projects
+- show document as markdown
 
 ### State
 
@@ -1135,8 +1134,11 @@ Vi mode is available for the docs editor and the chat input. Toggle it in **Sett
 auth csrf "<CSRF token>"
      email "<email entered in the login/signupform>"
      otp "<otp code entered in the login form>"
-     otpRequested "<0|1>" // Whether the OTP request was sent
-     signupRequested "<0|1>" // Whether a signup was just requested
+     otpRequested <0|1> // Whether the OTP request was sent
+     signupRequested <0|1> // Whether a signup was just requested
+file content "..." // Current file selected
+     mode <edit|view> // Whether we're editing the file we're viewing or not
+     name "..."
 files 1 "<filename 1>" // List of files for current project
       ...
 mode <local|cloud> // Determines if we're in local vibey or cloud vibey.

@@ -1,5 +1,55 @@
 ## Vibey development notes
 
+### 2026-04-23
+
+claude --model=claude-opus-4-6 --dangerously-skip-permissions
+
+OK, big simplification: in the project view, in the URL, we have the path to the file. We're working with files. If it's a doc, it's prepended by doc. The only trickery is with dialogs, since we want to avoid showing the status as changing.
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. After that...
+
+- We're working in cclient.js. Make the logout button more purple, using a color we already have defined. Make it closer to the top, slightly bigger in font.
+- Add that purple to the list of colors we have above
+- Please make all docs in the list of files (those that start with doc/) have a little doc icon next to them, and have a blue color.
+- Please add a toggler between view and edit mode (using the words) on the top left part of the right pane. I'll handle the reactivity.
+- Please now style the textarea so it takes up almost the entire space and its colors match its surroundings.
+
+If good structure is structure-preserving, new innovations can be created from the same shape as the old ones.
+
+https://courses.cs.washington.edu/courses/cse550/20au/papers/CSE550.ritchie84evolution.pdf
+- Make it about collaboration from the beginning. A project is a shared space.
+- Files are the core of the system.
+- Non-file things are presented as files: device files.
+- The other thing an OS needs besides files is processes.
+- File calls: read, write, open, close, create, delete, print. And shell: run commands.
+- i-nodes: representation of files, a linear array, also in disk. Protection mode, type, size, physical blocks holding the contents. Directories are a special kind of file.
+- The filesystem took no path names in calls, which was a major inconvenience. All directories were created on startup, not at runtime.
+- Originally, only one process in memory at a time.
+- Process calls: fork, exec, wait, exit. My understanding: fork creates another process bound to the one from which you fork. Exec makes your current process do one thing, forgetting everything that happened before. Wait is just for child processes created by fork.
+- stdin and stdout were device files.
+- Shell loop: 1) close all open files; 2) read a line from the terminal; 3) link to file in the command from the terminal, open file, remove link, exec that file -- it's like jumping to that file/executable/call; 4) let the command run until it calls exit, re-read the shell program and go to step 1.
+- processes had entries in the process table: state, id, parent, open files, ??
+- Later, the shell became a userland (normal) program instead of part of the OS.
+- What would come later: redirection, background processes, shell files, pipes, filters
+- "Process control in its modern form was designed and implemented within a couple of days. It is astonishing how easily it fitted into the existing system; at the same time it is easy to see how some of the slightly unusual features of the design are present precisely because they represented small, easily-coded changes to what existed." Pure unfolding. The paper's title is about the "evolution" of the system.
+- The shell was the exec, in that it opened the file and transferred control to it.
+- Messages were eschewed: instead, unix used files and processes.
+- Buffer: a chunk of memory that has two markers: up to where it was written, and up to where it was read.
+- The new process control system required special commands: commands that were run "inside" the current process, to affect its own state. If chdir is a separate command, it doesn't affect the current directory of the process running it. Other command-like functions, like login, also required this.
+- Side note: it's beautiful to see the pattern of outer memory and inner memory. Memory vs CPU registers. Disk vs memory. This is reflected in unix: files for disk, processes to move things between disk and memory, while effecting transformations. This is even the case in programs: one function, or even one line is being run; the rest is in "disk", or rather outside, waiting for its turn. Computation is time going through (data)space and remaking it. And this duality is also in the OS (the outer) vs the programming language (the inner).
+- Read/write pointers exist for each open file for each process. This is isomorphic with the buffer markers. The only difference is that a buffer can only be read/written by one process (not necessarily the same process for read and write, almost always different ones), vs a file can be read and written by multiple processes.
+- "Solution of this problem required creation of a new system table to contain the IO pointers of open files independently of the process in which they were opened." Global state is required here, to jump between processes. Lifting state up.
+- "Because both the Unix IO system and its shell were under the exclusive control of Thompson, when the right idea finally surfaced, it was a matter of an hour or so to implement it."
+- "Perhaps the most interesting thing about the enterprise was its small size: there were 24K bytes of core memory (16K for the system, 8K for user programs), and a disk with 1K blocks (512K bytes). Files were limited to 64K bytes."
+- "The genius of the Unix pipeline is precisely that it is constructed from the very same commands used constantly in simplex fashion. The mental leap needed to see this possibility and to invent the notation is large indeed." I think what makes this possible is stdin and stdout. Making a leap, you could say the same thing about functions: one surface for inputs, another one for a single output.
+- In 1973, the OS kernel was rewritten in C (from assembler), and multi-programming was introduced.
+- "Today, the only important Unix program still written in assembler is the assembler itself (...) It seems certain that much of the success of Unix follows from the readability, modifiability, and portability of its software that in turn follows from its expression in high-level languages."
+
+nate b. jones:
+"A few weeks ago, Andrej Karpathy posted an idea that more than a hundred thousand people bookmarked. On the surface it sounded almost too simple: use your AI to build and maintain a personal wiki. You throw raw material into a folder, articles, research, meeting notes, whatever you’ve got. The AI reads all of it, pulls out what matters, connects ideas across sources, flags where things contradict, and keeps a running set of organized notes that gets smarter every time you feed it something new. No database, no special tools. Just folders, text files, and an AI doing the work of a full-time research librarian."
+
+a key idea in vibey is that interfaces for humans should be also accessible for agents. Using the same interface is a structure-preserving principle exemplified by unix using files for many things, including interprocess communication.
+
 ### 2026-04-22
 
 interesting that parametrized queries emerged as a performance improvement. The key to the process is to separate code and data. Redis does this by default, so it doesn't need parametrized queries.
@@ -51,6 +101,8 @@ And it should hook directly to the containers.
 
 Thompson started Unix with files for a reason.
 
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**. After that...
+
 - In cclient.js, take the project view and create a main area with two parts: a left part and a right part. Use the golden ratio to determine their proportions. The left one should be the narrow one.
 - Make the logout button a bit smaller so it doesn't touch the right pane.
 - There should be some space between the right pane and the right edge of the screen, like there is on the left
@@ -58,6 +110,8 @@ Thompson started Unix with files for a reason.
 - Replace the contents of the left pane with a list of the files for the current project.
 
 I'm doing unidirectional data flow by making all page changes be on the URL, and then read the state from there.
+
+I'm unfolding the UI, step by step.
 
 ### 2026-04-20
 

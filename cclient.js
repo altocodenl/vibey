@@ -7,6 +7,21 @@ B.internal.timeout = 500;
 
 var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log;
 
+// *** HELPERS ***
+
+// TODO: remove after the server stops requiring slug names for projects
+var slugify = function (name) {
+   // Split into runs of pass-through chars [a-zA-Z0-9_-] and runs of everything else
+   var parts = name.match (/[a-zA-Z0-9_\-]+|[^a-zA-Z0-9_\-]+/g) || [];
+   return dale.go (parts, function (part) {
+      if (/^[a-zA-Z0-9_\-]+$/.test (part)) return part;
+      return '.' + btoa(String.fromCharCode(...new TextEncoder().encode(part)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '') + '.';
+   }).join ('');
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -166,13 +181,6 @@ B.mrespond ([
 
    // *** PROJECTS ***
 
-   ['load', 'files', function (x, project) {
-      B.call (x, 'get', 'project/' + encodeURIComponent (project) + '/files', function (x, error, rs) {
-         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
-         B.call (x, 'set', 'files', rs.body);
-      });
-   }],
-
    ['create', 'project', function (x) {
       var name = B.get ('new', 'project').trim ();
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a project name');
@@ -180,8 +188,10 @@ B.mrespond ([
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
       B.call (x, 'post', 'projects', {name: name}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
-      B.call (x, 'snackbar', 'ok', 'Project created');
+         B.call (x, 'snackbar', 'ok', 'Project created');
+
          B.call (x, 'rem', 'new', 'project');
+         B.call (x, 'navigate', 'project/' + slugify (name) + '/doc');
          B.call (x, 'load', 'projects');
       });
    }],
@@ -208,6 +218,29 @@ B.mrespond ([
       if (B.get ('new', 'project') !== undefined) c ('.project-modal-input') [0].focus ();
    }],
 
+   // *** FILES ***
+
+   ['load', 'files', function (x, project) {
+      B.call (x, 'get', 'project/' + encodeURIComponent (project) + '/files', function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
+         B.call (x, 'set', 'files', rs.body);
+      });
+   }],
+
+   ['change', ['file', 'name'], function (x) {
+      B.call (x, 'get', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
+         B.call (x, 'set', ['file', 'content'], rs.body.content);
+      });
+   }],
+
+   ['save', 'file', function (x, ev) {
+      B.call (x, 'post', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), {content: ev.value}, function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem saving the file');
+         B.call (x, 'mset', ['file', 'conent'], ev.value);
+      });
+   }],
+
 
 ]);
 
@@ -230,7 +263,8 @@ var css = {
       success:      '#04E762',
       error:        '#D33E43',
       warning:      '#ffff00',
-      dark:         '#333'
+      dark:         '#333',
+      purple:       '#5a189a'
    },
    input:      'db w-100 pa3 mb3 br2 ba b-border bg-input text-bright outline-0 placeholder-text-muted',
    button:     'pa3 br2 bn bg-primary hover-bg-primary-hover white fw6 pointer',
@@ -357,7 +391,9 @@ css.style = [
       'min-width': 0
    }],
    ['.project-pane-right', {
-      'min-width': 0
+      'min-width': 0,
+      display: 'flex',
+      'flex-direction': 'column'
    }],
 ]
 
@@ -384,8 +420,8 @@ views.main = function () {
          }) (),
 
          ! inc (['login', 'signup'], view) ? ['button', {
-            class: css.button + ' absolute top-0 right-0 mt3 mr3 mt4-ns mr4-ns pa2 ph3 f6',
-            style: style ({'z-index': 1000}),
+            class: css.button + ' absolute top-0 right-0 mt2 mr3 mt3-ns mr4-ns pa2 ph3 f5',
+            style: style ({'z-index': 1000, 'background-color': css.colors.purple}),
             onclick: B.ev ('logout', [])
          }, 'Logout'] : ''
       ]];
@@ -540,20 +576,47 @@ views.project = function () {
       return ['div', {class: 'project-shell bg-app-bg'}, [
          ['div', {class: 'f2 fw7 text-bright'}, project],
          ['div', {class: 'project-main'}, [
-            B.view ('files', function (files) {
+            B.view ([['files'], ['file', 'name']], function (files, name) {
                return ['div', {class: 'project-pane project-pane-left'}, [
-                  ['div', {class: 'f5 fw6 text-bright mb3'}, 'Files'],
+                  ['br'], ['br'],
                   ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file) {
                      return ['div', {class: 'mb2 pb2', style: style ({'border-bottom': '1px solid ' + css.colors.border})}, [
-                        ['div', {class: 'text-bright fw5 lh-copy'}, file],
+                        ['div', {
+                           class: (file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer',
+                           onclick: B.ev ('set', ['file', 'name'], file)
+                        }, (function () {
+                           if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], file.replace (/^doc\//, '').replace (/.md$/, '')];
+                           return file;
+                        }) ()]
+
                      ]];
                   })]
                ]];
             }),
-            ['div', {class: 'project-pane project-pane-right'}, [
-               ['div', {class: 'f5 fw6 text-bright mb2'}, 'Right'],
-               ['div', {class: 'text-muted lh-copy'}, 'This is the wide pane.']
-            ]]
+            B.view ([['file', 'content'], ['file', 'mode']], function (content, mode) {
+               return ['div', {class: 'project-pane project-pane-right'}, [
+                  ['div', {class: 'flex items-center mb3'}, [
+                     ['span', {
+                        class: 'pointer fw6 mr3 ' + (mode !== 'edit' ? 'text-bright' : 'text-muted'),
+                        onclick: B.ev ('set', ['file', 'mode'], 'view')
+                     }, 'View'],
+                     ['span', {
+                        class: 'pointer fw6 ' + (mode === 'edit' ? 'text-bright' : 'text-muted'),
+                        onclick: B.ev ('set', ['file', 'mode'], 'edit')
+                     }, 'Edit'],
+                  ]],
+                  (function () {
+                     if (mode === 'edit') return ['textarea', {
+                        class: 'db w-100 bn outline-0 text-bright lh-copy f5',
+                        style: style ({'background-color': css.colors.surface, color: css.colors.textBright, flex: 1, resize: 'none', 'font-family': 'monospace'}),
+                        oninput: B.ev ('save', 'file', {raw: 'event'}),
+                        onchange: B.ev ('save', 'file', {raw: 'event'}),
+                        value: content
+                     }, content || ''];
+                     return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
+                  }) (),
+               ]];
+            }),
          ]]
       ]];
    });
