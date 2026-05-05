@@ -1,5 +1,29 @@
 ## Vibey development notes
 
+### 2026-05-05
+
+vibey ideas:
+- the space keeps unfolding. there's no concept behind it, unbelievably, except that 1) it's an openbound; 2) it's about unfolding a digital space. lifespace.
+- vibey is a good, whimsical name.
+- It is an integrated whole, rather than multiple apps.
+- The big four, to be slowly unfolded: editor, dialog/terminal/channel, files, email. Eventually, cell. Cell is code you can see, unlike the opaqueness of normal code that we still support.
+- Files: backup, dedup, share.
+- Email: attachments should be files.
+- There should be a personal project that's a container where the files are. I wonder if the email should be there too, as a special app that is running and you cannot modify. This is the main project.
+- Custom icons with own style: scribe tablet and chisel for new doc; talking head for new dialog)
+
+Think and feel how others would use vibey in different, fitting ways: think of user stories.
+
+Things I'd like to do in vibey:
+- Have my blog there.
+- Use it as my editor of choice.
+- Put my pivs there.
+- Put my family's pivs there.
+
+Big idea: vibey apps can be docker composes + clones. Apps would then be run on users' engines. You could make an app for just a few users per database/tenant, because the tenants would be distributed. The altocode email, or a new version of tagaway, could be vibey apps. And instead of being in a centralized cloud, the app tenants can talk to each other through open protocols.
+
+Interesting idea: have rsync-like sync to s3-like storage constantly. Still have your normal disk. But have auto s3-like backup. Eventually, perhaps, with dedup.
+
 ### 2026-04-23
 
 claude --model=claude-opus-4-6 --dangerously-skip-permissions

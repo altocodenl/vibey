@@ -105,7 +105,7 @@ B.mrespond ([
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error && error.status === 403 && x.path [0].indexOf ('auth/') !== 0) {
-            B.call (x, 'rem', [], dale.fil (dale.keys (B.get ()), 'mode', (v) => v));
+            B.call (x, 'set', [], {auth: {mode: 'cloud'}}});
             B.call (x, 'navigate', 'login');
          }
 
@@ -121,7 +121,7 @@ B.mrespond ([
 
          if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
-         B.call (x, 'set', 'mode', rs && rs.body.mode === 'LOCAL' ? 'local' : 'cloud');
+         B.call (x, 'set', ['auth', 'mode'], rs && rs.body.mode === 'LOCAL' ? 'local' : 'cloud');
 
          if (error && error.status === 403) return B.call (x, 'navigate', 'login');
 
@@ -163,7 +163,7 @@ B.mrespond ([
 
    ['logout', [], function (x) {
       B.call (x, 'post', 'auth/logout', {}, function (x, error) {
-         B.call (x, 'rem', [], dale.fil (dale.keys (B.get ()), 'mode', (v) => v));
+         B.call (x, 'set', [], {auth: {mode: 'cloud'}}});
          B.call (x, 'navigate', 'login');
       });
    }],

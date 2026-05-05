@@ -1062,77 +1062,97 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
 
-- UI
-   - Tabs!
-   - Unify dialogs and docs and files into one view, but make docs and dialogs distinct.
-   - The structure of vibey should be understandable at a glance, by virtue of having very few things: 1) settings as just one wheelie that creates a modal, rather than a view; 2) main should be green and highlighted; 3) hide all the other buttons, snapshots or anything else. Just keep the ray for connection, always visible, not just on dialog. For projects, just click on vibey, or go back. Logout yes. Make the doc autosaved.
-   - The commands done by the agent should be beautiful, readable and understandable.
-   - Replace view/edit with hand and eye.
-   - Remove the bubble, color the whole thing, use the entire space of the text.
-   - See the files, not just the uploads. remove the specialness of the uploads folder. the files is everything except the dialogs and docs. Show folders too as show/hide, but don't nest them with indent. Just do it by name. Same goes for the files, put the paths in each file. Little folder icon.
-   - Stream tool execution while it's happening
-   - Remove commands being shown in duplicate when streaming
-   - Debug stalled dialog
-   - Update contents of textarea when switching between files
-   - Show more than 65k in textarea when initalizing it
-- Server refactor
+- Server
    - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
-   - Make DELETE /project to take a project name and not a project slug
-   - Don't display slugs for projects, just use project names and let the slugs be an internal thing, resolved inside past the router.
-- Please allow specifying of a model in the subject of an email in the trigger.
-- Add mkdir -p as a fallback
-- Demo videos
-   - Fitness tracker with update
-   - Online research
-   - Better GDP graphs example
-- Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
+   - Don't display slugs for projects, just use project names and let the slugs be an internal thing, resolved inside past the router. Don't return slugs for projects.
+   - Return last modified date for the project by checking on git
+   - Please allow specifying of a model in the subject of an email in the trigger.
+   - Add mkdir -p as a fallback only to increase speed
+   - Make dialog status depend on server status, not filename
+   - Remove snapshots
+   - Remove compaction of main.md. If main.md changes, reattach it below to avoid busting cache.
+   - Support renaming of project
+   - Serve static proxy through a normal GET file call
+   - Security: public routes must not be served from the same origin as the authenticated app. If `/public/*` stays on the same origin, a malicious published app/doc can use the viewer's session cookie to call private endpoints like `/settings`, `/projects`, `/snapshots`, etc. Serve public content from a separate origin such as `public.vibey.app`, and do not scope the main app's session cookie to the parent domain.
+   - Replace puppeteer with playwright
 
-### TODO later
+- cclient
+   - Doc
+      - Show normal project name instead of slugified
+      - Back button to go back to projects
+      - Save doc every n (5) seconds if there are changes
+      - Improve look of toggler
+      - Highlight main
+      - Create new doc
+      - Delete existing doc (except main)
+   - Dialog
+      - Configure AI provider modal: openai, claude (special usage), api keys
+      - Create dialog
+      - Select model
+      - Send message/stop stream
+      - Show streaming dialog
+      - Keep on streaming after refresh
+      - Show dialog status as color
+      - Expand/compress tool call
+      - Show main.md as hidden but sent, expandable.
+      - Show dialog gauges (N.n ktcache / N.n ktin / N.n ktout, NN.n % window)
+      - Cloud only: API trigger modal & email trigger modal (one, email at top, API call below)
+   - Project:
+      - Download, upload with name
+      - Access:
+         - Make doc/folder public, open to another user (write)
+         - Make project open to another user
+   - Docs & dialogs
+      - Embedding in doc
+      - Open/close tabs
+      - Upload/download files/folders
+      - See files in other folders (support for special view of image, video and audio). Show edit for textual files.
+      - See open processes in the bar too, perhaps tailing logs
+      - Send commands to the terminal: start with `term`.
+      - Share project with another user
+      - Dialog without AI: slider to turn off.
+      - Syntax highlighting for code.
+   - Vi mode
+      - Enable/disable in settings.
+      - Normal vs insert mode: to normal with escape or command+l. To insert with i I, a A, o O.
+      - Navigate with hjkl.
+      - Jump word with b w.
+      - Go to prev next char with f F.
+      - Search with slash + entry + enter: move with n and N.
+      - Move tabs with tj tk.
+      - Delete last word with Ctrl+W.
+      - Copy with yy or N lines with N yy
+      - Delete line with dd or N lines with N dd
+      - Paste with p
+      - Undo with u, redo with ctrl+r
+      - Replace with r, delete with x
+      - Go to beginning of line with 0, end with $
+      - shift + space to add an indent level, ctrl + space to remove it
 
-- Delete upload
-- Poll new dialogs
-- Pass a model in the trigger (email & API)
-- Use 4.1 with API token, only show it if there is one
-- Add test for launching agent
-- Add cron triggers.
-- How would vibey apps look like? Basically, shareable docs that you can browse, and which have been audited.
-- Spin Hetzner engines and bind projects to them.
-- Put dialog state in memory [perhaps, but what about sockets]
-- Hosted services? (email, DB)
-- Billing: aligned pricing: an annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
-- Please fix vi mode. Take your time to test that the existing functionality really works. Extend the tests in test-client to avoid regressions. You can build and rebuild vibey as you need to.
+Calls at a glance:
+   - Auth: user, session, csrf token
+   - Access: read/write project/doc/dialog
+   - Project: create, list, rename, delete, download, upload
+   - File: create, list, rename, update, delete.
+   - Dialog: create, list, rename, delete, send message, stream, stop, tool call.
+   - Proxy: live
 
-##### Vi mode [TODO]
+To understand a system:
+   - System calls: what goes in and what comes out
+   - Data at rest on both sides (DB, container structure, in-memory server state for LLM calls, client state)
 
-Vi mode is available for the docs editor and the chat input. Toggle it in **Settings → Editor → Vi mode**. The setting is persisted in `secret.json` under `editor.viMode` and loaded via `GET /settings`.
+State:
+- Client
+- Redis
+- Server in-memory
+- Files in container
 
-**Docs editor**
-- Modes: normal / insert / command.
-- Save with `:w`, close with `:q`, save+close with `:wq`, force close with `:q!`.
-- Status bar shows mode or command input + cursor position.
-
-**Chat input (lighter)**
-- Modes: normal / insert (no command mode).
-- `Ctrl+Enter` sends in both modes.
-
-**Keymap (normal mode)**
-- Movement: `h` `j` `k` `l`, `w`/`b`, `0`/`$`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`.
-- Insert: `i` `a` `o` `O` `A` `I`.
-- Editing: `x`, `dd`, `yy`, `p`, `u`, `Ctrl-r`.
-- Search: `/` then `n`/`N`.
-- Commands: `:` enters command mode.
-
-## Refactored client (cclient.js)
-
-- unslugify project name
-- back button to go back to projects
-- show document as markdown
-
-### State
+### Client state
 
 ```
 auth csrf "<CSRF token>"
      email "<email entered in the login/signupform>"
+     mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
      otp "<otp code entered in the login form>"
      otpRequested <0|1> // Whether the OTP request was sent
      signupRequested <0|1> // Whether a signup was just requested
@@ -1141,7 +1161,6 @@ file content "..." // Current file selected
      name "..."
 files 1 "<filename 1>" // List of files for current project
       ...
-mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 models anthropic "<model name>" context <size of context window in tokens>
                  ...
        openai "<model name> context <size of context window in tokens>
@@ -1162,6 +1181,20 @@ settings claude hasKey <0|1>
          testButton <0|1>
 view "<view name>"
 ```
+
+### TODO later
+
+- Delete upload
+- Poll new dialogs
+- Pass a model in the trigger (email & API)
+- Use 4.1 with API token, only show it if there is one
+- Add test for launching agent
+- Add cron triggers.
+- How would vibey apps look like? Basically, shareable docs that you can browse, and which have been audited.
+- Spin Hetzner engines and bind projects to them.
+- Put dialog state in memory [perhaps, but what about sockets]
+- Hosted services? (email, DB)
+- Billing: aligned pricing: an annual subscription (30 USD?) that gives you access to key cloud providers priced at cost (Hetzner for VPS, Backblaze for files); calls to LLM APIs; email sending. You can also of course bring your own API keys or subscriptions.
 
 ## License
 
