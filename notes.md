@@ -1,5 +1,44 @@
 ## Vibey development notes
 
+### 2026-05-07
+
+Things I'd like to do in vibey, reprise:
+- Have my blog there.
+- Use it as my editor of choice.
+- Put my pivs there.
+- Put my family's pivs there.
+- Publish my open source code there.
+- Receive and send email there. Put my old emails there as well.
+- Eventually, trust it enough to have my own journal there.
+- Have old, small, custom apps I did a long time ago running in a vibey container, for easy access to files beyond the app itself.
+
+I'm rethinking the tagline to something else. The key thing is not making things happen, but creating a digital, habitable, personal or small-group-like. That's the key, the trust and the habitability.
+- Make yourself at cloud
+- Your home cloud
+
+Habitability: a space you can make your own. The building blocks, properly shaped, so you can build with them. More than enough trust so that you decide it's worth your while to build upon this. Building requires: the possibility of doing it, and the trust to make it good to invest time in it.
+
+Idea: distribute apps with docker compose + a clone of a repo.
+- Vibey could be an open, useful infrastructure to distribute apps. You could build an app useful to a lot of people with the app not having to scale beyond one or a few users, if the app works on the vibey engine of those who are using it. It's a much more distributed way to run apps in the cloud.
+- The fundamentals are:
+   - The vibey engine, which gives you: 1) a container with unix; 2) files with git + backup; 3) agents that can work on them; 4) an UI to see files and dialogs.
+   - Some form of in-built auth that can be optionally used as a default.
+   - Communication channels: email in/out, https in/out (with domain/dns integration, both).
+- Could vibey itself, the client, be built as an app? Not the server, but perhaps the client. Or rather, an alternative vibey client could definitely be built as an app!
+- Email and pivs (tagaway-like) as vibey apps built on top of the primitives! This would really work much better than in-built apps!
+- How would you open an installed app? Where would you list them? How would you start/stop them? All of this needs to grow organically around the main interface with the list on the left and the views on the right.
+- What would be different:
+   - Your files are part of the project, not the app. You can see them directly. Other apps can see them too. It would be truly Unix like. Unix is low ego, small utilities that cooperate, instead of unwieldy siloes.
+   - You could embed the apps anywhere, rather than boot them like they were 80s game that took over your entire computer. If you want full screen, open it in a tab.
+
+Agents/AI is something that increases the temperature of the reaction, perhaps making it possible. But most of this could have been possible five years ago. It's just more valuable now to more people because they don't have to code to be able to build their own digital spaces, their own apps. Vibey is, essentially, an OS-like proposition. A higher level OS. I wasn't expecting this.
+
+Company accounts don't fit in vibey. Every account is personal, but companies can pay for company accounts, each of them bound to one employee. The measure of vibey has to be human.
+
+Concerning the s3-like-rsync:
+- Have a rsync summary of what's in a bucket as a file inside the bucket. When rsyncing, compare that file against your local one. Redo the rsync summary with a special command, like tarsnap's --fsck.
+- Dedup can come later. What matters at the beginning is quick syncing between the fs of the container and the bucket, so we're backed up.
+
 ### 2026-05-05
 
 vibey ideas:
@@ -10,7 +49,7 @@ vibey ideas:
 - Files: backup, dedup, share.
 - Email: attachments should be files.
 - There should be a personal project that's a container where the files are. I wonder if the email should be there too, as a special app that is running and you cannot modify. This is the main project.
-- Custom icons with own style: scribe tablet and chisel for new doc; talking head for new dialog)
+- Custom icons with own style: scribe tablet and chisel for new doc; talking head for new dialog). Ray for connect, star snowflake for config, door handle for logout.
 
 Think and feel how others would use vibey in different, fitting ways: think of user stories.
 
