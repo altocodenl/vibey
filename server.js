@@ -1730,7 +1730,7 @@ var defaultModelForProvider = function (provider) {
 var TOOLS = [
    {
       name: 'run_command',
-      description: 'Run a shell command. Use for reading files (cat), listing directories (ls), HTTP requests (curl), git, and anything else the shell can do. 30s timeout.',
+      description: 'Run a shell command. Use for reading files (cat), listing directories (ls), HTTP requests (curl), git, and anything else the shell can do. 5m timeout. If you want to run something detached, use nohup.',
       input_schema: {
          type: 'object',
          properties: {
@@ -3305,15 +3305,17 @@ var routes = [
             ['title', 'vibey'],
             ['link', {rel: 'stylesheet', href: 'https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css'}],
             ['link', {rel: 'stylesheet', href: 'https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css'}],
+            ['link', {rel: 'stylesheet', href: 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css'}],
          ]],
          ['body', [
-            ['script', {src: 'https://cdn.jsdelivr.net/gh/fpereiro/gotob@434aa5a532fa0f9012743e935c4cd18eb5b3b3c5/gotoB.min.js'}],
+            ['script', {src: 'gotoB.min.js'}],
             ['script', {src: 'https://cdn.jsdelivr.net/npm/marked/marked.min.js'}],
             ['script', {src: 'client-css.js'}],
             ['script', {src: 'client.js'}],
          ]]
       ]]
    ])],
+   ['get', 'gotoB.min.js', cicek.file, 'node_modules/gotob/gotoB.min.js'],
    ['get', 'client-css.js', cicek.file],
    ['get', 'client.js', cicek.file],
    ['get', 'test-client.js', cicek.file],
@@ -3841,6 +3843,8 @@ var routes = [
       if (! user) return reply (rs, 403, {error: 'Invalid trigger ID'});
 
       rq.user = {id: user.id, email: user.email, admin: user.admin === '1'};
+
+      if (type (rq.body) !== 'object') return reply (rs, 400, {error: 'Body must be an object'});
 
       // Build prompt from body.prompt or body.data
       var prompt = rq.body.prompt;

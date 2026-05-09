@@ -8,7 +8,7 @@ Turn your words into actions.
 
 1. **Communication as the basis:** *Everything is a document*. Your description of what you're building. The dialogs with AI while building it. How you orchestrate your agents. Documents are the source of truth for everything. There is no database.
 2. **Connected through the web:** *Everything in your browser*. Your documents are not only text: use images, audio, and embed small apps in your documents. Everything has an URL. No terminal or dedicated native app needed.
-3. **Autonomy with walls**: *Agents run YOLO within a self-contained project*. The agents don't ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
+3. **Walled autonomy**: *Agents run YOLO within a self-contained project*. The agents don't ask for permission, they just run the commands that they need for the task you give them, so they work at full speed. **But** each project is fully isolated in its own container and volume. A rogue agent's blast radius is limited to its own project — it cannot touch other projects, vibey, or your computer.
 4. **Transparent**: *Bring your own AI credentials,* whether personal or API keys. See every call that your agents make.
 5. **Freedom**: Vibey is open source. Altocode, the company behind Vibey cloud, is an [openbound](https://altocode.nl/blog/altocode-is-an-openbound).
 
@@ -1065,6 +1065,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 - Server
    - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
    - Don't display slugs for projects, just use project names and let the slugs be an internal thing, resolved inside past the router. Don't return slugs for projects.
+   - Block deletion of the main doc
    - Return last modified date for the project by checking on git
    - Please allow specifying of a model in the subject of an email in the trigger.
    - Add mkdir -p as a fallback only to increase speed
@@ -1080,11 +1081,11 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
    - Doc
       - Show normal project name instead of slugified
       - Back button to go back to projects
-      - Save doc every n (5) seconds if there are changes
+      - Save doc every n (5) seconds if there are changes, or when switching docs, or when closing the tab
       - Improve look of toggler
-      - Highlight main
+      - Highlight the main doc
       - Create new doc
-      - Delete existing doc (except main)
+      - Delete existing doc (except main, also block it in the server)
    - Dialog
       - Configure AI provider modal: openai, claude (special usage), api keys
       - Create dialog

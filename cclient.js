@@ -60,9 +60,11 @@ B.mrespond ([
 
       B.call (x, 'set', 'view', hash [0]);
 
-      B.call (x, 'load', 'models');
-      B.call (x, 'load', 'projects');
-      B.call (x, 'load', 'settings');
+      if (inc (loggedViews, hash [0])) {
+         B.call (x, 'load', 'models');
+         B.call (x, 'load', 'projects');
+         B.call (x, 'load', 'settings');
+      }
 
       if (hash [0] === 'project') {
          B.call (x, 'load', 'files', hash [1]);
@@ -105,8 +107,9 @@ B.mrespond ([
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error && error.status === 403 && x.path [0].indexOf ('auth/') !== 0) {
-            B.call (x, 'set', [], {auth: {mode: 'cloud'}}});
+            B.call (x, 'set', [], {auth: {mode: 'cloud'}});
             B.call (x, 'navigate', 'login');
+            return;
          }
 
          if (cb) cb (x, error, rs);
@@ -163,7 +166,7 @@ B.mrespond ([
 
    ['logout', [], function (x) {
       B.call (x, 'post', 'auth/logout', {}, function (x, error) {
-         B.call (x, 'set', [], {auth: {mode: 'cloud'}}});
+         B.call (x, 'set', [], {auth: {mode: 'cloud'}});
          B.call (x, 'navigate', 'login');
       });
    }],
@@ -613,7 +616,7 @@ views.project = function () {
                         onchange: B.ev ('save', 'file', {raw: 'event'}),
                         value: content
                      }, content || ''];
-                     return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
+                     return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', /*marked.parse (content || '')*/]];
                   }) (),
                ]];
             }),
