@@ -962,7 +962,7 @@
       ['Dialog 3: Create dialog draft (dialog/new)', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/new', {}, {
             provider: 'openai',
-            model: 'gpt-5.2-codex',
+            model: 'gpt-5.4',
             slug: TEST_DIALOG
          }, function (error, rs) {
             window._dialogDialogDraft = {error: error, rs: rs};
@@ -975,7 +975,7 @@
          if (! body.dialogId) return 'Missing dialogId in dialog/new response';
          if (! body.filename || body.filename.indexOf ('-done.md') === -1) return 'Expected done filename, got ' + body.filename;
          if (body.provider !== 'openai') return 'Expected provider openai, got ' + body.provider;
-         if (body.model !== 'gpt-5.2-codex') return 'Expected model gpt-5.2-codex, got ' + body.model;
+         if (body.model !== 'gpt-5.4') return 'Expected model gpt-5.4, got ' + body.model;
          if (body.status !== 'done') return 'Expected status done, got ' + body.status;
          window._dialogDialogId = body.dialogId;
          return true;
@@ -1000,7 +1000,7 @@
       ['Dialog 4a: Create another dialog while not on Dialogs', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/new', {}, {
             provider: 'openai',
-            model: 'gpt-5.2-codex',
+            model: 'gpt-5.4',
             slug: 'refresh-check'
          }, function (error, rs) {
             window._dialogRefreshDraft = {error: error, rs: rs};
@@ -1210,7 +1210,7 @@
       ['Dialog 17: POST /dialog async new dialog', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog', {}, {
             provider: 'openai',
-            model: 'gpt-5.2-codex',
+            model: 'gpt-5.4',
             prompt: 'Use the run_command tool to run `cat test-sample.txt`. Reply with its first line only.',
             slug: 'async-test'
          }, function (error, rs) {
@@ -1318,7 +1318,7 @@
       }],
 
       ['Dialog 21: Create dialog agent-a', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, function (error, rs) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.4', slug: 'agent-a'}, function (error, rs) {
             window._dialogAgentA = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
          });
@@ -1334,7 +1334,7 @@
       }],
 
       ['Dialog 22: Create dialog agent-b', function (done) {
-         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, function (error, rs) {
+         c.ajax ('post', 'project/' + encodeURIComponent (window._dialogProjectSlug) + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.4', slug: 'agent-b'}, function (error, rs) {
             window._dialogAgentB = {error: error, rs: rs};
             done (SHORT_WAIT, POLL);
          });
@@ -1635,7 +1635,7 @@
       ['Dialog 41: Fire write_file dialog and collect SSE events', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._streamDeltaSlug) + '/dialog', {}, {
             provider: 'openai',
-            model: 'gpt-5.2-codex',
+            model: 'gpt-5.4',
             prompt: 'Use write_file to create a file called streamed.txt containing at least 200 words of prose about the history of computing. Do only this one tool call, nothing else.',
             slug: 'stream-delta-client'
          }, function (error, rs) {
@@ -1714,7 +1714,7 @@
       ['Dialog 43: Text-only response has no tool block in chunks', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._streamDeltaSlug) + '/dialog', {}, {
             provider: 'openai',
-            model: 'gpt-5.2-codex',
+            model: 'gpt-5.4',
             prompt: 'Say hello and nothing else. Do not use any tools.',
             slug: 'no-tool-client'
          }, function (error, rs) {
@@ -1787,7 +1787,7 @@
 
       ['Dialog 47: Fire dialog with run_command to verify description in markdown', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._descProject) + '/dialog', {},
-            {provider: 'openai', model: 'gpt-5.2-codex', prompt: 'Use run_command to run `echo desc-client-test`. Do only this one tool call.', slug: 'desc-client'},
+            {provider: 'openai', model: 'gpt-5.4', prompt: 'Use run_command to run `echo desc-client-test`. Do only this one tool call.', slug: 'desc-client'},
             function (error, rs) {
                if (error) {window._descDialogError = true; return done (SHORT_WAIT, POLL);}
                window._descDialogId = rs.body.dialogId;
@@ -2213,12 +2213,12 @@
       }],
 
       ['Dialog 52g: launch_agent tool bubbles render compact and expanded summaries', function () {
-         var sampleBlock = '---\nTool request: launch_agent [call_spawn]\n> Description: Spawn a sibling agent to verify launch flow\n\n    {\n      "provider": "openai",\n      "model": "gpt-5.2-codex",\n      "slug": "spawned-agent-test",\n      "prompt": "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools."\n    }\n\nResult:\n\n    {\n      "success": true,\n      "launched": {\n        "dialogId": "20260402-120000-spawned-agent-test",\n        "filename": "dialog/20260402-120000-spawned-agent-test-active.md",\n        "status": "active",\n        "provider": "openai",\n        "model": "gpt-5.2-codex"\n      }\n    }\n\n---';
+         var sampleBlock = '---\nTool request: launch_agent [call_spawn]\n> Description: Spawn a sibling agent to verify launch flow\n\n    {\n      "provider": "openai",\n      "model": "gpt-5.4",\n      "slug": "spawned-agent-test",\n      "prompt": "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools."\n    }\n\nResult:\n\n    {\n      "success": true,\n      "launched": {\n        "dialogId": "20260402-120000-spawned-agent-test",\n        "filename": "dialog/20260402-120000-spawned-agent-test-active.md",\n        "status": "active",\n        "provider": "openai",\n        "model": "gpt-5.4"\n      }\n    }\n\n---';
          var compact = formatToolBlocksForMessage (sampleBlock, true, {});
          var full = formatToolBlocksForMessage (sampleBlock, false, {});
          if (compact.indexOf ('Spawn a sibling agent to verify launch flow') === -1) return 'Compact launch_agent view missing description';
          if (compact.indexOf ('spawned-agent-test') !== -1) return 'Compact launch_agent view should hide raw details';
-         if (full.indexOf ('⚡ openai/gpt-5.2-codex [spawned-agent-test]') === -1) return 'Expanded launch_agent view missing provider/model/slug summary';
+         if (full.indexOf ('⚡ openai/gpt-5.4 [spawned-agent-test]') === -1) return 'Expanded launch_agent view missing provider/model/slug summary';
          if (full.indexOf ('sleep 5 && echo CHILD READY') === -1) return 'Expanded launch_agent view missing prompt preview';
          if (full.indexOf ('20260402-120000-spawned-agent-test') === -1) return 'Expanded launch_agent view missing launched dialog result';
          return true;
@@ -2239,9 +2239,9 @@
       ['Dialog 52i: Parent dialog uses launch_agent exactly once', function (done) {
          c.ajax ('post', 'project/' + encodeURIComponent (window._spawnProject) + '/dialog', {}, {
             provider: 'openai',
-            model: 'gpt-5.2-codex',
+            model: 'gpt-5.4',
             slug: 'spawn-parent-test',
-            prompt: 'Use launch_agent exactly once. Spawn a sibling agent with provider openai, model gpt-5.2-codex, slug spawned-agent-test, and prompt "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools." After launching it, briefly say that you spawned it. Do not use any other tools.'
+            prompt: 'Use launch_agent exactly once. Spawn a sibling agent with provider openai, model gpt-5.4, slug spawned-agent-test, and prompt "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools." After launching it, briefly say that you spawned it. Do not use any other tools.'
          }, function (error, rs) {
             if (error || ! rs || ! rs.body || ! rs.body.dialogId) {
                window._spawnParentStream = {error: error || 'missing dialogId', rs: rs};

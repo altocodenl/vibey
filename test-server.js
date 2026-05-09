@@ -624,11 +624,11 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 3: Create dialog draft', 'post', 'project/' + DIALOG_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: DIALOG_SLUG}, 200, function (s, rq, rs) {
+   ['Dialog 3: Create dialog draft', 'post', 'project/' + DIALOG_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.4', slug: DIALOG_SLUG}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('dialog/new missing dialogId or filename');
       if (rs.body.provider !== 'openai') return log ('dialog/new provider mismatch');
-      if (rs.body.model !== 'gpt-5.2-codex') return log ('dialog/new model mismatch');
+      if (rs.body.model !== 'gpt-5.4') return log ('dialog/new model mismatch');
       if (rs.body.status !== 'done') return log ('dialog/new should start as done, got: ' + rs.body.status);
       if (! rs.body.filename.match (/^dialog\/.*\-done\.md$/)) return log ('dialog/new filename should end in -done.md');
       if (rs.body.filename.indexOf (DIALOG_SLUG) === -1) return log ('dialog/new filename missing slug');
@@ -828,7 +828,7 @@ var dialogSequence = [
    ['Dialog 17: POST /dialog returns JSON immediately', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
          provider: 'openai',
-         model: 'gpt-5.2-codex',
+         model: 'gpt-5.4',
          prompt: 'Use the run_command tool to run `cat test-sample.txt`. Reply with its first line only.',
          slug: 'async-test'
       }, function (error, code, body) {
@@ -918,7 +918,7 @@ var dialogSequence = [
    }],
 
    // Test 21-22: Create agent drafts
-   ['Dialog 21: Create agent-a draft', 'post', 'project/' + DIALOG_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-a'}, 200, function (s, rq, rs) {
+   ['Dialog 21: Create agent-a draft', 'post', 'project/' + DIALOG_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.4', slug: 'agent-a'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.dialogA = rs.body.dialogId;
       if (rs.body.status !== 'done') return log ('agent-a should start as done, got: ' + rs.body.status);
@@ -926,7 +926,7 @@ var dialogSequence = [
       return true;
    }],
 
-   ['Dialog 22: Create agent-b draft', 'post', 'project/' + DIALOG_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'agent-b'}, 200, function (s, rq, rs) {
+   ['Dialog 22: Create agent-b draft', 'post', 'project/' + DIALOG_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.4', slug: 'agent-b'}, 200, function (s, rq, rs) {
       if (! rs.body.dialogId) return log ('missing dialogId');
       s.dialogB = rs.body.dialogId;
       if (rs.body.status !== 'done') return log ('agent-b should start as done, got: ' + rs.body.status);
@@ -1138,7 +1138,7 @@ var dialogSequence = [
    ['Dialog 38: Fire write_file for streaming deltas', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
          provider: 'openai',
-         model: 'gpt-5.2-codex',
+         model: 'gpt-5.4',
          prompt: 'Use write_file to create a file called streamed.txt containing at least 200 words of prose about the history of computing. Do only this one tool call, nothing else.',
          slug: 'stream-delta-test'
       }, function (error, code, body) {
@@ -1223,7 +1223,7 @@ var dialogSequence = [
    ['Dialog 42: Text-only response has no tool block chunks', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
          provider: 'openai',
-         model: 'gpt-5.2-codex',
+         model: 'gpt-5.4',
          prompt: 'Say hello and nothing else. Do not use any tools.',
          slug: 'no-tool-test'
       }, function (error, code, body) {
@@ -1256,7 +1256,7 @@ var dialogSequence = [
 
          httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
             provider: 'openai',
-            model: 'gpt-5.2-codex',
+            model: 'gpt-5.4',
             prompt: 'Use edit_file to replace "line 5 replace me" with "line 5 replaced" in to-edit.txt. Do only this one tool call, nothing else.',
             slug: 'edit-delta-test'
          }, function (error, code, body) {
@@ -1289,7 +1289,7 @@ var dialogSequence = [
    ['Dialog 44: Tool call description in markdown', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
          provider: 'openai',
-         model: 'gpt-5.2-codex',
+         model: 'gpt-5.4',
          prompt: 'Use run_command to run `echo hello-description-test`. Do only this one tool call, nothing else.',
          slug: 'desc-test'
       }, function (error, code, body) {
@@ -1334,7 +1334,7 @@ var dialogSequence = [
    ['Dialog 45: tool_request event has description in input', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
          provider: 'openai',
-         model: 'gpt-5.2-codex',
+         model: 'gpt-5.4',
          prompt: 'Use write_file to create a file called desc-test-file.txt with content "hello". Do only this one tool call.',
          slug: 'desc-event-test'
       }, function (error, code, body) {
@@ -1374,8 +1374,8 @@ var dialogSequence = [
    ['Dialog 47: launch_agent spawns a sibling dialog', 'get', 'project/' + DIALOG_PROJECT + '/dialogs', {}, '', 200, function (s, rq, rs, next) {
       httpJson ('POST', '/project/' + DIALOG_PROJECT + '/dialog', {
          provider: 'openai',
-         model: 'gpt-5.2-codex',
-         prompt: 'Use launch_agent exactly once. Spawn a sibling agent with provider openai, model gpt-5.2-codex, slug spawned-agent-test, and prompt "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools." After launching it, briefly say that you spawned it. Do not use any other tools.',
+         model: 'gpt-5.4',
+         prompt: 'Use launch_agent exactly once. Spawn a sibling agent with provider openai, model gpt-5.4, slug spawned-agent-test, and prompt "Use run_command to execute `sleep 5 && echo CHILD READY`, then reply with exactly CHILD READY. Do not use any other tools." After launching it, briefly say that you spawned it. Do not use any other tools.',
          slug: 'spawn-parent-test'
       }, function (error, code, body) {
          if (error) return log ('POST /dialog failed: ' + error.message);
@@ -1397,7 +1397,7 @@ var dialogSequence = [
             var launched = (((toolResults [0] || {}).tool || {}).result || {}).launched;
             if (type (launched) !== 'object' || ! launched.dialogId) return log ('launch_agent result missing launched dialog payload');
             if (launched.provider !== 'openai') return log ('Expected spawned provider openai, got ' + launched.provider);
-            if (launched.model !== 'gpt-5.2-codex') return log ('Expected spawned model gpt-5.2-codex, got ' + launched.model);
+            if (launched.model !== 'gpt-5.4') return log ('Expected spawned model gpt-5.4, got ' + launched.model);
             if (! launched.filename || launched.filename.indexOf ('-active.md') === -1 && launched.filename.indexOf ('-done.md') === -1) return log ('Unexpected spawned filename: ' + launched.filename);
             s.spawnChildDialogId = launched.dialogId;
             next ();
@@ -1971,7 +1971,7 @@ var staticSequence = [
       return true;
    }],
 
-   ['Static 3: Create dialog draft (orchestrator)', 'post', 'project/' + STATIC_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['Static 3: Create dialog draft (orchestrator)', 'post', 'project/' + STATIC_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.4', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.staticDialogId = rs.body.dialogId;
@@ -2091,7 +2091,7 @@ var backendSequence = [
       return true;
    }],
 
-   ['Backend 3: Create dialog draft (orchestrator)', 'post', 'project/' + BACKEND_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.2-codex', slug: 'orchestrator'}, 200, function (s, rq, rs) {
+   ['Backend 3: Create dialog draft (orchestrator)', 'post', 'project/' + BACKEND_PROJECT + '/dialog/new', {}, {provider: 'openai', model: 'gpt-5.4', slug: 'orchestrator'}, 200, function (s, rq, rs) {
       if (type (rs.body) !== 'object') return log ('dialog/new should return object');
       if (! rs.body.dialogId || ! rs.body.filename) return log ('missing dialogId or filename');
       s.backendDialogId = rs.body.dialogId;

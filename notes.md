@@ -1,5 +1,41 @@
 ## Vibey development notes
 
+### 2026-05-09
+
+#### Incident report
+
+Error messages from user: 22, 502 unreachable the app. The static website is up.
+Checking things at 0620 the next day. acdev server is up. Last restart five days ago.
+
+- Error reported on 2026-05-08 around 22 UTC.
+- Checking things at 0620 on 2026-05-09. Host server is up. Last server restart was five days ago. Static page is up. App is confirmed down with 502.
+
+Vibey logs:
+
+```
+vibey-1  | 2026-05-08T22:19:48.784Z DOCK-RS 47403640ea97 [ID REDACTED]-[PROJECT NAME REDACTED] OK (45ms)
+vibey-1  | 2026-05-08T22:19:48.784Z HTTP-RS 9d16dc0e14a8 GET /project/[PROJECT NAME REDACTED]/dialog/20260508-221924-triggered 304 (324ms)
+vibey-1  | 2026-05-08T22:21:09.210Z HTTP-RQ 173f1f0ec08d POST /trigger [IP REDACTED]
+vibey-1  | {
+vibey-1  |   priority: 'critical',
+vibey-1  |   type: 'server error',
+vibey-1  |   error: TypeError: Cannot read properties of undefined (reading 'prompt')
+vibey-1  |       at AsyncFunction.routes (/app/server.js:3846:28)
+vibey-1  |       at process.processTicksAndRejections (node:internal/process/task_queues:103:5),
+vibey-1  |   stack: "TypeError: Cannot read properties of undefined (reading 'prompt')\n" +
+vibey-1  |     '    at AsyncFunction.routes (/app/server.js:3846:28)\n' +
+vibey-1  |     '    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)',
+vibey-1  |   origin: 'unhandledRejection'
+```
+
+Issues:
+- No proper validation on the endpoint.
+- No restarting on uncaught error.
+
+Immediate fix: require a body.
+
+Later: add workers to the model, and shared memory. Restart workers when they fail. Add supervision with mongroup.
+
 ### 2026-05-07
 
 Things I'd like to do in vibey, reprise:
