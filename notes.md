@@ -2,6 +2,25 @@
 
 ### 2026-05-09
 
+Thinking of Steve Jobs' x3 when he announced the iphone. A great deal of the value was on the integration of those three things (ipod, phone, internet device). In vibey:
+- File viewer/editor
+- AI agent
+- Personal cloud server
+
+With native apps, the apps are guests on your computer, although they mostly have their own data space. With cloud apps, you're a guest in their space, also your data. With vibey apps, your space is again home, and the apps are guests. The apps can use the dataspace of your home, rather than being a silo. This has profound and immediate consequences in what's possible.
+
+Apps I'd like to have in vibey:
+- Email
+- Winamp-like player
+- Tagaway-like photo/video organizer (tags, dedup)
+
+Comparing vibey to something like exe.dev:
+- Containers instead of servers/engines, so you can start over easily (though if there's a quick restore function, that'd be the same). But, with containers you can share the space of an engine with full independence between projects. Smaller blast radius.
+- Autogit built-in.
+- Auto backup built in.
+
+It's crucial to be able to quickly see an earlier response from the agent as one block, and to go up visually. In terminal based agents, scrolling up still makes it hard to distinguish what was 2-3 messages ago.
+
 #### Incident report
 
 Error messages from user: 22, 502 unreachable the app. The static website is up.
@@ -51,6 +70,8 @@ Things I'd like to do in vibey, reprise:
 I'm rethinking the tagline to something else. The key thing is not making things happen, but creating a digital, habitable, personal or small-group-like. That's the key, the trust and the habitability.
 - Make yourself at cloud
 - Your home cloud
+- A cloud of your own
+- A personal cloud
 
 Habitability: a space you can make your own. The building blocks, properly shaped, so you can build with them. More than enough trust so that you decide it's worth your while to build upon this. Building requires: the possibility of doing it, and the trust to make it good to invest time in it.
 
