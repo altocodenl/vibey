@@ -1,5 +1,90 @@
 ## Vibey development notes
 
+### 2026-05-11
+
+Attachments suck, because of their separateness.
+
+I just realized that everything is a file, in vibey. Or almost. It's all on the left side. Innovations:
+- Don't show the directories, just put them as prefixes. To narrow it down, just search. (idea to experiment with: you can click on the slashes to hide/show a prefix).
+- The dialogs go there too.
+- The apps go there too, at the bottom. Embeds can be little docs that open apps. You could put it as an app.
+
+There's really just two views:
+- Project/engine (outer)
+- Inside the project (inner)
+
+Modals (alcoves):
+- Engine properties
+- Project connection properties
+- General settings: AI, editor mode
+
+Show the project under its engine, isomorphic to how files are inside projects.
+
+Engine > Project > File
+
+With processes represented as files (through an embed block), we have a single interface for them. It's a bit rough, but it can make the process much more tangible: just tell the agent (or the process itself) to put the file with the embed block so you can see it.
+
+Should we just use the embed block as the only way to link to an app? Perhaps!
+
+A wild idea: have iframes to siloed apps, like figma. Open a figma project in a vibey tab, have it accessible there.
+
+Parts:
+1) Editor
+2) Engine
+3) Apps?
+
+Having everything in vibey reminds me of emacs.
+
+What would make vibey production ready?
+- Solid editor.
+- Rewritten server with SSE state in redis & fork, even for local.
+- Autobackup to S3.
+- Engine.
+
+Engine/project config:
+- Nginx config (forwarding of A traffic)
+- Forwarding of MX (email) to different projects
+- Show IP
+- Cron of when to restart
+- Confirm upgrade of OS, if available
+
+What can you do with vibey?
+- Internal apps/dasboards.
+- Research.
+- Simple workflows involving AI.
+- Publish docs/articles/landing pages.
+- Degoogling?
+- Email?
+
+Thinking not in terms of flows, but actions/transformations:
+- AI
+   - Send a message
+   - Receive a message
+   - Browse previous messages
+   - Inspect tool usage
+- Files
+   - Create/delete
+   - Edit
+   - Upload
+   - See
+      - Text
+      - Code
+      - Audio/video
+      - PDF
+- Host
+   - Receive HTTPS calls
+   - Receive emails
+- Publish/
+   - Static markdown
+   - Static HTML
+   - Folder/project (readonly)
+
+Things in the back:
+- Autogit
+- Autobucket
+- Uptime
+- Forwarding
+
 ### 2026-05-09
 
 Thinking of Steve Jobs' x3 when he announced the iphone. A great deal of the value was on the integration of those three things (ipod, phone, internet device). In vibey:

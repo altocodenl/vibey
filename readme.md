@@ -1062,6 +1062,7 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
 
+- Old client: scroll docs & dialogs bar
 - Server
    - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
    - Don't display slugs for projects, just use project names and let the slugs be an internal thing, resolved inside past the router. Don't return slugs for projects.
@@ -1079,7 +1080,6 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 
 - cclient
    - Doc
-      - Show normal project name instead of slugified
       - Back button to go back to projects
       - Save doc every n (5) seconds if there are changes, or when switching docs, or when closing the tab
       - Improve look of toggler
@@ -1101,7 +1101,9 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
    - Project:
       - Download, upload with name
       - Access:
-         - Make doc/folder public, open to another user (write)
+         - Make doc/folder/project public
+            - Autorender public markdown files to nice HTML
+            - Allow making an entire project public. What's public is the read-only of everything's that in there. It could be just like the vibey interface, but with the editing off.
          - Make project open to another user
    - Docs & dialogs
       - Embedding in doc

@@ -53,9 +53,10 @@ B.mrespond ([
 
       if (hash.length > 1) {
          if (hash [0] !== 'project') return B.call (x, 'navigate', 'projects');
-         var projectViews = ['doc', 'dialog', 'file'];
-         if (! inc (projectViews, hash [2])) return B.call (x, 'navigate', 'projects');
-         B.call (x, 'set', 'project', hash [1]);
+         B.call (x, 'set', 'project', decodeURIComponent (hash [1]));
+
+         if (! hash [2]) B.call (x, 'navigate', 'projects/' + hash [1] + '/main.md');
+         else            B.call (x, 'set', 'file', 'name', decodeURIComponent (hash [2]));
       }
 
       B.call (x, 'set', 'view', hash [0]);
@@ -67,7 +68,7 @@ B.mrespond ([
       }
 
       if (hash [0] === 'project') {
-         B.call (x, 'load', 'files', hash [1]);
+         B.call (x, 'load', 'files');
       }
    }],
 
@@ -106,6 +107,7 @@ B.mrespond ([
       }
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
+         if (error) clog (error.responseText);
          if (error && error.status === 403 && x.path [0].indexOf ('auth/') !== 0) {
             B.call (x, 'set', [], {auth: {mode: 'cloud'}});
             B.call (x, 'navigate', 'login');
@@ -194,7 +196,7 @@ B.mrespond ([
          B.call (x, 'snackbar', 'ok', 'Project created');
 
          B.call (x, 'rem', 'new', 'project');
-         B.call (x, 'navigate', 'project/' + slugify (name) + '/doc');
+         B.call (x, 'navigate', 'project/' + slugify (name));
          B.call (x, 'load', 'projects');
       });
    }],
@@ -223,22 +225,22 @@ B.mrespond ([
 
    // *** FILES ***
 
-   ['load', 'files', function (x, project) {
-      B.call (x, 'get', 'project/' + encodeURIComponent (project) + '/files', function (x, error, rs) {
+   ['load', 'files', function (x) {
+      B.call (x, 'get', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/files', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          B.call (x, 'set', 'files', rs.body);
       });
    }],
 
    ['change', ['file', 'name'], function (x) {
-      B.call (x, 'get', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
+      B.call (x, 'get', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
          B.call (x, 'set', ['file', 'content'], rs.body.content);
       });
    }],
 
    ['save', 'file', function (x, ev) {
-      B.call (x, 'post', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), {content: ev.value}, function (x, error, rs) {
+      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + B.get ('file', 'name'), {content: ev.value}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem saving the file');
          B.call (x, 'mset', ['file', 'conent'], ev.value);
       });
@@ -539,7 +541,7 @@ views.projects = function () {
                   return ['div', {
                      class: 'flex justify-between items-center pa3 br3 mb3 pointer',
                      style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}) ,
-                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.slug) + '/doc')
+                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.name) + '/doc')
                   }, [
                      ['span', {class: 'f4 fw6 lh-copy'}, project.name],
                      ['span', {
@@ -577,7 +579,14 @@ views.projects = function () {
 views.project = function () {
    return B.view ('project', function (project) {
       return ['div', {class: 'project-shell bg-app-bg'}, [
-         ['div', {class: 'f2 fw7 text-bright'}, project],
+         ['div', {class: 'flex items-center'}, [
+            ['span', {
+               class: 'f1 fw7 light-blue pointer mr3',
+               style: style ({'line-height': 1}),
+               onclick: B.ev ('navigate', 'projects')
+            }, '‹'],
+            ['span', {class: 'f2 fw7 text-bright'}, project]
+         ]],
          ['div', {class: 'project-main'}, [
             B.view ([['files'], ['file', 'name']], function (files, name) {
                return ['div', {class: 'project-pane project-pane-left'}, [
