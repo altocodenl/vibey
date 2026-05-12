@@ -1080,10 +1080,6 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 
 - cclient
    - Doc
-      - Back button to go back to projects
-      - Save doc every n (5) seconds if there are changes, or when switching docs, or when closing the tab
-      - Improve look of toggler
-      - Highlight the main doc
       - Create new doc
       - Delete existing doc (except main, also block it in the server)
    - Dialog

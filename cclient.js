@@ -51,12 +51,29 @@ B.mrespond ([
       if (inc (loggedViews, hash [0]) && ! B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'login');
       if (inc (authViews,   hash [0]) &&   B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'projects');
 
-      if (hash.length > 1) {
-         if (hash [0] !== 'project') return B.call (x, 'navigate', 'projects');
+      if (hash.length > 1 && hash [0] !== 'project') return B.call (x, 'navigate', 'projects');
+
+      if (hash [0] === 'project') {
+
+         if (hash.length === 1) return B.call (x, 'navigate', 'projects');
+
+         var projects = B.get ('projects');
+         if (projects && ! dale.stop (projects, true, function (Project) {
+            return Project.name === decodeURIComponent (hash [1]);
+         })) return B.call (x, 'navigate', 'projects');
+
          B.call (x, 'set', 'project', decodeURIComponent (hash [1]));
 
-         if (! hash [2]) B.call (x, 'navigate', 'projects/' + hash [1] + '/main.md');
-         else            B.call (x, 'set', 'file', 'name', decodeURIComponent (hash [2]));
+         if (! hash [2]) return B.call (x, 'navigate', 'project/' + hash [1] + '/doc/main.md');
+
+         var file = decodeURIComponent (hash.slice (2).join ('/'));
+
+         var files = B.get ('files');
+         if (files && ! inc (files, file)) return B.call (x, 'navigate', 'project/' + hash [1] + '/doc/main.md');
+
+         B.call (x, 'set', ['file', 'name'], file);
+
+         B.call (x, 'load', 'files');
       }
 
       B.call (x, 'set', 'view', hash [0]);
@@ -65,10 +82,6 @@ B.mrespond ([
          B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
          B.call (x, 'load', 'settings');
-      }
-
-      if (hash [0] === 'project') {
-         B.call (x, 'load', 'files');
       }
    }],
 
@@ -179,6 +192,7 @@ B.mrespond ([
       return ['load', entity, function (x) {
          B.call (x, 'get', entity, function (x, error, rs) {
             if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + entity);
+
             B.call (x, 'set', entity, rs.body);
          });
       }];
@@ -211,6 +225,11 @@ B.mrespond ([
       });
    }],
 
+   ['change', /^(projects|files)$/, function (x) {
+      // To validate if the project or file exists after we load the list of projects or the list of files
+      B.call (x, 'read', 'hash');
+   }],
+
    ['keydown', [], function (x, ev) {
       if (B.get ('new', 'project') === undefined) return;
       if (ev.key === 'Enter') {
@@ -221,6 +240,10 @@ B.mrespond ([
 
    ['change', ['new', 'project'], {priority: -1000}, function (x) {
       if (B.get ('new', 'project') !== undefined) c ('.project-modal-input') [0].focus ();
+   }],
+
+   ['change', ['new', 'file'], {priority: -1000}, function (x) {
+      if (B.get ('new', 'file') !== undefined) c ('.new-file-input') [0].focus ();
    }],
 
    // *** FILES ***
@@ -239,10 +262,10 @@ B.mrespond ([
       });
    }],
 
-   ['save', 'file', function (x, ev) {
-      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + B.get ('file', 'name'), {content: ev.value}, function (x, error, rs) {
+   ['save', 'file', function (x, value) {
+      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + B.get ('file', 'name'), {content: value}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem saving the file');
-         B.call (x, 'mset', ['file', 'conent'], ev.value);
+         B.call (x, 'mset', ['file', 'content'], value);
       });
    }],
 
@@ -376,7 +399,7 @@ css.style = [
    }],
    ['.project-main', {
       display: 'grid',
-      'grid-template-columns': '38.2fr 61.8fr',
+      'grid-template-columns': '23.6fr 76.4fr',
       gap: 24,
       flex: 1,
       width: 1,
@@ -541,7 +564,7 @@ views.projects = function () {
                   return ['div', {
                      class: 'flex justify-between items-center pa3 br3 mb3 pointer',
                      style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}) ,
-                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.name) + '/doc')
+                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.name))
                   }, [
                      ['span', {class: 'f4 fw6 lh-copy'}, project.name],
                      ['span', {
@@ -577,7 +600,9 @@ views.projects = function () {
 }
 
 views.project = function () {
-   return B.view ('project', function (project) {
+   return B.view ([['projects'], ['project']], function (projects, project) {
+      if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
+
       return ['div', {class: 'project-shell bg-app-bg'}, [
          ['div', {class: 'flex items-center'}, [
             ['span', {
@@ -588,21 +613,55 @@ views.project = function () {
             ['span', {class: 'f2 fw7 text-bright'}, project]
          ]],
          ['div', {class: 'project-main'}, [
-            B.view ([['files'], ['file', 'name']], function (files, name) {
-               return ['div', {class: 'project-pane project-pane-left'}, [
-                  ['br'], ['br'],
-                  ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file) {
-                     return ['div', {class: 'mb2 pb2', style: style ({'border-bottom': '1px solid ' + css.colors.border})}, [
-                        ['div', {
-                           class: (file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer',
-                           onclick: B.ev ('set', ['file', 'name'], file)
-                        }, (function () {
-                           if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], file.replace (/^doc\//, '').replace (/.md$/, '')];
-                           return file;
-                        }) ()]
+            B.view ([['files'], ['file', 'name'], ['new', 'file']], function (files, name, newFile) {
+               return ['div', {class: 'project-pane project-pane-left', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
+                  ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
+                     ['br'], ['br'],
+                     ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file) {
+                        var active = file === name;
+                        return ['div', {
+                           class: 'mb2 pb2',
+                           style: style ({
+                              'border-bottom': '1px solid ' + css.colors.border,
+                              'background-color': active ? 'rgba(74, 105, 189, 0.25)' : undefined,
+                              'border-left': active ? '3px solid ' + css.colors.link : '3px solid transparent',
+                              padding: '8px 10px',
+                              'border-radius': 4,
+                           })
+                        }, [
+                           ['div', {
+                              class: (active ? 'text-bright fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer',
+                              onclick: B.ev ('navigate', 'project/' + B.get ('project') + '/' + file)
+                           }, (function () {
+                              if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], file.replace (/^doc\//, '').replace (/.md$/, '')];
+                              return file;
+                           }) ()]
 
-                     ]];
-                  })]
+                        ]];
+                     })]
+                  ]],
+                  ['button', {
+                     class: css.buttonWide + ' mt3 f5 shadow-primary',
+                     onclick: B.ev ('set', ['new', 'file'], '')
+                  }, '+ New doc'],
+                  newFile !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'file')}, [
+                     ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
+                        ['div', {class: 'project-modal-kicker'}, 'New doc'],
+                        ['div', {class: 'project-modal-title'}, 'Name your new doc...'],
+                        ['input', {
+                           class: css.input + ' mb0 new-file-input',
+                           type: 'text',
+                           placeholder: 'my-doc',
+                           value: newFile,
+                           oninput: B.ev ('set', ['new', 'file']),
+                           onkeydown: B.ev ('keydown', 'file', {raw: 'event'})
+                        }],
+                        ['div', {class: 'modal-actions'}, [
+                           ['button', {class: css.button, onclick: B.ev ('rem', 'new', 'file')}, 'Cancel'],
+                           ['button', {class: css.button, onclick: B.ev ('create', 'file'), disabled: ! ((newFile || '').trim ())}, 'Create doc']
+                        ]]
+                     ]]
+                  ]] : ''
                ]];
             }),
             B.view ([['file', 'content'], ['file', 'mode']], function (content, mode) {
@@ -621,11 +680,11 @@ views.project = function () {
                      if (mode === 'edit') return ['textarea', {
                         class: 'db w-100 bn outline-0 text-bright lh-copy f5',
                         style: style ({'background-color': css.colors.surface, color: css.colors.textBright, flex: 1, resize: 'none', 'font-family': 'monospace'}),
-                        oninput: B.ev ('save', 'file', {raw: 'event'}),
-                        onchange: B.ev ('save', 'file', {raw: 'event'}),
+                        oninput:  B.ev ('save', 'file', {raw: 'this.value'}),
+                        onchange: B.ev ('save', 'file', {raw: 'this.value'}),
                         value: content
                      }, content || ''];
-                     return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', /*marked.parse (content || '')*/]];
+                     return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
                   }) (),
                ]];
             }),

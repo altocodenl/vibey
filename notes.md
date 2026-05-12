@@ -1,5 +1,25 @@
 ## Vibey development notes
 
+### 2026-05-12
+
+What is there?
+
+- Files
+- Processes/computing
+- AI as a shell, also as programmer
+- The ability to receive traffic (HTTPS & email), not just send it
+
+===
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- Can you highlight more the file that is currently selected?
+- Now, please give a bit more of padding to the file entry on the left, it's too cramped
+- If using the golden ratio, how could we still shrink the left part of the view and increase the right one?
+- If there are unsaved changes when closing the tab, all I can do is just stop it with a before unload? Or just delay it a bit while I save? What are my options?
+- What's the frequency of saving on google sheets?
+- Please add the button and the modal (copying the modal from the one for new project) to create a new file. I'll handle the button logic. Please make the button a big, nice one at the bottom of the left column.
+
 ### 2026-05-11
 
 Attachments suck, because of their separateness.
