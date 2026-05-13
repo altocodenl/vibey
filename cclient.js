@@ -225,21 +225,26 @@ B.mrespond ([
       });
    }],
 
+   // *** PROJECTS & FILES ***
+
    ['change', /^(projects|files)$/, function (x) {
       // To validate if the project or file exists after we load the list of projects or the list of files
       B.call (x, 'read', 'hash');
    }],
 
    ['keydown', [], function (x, ev) {
-      if (B.get ('new', 'project') === undefined) return;
-      if (ev.key === 'Enter') {
-         B.call (x, 'create', 'project');
-         B.call (x, 'rem', 'new', 'project');
-      }
+      if (ev.key !== 'Enter') return;
+      dale.stopNot (['project', 'file'], undefined, function (entity) {
+         if (B.get ('new', entity) !== undefined) {
+            B.call (x, 'create', entity);
+            B.call (x, 'rem', 'new', entity);
+            return true;
+         }
+      });
    }],
 
    ['change', ['new', 'project'], {priority: -1000}, function (x) {
-      if (B.get ('new', 'project') !== undefined) c ('.project-modal-input') [0].focus ();
+      if (B.get ('new', 'project') !== undefined) c ('.new-project-input') [0].focus ();
    }],
 
    ['change', ['new', 'file'], {priority: -1000}, function (x) {
@@ -262,13 +267,25 @@ B.mrespond ([
       });
    }],
 
-   ['save', 'file', function (x, value) {
-      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + B.get ('file', 'name'), {content: value}, function (x, error, rs) {
-         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem saving the file');
-         B.call (x, 'mset', ['file', 'content'], value);
+   ['save', 'file', function (x, name, value, New) {
+      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + name, {content: value}, function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
+
+         if (! New) B.call (x, 'mset', ['file', 'content'], value);
+         else       B.call (x, 'navigate', 'project/' + B.get ('project') + '/' + name);
       });
    }],
 
+   ['create', 'file', function (x) {
+      var name = B.get ('new', 'file').trim ();
+      if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a file name');
+      name = 'doc/' + name + '.md';
+
+      B.call (x, 'madd', 'files', name);
+      B.call (x, 'save', 'file', name, '', 'new');
+      B.call (x, 'rem', 'new', 'file');
+      B.call (x, 'load', 'files');
+   }],
 
 ]);
 
@@ -582,7 +599,7 @@ views.projects = function () {
                ['div', {class: 'project-modal-kicker'}, 'New project'],
                ['div', {class: 'project-modal-title'}, 'Name your next world...'],
                ['input', {
-                  class: css.input + ' mb0 project-modal-input',
+                  class: css.input + ' mb0 new-project-input',
                   type: 'text',
                   placeholder: 'I have this idea',
                   value: newProject,
@@ -614,6 +631,7 @@ views.project = function () {
          ]],
          ['div', {class: 'project-main'}, [
             B.view ([['files'], ['file', 'name'], ['new', 'file']], function (files, name, newFile) {
+               files = teishi.copy (files).sort ();
                return ['div', {class: 'project-pane project-pane-left', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
@@ -644,6 +662,7 @@ views.project = function () {
                      class: css.buttonWide + ' mt3 f5 shadow-primary',
                      onclick: B.ev ('set', ['new', 'file'], '')
                   }, '+ New doc'],
+
                   newFile !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'file')}, [
                      ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
                         ['div', {class: 'project-modal-kicker'}, 'New doc'],
@@ -680,8 +699,8 @@ views.project = function () {
                      if (mode === 'edit') return ['textarea', {
                         class: 'db w-100 bn outline-0 text-bright lh-copy f5',
                         style: style ({'background-color': css.colors.surface, color: css.colors.textBright, flex: 1, resize: 'none', 'font-family': 'monospace'}),
-                        oninput:  B.ev ('save', 'file', {raw: 'this.value'}),
-                        onchange: B.ev ('save', 'file', {raw: 'this.value'}),
+                        oninput:  B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
+                        onchange: B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
                         value: content
                      }, content || ''];
                      return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];

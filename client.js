@@ -3922,23 +3922,25 @@ views.dialogs = function () {
             ['span', {class: 'file-list-title'}, 'Dialogs'],
             ['button', {class: 'primary btn-small', onclick: B.ev ('create', 'dialog'), disabled: noProvider}, '+ New']
          ]],
-         dialogFiles && dialogFiles.length > 0
-            ? dale.go (dialogFiles, function (name) {
-               var isActive = currentFile && currentFile.name === name;
-               var parsedDialog = h.parseDialogFilename (name) || {status: null};
-               var displayName = h.dialogDisplayLabel (name);
-               return ['div', {
-                  class: 'file-item' + (isActive ? ' file-item-active' : ''),
-                  onclick: viewportPhone ? B.ev (['load', 'file', name], ['set', 'mobileDialogsPanel', null]) : B.ev ('load', 'file', name)
-               }, [
-                  ['span', {class: 'dialog-name'}, h.statusIcon (parsedDialog.status) + ' ' + displayName],
-                  ['span', {
-                     class: 'file-delete',
-                     onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
-                  }, '×']
-               ]];
-            })
-            : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No dialogs yet']
+         ['div', {class: 'file-list-scroll'}, [
+            dialogFiles && dialogFiles.length > 0
+               ? dale.go (dialogFiles, function (name) {
+                  var isActive = currentFile && currentFile.name === name;
+                  var parsedDialog = h.parseDialogFilename (name) || {status: null};
+                  var displayName = h.dialogDisplayLabel (name);
+                  return ['div', {
+                     class: 'file-item' + (isActive ? ' file-item-active' : ''),
+                     onclick: viewportPhone ? B.ev (['load', 'file', name], ['set', 'mobileDialogsPanel', null]) : B.ev ('load', 'file', name)
+                  }, [
+                     ['span', {class: 'dialog-name'}, h.statusIcon (parsedDialog.status) + ' ' + displayName],
+                     ['span', {
+                        class: 'file-delete',
+                        onclick: B.ev ('delete', 'file', name, {stopPropagation: true})
+                     }, '×']
+                  ]];
+               })
+               : ['div', {style: style ({color: '#666', 'font-size': '13px'})}, 'No dialogs yet']
+         ]]
       ]];
 
       return ['div', {class: 'files-container' + (viewportPhone ? ' files-container-phone' : '')}, [
