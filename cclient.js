@@ -75,6 +75,7 @@ B.mrespond ([
 
          B.call (x, 'load', 'files');
       }
+      if (hash [0] !== 'project') B.call (x, 'rem', [], 'file');
 
       B.call (x, 'set', 'view', hash [0]);
 
@@ -285,6 +286,16 @@ B.mrespond ([
       B.call (x, 'save', 'file', name, '', 'new');
       B.call (x, 'rem', 'new', 'file');
       B.call (x, 'load', 'files');
+   }],
+
+   ['remove', 'file', function (x, file) {
+      if (! confirm ('Delete file"' + file + '"? This cannot be undone.')) return;
+
+      B.call (x, 'delete', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + file, function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
+         B.call (x, 'load', 'files');
+         if (B.get ('file', 'name') === file) B.call (x, 'navigate', 'project/' + B.get ('project') + '/doc/main.md');
+      });
    }],
 
 ]);
@@ -571,7 +582,7 @@ views.projects = function () {
                ['button', {
                   class: css.buttonWide + ' mw6 ph4 f4 shadow-primary',
                   onclick: B.ev ('set', ['new', 'project'], '')
-               }, '+ New project']
+               }, '+ New']
             ]],
             (function () {
                if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
@@ -630,8 +641,8 @@ views.project = function () {
             ['span', {class: 'f2 fw7 text-bright'}, project]
          ]],
          ['div', {class: 'project-main'}, [
-            B.view ([['files'], ['file', 'name'], ['new', 'file']], function (files, name, newFile) {
-               files = teishi.copy (files).sort ();
+            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove']], function (files, name, newFile, remove) {
+               files = (teishi.copy (files) || []).sort ();
                return ['div', {class: 'project-pane project-pane-left', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
@@ -648,20 +659,36 @@ views.project = function () {
                            })
                         }, [
                            ['div', {
-                              class: (active ? 'text-bright fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer',
-                              onclick: B.ev ('navigate', 'project/' + B.get ('project') + '/' + file)
-                           }, (function () {
-                              if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], file.replace (/^doc\//, '').replace (/.md$/, '')];
-                              return file;
-                           }) ()]
+                              class: 'flex justify-between items-center'
+                           }, [
+                              ['div', {
+                                 class: (active ? 'text-bright fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer',
+                                 onclick: B.ev ('navigate', 'project/' + B.get ('project') + '/' + file)
+                              }, (function () {
+                                 if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], file];
+                                 return file;
+                              }) ()],
+                              remove ? ['span', {
+                                 class: 'f4 lh-solid pointer',
+                                 style: style ({color: css.colors.purple}),
+                                 onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'file', file])
+                              }, '×'] : []
+                           ]]
 
                         ]];
                      })]
                   ]],
-                  ['button', {
-                     class: css.buttonWide + ' mt3 f5 shadow-primary',
-                     onclick: B.ev ('set', ['new', 'file'], '')
-                  }, '+ New doc'],
+                  ['div', {class: 'flex mt3', style: style ({gap: '0.5rem'})}, [
+                     ['button', {
+                        class: css.button + ' f6 ph3 pv2 shadow-primary',
+                        onclick: B.ev ('set', ['new', 'file'], '')
+                     }, '+ Add'],
+                     ['button', {
+                        class: css.button + ' f6 ph3 pv2',
+                        style: style ({'background-color': css.colors.purple}),
+                        onclick: B.ev ('set', ['file', 'remove'], ! remove)
+                     }, 'X ' + (remove ? 'Done removing' : 'Remove')],
+                  ]],
 
                   newFile !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'file')}, [
                      ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
@@ -683,17 +710,18 @@ views.project = function () {
                   ]] : ''
                ]];
             }),
-            B.view ([['file', 'content'], ['file', 'mode']], function (content, mode) {
+            B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name']], function (content, mode, fileName) {
                return ['div', {class: 'project-pane project-pane-right'}, [
                   ['div', {class: 'flex items-center mb3'}, [
+                     ['span', {class: 'fw6 text-bright mr3'}, (fileName || '').replace (/^doc\//, '').replace (/\.md$/, '')],
                      ['span', {
                         class: 'pointer fw6 mr3 ' + (mode !== 'edit' ? 'text-bright' : 'text-muted'),
                         onclick: B.ev ('set', ['file', 'mode'], 'view')
-                     }, 'View'],
+                     }, [['i', {class: 'bi bi-eye mr1'}], 'View']],
                      ['span', {
                         class: 'pointer fw6 ' + (mode === 'edit' ? 'text-bright' : 'text-muted'),
                         onclick: B.ev ('set', ['file', 'mode'], 'edit')
-                     }, 'Edit'],
+                     }, [['i', {class: 'bi bi-hand-index mr1'}], 'Edit']],
                   ]],
                   (function () {
                      if (mode === 'edit') return ['textarea', {

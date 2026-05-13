@@ -1079,9 +1079,6 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
    - Replace puppeteer with playwright
 
 - cclient
-   - Doc
-      - Create new doc
-      - Delete existing doc (except main, also block it in the server)
    - Dialog
       - Configure AI provider modal: openai, claude (special usage), api keys
       - Create dialog
@@ -1111,6 +1108,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
       - Share project with another user
       - Dialog without AI: slider to turn off.
       - Syntax highlighting for code.
+      - Multiple tabs open at the same time, split the screen
    - Vi mode
       - Enable/disable in settings.
       - Normal vs insert mode: to normal with escape or command+l. To insert with i I, a A, o O.
@@ -1157,6 +1155,7 @@ auth csrf "<CSRF token>"
      signupRequested <0|1> // Whether a signup was just requested
 file content "..." // Current file selected
      mode <edit|view> // Whether we're editing the file we're viewing or not
+     remove // If set, when clicking on a file we show crosses to remove them.
      name "..."
 files 1 "<filename 1>" // List of files for current project
       ...
@@ -1164,7 +1163,8 @@ models anthropic "<model name>" context <size of context window in tokens>
                  ...
        openai "<model name> context <size of context window in tokens>
               ...
-new project "<project name>" // Enables the new project modal
+new file "<file name>" // Name for a new file
+    project "<project name>" // Enables the new project modal
 project "<project slug>" // The current project selected
 projects 1 name "<project name>"
            slug "<project slug>"

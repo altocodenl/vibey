@@ -1,5 +1,36 @@
 ## Vibey development notes
 
+### 2026-05-13
+
+There's an interesting dualism between OS and language that reminds me of client and server. I'm not exactly sure which is which. In what I'm building, the parts are vibey and cell.
+
+The pattern for validating that the URL is correct is to make certain updates run the `read hash` responder, and let that responder validate against what's there. It took me a couple of tries to figure that out.
+
+AI for creating generated structure:
+- Can AI see the wholeness?
+- Can it differentiate existing centers to strengthen them?
+
+In vim, the file itself vs folders is modal, in the way I use it. I'm either in a file, switching files with shortcuts, or going
+
+Shift+click to open several tabs, autodivide the screen vertically!
+
+Two questions coming from reading Alexander's The Process of Creating Life:
+- Is language geometrical?
+- Is generated structure non-teleological?
+
+What I perceive that clankers are good at:
+- Pointing out issues in code.
+- Coming up with a quick prototype.
+- Explaining things.
+- Giving feedback about ideas.
+
+===
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- Please add the name of the open file to the left of View and Edit
+- Please add crosses next to the files (like we do for projects) when the remove mode is on.
+
 ### 2026-05-12
 
 What is there?
