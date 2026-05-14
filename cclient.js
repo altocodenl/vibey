@@ -100,6 +100,7 @@ B.mrespond ([
          if (snackbar.timeout) clearTimeout (snackbar.timeout);
          B.call (x, 'rem', [], 'snackbar');
       }
+      if (type === 'clear') return;
 
       var timeout = setTimeout (function () {
          B.call (x, 'rem', [], 'snackbar');
@@ -208,10 +209,12 @@ B.mrespond ([
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
       B.call (x, 'post', 'projects', {name: name}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
-         B.call (x, 'snackbar', 'ok', 'Project created');
+
+         B.call (x, 'snackbar', 'clear');
 
          B.call (x, 'rem', 'new', 'project');
-         B.call (x, 'navigate', 'project/' + slugify (name));
+         B.call (x, 'add', 'projects', {name: name});
+         B.call (x, 'navigate', 'project/' + name + '/doc/main.md');
          B.call (x, 'load', 'projects');
       });
    }],
@@ -233,15 +236,10 @@ B.mrespond ([
       B.call (x, 'read', 'hash');
    }],
 
-   ['keydown', [], function (x, ev) {
+   ['keydown', '*', function (x, ev) {
+      var entity = x.path [0];
       if (ev.key !== 'Enter') return;
-      dale.stopNot (['project', 'file'], undefined, function (entity) {
-         if (B.get ('new', entity) !== undefined) {
-            B.call (x, 'create', entity);
-            B.call (x, 'rem', 'new', entity);
-            return true;
-         }
-      });
+      B.call (x, 'create', entity);
    }],
 
    ['change', ['new', 'project'], {priority: -1000}, function (x) {
@@ -288,13 +286,13 @@ B.mrespond ([
       B.call (x, 'load', 'files');
    }],
 
-   ['remove', 'file', function (x, file) {
-      if (! confirm ('Delete file"' + file + '"? This cannot be undone.')) return;
+   ['remove', 'file', function (x, name) {
+      if (! confirm ('Delete file"' + name + '"? This cannot be undone.')) return;
 
-      B.call (x, 'delete', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + file, function (x, error, rs) {
+      B.call (x, 'delete', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + name, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'load', 'files');
-         if (B.get ('file', 'name') === file) B.call (x, 'navigate', 'project/' + B.get ('project') + '/doc/main.md');
+         if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'project/' + B.get ('project') + '/doc/main.md');
       });
    }],
 
@@ -476,10 +474,10 @@ views.main = function () {
          }) (),
 
          ! inc (['login', 'signup'], view) ? ['button', {
-            class: css.button + ' absolute top-0 right-0 mt2 mr3 mt3-ns mr4-ns pa2 ph3 f5',
-            style: style ({'z-index': 1000, 'background-color': css.colors.purple}),
+            class: css.button + ' absolute top-0 right-0 pa2 ph3 f5',
+            style: style ({'z-index': 1000, 'background-color': css.colors.purple, margin: '24px 24px 0 0'}),
             onclick: B.ev ('logout', [])
-         }, 'Logout'] : ''
+         }, [['i', {class: 'bi bi-person-walking mr1'}], 'Logout']] : ''
       ]];
    });
 }
@@ -615,7 +613,7 @@ views.projects = function () {
                   placeholder: 'I have this idea',
                   value: newProject,
                   oninput: B.ev ('set', ['new', 'project']),
-                  onkeydown: B.ev ('keydown', [], {raw: 'event'})
+                  onkeydown: B.ev ('keydown', 'project', {raw: 'event'})
                }],
                ['div', {class: 'modal-actions'}, [
                   ['button', {class: css.button, onclick: B.ev ('rem', 'new', 'project')}, 'Cancel'],
@@ -641,7 +639,7 @@ views.project = function () {
             ['span', {class: 'f2 fw7 text-bright'}, project]
          ]],
          ['div', {class: 'project-main'}, [
-            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove']], function (files, name, newFile, remove) {
+            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove']], function (files, name, newFileName, remove) {
                files = (teishi.copy (files) || []).sort ();
                return ['div', {class: 'project-pane project-pane-left', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
@@ -668,7 +666,7 @@ views.project = function () {
                                  if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], file];
                                  return file;
                               }) ()],
-                              remove ? ['span', {
+                              remove && file !== 'doc/main.md' ? ['span', {
                                  class: 'f4 lh-solid pointer',
                                  style: style ({color: css.colors.purple}),
                                  onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'file', file])
@@ -687,10 +685,10 @@ views.project = function () {
                         class: css.button + ' f6 ph3 pv2',
                         style: style ({'background-color': css.colors.purple}),
                         onclick: B.ev ('set', ['file', 'remove'], ! remove)
-                     }, 'X ' + (remove ? 'Done removing' : 'Remove')],
+                     }, [['i', {class: 'bi ' + (remove ? 'bi-check-lg' : 'bi-eraser-fill') + ' mr1'}], remove ? 'Done removing' : 'Remove']],
                   ]],
 
-                  newFile !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'file')}, [
+                  newFileName !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'file')}, [
                      ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
                         ['div', {class: 'project-modal-kicker'}, 'New doc'],
                         ['div', {class: 'project-modal-title'}, 'Name your new doc...'],
@@ -698,13 +696,13 @@ views.project = function () {
                            class: css.input + ' mb0 new-file-input',
                            type: 'text',
                            placeholder: 'my-doc',
-                           value: newFile,
+                           value: newFileName,
                            oninput: B.ev ('set', ['new', 'file']),
                            onkeydown: B.ev ('keydown', 'file', {raw: 'event'})
                         }],
                         ['div', {class: 'modal-actions'}, [
                            ['button', {class: css.button, onclick: B.ev ('rem', 'new', 'file')}, 'Cancel'],
-                           ['button', {class: css.button, onclick: B.ev ('create', 'file'), disabled: ! ((newFile || '').trim ())}, 'Create doc']
+                           ['button', {class: css.button, onclick: B.ev ('create', 'file'), disabled: ! ((newFileName || '').trim ())}, 'Create doc']
                         ]]
                      ]]
                   ]] : ''

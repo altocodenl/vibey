@@ -1062,7 +1062,6 @@ The current client has a dedicated phone layout for viewports narrower than `768
 
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
 
-- Old client: scroll docs & dialogs bar
 - Server
    - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
    - Don't display slugs for projects, just use project names and let the slugs be an internal thing, resolved inside past the router. Don't return slugs for projects.

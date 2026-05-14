@@ -1,5 +1,19 @@
 ## Vibey development notes
 
+### 2026-05-14
+
+Dualism between icon and word. Every icon has a name, every name an icon.
+
+Idea for keeping the textarea (instead of creating a custom textarea-like element) with vim mode: change how the cursor looks, compute position and change it while being in normal mode.
+
+claude: "Yes — caret-color: transparent hides the native cursor, and then you overlay your own block cursor (a small div or ::after pseudo-element) at the computed position. In normal mode you show a block, in insert mode you restore caret-color to visible and hide the overlay."
+
+===
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- We're working on cclient.js. Please add a foot icon next to the logout button. Also vertically align the logout button better so it's consistent with the project name on that top header.
+
 ### 2026-05-13
 
 There's an interesting dualism between OS and language that reminds me of client and server. I'm not exactly sure which is which. In what I'm building, the parts are vibey and cell.
