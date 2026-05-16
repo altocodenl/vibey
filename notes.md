@@ -1,5 +1,17 @@
 ## Vibey development notes
 
+### 2026-05-16
+
+CPU: linear, read text (prefrontal cortex)
+GPU: parallel, see image (visual cortex)
+
+Vibey's what is a three by three:
+- Layer 1, files: editor, viewer (of text & other formats), publisher (of pages & files).
+- Layer 2, dialog: AI harness, terminal, chat.
+- Layer 3, server: run apps, send data (HTTPS, email), receive data (HTTPS, email).
+
+Offline, you lose the last feature of each layer.
+
 ### 2026-05-14
 
 Dualism between icon and word. Every icon has a name, every name an icon.
