@@ -1152,6 +1152,7 @@ auth csrf "<CSRF token>"
      otp "<otp code entered in the login form>"
      otpRequested <0|1> // Whether the OTP request was sent
      signupRequested <0|1> // Whether a signup was just requested
+key command <0|1> // if set, the command key is pressed
 file content "..." // Current file selected
      mode <edit|view> // Whether we're editing the file we're viewing or not
      remove // If set, when clicking on a file we show crosses to remove them.
@@ -1164,6 +1165,7 @@ models anthropic "<model name>" context <size of context window in tokens>
               ...
 new file "<file name>" // Name for a new file
     project "<project name>" // Enables the new project modal
+    type "dialog|file" // Whether the new file is a normal file or a dialog
 project "<project slug>" // The current project selected
 projects 1 name "<project name>"
            slug "<project slug>"

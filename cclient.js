@@ -28,6 +28,12 @@ window.addEventListener ('hashchange', function () {
    B.call ('read', 'hash');
 });
 
+dale.go (['keydown', 'keyup', 'blur'], function (type) {
+   window.addEventListener (type, function (ev) {
+      B.call (type, '', ev);
+   });
+});
+
 // *** RESPONDERS ***
 
 B.mrespond ([
@@ -237,9 +243,58 @@ B.mrespond ([
    }],
 
    ['keydown', '*', function (x, ev) {
-      var entity = x.path [0];
-      if (ev.key !== 'Enter') return;
-      B.call (x, 'create', entity);
+
+      var where = x.path [0];
+
+      // Create new project / new file
+      if (inc (['project', 'file'], where)) {
+         if (ev.key !== 'Enter') return;
+         B.call (x, 'create', where);
+      }
+
+      // Shortcut keys in inner view
+      if (where === '') {
+         if (ev.key === 'Meta') B.call ('set', ['key', 'command'], true);
+         // Shortcuts for inner view
+         if (ev.metaKey && B.get ('view') === 'project' && B.get ('new', 'file') === undefined) {
+            if (ev.key === 'e') {
+               ev.preventDefault ();
+               B.call ('set', ['file', 'mode'], 'edit');
+            }
+            if (ev.key === 'i') {
+               ev.preventDefault ();
+               B.call ('set', ['file', 'mode'], 'view');
+            }
+            if (ev.key === 'd') {
+               ev.preventDefault ();
+               B.call ('set', ['new', 'file'], '');
+            }
+         }
+         // Shortcuts for new file/dialog modal
+         if (ev.metaKey && B.get ('view') === 'project' && B.get ('new', 'file') !== undefined) {
+            if (ev.key === 'o') {
+               ev.preventDefault ();
+               B.call ('set', ['new', 'type'], 'doc');
+            }
+            if (ev.key === 'i') {
+               ev.preventDefault ();
+               B.call ('set', ['new', 'type'], 'dialog');
+            }
+            if (ev.key === 'x') {
+               ev.preventDefault ();
+               B.call ('rem', 'new', 'file');
+            }
+            if (ev.key === 'd') {
+               ev.preventDefault ();
+               B.call ('create', 'file');
+            }
+         }
+      }
+   }],
+
+   [/^(keyup|blur)$/, '*', function (x, ev) {
+      if (x.verb === 'keyup' && ev.key === 'Meta') B.call (x, 'rem', 'key', 'command');
+      if (x.verb === 'blur') B.call (x, 'rem', 'key', 'command');
    }],
 
    ['change', ['new', 'project'], {priority: -1000}, function (x) {
@@ -449,6 +504,21 @@ css.style = [
       display: 'flex',
       'flex-direction': 'column'
    }],
+   ['.cmd-tooltip', {
+      position: 'absolute',
+      top: -28,
+      left: '50%',
+      transform: 'translateX(-50%)',
+      'background-color': css.colors.primary,
+      color: '#fff',
+      'font-size': '0.72rem',
+      'font-weight': '700',
+      padding: '2px 8px',
+      'border-radius': 5,
+      'white-space': 'nowrap',
+      'pointer-events': 'none',
+      'z-index': 10
+   }],
 ]
 
 var views = {};
@@ -639,7 +709,7 @@ views.project = function () {
             ['span', {class: 'f2 fw7 text-bright'}, project]
          ]],
          ['div', {class: 'project-main'}, [
-            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove']], function (files, name, newFileName, remove) {
+            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove'], ['key', 'command'], ['new', 'type']], function (files, name, newFileName, remove, command, newType) {
                files = (teishi.copy (files) || []).sort ();
                return ['div', {class: 'project-pane project-pane-left', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
@@ -678,9 +748,12 @@ views.project = function () {
                   ]],
                   ['div', {class: 'flex mt3', style: style ({gap: '0.5rem'})}, [
                      ['button', {
-                        class: css.button + ' f6 ph3 pv2 shadow-primary',
+                        class: css.button + ' f6 ph3 pv2 shadow-primary relative',
                         onclick: B.ev ('set', ['new', 'file'], '')
-                     }, '+ Add'],
+                     }, [
+                        command ? ['span', {class: 'cmd-tooltip'}, 'D'] : '',
+                        '+ Add'
+                     ]],
                      ['button', {
                         class: css.button + ' f6 ph3 pv2',
                         style: style ({'background-color': css.colors.purple}),
@@ -688,39 +761,74 @@ views.project = function () {
                      }, [['i', {class: 'bi ' + (remove ? 'bi-check-lg' : 'bi-eraser-fill') + ' mr1'}], remove ? 'Done removing' : 'Remove']],
                   ]],
 
-                  newFileName !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'file')}, [
-                     ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
-                        ['div', {class: 'project-modal-kicker'}, 'New doc'],
-                        ['div', {class: 'project-modal-title'}, 'Name your new doc...'],
-                        ['input', {
-                           class: css.input + ' mb0 new-file-input',
-                           type: 'text',
-                           placeholder: 'my-doc',
-                           value: newFileName,
-                           oninput: B.ev ('set', ['new', 'file']),
-                           onkeydown: B.ev ('keydown', 'file', {raw: 'event'})
-                        }],
-                        ['div', {class: 'modal-actions'}, [
-                           ['button', {class: css.button, onclick: B.ev ('rem', 'new', 'file')}, 'Cancel'],
-                           ['button', {class: css.button, onclick: B.ev ('create', 'file'), disabled: ! ((newFileName || '').trim ())}, 'Create doc']
+                  newFileName !== undefined ? (function () {
+                     var isDialog = newType === 'dialog';
+                     return ['div', {class: 'modal-backdrop', onclick: B.ev (['rem', 'new', 'file'], ['rem', 'new', 'type'])}, [
+                        ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
+                           ['div', {class: 'flex mb3', style: style ({gap: '0.5rem'})}, [
+                              ['button', {
+                                 class: css.button + ' f6 ph3 pv2 relative' + (! isDialog ? ' shadow-primary' : ''),
+                                 style: ! isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.border, color: css.colors.textMuted}),
+                                 onclick: B.ev ('set', ['new', 'type'], 'doc')
+                              }, [
+                                 command ? ['span', {class: 'cmd-tooltip'}, 'O'] : '',
+                                 ['i', {class: 'bi bi-file-text mr1'}], 'Doc'
+                              ]],
+                              ['button', {
+                                 class: css.button + ' f6 ph3 pv2 relative' + (isDialog ? ' shadow-primary' : ''),
+                                 style: isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.border, color: css.colors.textMuted}),
+                                 onclick: B.ev ('set', ['new', 'type'], 'dialog')
+                              }, [
+                                 command ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
+                                 ['i', {class: 'bi bi-chat-dots mr1'}], 'Dialog'
+                              ]]
+                           ]],
+                           ['div', {class: 'project-modal-title'}, isDialog ? 'Name your new dialog...' : 'Name your new doc...'],
+                           ['input', {
+                              class: css.input + ' mb0 new-file-input',
+                              type: 'text',
+                              placeholder: isDialog ? 'my-dialog' : 'my-doc',
+                              value: newFileName,
+                              oninput: B.ev ('set', ['new', 'file']),
+                              onkeydown: B.ev ('keydown', 'file', {raw: 'event'})
+                           }],
+                           ['div', {class: 'modal-actions'}, [
+                              ['button', {class: css.button + ' relative', onclick: B.ev (['rem', 'new', 'file'], ['rem', 'new', 'type'])}, [
+                                 command ? ['span', {class: 'cmd-tooltip'}, 'X'] : '',
+                                 'Cancel'
+                              ]],
+                              ['button', {class: css.button + ' relative', onclick: B.ev ('create', 'file'), disabled: ! ((newFileName || '').trim ())}, [
+                                 command ? ['span', {class: 'cmd-tooltip'}, 'D'] : '',
+                                 isDialog ? 'Create dialog' : 'Create doc'
+                              ]]
+                           ]]
                         ]]
-                     ]]
-                  ]] : ''
+                     ]];
+                  }) () : ''
                ]];
             }),
             B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name']], function (content, mode, fileName) {
                return ['div', {class: 'project-pane project-pane-right'}, [
-                  ['div', {class: 'flex items-center mb3'}, [
-                     ['span', {class: 'fw6 text-bright mr3'}, (fileName || '').replace (/^doc\//, '').replace (/\.md$/, '')],
-                     ['span', {
-                        class: 'pointer fw6 mr3 ' + (mode !== 'edit' ? 'text-bright' : 'text-muted'),
-                        onclick: B.ev ('set', ['file', 'mode'], 'view')
-                     }, [['i', {class: 'bi bi-eye mr1'}], 'View']],
-                     ['span', {
-                        class: 'pointer fw6 ' + (mode === 'edit' ? 'text-bright' : 'text-muted'),
-                        onclick: B.ev ('set', ['file', 'mode'], 'edit')
-                     }, [['i', {class: 'bi bi-hand-index mr1'}], 'Edit']],
-                  ]],
+                  B.view ([['new', 'file'], ['key', 'command']], function (newFile, command) {
+                     var showTooltip = command && newFile === undefined;
+                     return ['div', {class: 'flex items-center mb3'}, [
+                        ['span', {class: 'fw6 text-bright mr3'}, (fileName || '').replace (/^doc\//, '').replace (/\.md$/, '')],
+                        ['span', {
+                           class: 'pointer fw6 mr3 relative ' + (mode !== 'edit' ? 'text-bright' : 'text-muted'),
+                           onclick: B.ev ('set', ['file', 'mode'], 'view')
+                        }, [
+                           showTooltip && mode && mode !== 'view' ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
+                           ['i', {class: 'bi bi-eye mr1'}], 'View'
+                        ]],
+                        ['span', {
+                           class: 'pointer fw6 relative ' + (mode === 'edit' ? 'text-bright' : 'text-muted'),
+                           onclick: B.ev ('set', ['file', 'mode'], 'edit')
+                        }, [
+                           showTooltip && mode !== 'edit' ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
+                           ['i', {class: 'bi bi-hand-index mr1'}], 'Edit'
+                        ]],
+                     ]];
+                  }),
                   (function () {
                      if (mode === 'edit') return ['textarea', {
                         class: 'db w-100 bn outline-0 text-bright lh-copy f5',

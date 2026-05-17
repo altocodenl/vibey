@@ -1,5 +1,26 @@
 ## Vibey development notes
 
+### 2026-05-17
+
+How can we create programs that are whole, in the alexandrian way?
+- Do things step-wise.
+- See the wholeness.
+- Test each change and make it fit well.
+
+Questions:
+- Can AI see the wholeness?
+- If it can't, can we still generate wholeness step-wise using AI to execute operations for us?
+
+These notes, perhaps more than the end result, reprsent the process of building vibey.
+
+====
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- I'm working on cclient.js. Could you add a tooltip on top of each of view / edit, with a V and and E respectively, when I press on the command letter?
+- I want to make the new file modal to also allow to create a dialog instead of a file. Maybe a button to select which, the input below will show the name for whatever was chosen. Let's just do the UI for now.
+
+
 ### 2026-05-16
 
 CPU: linear, read text (prefrontal cortex)
