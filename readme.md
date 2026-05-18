@@ -339,7 +339,7 @@ Injected after the header, before the first user message. Contains a compacted s
 <!-- DOC_MAIN_CONTEXT_END -->
 ```
 
-This block is updated in place before each LLM call.
+This block is updated in place before each LLM call. This is done in case `doc/main.md` changes between calls.
 
 #### User section
 
@@ -1079,8 +1079,8 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 
 - cclient
    - Dialog
-      - Configure AI provider modal: openai, claude (special usage), api keys
       - Create dialog
+      - Configure AI provider modal: openai, claude (special usage), api keys
       - Select model
       - Send message/stop stream
       - Show streaming dialog

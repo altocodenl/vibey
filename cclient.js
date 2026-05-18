@@ -244,50 +244,33 @@ B.mrespond ([
 
    ['keydown', '*', function (x, ev) {
 
-      var where = x.path [0];
-
-      // Create new project / new file
-      if (inc (['project', 'file'], where)) {
-         if (ev.key !== 'Enter') return;
-         B.call (x, 'create', where);
+      // Create new project or new file
+      if (ev.key === 'Enter') {
+         if (B.get ('new', 'project') !== undefined) return B.call (x, 'create', 'project');
+         if (B.get ('new', 'file') !== undefined)    return B.call (x, 'create', 'file');
       }
 
-      // Shortcut keys in inner view
-      if (where === '') {
-         if (ev.key === 'Meta') B.call ('set', ['key', 'command'], true);
-         // Shortcuts for inner view
-         if (ev.metaKey && B.get ('view') === 'project' && B.get ('new', 'file') === undefined) {
-            if (ev.key === 'e') {
-               ev.preventDefault ();
-               B.call ('set', ['file', 'mode'], 'edit');
-            }
-            if (ev.key === 'i') {
-               ev.preventDefault ();
-               B.call ('set', ['file', 'mode'], 'view');
-            }
-            if (ev.key === 'd') {
-               ev.preventDefault ();
-               B.call ('set', ['new', 'file'], '');
-            }
+      if (ev.key === 'Meta') return B.call ('set', ['key', 'command'], true);
+
+      var call = function (verb, path, arg) {
+         ev.preventDefault ();
+         return B.call (x, verb, path, arg);
+      }
+
+      // Shortcuts for inner view
+      if (ev.metaKey && B.get ('view') === 'project') {
+         if (ev.key === 'b') return call ('navigate', 'projects');
+         if (B.get ('new', 'file') === undefined) {
+            if (ev.key === 'e') return call ('set', ['file', 'mode'], 'edit');
+            if (ev.key === 'i') return call ('set', ['file', 'mode'], 'view');
+            if (ev.key === 'd') return call ('set', ['new', 'file'], '');
+            if (ev.key === 'x') return call ('set', ['file', 'remove'], ! B.get ('file', 'remove'));
          }
-         // Shortcuts for new file/dialog modal
-         if (ev.metaKey && B.get ('view') === 'project' && B.get ('new', 'file') !== undefined) {
-            if (ev.key === 'o') {
-               ev.preventDefault ();
-               B.call ('set', ['new', 'type'], 'doc');
-            }
-            if (ev.key === 'i') {
-               ev.preventDefault ();
-               B.call ('set', ['new', 'type'], 'dialog');
-            }
-            if (ev.key === 'x') {
-               ev.preventDefault ();
-               B.call ('rem', 'new', 'file');
-            }
-            if (ev.key === 'd') {
-               ev.preventDefault ();
-               B.call ('create', 'file');
-            }
+         if (B.get ('new', 'file') !== undefined) {
+            if (ev.key === 'o') return call ('set', ['new', 'type'], 'doc');
+            if (ev.key === 'i') return call ('set', ['new', 'type'], 'dialog');
+            if (ev.key === 'x') return call ('rem', 'new', 'file');
+            if (ev.key === 'd') return call ('create', 'file');
          }
       }
    }],
@@ -683,7 +666,6 @@ views.projects = function () {
                   placeholder: 'I have this idea',
                   value: newProject,
                   oninput: B.ev ('set', ['new', 'project']),
-                  onkeydown: B.ev ('keydown', 'project', {raw: 'event'})
                }],
                ['div', {class: 'modal-actions'}, [
                   ['button', {class: css.button, onclick: B.ev ('rem', 'new', 'project')}, 'Cancel'],
@@ -701,11 +683,16 @@ views.project = function () {
 
       return ['div', {class: 'project-shell bg-app-bg'}, [
          ['div', {class: 'flex items-center'}, [
-            ['span', {
-               class: 'f1 fw7 light-blue pointer mr3',
-               style: style ({'line-height': 1}),
-               onclick: B.ev ('navigate', 'projects')
-            }, '‹'],
+            B.view (['key', 'command'], function (command) {
+               return ['span', {
+                  class: 'f1 fw7 light-blue pointer mr3 relative',
+                  style: style ({'line-height': 1}),
+                  onclick: B.ev ('navigate', 'projects')
+               }, [
+                  command ? ['span', {class: 'cmd-tooltip'}, 'B'] : '',
+                  '‹'
+               ]];
+            }),
             ['span', {class: 'f2 fw7 text-bright'}, project]
          ]],
          ['div', {class: 'project-main'}, [
@@ -755,10 +742,13 @@ views.project = function () {
                         '+ Add'
                      ]],
                      ['button', {
-                        class: css.button + ' f6 ph3 pv2',
+                        class: css.button + ' f6 ph3 pv2 relative',
                         style: style ({'background-color': css.colors.purple}),
                         onclick: B.ev ('set', ['file', 'remove'], ! remove)
-                     }, [['i', {class: 'bi ' + (remove ? 'bi-check-lg' : 'bi-eraser-fill') + ' mr1'}], remove ? 'Done removing' : 'Remove']],
+                     }, [
+                        command ? ['span', {class: 'cmd-tooltip'}, 'X'] : '',
+                        ['i', {class: 'bi ' + (remove ? 'bi-check-lg' : 'bi-eraser-fill') + ' mr1'}], remove ? 'Done removing' : 'Remove'
+                     ]],
                   ]],
 
                   newFileName !== undefined ? (function () {
@@ -790,7 +780,6 @@ views.project = function () {
                               placeholder: isDialog ? 'my-dialog' : 'my-doc',
                               value: newFileName,
                               oninput: B.ev ('set', ['new', 'file']),
-                              onkeydown: B.ev ('keydown', 'file', {raw: 'event'})
                            }],
                            ['div', {class: 'modal-actions'}, [
                               ['button', {class: css.button + ' relative', onclick: B.ev (['rem', 'new', 'file'], ['rem', 'new', 'type'])}, [

@@ -1,5 +1,31 @@
 ## Vibey development notes
 
+### 2026-05-18
+
+You could have vibey apps with their own servers. But the clients still can run on the user engines, and also save data there too.
+
+- alexandrian paradigm: generate structures, don't fabricate them. This is the only way to avoid errors.
+- number of relationships is number of errors: n^2 of the number of elements.
+- specs are the new code: not, because specs are much more of a probability space than a certainty. the amount of errors can diverge enormously.
+- can model training save us? In Alexandrian terms, they can't, unless they can see the wholeness.
+- Can AI understand the relationships when differentiating structure?
+- What I'm working with now: human in the loop at every step, at every transformation. But use AI for some of the transformations.
+
+The goal: from an Alexandrian perspective, determine if the degree of life of the thing is high or not. That's it.
+
+Personal goal: see all my files in vibey, read epubs in vibey, edit in vibey, code in vibey, use it as my main AI harness, as my main terminal, put my blog there, put my apps there. Make vibey personally load bearing.
+
+If an embed points to a process that is down, add a fallback button that can restart the process. This should be part of the syntax.
+
+Another internal app: anki-like flashcards.
+
+===
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- We're working on cclient. Please add a 'X' tooltip to remove (and be done removing) files.
+- This is addicting. Please add a B tooltip on the chevron to go back to projects.
+
 ### 2026-05-17
 
 How can we create programs that are whole, in the alexandrian way?
