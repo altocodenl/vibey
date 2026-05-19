@@ -1063,13 +1063,14 @@ The current client has a dedicated phone layout for viewports narrower than `768
 Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
 
 - Server
+   - Make dialog status depend on server status, not filename. Remove date too, autogenerate a suffix with number if there's a repetition on the name.
+   - Move CSRF to a header for every method
    - Clean up settings to have 1) no vi mode or editor key; 2) credentials: {<provider>: {api: ..., oauth: {...}}, ...}
    - Don't display slugs for projects, just use project names and let the slugs be an internal thing, resolved inside past the router. Don't return slugs for projects.
    - Block deletion of the main doc
    - Return last modified date for the project by checking on git
    - Please allow specifying of a model in the subject of an email in the trigger.
    - Add mkdir -p as a fallback only to increase speed
-   - Make dialog status depend on server status, not filename
    - Remove snapshots
    - Remove compaction of main.md. If main.md changes, reattach it below to avoid busting cache.
    - Support renaming of project

@@ -22,6 +22,12 @@ var slugify = function (name) {
    }).join ('');
 }
 
+// TODO: remove after we remove date and status from dialogs
+var simplifyName = function (name) {
+   if (! name.match (/^dialog/)) return name;
+   return name.replace (/\d{8}-\d{6}-/, '').replace (/-(active|done).md/, '.md');
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -315,13 +321,30 @@ B.mrespond ([
 
    ['create', 'file', function (x) {
       var name = B.get ('new', 'file').trim ();
-      if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a file name');
+      if (B.get ('new', 'type') === 'dialog') return B.call (x, 'create', 'dialog', name);
+
+      if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a name');
+
       name = 'doc/' + name + '.md';
 
       B.call (x, 'madd', 'files', name);
       B.call (x, 'save', 'file', name, '', 'new');
       B.call (x, 'rem', 'new', 'file');
       B.call (x, 'load', 'files');
+   }],
+
+   ['create', 'dialog', function (x, name) {
+
+      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
+
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem creating the dialog');
+
+         B.call (x, 'madd', 'files', rs.body.filename);
+         B.call (x, 'rem', 'new', 'file');
+         B.call (x, 'navigate', 'project/' + B.get ('project') + '/' + rs.body.filename);
+         B.call (x, 'load', 'files');
+      });
+
    }],
 
    ['remove', 'file', function (x, name) {
@@ -479,10 +502,10 @@ css.style = [
       'box-sizing': 'border-box',
       'min-height': 0
    }],
-   ['.project-pane-left', {
+   ['.project-left-pane', {
       'min-width': 0
    }],
-   ['.project-pane-right', {
+   ['.project-right-pane', {
       'min-width': 0,
       display: 'flex',
       'flex-direction': 'column'
@@ -698,7 +721,7 @@ views.project = function () {
          ['div', {class: 'project-main'}, [
             B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove'], ['key', 'command'], ['new', 'type']], function (files, name, newFileName, remove, command, newType) {
                files = (teishi.copy (files) || []).sort ();
-               return ['div', {class: 'project-pane project-pane-left', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
+               return ['div', {class: 'project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
                      ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file) {
@@ -720,7 +743,8 @@ views.project = function () {
                                  class: (active ? 'text-bright fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer',
                                  onclick: B.ev ('navigate', 'project/' + B.get ('project') + '/' + file)
                               }, (function () {
-                                 if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], file];
+                                 if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], simplifyName (file)];
+                                 if (file.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-text mr1'}], simplifyName (file)];
                                  return file;
                               }) ()],
                               remove && file !== 'doc/main.md' ? ['span', {
@@ -797,11 +821,11 @@ views.project = function () {
                ]];
             }),
             B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name']], function (content, mode, fileName) {
-               return ['div', {class: 'project-pane project-pane-right'}, [
+               return ['div', {class: 'project-pane project-right-pane'}, [
                   B.view ([['new', 'file'], ['key', 'command']], function (newFile, command) {
                      var showTooltip = command && newFile === undefined;
                      return ['div', {class: 'flex items-center mb3'}, [
-                        ['span', {class: 'fw6 text-bright mr3'}, (fileName || '').replace (/^doc\//, '').replace (/\.md$/, '')],
+                        ['span', {class: 'fw6 text-bright mr3'}, simplifyName (fileName || '')],
                         ['span', {
                            class: 'pointer fw6 mr3 relative ' + (mode !== 'edit' ? 'text-bright' : 'text-muted'),
                            onclick: B.ev ('set', ['file', 'mode'], 'view')
