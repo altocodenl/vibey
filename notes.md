@@ -1,5 +1,65 @@
 ## Vibey development notes
 
+### 2026-05-21
+
+Thinking UIs in Alexandrian terms: evolve the view from the pure data view. Make some centers stronger. But start with the data.
+
+https://paulgraham.com/before.html
+"Mark Zuckerberg didn't succeed because he was an expert on startups. He succeeded despite being a complete noob at startups, because he understood his users really well."
+
+https://paulgraham.com/growth.html
+"A good growth rate during YC is 5-7% a week. If you can hit 10% a week you're doing exceptionally well. If you can only manage 1%, it's a sign you haven't yet figured out what you're doing."
+"In theory this sort of hill-climbing could get a startup into trouble. They could end up on a local maximum. But in practice that never happens. Having to hit a growth number every week forces founders to act, and acting versus not acting is the high bit of succeeding. Nine times out of ten, sitting around strategizing is just a form of procrastination. Whereas founders' intuitions about which hill to climb are usually better than they realize. Plus the maxima in the space of startup ideas are not spiky and isolated. Most fairly good ideas are adjacent to even better ones."
+
+"A company that grows at 1% a week will grow 1.7x a year, whereas a company that grows at 5% a week will grow 12.6x. A company making $1000 a month (a typical number early in YC) and growing at 1% a week will 4 years later be making $7900 a month, which is less than a good programmer makes in salary in Silicon Valley. A startup that grows at 5% a week will in 4 years be making $25 million a month."
+
+"Understanding growth is what starting a startup consists of. What you're really doing (and to the dismay of some observers, all you're really doing) when you start a startup is committing to solve a harder type of problem than ordinary businesses do. You're committing to search for one of the rare ideas that generates rapid growth. Because these ideas are so valuable, finding one is hard. The startup is the embodiment of your discoveries so far. Starting a startup is thus very much like deciding to be a research scientist: you're not committing to solve any specific problem; you don't know for sure which problems are soluble; but you're committing to try to discover something no one knew before. A startup founder is in effect an economic research scientist. Most don't discover anything that remarkable, but some discover relativity."
+
+https://paulgraham.com/ds.html
+"I have never once seen a startup lured down a blind alley by trying too hard to make their initial users happy."
+
+"In software, especially, it usually works best to get something in front of users as soon as it has a quantum of utility, and then see what they do with it."
+
+"The feedback you get from engaging directly with your earliest users will be the best you ever get."
+
+"Consulting is the canonical example of work that doesn't scale. But (like other ways of bestowing one's favors liberally) it's safe to do it so long as you're not being paid to."
+
+"Some startups could be entirely manual at first. If you can find someone with a problem that needs solving and you can solve it manually, go ahead and do that for as long as you can, and then gradually automate the bottlenecks."
+
+"The need to do something unscalably laborious to get started is so nearly universal that it might be a good idea to stop thinking of startup ideas as scalars. Instead we should try thinking of them as pairs of what you're going to build, plus the unscalable thing(s) you're going to do initially to get the company going."
+
+"It could be interesting to start viewing startup ideas this way, because now that there are two components you can try to be imaginative about the second as well as the first. But in most cases the second component will be what it usually is — recruit users manually and give them an overwhelmingly good experience — and the main benefit of treating startups as vectors will be to remind founders they need to work hard in two dimensions."
+
+https://paulgraham.com/yahoo.html
+"The worst consequence of trying to be a media company was that they didn't take programming seriously enough. Microsoft (back in the day), Google, and Facebook have all had hacker-centric cultures. But Yahoo treated programming as a commodity. At Yahoo, user-facing software was controlled by product managers and designers. The job of programmers was just to take the work of the product managers and designers the final step, by translating it into code."
+
+"Microsoft (back in the day), Google, and Facebook have all been obsessed with hiring the best programmers. Yahoo wasn't. They preferred good programmers to bad ones, but they didn't have the kind of single-minded, almost obnoxiously elitist focus on hiring the smartest people that the big winners have had. And when you consider how much competition there was for programmers when they were hiring, during the Bubble, it's not surprising that the quality of their programmers was uneven."
+
+"In technology, once you have bad programmers, you're doomed. I can't think of an instance where a company has sunk into technical mediocrity and recovered."
+
+https://paulgraham.com/gba.html
+"Hackers are unruly. That is the essence of hacking. And it is also the essence of Americanness. It is no accident that Silicon Valley is in America, and not France, or Germany, or England, or Japan. In those countries, people color inside the lines."
+
+==
+
+Idea: per project AI credentials. But let's see it when there's an actual need for it.
+
+Make the settings modal come from above, like the guake console, a bit like a flying saucer that comes back shortly, then goes back up.
+
+==
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+
+### 2026-05-20
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- We're working on cclient. Please make the Edit & View buttons not be grayed out when they're not the current mode, instead paint in faint blue the one that's currently selected, like we do for the current file.
+- I need some semi subtle coloring on the doc vs dialog icon. Let's try blue for the icon for a doc and violet for the icon for a dialog.
+- It didn't work. Please add a brighter violet and use that for the dialog. Also, make the dialog icon be the one with the dots, not the one with the lines.
+- Please add the UI for tooltips so that there's an unconditional 'J' on top of each file entry on the left pane. I'll change it in a minute.
+
 ### 2026-05-18
 
 You could have vibey apps with their own servers. But the clients still can run on the user engines, and also save data there too.

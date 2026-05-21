@@ -1080,7 +1080,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 
 - cclient
    - Dialog
-      - Create dialog
+      - Show tooltip to delete current file when on delete mode.
       - Configure AI provider modal: openai, claude (special usage), api keys
       - Select model
       - Send message/stop stream

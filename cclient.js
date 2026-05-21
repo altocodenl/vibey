@@ -207,6 +207,7 @@ B.mrespond ([
          B.call (x, 'get', entity, function (x, error, rs) {
             if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + entity);
 
+            if (entity === 'files') rs.body.sort ();
             B.call (x, 'set', entity, rs.body);
          });
       }];
@@ -271,6 +272,15 @@ B.mrespond ([
             if (ev.key === 'i') return call ('set', ['file', 'mode'], 'view');
             if (ev.key === 'd') return call ('set', ['new', 'file'], '');
             if (ev.key === 'x') return call ('set', ['file', 'remove'], ! B.get ('file', 'remove'));
+            if (ev.key === 'j' || ev.key === 'k') {
+               var files = B.get ('files'), current = B.get ('file', 'name');
+               if (! files || ! files.length) return;
+               var index = files.indexOf (current);
+               var next = ev.key === 'j' ? index + 1 : index - 1;
+               if (next < 0) next = files.length - 1;
+               if (next === files.length) next = 0;
+               return call ('navigate', 'project/' + B.get ('project') + '/' + files [next]);
+            }
          }
          if (B.get ('new', 'file') !== undefined) {
             if (ev.key === 'o') return call ('set', ['new', 'type'], 'doc');
@@ -379,7 +389,9 @@ var css = {
       error:        '#D33E43',
       warning:      '#ffff00',
       dark:         '#333',
-      purple:       '#5a189a'
+      purple:       '#5a189a',
+      violet:       '#b07aff',
+      activeHighlight: 'rgba(74, 105, 189, 0.25)'
    },
    input:      'db w-100 pa3 mb3 br2 ba b-border bg-input text-bright outline-0 placeholder-text-muted',
    button:     'pa3 br2 bn bg-primary hover-bg-primary-hover white fw6 pointer',
@@ -513,7 +525,7 @@ css.style = [
    ['.cmd-tooltip', {
       position: 'absolute',
       top: -28,
-      left: '50%',
+      left: '10px',
       transform: 'translateX(-50%)',
       'background-color': css.colors.primary,
       color: '#fff',
@@ -701,6 +713,13 @@ views.projects = function () {
 }
 
 views.project = function () {
+
+   var iconAndName = function (name) {
+      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1', style: style ({color: css.colors.link})}], simplifyName (name)];
+      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1', style: style ({color: css.colors.violet})}], simplifyName (name)];
+      return name;
+   }
+
    return B.view ([['projects'], ['project']], function (projects, project) {
       if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
 
@@ -720,17 +739,16 @@ views.project = function () {
          ]],
          ['div', {class: 'project-main'}, [
             B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove'], ['key', 'command'], ['new', 'type']], function (files, name, newFileName, remove, command, newType) {
-               files = (teishi.copy (files) || []).sort ();
                return ['div', {class: 'project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
-                     ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file) {
+                     ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file, index) {
                         var active = file === name;
                         return ['div', {
                            class: 'mb2 pb2',
                            style: style ({
                               'border-bottom': '1px solid ' + css.colors.border,
-                              'background-color': active ? 'rgba(74, 105, 189, 0.25)' : undefined,
+                              'background-color': active ? css.colors.activeHighlight : undefined,
                               'border-left': active ? '3px solid ' + css.colors.link : '3px solid transparent',
                               padding: '8px 10px',
                               'border-radius': 4,
@@ -740,13 +758,20 @@ views.project = function () {
                               class: 'flex justify-between items-center'
                            }, [
                               ['div', {
-                                 class: (active ? 'text-bright fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer',
+                                 class: (active ? 'text-bright fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer relative',
                                  onclick: B.ev ('navigate', 'project/' + B.get ('project') + '/' + file)
-                              }, (function () {
-                                 if (file.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1'}], simplifyName (file)];
-                                 if (file.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-text mr1'}], simplifyName (file)];
-                                 return file;
-                              }) ()],
+                              }, [
+                                 (function () {
+                                    if (active || ! command) return;
+                                    var prev = files.indexOf (name) - 1, next = files.indexOf (name) + 1;
+                                    if (prev < 0) prev = files.length - 1;
+                                    if (next === files.length) next = 0;
+                                    if (index === prev) return ['span', {class: 'cmd-tooltip'}, 'J'];
+                                    if (index === next) return ['span', {class: 'cmd-tooltip'}, 'K'];
+                                    return
+                                 }) (),
+                                 iconAndName (file)
+                              ]],
                               remove && file !== 'doc/main.md' ? ['span', {
                                  class: 'f4 lh-solid pointer',
                                  style: style ({color: css.colors.purple}),
@@ -825,31 +850,45 @@ views.project = function () {
                   B.view ([['new', 'file'], ['key', 'command']], function (newFile, command) {
                      var showTooltip = command && newFile === undefined;
                      return ['div', {class: 'flex items-center mb3'}, [
-                        ['span', {class: 'fw6 text-bright mr3'}, simplifyName (fileName || '')],
-                        ['span', {
-                           class: 'pointer fw6 mr3 relative ' + (mode !== 'edit' ? 'text-bright' : 'text-muted'),
-                           onclick: B.ev ('set', ['file', 'mode'], 'view')
-                        }, [
-                           showTooltip && mode && mode !== 'view' ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
-                           ['i', {class: 'bi bi-eye mr1'}], 'View'
-                        ]],
-                        ['span', {
-                           class: 'pointer fw6 relative ' + (mode === 'edit' ? 'text-bright' : 'text-muted'),
-                           onclick: B.ev ('set', ['file', 'mode'], 'edit')
-                        }, [
-                           showTooltip && mode !== 'edit' ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
-                           ['i', {class: 'bi bi-hand-index mr1'}], 'Edit'
-                        ]],
+                        ['span', {class: 'fw6 text-bright mr3'}, iconAndName (fileName || '')],
+                        (fileName || '').match (/^dialog\//) ? '' : [
+                           ['span', {
+                           class: 'pointer fw6 mr3 relative text-bright',
+                              style: style ({'background-color': mode !== 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
+                              onclick: B.ev ('set', ['file', 'mode'], 'view')
+                           }, [
+                              showTooltip && mode && mode !== 'view' ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
+                              ['i', {class: 'bi bi-eye mr1'}], 'View'
+                           ]],
+                           ['span', {
+                              class: 'pointer fw6 relative text-bright',
+                              style: style ({'background-color': mode === 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
+                              onclick: B.ev ('set', ['file', 'mode'], 'edit')
+                           }, [
+                              showTooltip && mode !== 'edit' ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
+                              ['i', {class: 'bi bi-hand-index mr1'}], 'Edit'
+                           ]],
+                        ]
                      ]];
                   }),
                   (function () {
-                     if (mode === 'edit') return ['textarea', {
+                     var isDialog = (fileName || '').match (/^dialog\//);
+                     if (mode === 'edit' && ! isDialog) return ['textarea', {
                         class: 'db w-100 bn outline-0 text-bright lh-copy f5',
                         style: style ({'background-color': css.colors.surface, color: css.colors.textBright, flex: 1, resize: 'none', 'font-family': 'monospace'}),
                         oninput:  B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
                         onchange: B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
-                        value: content
+                        value: content,
+                        autofocus: true
                      }, content || ''];
+
+                     var hasActiveAIKey = dale.stop (['claude', 'openai'], true, function (k) {
+                        if (B.get ('settings', k + 'OAuth', 'loggedIn') && ! B.get ('settings', k + 'OAuth', 'expired')) return true;
+                        if (B.get ('settings', k, 'hasKey')) return true;
+                     });
+
+                     if (isDialog && ! hasActiveAIKey) return ['div', {class: 'flex items-center justify-center tc text-muted f5 lh-copy', style: style ({flex: 1})}, ['div', {class: 'pa4'}, [['i', {class: 'bi bi-plug db f2 mb3'}], 'No active AI connection yet.', ['br'], ['button', {class: css.button + ' mt3', onclick: B.ev ('snackbar', 'info', 'Settings view coming soon!')}, 'Add one now']]]];
+
                      return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
                   }) (),
                ]];
