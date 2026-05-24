@@ -1,5 +1,34 @@
 ## Vibey development notes
 
+### 2026-05-24
+
+Vibey is about something with the potential of making users feel great: being able to express your thoughts in one place, to retrieve your other thoughts and related files, and immediately publish them in the open web. Have AI next to you, at arm's length. And yave your own custom apps, plus a few others you get from others, in one place. It's a proper digital home to thrive. And because it's really yours, no profit motive can take it away from you (open source + profit bound).
+
+It's no fun to be switching from one app to the other, it kills your engagement. So let's put everything necessary in one place, comfortably.
+It's no fun to not be allowed to peak under the hood - or modify the engine when you learn more. So let's open that door.
+It's no fun for a loved product to enshittify. So let's prevent that.
+
+Maybe the essence of vibey is the single place nature of it. It's like a unix of sorts, in the web.
+
+Thrive through fun. Have fun and prosper.
+
+This is the why of altocode: let's make it fun to work with computers
+
+I wonder if the reason so many people with seemingly good jobs are so eager to run away from them and work on something with purpose is because so much of the work is soulless, nowadays.
+
+In a digital world that's desperate to engage users, humans are starved of real engagement.
+
+Launch list:
+- Edit files
+- See non-text files
+- Publish text files
+- AI chat/harness
+- Send emails to AI
+- Human chat (invite to project)
+- Embedded apps
+
+The idea with vibey is not about what you can do if tokens are unlimited and free, but rather: what you can do with useful, affordable tokens, and a single place on which you and others can work with ownership and flow?
+
 ### 2026-05-21
 
 Thinking UIs in Alexandrian terms: evolve the view from the pure data view. Make some centers stronger. But start with the data.
