@@ -12,7 +12,7 @@ Maybe the essence of vibey is the single place nature of it. It's like a unix of
 
 Thrive through fun. Have fun and prosper.
 
-This is the why of altocode: let's make it fun to work with computers
+This is the why of altocode: let's make it fun to work with computers. Make computers fun again.
 
 I wonder if the reason so many people with seemingly good jobs are so eager to run away from them and work on something with purpose is because so much of the work is soulless, nowadays.
 
