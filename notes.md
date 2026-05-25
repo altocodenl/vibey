@@ -1,5 +1,15 @@
 ## Vibey development notes
 
+### 2026-05-25
+
+Vibey's what is a three by three (reprise, different layer 3):
+- Layer 1, files: editor, viewer (of text & other formats), publisher (of pages & files).
+- Layer 2, dialog: AI harness, terminal, chat.
+- Layer 3, server: embedded apps, container (isolation), server (receive email & HTTPS)
+
+The sequence:
+fun -> engagement -> empowerment
+
 ### 2026-05-24
 
 Vibey is about something with the potential of making users feel great: being able to express your thoughts in one place, to retrieve your other thoughts and related files, and immediately publish them in the open web. Have AI next to you, at arm's length. And yave your own custom apps, plus a few others you get from others, in one place. It's a proper digital home to thrive. And because it's really yours, no profit motive can take it away from you (open source + profit bound).
