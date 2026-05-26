@@ -1,11 +1,23 @@
 ## Vibey development notes
 
+### 2026-05-26
+
+===
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- I want the settings to be an interesting view. I'm thinking of a situation where both the left and the right panels have an animation that they rotate so you can see the "back" part of them, revealing the settings. How could we go about it as a CSS animation?
+- We're working on cclient. Please put a placeholder for the left pane to flip. Make it depend on a state variable (settings.show).
+- That worked quite well! But can you make it flip "in place", rather than eat the space of the right pane?
+- It worked! Please do the same on the right pane.
+- Please take the settings wheel at the bottom left and put it next to logout, on its left, with a button like it. Also gray, and saying settings next to the dented wheel. And instead of a dented wheel, put a shovel.
+
 ### 2026-05-25
 
 Vibey's what is a three by three (reprise, different layer 3):
 - Layer 1, files: editor, viewer (of text & other formats), publisher (of pages & files).
 - Layer 2, dialog: AI harness, terminal, chat.
-- Layer 3, server: embedded apps, container (isolation), server (receive email & HTTPS)
+- Layer 3, server: embedded apps, container (isolation), engine/server (receive email & HTTPS)
 
 The sequence:
 fun -> engagement -> empowerment

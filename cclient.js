@@ -267,11 +267,13 @@ B.mrespond ([
       // Shortcuts for inner view
       if (ev.metaKey && B.get ('view') === 'project') {
          if (ev.key === 'b') return call ('navigate', 'projects');
+         if (ev.key === 'o') return call ('set', ['settings', 'show'], ! B.get ('settings', 'show'));
          if (B.get ('new', 'file') === undefined) {
             if (ev.key === 'e') return call ('set', ['file', 'mode'], 'edit');
             if (ev.key === 'i') return call ('set', ['file', 'mode'], 'view');
             if (ev.key === 'd') return call ('set', ['new', 'file'], '');
             if (ev.key === 'x') return call ('set', ['file', 'remove'], ! B.get ('file', 'remove'));
+            if (ev.key === 'v' && B.get ('file', 'remove')) return call ('remove', 'file', B.get ('file', 'name'));
             if (ev.key === 'j' || ev.key === 'k') {
                var files = B.get ('files'), current = B.get ('file', 'name');
                if (! files || ! files.length) return;
@@ -522,6 +524,32 @@ css.style = [
       display: 'flex',
       'flex-direction': 'column'
    }],
+   ['.flip-card', {
+      perspective: 1200,
+   }],
+   ['.flip-card-inner', {
+      position: 'relative',
+      width: 1,
+      height: 1,
+      transition: 'transform 0.6s ease',
+      'transform-style': 'preserve-3d',
+      'transform-origin': 'center center',
+   }],
+   ['.flip-card-inner.flipped', {
+      transform: 'rotateY(180deg)',
+   }],
+   ['.flip-card-front, .flip-card-back', {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: 1,
+      height: 1,
+      'backface-visibility': 'hidden',
+      '-webkit-backface-visibility': 'hidden',
+   }],
+   ['.flip-card-back', {
+      transform: 'rotateY(180deg)',
+   }],
    ['.cmd-tooltip', {
       position: 'absolute',
       top: -28,
@@ -561,11 +589,26 @@ views.main = function () {
             ]];
          }) (),
 
-         ! inc (['login', 'signup'], view) ? ['button', {
-            class: css.button + ' absolute top-0 right-0 pa2 ph3 f5',
-            style: style ({'z-index': 1000, 'background-color': css.colors.purple, margin: '24px 24px 0 0'}),
-            onclick: B.ev ('logout', [])
-         }, [['i', {class: 'bi bi-person-walking mr1'}], 'Logout']] : ''
+         ! inc (['login', 'signup'], view) ? ['div', {
+            class: 'absolute top-0 right-0 flex',
+            style: style ({'z-index': 1000, margin: '24px 24px 0 0', gap: 24})
+         }, [
+            B.view ([['settings', 'show'], ['key', 'command']], function (settings, command) {
+               return ['button', {
+                  class: css.button + ' pa2 ph3 f5 relative',
+                  style: style ({'background-color': '#555'}),
+                  onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
+               }, [
+                  command ? ['span', {class: 'cmd-tooltip'}, 'O'] : '',
+                  ['i', {class: 'bi mr1 ' + (settings ? 'bi-check-lg' : 'bi-wrench-adjustable mr1')}], settings ? 'Done with this' : 'Settings'
+               ]];
+            }),
+            ['button', {
+               class: css.button + ' pa2 ph3 f5',
+               style: style ({'background-color': css.colors.purple}),
+               onclick: B.ev ('logout', [])
+            }, [['i', {class: 'bi bi-person-walking mr1'}], 'Logout']]
+         ]] : ''
       ]];
    });
 }
@@ -738,8 +781,9 @@ views.project = function () {
             ['span', {class: 'f2 fw7 text-bright'}, project]
          ]],
          ['div', {class: 'project-main'}, [
-            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove'], ['key', 'command'], ['new', 'type']], function (files, name, newFileName, remove, command, newType) {
-               return ['div', {class: 'project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
+            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove'], ['key', 'command'], ['new', 'type'], ['settings', 'show']], function (files, name, newFileName, remove, command, newType, showSettings) {
+               return ['div', {class: 'flip-card'}, [['div', {class: 'flip-card-inner' + (showSettings ? ' flipped' : '')}, [
+                  ['div', {class: 'flip-card-front project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
                      ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file, index) {
@@ -766,17 +810,20 @@ views.project = function () {
                                     var prev = files.indexOf (name) - 1, next = files.indexOf (name) + 1;
                                     if (prev < 0) prev = files.length - 1;
                                     if (next === files.length) next = 0;
-                                    if (index === prev) return ['span', {class: 'cmd-tooltip'}, 'J'];
-                                    if (index === next) return ['span', {class: 'cmd-tooltip'}, 'K'];
+                                    if (index === prev) return ['span', {class: 'cmd-tooltip'}, 'K'];
+                                    if (index === next) return ['span', {class: 'cmd-tooltip'}, 'J'];
                                     return
                                  }) (),
                                  iconAndName (file)
                               ]],
                               remove && file !== 'doc/main.md' ? ['span', {
-                                 class: 'f4 lh-solid pointer',
+                                 class: 'f4 lh-solid pointer relative',
                                  style: style ({color: css.colors.purple}),
                                  onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'file', file])
-                              }, '×'] : []
+                              }, [
+                                 file === name ? ['span', {class: 'cmd-tooltip', style: style ({left: 'auto', right: 0, transform: 'none'})}, 'V'] : [],
+                                 '×'
+                              ]] : []
                            ]]
 
                         ]];
@@ -843,36 +890,54 @@ views.project = function () {
                         ]]
                      ]];
                   }) () : ''
-               ]];
+               ]],
+               ['div', {class: 'flip-card-back project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
+                  ['div', {class: 'flex items-center justify-between mb3'}, [
+                     ['span', {class: 'f4 fw6 text-bright'}, 'Settings'],
+                     ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
+                  ]],
+                  ['div', {class: 'text-muted lh-copy tc', style: style ({flex: 1, display: 'flex', 'align-items': 'center', 'justify-content': 'center'})}, [
+                     ['div', [
+                        ['i', {class: 'bi bi-gear db f1 mb3 light-blue'}],
+                        'Settings will appear here'
+                     ]]
+                  ]]
+               ]]
+            ]]]];
             }),
-            B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name']], function (content, mode, fileName) {
-               return ['div', {class: 'project-pane project-right-pane'}, [
+            B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name'], ['settings', 'show']], function (content, mode, fileName, showSettings) {
+               if (fileName === undefined) fileName = '';
+               return ['div', {class: 'flip-card'}, [['div', {class: 'flip-card-inner' + (showSettings ? ' flipped' : '')}, [
+                  ['div', {class: 'flip-card-front project-pane project-right-pane'}, [
                   B.view ([['new', 'file'], ['key', 'command']], function (newFile, command) {
                      var showTooltip = command && newFile === undefined;
                      return ['div', {class: 'flex items-center mb3'}, [
-                        ['span', {class: 'fw6 text-bright mr3'}, iconAndName (fileName || '')],
-                        (fileName || '').match (/^dialog\//) ? '' : [
-                           ['span', {
-                           class: 'pointer fw6 mr3 relative text-bright',
-                              style: style ({'background-color': mode !== 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
-                              onclick: B.ev ('set', ['file', 'mode'], 'view')
-                           }, [
-                              showTooltip && mode && mode !== 'view' ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
-                              ['i', {class: 'bi bi-eye mr1'}], 'View'
-                           ]],
-                           ['span', {
-                              class: 'pointer fw6 relative text-bright',
-                              style: style ({'background-color': mode === 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
-                              onclick: B.ev ('set', ['file', 'mode'], 'edit')
-                           }, [
-                              showTooltip && mode !== 'edit' ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
-                              ['i', {class: 'bi bi-hand-index mr1'}], 'Edit'
-                           ]],
-                        ]
+                        ['span', {class: 'fw6 text-bright mr3'}, iconAndName (fileName)],
+                        (function () {
+                           if (fileName.match (/^dialog\//)) return ['div', 'hallo']; // TODO: add ai/human/terminal mode
+                           return [
+                              ['span', {
+                                 class: 'pointer fw6 mr3 relative text-bright',
+                                 style: style ({'background-color': mode !== 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
+                                 onclick: B.ev ('set', ['file', 'mode'], 'view')
+                              }, [
+                                 showTooltip && mode && mode !== 'view' ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
+                                 ['i', {class: 'bi bi-eye mr1'}], 'View'
+                              ]],
+                              ['span', {
+                                 class: 'pointer fw6 relative text-bright',
+                                 style: style ({'background-color': mode === 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
+                                 onclick: B.ev ('set', ['file', 'mode'], 'edit')
+                              }, [
+                                 showTooltip && mode !== 'edit' ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
+                                 ['i', {class: 'bi bi-hand-index mr1'}], 'Edit'
+                              ]],
+                           ];
+                        }) ()
                      ]];
                   }),
                   (function () {
-                     var isDialog = (fileName || '').match (/^dialog\//);
+                     var isDialog = fileName.match (/^dialog\//);
                      if (mode === 'edit' && ! isDialog) return ['textarea', {
                         class: 'db w-100 bn outline-0 text-bright lh-copy f5',
                         style: style ({'background-color': css.colors.surface, color: css.colors.textBright, flex: 1, resize: 'none', 'font-family': 'monospace'}),
@@ -887,11 +952,24 @@ views.project = function () {
                         if (B.get ('settings', k, 'hasKey')) return true;
                      });
 
-                     if (isDialog && ! hasActiveAIKey) return ['div', {class: 'flex items-center justify-center tc text-muted f5 lh-copy', style: style ({flex: 1})}, ['div', {class: 'pa4'}, [['i', {class: 'bi bi-plug db f2 mb3'}], 'No active AI connection yet.', ['br'], ['button', {class: css.button + ' mt3', onclick: B.ev ('snackbar', 'info', 'Settings view coming soon!')}, 'Add one now']]]];
+                     if (isDialog && ! hasActiveAIKey) return ['div', {class: 'flex items-center justify-center tc text-muted f5 lh-copy', style: style ({flex: 1})}, ['div', {class: 'pa4'}, [['i', {class: 'bi bi-plug db f2 mb3'}], 'No active AI connection yet.', ['br'], ['button', {class: css.button + ' mt3', onclick: B.ev ('set', ['settings', 'show'], true)}, 'Add one now']]]];
 
                      return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
                   }) (),
-               ]];
+               ]],
+               ['div', {class: 'flip-card-back project-pane project-right-pane'}, [
+                  ['div', {class: 'flex items-center justify-between mb3'}, [
+                     ['span', {class: 'f4 fw6 text-bright'}, 'Settings'],
+                     ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
+                  ]],
+                  ['div', {class: 'text-muted lh-copy tc', style: style ({flex: 1, display: 'flex', 'align-items': 'center', 'justify-content': 'center'})}, [
+                     ['div', [
+                        ['i', {class: 'bi bi-gear db f1 mb3 light-blue'}],
+                        'Settings will appear here'
+                     ]]
+                  ]]
+               ]]
+            ]]]];
             }),
          ]]
       ]];

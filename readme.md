@@ -1080,7 +1080,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
 
 - cclient
    - Dialog
-      - Show tooltip to delete current file when on delete mode.
+      - Switch modes: AI, human, terminal
       - Configure AI provider modal: openai, claude (special usage), api keys
       - Select model
       - Send message/stop stream
@@ -1096,6 +1096,7 @@ Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.
       - Access:
          - Make doc/folder/project public
             - Autorender public markdown files to nice HTML
+            - Make media to be watchable rather than just something downloadable.
             - Allow making an entire project public. What's public is the read-only of everything's that in there. It could be just like the vibey interface, but with the editing off.
          - Make project open to another user
    - Docs & dialogs
@@ -1155,9 +1156,10 @@ auth csrf "<CSRF token>"
      signupRequested <0|1> // Whether a signup was just requested
 key command <0|1> // if set, the command key is pressed
 file content "..." // Current file selected
+     dialogMode <ai|human|terminal> // Dialog mode
      mode <edit|view> // Whether we're editing the file we're viewing or not
-     remove // If set, when clicking on a file we show crosses to remove them.
      name "..."
+     remove // If set, when clicking on a file we show crosses to remove them.
 files 1 "<filename 1>" // List of files for current project
       ...
 models anthropic "<model name>" context <size of context window in tokens>
@@ -1179,6 +1181,7 @@ settings claude hasKey <0|1>
          openai hasKey <0|1>
          openaiOAuth expired <0|1>
                      loggedIn <0|1>
+         show <0|1>
          testButton <0|1>
 view "<view name>"
 ```
