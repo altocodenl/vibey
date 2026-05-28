@@ -1,5 +1,13 @@
 ## Vibey development notes
 
+### 2026-05-27
+
+I've decided to not give a free tier on vibey. Actually, the free tier is to run it locally, or set it up in a VPS following the instructions.
+
+Base fee: 5 EUR/mo plus the engine, so it'll be about 8-9 EUR/mo with the base engine. Only one option to start, then you can upgrade the engine.
+
+For practical purposes, S3 is free. We only need to pay if we need to do disaster recovery. It's like insurance that you only pay for if you have an accident, but the cost is still relatively low.
+
 ### 2026-05-26
 
 ===
