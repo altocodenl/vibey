@@ -1,12 +1,25 @@
 ## Vibey development notes
 
+### 2026-05-30
+
+The big problem (I think) is the trillions of human hours we lose to 1) not having an unified representation to data; 2) not having an unified dataspace. This is seen in us poring over something that we cannot see "directly", and us switching between several apps and contexts to get a single thing done. This is where the waste/frictio nlies.
+
+### 2026-05-29
+
+vibey is a client over your own server! with the addons of ai and proxy, but that's what it is. It's beautiful. it's the os. and then will come cell. The measure of vibey will be to replace multiple apps with one that can connect to them. The one integration layer, with one representation layer. And for cell, to replace spreadsheets and most programming languages. That's the bar. Now go!
+
+A remarkable insight I got from a startup founder: customers do not buy solutions, they buy problems. They trust that you understand the problem they have and that you can do something about it.
+For people (like me) who are solution oriented, this borders on revelation.
+
+fun -> engagement -> growth -> empowerment
+
 ### 2026-05-27
 
 I've decided to not give a free tier on vibey. Actually, the free tier is to run it locally, or set it up in a VPS following the instructions.
 
 Base fee: 5 EUR/mo plus the engine, so it'll be about 8-9 EUR/mo with the base engine. Only one option to start, then you can upgrade the engine.
 
-For practical purposes, S3 is free. We only need to pay if we need to do disaster recovery. It's like insurance that you only pay for if you have an accident, but the cost is still relatively low.
+For practical purposes, S3 is free (we only pay per requests, which is minimal). We only need to pay if we need to do disaster recovery. It's like insurance that you only pay for if you have an accident, but the cost is still relatively low.
 
 ### 2026-05-26
 
