@@ -7,6 +7,8 @@ The big problem (I think) is the trillions of human hours we lose to 1) not havi
 1. Anyone can see the data in question **directly**.
 2. Everyone will be able to work in one place rather than switching from here to there.
 
+Solving these problems makes it much more fun to work with data. Immediate feedback, closeness. It's the same two elements that make a good text editor so powerful.
+
 Some notes on Alexander - The process of creating life:
 - I now find a deep meaning of equivalence: with A and B (living structure and living process, but it could be anything), you could expect some As to generate some Bs, and have partial one to manys. But true equivalence means: they are the same. Every A takes to B and every B takes to A. Then, A and B are complementary ways to look at the same thing, the same elephant. Equivalence is arrived to, it's not a starting point. You start by looking at the distinction and arrive at unification.
 - Generative processes with AI, for creating live code. How could we do it?
