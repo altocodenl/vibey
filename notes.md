@@ -2,7 +2,94 @@
 
 ### 2026-05-30
 
-The big problem (I think) is the trillions of human hours we lose to 1) not having an unified representation to data; 2) not having an unified dataspace. This is seen in us poring over something that we cannot see "directly", and us switching between several apps and contexts to get a single thing done. This is where the waste/frictio nlies.
+The big problem (I think) is the trillions of human hours we lose to 1) not having an unified representation to data; 2) not having an unified dataspace. This is seen in us poring over something that we cannot see "directly", and us switching between several apps and contexts to get a single thing done. This is where the waste/friction lies. This is what vibey + cell are trying to solve. How will things be different if they work?
+
+1. Anyone can see the data in question **directly**.
+2. Everyone will be able to work in one place rather than switching from here to there.
+
+Some notes on Alexander - The process of creating life:
+- I now find a deep meaning of equivalence: with A and B (living structure and living process, but it could be anything), you could expect some As to generate some Bs, and have partial one to manys. But true equivalence means: they are the same. Every A takes to B and every B takes to A. Then, A and B are complementary ways to look at the same thing, the same elephant. Equivalence is arrived to, it's not a starting point. You start by looking at the distinction and arrive at unification.
+- Generative processes with AI, for creating live code. How could we do it?
+- Prigogine had the conclusion I also saw emerging in code: change and time are the same.
+- "When the wholeness unfolds unnaturally, value is destroyed. When the wholeness unfolds naturally, value is created."
+- Alexander: machines as teleological, worth it only for a goal. Whys are about goals, or processes? What if we shift whys to processes, to the present and the action, and not just the goal? This would be what turns ends into means. From a Buddhist perspective, you could see liberation as the lack of ends. If there's no desire, there's no end. Politically, it makes sense. The more ends are emphasized, the more horror is justified.
+- Trillions of processes vs billions of them being alive reminds me of infinite real vs infinite natural numbers.
+- Creativity as respect for what exists.
+- The principle of increasing wholeness. It feels in complete contrast to entropy and the heat death of the universe.
+- Smoothness as the defining characteristic of living process. Continuity.
+- Structure preservation as the upholding of consistency as the system grows.
+- A thought: wouldn't LLMs be probabilistically structure preserving, by inferring the next token from the previous ones? There's a step-wise process to it that resembles the other. To what extent can they be made to see the whole?
+- The fifteen properties are not just conditions. They are the verbs of the process of creating life.
+- Idea: perhaps the roughness transformation is required by higher or lower levels of scale that are not apparent at the scale to which something looks rough.
+- "ultimately, the process, not the design, [is] which gives life to a building. Thus, the issue of process is immense. In its impact on the quality of architecture, it is more important than the static structure of the designs."
+- "There is no design. The building arises from the process."
+- "This harmony results because of a stae of mind in which the makers actually *see* the wholeness directly and accurately: that is, they see the system of centers that forms the wholeness."
+- "This "paying atention to the wholeness" is essentially synonymous with love of life. (...) For a person to become part of that wholeness, to extend it, love does - must - enter in."
+- "IF, as I have argued, natural structures get their life only from the smooth unfolding of the wholeness, it must follow that structures we build also will have life if they are created by unfolding wholeness, and will not have life if they do not."
+- "Yet it all come from images, hardly ever form life."
+- "The success of this process depends, always, on sequence."
+- "it is just the appearance of images in human thought which first deflects the natural unfolding process, distorts it, destroys it, and begins to create ugliness."
+- "the much-hailed "great" works of architecture of the early 20th century were hardly better than questionable nonsense"
+- "The image-driven process, by its nature, produces things which are dead."
+- "Creativity comes about when we discover the new within a structure already latent in the present. (...) our most wonderful creations come about, when we draw them as extensions and enhancements of what exists already."
+- You could perhaps say that structure-destroying processes will be left aside because history and nature themselves are structure-preserving. What will come out of this is a new, industrial way to build in a structure-preserving way.
+- "The building is created by attention."
+- "The denial of this point of view, is the chief way in which 20-thcentury development destroyed the surface of the Earth."
+- "If we do one thing at a time, and if what we do is wholesome and sound, then whatever comes next will work. We do not have to tie it down ahead of time for fear of some imaginary potential catastrophe of "design". Instead, we just go step by step, doing what is required as well as we ar able, with confidence that the next thing, too, will work out somehow when its time comes, but that it need not be worked out now."
+- "Generative processes tell us what to DO, what ACTIONS to take, step by step, to make buildings and building designs unfold beautifully, rather than detailed drawings which tell us what the END-result is supposed to be."
+- "Living structure in buildings can only be GENERATED. It cannot be by brute force from designs."
+- "The practical crux of unfolding, the essence of every living process (...) is tht it is above all a GEOMETRIC process. (...) The unfolding is geometrical in its ESSENCE."
+- "The law states simply this: ALL the well-ordered complex systems we know in the world, all those anyway that we view as highly successful, are GENERATED structures, not fabricated structures."
+- "We know that A-C happened in time in some *meaningful* way, and in a way which mattered, and which gave them their deep essential structure. In D-F, the role of time is insignificant, trivial. Time did not affect the structure, or contribute to its design."
+- "It is here, that we shall see the vast superiority of generated plans. They avoid mistakes."
+- "Computers and computer networks, and software, are all enormously complex. It would be natural to expect, therefore, that we must have a theory of complexity, that we have an effective and sensible way of thinking about the best way to *create* complexity. (...) one would expect that we have at least asked ourselves *how*, in general, a complex structure may become well-formed."
+- "once we have the geometry of complexity fixed in our minds as a target, we may then understand better the purpose of the chapters which follow (...) intended to make the generation of living structure (...) achievable, possible, and likely to succeed."
+- Note: Brooks' essential complexity is perhaps Alexander's generated complexity. It would be then not a matter of amount of complexity, but rather of the number of errors in the complexity.
+- "I claim that in a professional planning/design/development process, this failure of adaptation is inevitable"
+- "the plan E must inevitably have some 8,000 mistakes in it. There was, in the procedure used to generate this plan, no way to avoid it."
+- Note: It almost feels like generated structure has no closed-form solution. That it's really an NP process, where you have to take it step by step. You cannot just jump to the end. But perhaps some aspects of it you can calculate in closed form, as a lossy transform/representation, without capturing the all.
+- "it is essential - absolutely essential - that the adaptation, and the avoiding of mistakes, occurs at several levels of scale"
+- Note: does nature do this, while unfolding potentially new structures? Can it somehow see errors before committing to a decision, rather than playing them out all the way and letting death select them?
+- Note: generation allows adaptation. Adaptation prevents mistakes.
+- "The valuable *decision time* need not be done by a highly paid worker - it can be done by family members themselves (...) and the only thing the construction worker or crafstman must do then is to cut, nail and place material correctly"
+- "A mistake, is ultimately a gemoetrical problem, which bears on what we call function"
+- "If you wat to get a system of centers to appear in that cup or glass, you must introduce them in a certain order (...) This is what the loose term "unfolding" means."
+- "Thus the importance of time (...) allows you to get each next layer of structure from the previously established layers of structure. Complex, generated structure *cannot be arrived at in any other way*. (...) *That is the secret of the whole thing*"
+- "The key to complex adaptation in a generated structure lies in the concept of differentiation. This is a process of dividing and differentiating a whole to get the parts, rather than adding parts together to *get* a whole."
+- "the way forward in the next decades, towards programs with highly adapted human performance, will be through programs which are generated through unfolding, in some fashion comparable to what I have described for buildings."
+- "*The real essence lies in the structure-preserving transformations, which move the structure forward through time, and which are primarily responsible for the success of the generating process.* The needed transformations are not merely trial-and-error steps"
+- "To assume that the point of generated structures is merely slow, step-by-step evolutionary adaptation, is to make the same mistake that early adherents of Darwinism made in biology - to assume that small steps *alone*, modification coupled with selective pressure, would be sufficient  to get a genotype to a new state"
+- - "The argument put forward is that the high level of complexity we need in urban tissue, orking and dwelling spaces, computer programs, etc., can only be attained when an existing, albeit latent, structure unfolds through differentiation to the needed level of complexity. Each differentiation, i.e. decision, is made in sequence and in context. It is reworked right then and ther until it is mistake-free, i.e., it takes into account all the connecting relationships. This must be done in sequence and in context because the necessary information for a successful decision is not avaliable prior to that step in the unfolding."
+- Note: is there a morphogenesis of optimal algorithms?
+- "each differentiation *adds relationships and brings ore interdependence among the centers*."
+- "it is vital, for success, that the process is *able* to keep on cramming in more and more relationships, so that the mistake-avoiding adaptations can continue to be generated."
+- Note: reminds me of a good Turing Machine, always continuing.
+- "This "cramming" of complexity brings with it a need to constantly clean out any non-functionalities and leave only the most simple possible gemoetry in place. It is simple structure that allows for maximum relationships"
+- "The structure seeks, above all, to avoid mistakes. To do it, it promotes an activity of structure-preserving transformations, to maintain coherence."
+- "(1) There are individual processes of design (...) A local process of creation creates one complete center, large or small, from conception to completion. It is done in a controlled and continuous sequence (...) It does have a completion date. (2) There is an accretive process which forms the larger structure (...) spread out in time and place, and are initiated independently by many different people. (...) Any definition of living process, must take both kinds of process into account. (...) this overall process generally has no finite beginning or end, and no completion date."
+- Note: the above has a strong bearing towards a single, consistent process, vs a whole much more loosely coordinated, but still coherent.
+- Note: I wonder why prefabricated pieces don't create the simplest designs. Perhaps because they can't avoid the mistakes.
+- "This is the nature of all living process in the built environment. At every scale, every act of formation is both local and global, both creative/complete and accretive/incomplete."
+- "Here we come to the core of the secret. The fifteen strcture-preserving transformations have the capacity to conserve and to create. (...) it is *new* coherence that they generate. Yet they are conservative and pull the future from the present."
+- "But the essential point is this. We do have a system of transformations which are, in principle, capable of nudging a system steadily towards living structure, and these transformations are precisely those transformations which govern the life of the centers themselves - and hence the wholeness (which *is* the system of center), too."
+- Note: the transformations would be the calls. The effect they produce in the wholeness would be the response. The response, bringing back the entire thing, reminds me of the functional extreme of returning the entire world/state after a single call. But in this case (generated structure) it is apt and fitting.
+- "When I said, there, that contemporary design and planning and development are too often structure-destroying rather than structure-preserving, what I meant was that the fifteen differentiating transformations were largely missing from day-to-day processes."
+- "*in a way that guarantees it has a positive impact on the larger whole.* (...) Cities and buildings can become coherent and harmonious, merely as a result of following this rule."
+- "The idea that there might be a single class of processes at the core of all living processes in society - hence at the core of all building, engineering, and all construction of our world - may shock the modern mind."
+- Note: it'd be very interesting and fruitful to apply this to algorithm design.
+- "The structure-enhancing step, which again and again intensifies one center and creates "hooks" to other new centers, might even be called *the* fundamental process."
+- The Fundamental Differentiating Process:
+   - Pay attention to the wholeness that already exists, actual and latent.
+   - Identify the weakest place, these are latent centers.
+   - Work on that center using one or more of the transformations.
+   - New centers are born. The life of the whole should be larger.
+   - Test that life has indeed increased. Also test that the change you've done is the simplest possible that would get the job done.
+   - Go back to the beginning.
+- Note: if designs don't have a faithful representation of the centers of the existing thing, then new designs will almost certainly destroy the wholeness that was already present there. Think of UI redesign in an existing app.
+- "It is a living process when, in *content* - not necessarily in outward verbal form - it accomplishes, and approcimates, the scheme I have described."
+- "The idea of living process, is, in a sense, only a formal way of talking about your natural process."
+- The optimal algorithm could be done as a differentiating/unfolding process.
+- Structure restoring transformations: even if you start from a bit of a void, you need to work in the existing world. Are structure restoring transformations also structure preserving transformations? I think so. It might be way more work to take something with a low degree of life and make it have a high degree of life, but it must be possible. The question is how much of a void transformation you need to apply first, but it's perhaps less than we think. In this, I disagree with Alexander (without knowing anything myself) about how when a process goes bad, it's broken. We need to learn the art of healing structure.
 
 ### 2026-05-29
 
