@@ -200,6 +200,47 @@ B.mrespond ([
       });
    }],
 
+   // *** OAUTH ***
+
+   ['login', 'oauth', function (x, provider) {
+      B.call (x, 'set', ['oauth', 'loading'], provider);
+      B.call (x, 'post', 'settings/login/' + provider, {}, function (x, error, rs) {
+         if (error) {
+            B.call (x, 'rem', 'oauth', 'loading');
+            return B.call (x, 'snackbar', 'error', 'Failed to start login');
+         }
+         window.open (rs.body.url, '_blank');
+         if (rs.body.flow === 'paste_code') {
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code'});
+            B.call (x, 'rem', 'oauth', 'loading');
+         }
+         else {
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting'});
+            B.call (x, 'complete', 'oauth', provider);
+         }
+      });
+   }],
+
+   ['complete', 'oauth', function (x, provider, manualCode) {
+      B.call (x, 'set', ['oauth', 'loading'], provider);
+      var body = manualCode ? {code: manualCode} : {};
+      B.call (x, 'post', 'settings/login/' + provider + '/callback', body, function (x, error, rs) {
+         B.call (x, 'rem', 'oauth', 'loading');
+         B.call (x, 'rem', 'oauth', 'step');
+         B.call (x, 'rem', 'oauth', 'code');
+         if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
+         B.call (x, 'load', 'settings');
+      });
+   }],
+
+   ['logout', 'oauth', function (x, provider) {
+      if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
+      B.call (x, 'post', 'settings/logout/' + provider, {}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to logout');
+         B.call (x, 'load', 'settings');
+      });
+   }],
+
    // *** LOAD DATA ***
 
    ...dale.go (['models', 'projects', 'settings'], function (entity) {
@@ -902,8 +943,8 @@ views.project = function () {
                         'Settings will appear here'
                      ]]
                   ]]
-               ]]
-            ]]]];
+                  ]]
+               ]]]];
             }),
             B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name'], ['settings', 'show']], function (content, mode, fileName, showSettings) {
                if (fileName === undefined) fileName = '';
@@ -957,17 +998,66 @@ views.project = function () {
                      return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
                   }) (),
                ]],
-               ['div', {class: 'flip-card-back project-pane project-right-pane'}, [
+               ['div', {class: 'flip-card-back project-pane project-right-pane', style: style ({overflow: 'auto'})}, [
                   ['div', {class: 'flex items-center justify-between mb3'}, [
                      ['span', {class: 'f4 fw6 text-bright'}, 'Settings'],
                      ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
                   ]],
-                  ['div', {class: 'text-muted lh-copy tc', style: style ({flex: 1, display: 'flex', 'align-items': 'center', 'justify-content': 'center'})}, [
-                     ['div', [
-                        ['i', {class: 'bi bi-gear db f1 mb3 light-blue'}],
-                        'Settings will appear here'
-                     ]]
-                  ]]
+                  B.view ([['settings'], ['oauth']], function (settingsData, oauth) {
+                     settingsData = settingsData || {};
+                     oauth = oauth || {};
+                     var openaiOAuth = settingsData.openaiOAuth || {};
+                     var oauthLoading = oauth.loading;
+                     var oauthStep = oauth.step;
+                     var oauthCode = oauth.code;
+                     var isPaste = oauthStep && oauthStep.provider === 'openai' && oauthStep.flow === 'paste_code';
+                     var isWaiting = oauthStep && oauthStep.provider === 'openai' && oauthStep.flow === 'waiting';
+
+                     return ['div', [
+                        ['div', {class: 'f6 text-muted mb3 lh-copy'}, 'Use your existing ChatGPT subscription. Logs in via OAuth — no API key needed.'],
+
+                        ['div', {style: style ({'background-color': css.colors.surface, 'border-radius': 8, padding: '1rem', 'margin-bottom': '1rem', border: '1px solid ' + css.colors.border})}, [
+                           ['div', {class: 'flex items-center justify-between mb2'}, [
+                              ['span', {class: 'fw6 light-blue'}, 'ChatGPT Plus/Pro'],
+                              openaiOAuth.loggedIn
+                                 ? ['span', {class: 'f6', style: style ({color: openaiOAuth.expired ? '#f0ad4e' : css.colors.success})}, openaiOAuth.expired ? '⚠ Expired' : '✓ Connected']
+                                 : ['span', {class: 'f6', style: style ({color: css.colors.purple})}, '✗ Not connected']
+                           ]],
+
+                           openaiOAuth.loggedIn && ! isPaste && ! isWaiting ? ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
+                              openaiOAuth.expired ? ['button', {class: css.button + ' f6', onclick: B.ev ('login', 'oauth', 'openai'), disabled: oauthLoading === 'openai'}, 'Re-authenticate'] : [],
+                              ['button', {class: css.button + ' f6', style: style ({'background-color': '#c44'}), onclick: B.ev ('logout', 'oauth', 'openai'), disabled: oauthLoading === 'openai'}, 'Logout']
+                           ]] : [],
+
+                           ! openaiOAuth.loggedIn && ! isPaste && ! isWaiting ? ['button', {
+                              class: css.button + ' f6 mt2',
+                              onclick: B.ev ('login', 'oauth', 'openai'),
+                              disabled: oauthLoading === 'openai'
+                           }, oauthLoading === 'openai' ? 'Opening browser...' : 'Login with ChatGPT'] : [],
+
+                           isPaste ? ['div', {class: 'mt2'}, [
+                              ['div', {class: 'f6 mb2 lh-copy', style: style ({color: '#f0ad4e'})}, 'A browser tab opened. After OpenAI redirects to localhost:1455, copy the full URL and paste it below.'],
+                              ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
+                                 ['input', {
+                                    type: 'text',
+                                    value: oauthCode || '',
+                                    placeholder: 'Paste callback URL here...',
+                                    oninput: B.ev ('set', ['oauth', 'code'], {raw: 'this.value'}),
+                                    style: style ({flex: 1, padding: '0.5rem', 'border-radius': 6, border: 'none', 'background-color': css.colors.appBg, color: css.colors.textBright, 'font-family': 'monospace', 'font-size': '12px'})
+                                 }],
+                                 ['button', {class: css.button + ' f6', onclick: B.ev ('complete', 'oauth', 'openai', oauthCode || ''), disabled: ! oauthCode || ! oauthCode.trim ()}, 'Submit'],
+                                 ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.border}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
+                              ]]
+                           ]] : [],
+
+                           isWaiting ? ['div', {class: 'mt2'}, [
+                              ['div', {class: 'f6 mb2 lh-copy', style: style ({color: '#f0ad4e'})}, oauthLoading === 'openai' ? '⏳ Waiting for browser authentication...' : '✓ Authentication complete!'],
+                              ['div', {class: 'f6 text-muted mb2 lh-copy'}, 'Complete the login in the browser tab. This page will update automatically.'],
+                              ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.border}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
+                           ]] : []
+                        ]]
+                     ]];
+                  })
                ]]
             ]]]];
             }),

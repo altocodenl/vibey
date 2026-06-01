@@ -1,5 +1,19 @@
 ## Vibey development notes
 
+### 2026-06-01
+
+Ideas for dialog:
+- Switch between AI, human and terminal.
+- Experiment: make the text box be inside the dialog, rather than fixed at the bottom. When you're scrolling up, usually you don't need to enter anything.
+- Show the currently selected message, super useful when you read up. Compare to the experience of a web chatbot or a terminal agent, where there are very weak boundaries between messages.
+
+===
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+See the settings page of client.js. Don't do anything yet. Then see the settings page of cclient, where we're working. Add just something to add an openai subscription.
+
+
 ### 2026-05-30
 
 The big problem (I think) is the trillions of human hours we lose to 1) not having an unified representation to data; 2) not having an unified dataspace. This is seen in us poring over something that we cannot see "directly", and us switching between several apps and contexts to get a single thing done. This is where the waste/friction lies. This is what vibey + cell are trying to solve. How will things be different if they work?

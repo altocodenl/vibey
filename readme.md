@@ -1172,6 +1172,10 @@ new file "<file name>" // Name for a new file
 project "<project slug>" // The current project selected
 projects 1 name "<project name>"
            slug "<project slug>"
+oauth code "<pasted callback URL or code>" // Manual OAuth code input
+      loading "<provider>" // Provider currently in OAuth flow (openai or claude)
+      step flow <paste_code|waiting> // Whether user must paste a code or wait for auto-callback
+           provider "<provider>" // Current OAuth step
 snackbar color <color>
          message <message>
          timeout "<JS timeout to clear the snackbar>"
@@ -1181,7 +1185,7 @@ settings claude hasKey <0|1>
          openai hasKey <0|1>
          openaiOAuth expired <0|1>
                      loggedIn <0|1>
-         show <0|1>
+         show <0|1> // Flips the settings panel open
          testButton <0|1>
 view "<view name>"
 ```
