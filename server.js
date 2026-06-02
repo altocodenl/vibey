@@ -5078,7 +5078,7 @@ var startSmtpServer = function () {
 
                   var prompt = 'Trigger' + (data.from ? ' from ' + data.from : '') + '\n\n' + (data.subject ? 'Subject: ' + data.subject + '\n\n' : '') + (data.body || '');
                   var slug = triggerInfo.userId + '-' + triggerInfo.projectSlug;
-                  var defaultModel = defaultModelForProvider (provider);
+                  var defaultModel = provider === 'openai' ? 'gpt-4.1' : defaultModelForProvider (provider);
 
                   var dialogId = await createDialogId (slug, 'email-trigger', null);
                   if (dialogId === false) return cb (new Error ('Failed to create dialog'));
