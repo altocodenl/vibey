@@ -221,13 +221,10 @@ B.mrespond ([
       });
    }],
 
-   ['complete', 'oauth', function (x, provider, manualCode) {
+   ['complete', 'oauth', function (x, provider, code) {
       B.call (x, 'set', ['oauth', 'loading'], provider);
-      var body = manualCode ? {code: manualCode} : {};
-      B.call (x, 'post', 'settings/login/' + provider + '/callback', body, function (x, error, rs) {
-         B.call (x, 'rem', 'oauth', 'loading');
-         B.call (x, 'rem', 'oauth', 'step');
-         B.call (x, 'rem', 'oauth', 'code');
+      B.call (x, 'post', 'settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
+         B.call (x, 'rem', [], 'oauth');
          if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
          B.call (x, 'load', 'settings');
       });
@@ -634,7 +631,8 @@ views.main = function () {
             class: 'absolute top-0 right-0 flex',
             style: style ({'z-index': 1000, margin: '24px 24px 0 0', gap: 24})
          }, [
-            B.view ([['settings', 'show'], ['key', 'command']], function (settings, command) {
+            B.view ([['settings', 'show'], ['key', 'command'], ['view']], function (settings, command, view) {
+               if (view !== 'project') return ['span'];
                return ['button', {
                   class: css.button + ' pa2 ph3 f5 relative',
                   style: style ({'background-color': '#555'}),
