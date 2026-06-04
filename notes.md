@@ -1,5 +1,23 @@
 ## Vibey development notes
 
+### 2026-06-03
+
+Thinking about how to provide access to s3/backblaze in vibey without 1) each customer getting having to get their own account; 2) each customer sending every request through our layer. Something like: credentials scoped to buckets, with usage tracking and usage limits.
+
+Claude:
+"  Backblaze B2 has this almost natively:
+  - You can create application keys scoped to a single bucket with granular permissions (read/write/list). These are long-lived but revocable.
+  - One Vibey master account, one bucket per customer (or per project), one scoped key per bucket.
+  - Customer's app talks directly to B2 with their scoped key. Your servers never touch the bytes."
+
+For usage, we issue two keys: read & write. When limits go beyond a certain point, the write key is revoked. Same for the read key. We poll every N minutes per bucket to see how much ingress/egress has been done.
+
+There can be an agent for syncing the project to backblaze automatically.
+
+tests as calls concerning an interface, the outermost part, the implementation as calls concerning the logic. Tests can be simple enumerations, or they can also assert invariants. Good tests approximate mathematical proofs of correctness, but they must do it over inputs and outputs, not over the logic.
+
+Put the main doc only in ai mode, if you edit it during the dialog, put it again below, to see it and not bust the cache. Thought about putting the prompt also at the top too in the dialog, hidden but expandable, but no, let's hide the prompt, otherwise it will pollute the files. I'm a bit torn on it, but it feels like it doesn't belong, because it's not user generated, while the main doc is. So let's skip it.
+
 ### 2026-06-01
 
 Ideas for dialog:
