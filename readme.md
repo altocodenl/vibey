@@ -1145,6 +1145,14 @@ State:
 - Server in-memory
 - Files in container
 
+### Redis state
+
+"csrf:<session id>" "<csrf token>"
+"session:<session id>" "<user id>"
+user:<id> id "..."
+          created "..."
+          last "..."
+
 ### Client state
 
 ```

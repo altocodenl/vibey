@@ -1,5 +1,64 @@
 ## Vibey development notes
 
+### 2026-06-04
+
+
+Some notes on Alexander - The process of creating life:
+- "Part of our difficulty in modern society is that accepted formal processes often fail to include natural processes, and that is how they get things screwed up."
+- "Whatever you are doing, whatever process you are following, the concept of a living process usually has the capacity to make it a little better, by making deeper, more profoundly and carefully structured living centers, replete with the fifteen properties - just helping you do a little better what you already do naturally."
+- "What I have defined as living process is - I believe - the minimal, and necessary core of *any* process capable of creating life."
+- The concept of living process (...) it sems to me that it might possibly compare in intellectual breadth and depth to the concept of energy as it was introduced in the seeventeenth century."
+- Note: load context (wholeness), see the latent center that most requires work, focus on it, re-evaluate after the change to see if it's a keeper or it should be discarded, go back to the beginning; I think rolling back changes can be a transformation itself, going back to the beginning and trying the thing again. Alexander says almost directly that we should not move forward with the decision if it doesn't improve the whole.
+- Note: coherence as the absence of errors when seeing how one center relates to all the others.
+- Fundamental features of the concept:
+   - Step-by-step (chapter 8)
+   - The whole rules (chapter 9)
+   - The process is about making centers (chapter 10)
+   - There's a vital sequence (chapter 11)
+   - Parts become locally unique (chapter 12)
+   - Centers are formed by generic patterns (chapter 13)
+   - Every living process is governed by feeling (chapter 14)
+   - For buildings, structure comes from an emergent aperiodic grid [I wonder what it would be in software - an aperiodic grid of calls?] (chapter 15)
+   - There's a form language that provides concrete methods for impleneting adopted structure through simple combinatory rules (chapter 16)
+   - The entire process is guided by the simplicity transformation (chapter 17)
+- "I am reasonably certain that, for any process to be a living one, these ten essential features, *at least*, must be present. I would like the reader to consider my discussion of living process in the next ten chapters as applying to every conceivable process in society, and to every architecture-creating process, at any scale, in which the reader is herself/himself involved."
+
+
+Each message has to have their own provider & model. These are not dialog-level things. Same with timestamps. A dialog is a strict sum of messages. Questions:
+- What divides one message from another, at the file level?
+- Do we enforce strict ordering on messages, to the point of blocking? Think of user A triggering a call, then B wants to come and say something. I'd say yes, let's do it like this.
+- If we don't store a current mode in the dialog, that has to be determined by the message sent. You can change it in the client for what will the next message be. But if you refresh, it will default to what the last message was: was it destined to AI, the terminal, or a human that will read it there?
+
+==
+
+Intro prompt: Hi! I'm building vibey. See please readme.md (in full) and prompt.md (from this one take only the orchestration convention and the coding guidelines, nothing else), then docs/todis.md (philosophy) and docs/ustack.md (libraries), **in full**.
+
+- I want to change the create dialog endpoint so that only the empty file is created, with nothing else. When the first message is sent to it, then we determine the provider and model. What would the implications be for client.js and cclient.js?
+- So, basically, since we send provider and model on every message, besides accomodating the empty dialog, there'd be nothing else?
+
+- What happens if we change the provider/model from one message to the other? Do we put the provider/model again on the message? It might make way more sense to put these by message.
+
+===
+
+What do I need to port from the old client to the new one?
+- Auth
+- Project
+- File viewer/editor
+- Dialog
+- Triggers (API & email)
+- Embeds
+
+I am very, very torn. The new client is going very well, and by going slowly, one center at a time, what comes out is so much better. It makes me realize I should do this with the server as well; and also with the tests.
+
+Two things hold me back: 1) leaving behind the old code, which means that I need to port the data. More than that, it's the feeling that I couldn't heal the other structure, I had to make a new one instead. But it does feel like it's so much work to fix, compared to doing it anew properly. Perhaps this is what Alexander referred to. Perhaps it's a big void transformation, but still preserving existing structure, so that the old data can be moved to the new one.
+2) This will take longer. And I feel a strong intention of making this useful to others, soon.
+
+I guess that behind this there are strong misgivings. If I keep on using AI, the misgiving that I'm not creating living structure, when I have a chance to. And if I don't use it, or barely using, the feeling that I'm leaving myself behind.
+
+This has to be decided right now. Funnily enough, it's possible to create something of value by hand that can scale massively, because of computers and the internet. If vibey is something small, vibrant and powerful, it can be done by hand. And if doing it by hand is required to be able to unfold something with a high degree of life, then the path ahead is clear.
+
+I started with cserver, from scratch. I decided not to sign the cookies, since they are just opaque ids.
+
 ### 2026-06-03
 
 Thinking about how to provide access to s3/backblaze in vibey without 1) each customer getting having to get their own account; 2) each customer sending every request through our layer. Something like: credentials scoped to buckets, with usage tracking and usage limits.
@@ -120,6 +179,7 @@ Some notes on Alexander - The process of creating life:
    - Test that life has indeed increased. Also test that the change you've done is the simplest possible that would get the job done.
    - Go back to the beginning.
 - Note: if designs don't have a faithful representation of the centers of the existing thing, then new designs will almost certainly destroy the wholeness that was already present there. Think of UI redesign in an existing app.
+- "Simple as this is, focusing on creation of one good thing at a time, is already likely to work (...) After a person has grasped that idea, I may point out that sometimes, the good things that we do work even better if each small good thing also helps to achieve some slightly larger good thing."
 - "It is a living process when, in *content* - not necessarily in outward verbal form - it accomplishes, and approcimates, the scheme I have described."
 - "The idea of living process, is, in a sense, only a formal way of talking about your natural process."
 - The optimal algorithm could be done as a differentiating/unfolding process.
