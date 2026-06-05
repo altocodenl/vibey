@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vibey — Own what AI does for you.</title>
+<meta name="description" content="You already have AI. You can now own what it does for you. Conveniently.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 17px; scroll-behavior: smooth; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #0a0a0a;
+  color: #e8e8e8;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+
+.hero {
+  padding-top: 48px;
+  padding-bottom: 32px;
+  text-align: center;
+}
+.hero h1 {
+  font-size: 3.2rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 16px;
+}
+.hero h1 em {
+  font-style: normal;
+  color: #b07aff;
+}
+.hero .lead {
+  font-size: 1.3rem;
+  color: #999;
+  max-width: 520px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.features {
+  padding-bottom: 16px;
+}
+
+.feature {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 4px 20px;
+  padding: 14px 0;
+  border-top: 1px solid #1a1a1a;
+}
+.feature:last-child {
+  border-bottom: 1px solid #1a1a1a;
+}
+.feature h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  padding-top: 1px;
+}
+.feature:nth-child(1) h3 { color: #b07aff; }
+.feature:nth-child(2) h3 { color: #7aafff; }
+.feature:nth-child(3) h3 { color: #4ec970; }
+.feature:nth-child(4) h3 { color: #ff7a7a; }
+.feature:nth-child(5) h3 { color: #ffb74a; }
+.feature:nth-child(6) h3 { color: #e07aff; }
+.feature:nth-child(7) h3 { color: #7adaff; }
+.feature p {
+  color: #999;
+  line-height: 1.7;
+  font-size: 0.95rem;
+}
+
+.cta {
+  text-align: center;
+  padding-bottom: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.cta a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #b07aff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.1rem;
+  background: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  border-radius: 999px;
+  padding: 14px 28px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.cta a:hover {
+  color: #fff;
+  border-color: #b07aff;
+}
+
+@media (max-width: 600px) {
+  .hero h1 { font-size: 2.2rem; }
+  .hero { padding-top: 60px; padding-bottom: 40px; }
+  .wrap { padding: 0 16px; }
+  .feature { grid-template-columns: 1fr; gap: 4px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1><em>Vibey</em></h1>
+    <p class="lead">You already have AI.<br>You can now own what it does for you.<br>Conveniently.</p>
+  </div>
+
+  <div class="features">
+    <div class="feature">
+      <h3>Dialogs as files</h3>
+      <p>Your conversations are readable, exportable. Switch to a different model or provider in mid-conversation.</p>
+    </div>
+    <div class="feature">
+      <h3>Memories as files</h3>
+      <p>Your context is one file. Instead of explaining yourself, AI starts with your main context file and takes it from there.</p>
+    </div>
+    <div class="feature">
+      <h3>One place</h3>
+      <p>Both your dialog and the final product live in the same place. Work side by side instead of back and forth.</p>
+    </div>
+    <div class="feature">
+      <h3>Powerful yet contained</h3>
+      <p>AI doesn't ask for permission, but it cannot touch anything beyond the project on which you're working. Every change is automatically versioned.</p>
+    </div>
+    <div class="feature">
+      <h3>Accessible from any device</h3>
+      <p>Works on any device with internet access and a browser.</p>
+    </div>
+    <div class="feature">
+      <h3>Comes with a server</h3>
+      <p>Host apps, serve documents, forward emails and send API calls to your agent, keep it working 24/7 while your computer is asleep.</p>
+    </div>
+  </div>
+
+  <div class="cta">
+    <a href="https://buildwithvibey.com/app">Try Vibey Cloud</a>
+    <div class="feature" style="text-align:left;max-width:720px;width:100%">
+      <h3>(For the hardcore)</h3>
+      <p>Open source. If you prefer to run it yourself, you can run Vibey locally or in your own server.</p>
+    </div>
+    <a href="https://github.com/altocodenl/vibey">See in GitHub</a>
+  </div>
+
+</div>
+</body>
+</html>

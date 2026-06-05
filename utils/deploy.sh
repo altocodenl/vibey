@@ -14,10 +14,11 @@ FOLDER="vibey"
 wc -l client.js client-css.js server.js test-client.js test-server.js website.js secret.js utils/deploy.sh
 
 if [ "$2" == "website" ] ; then
-   node website
-   scp website.html $HOST:/var/www/html
-   ssh $HOST "mkdir -p /var/www/html/video"
-   rsync -av video/ $HOST:/var/www/html/video/
+   scp new-website.html $HOST:/var/www/html/website.html
+   #node website
+   #scp website.html $HOST:/var/www/html
+   #ssh $HOST "mkdir -p /var/www/html/video"
+   #rsync -av video/ $HOST:/var/www/html/video/
    exit 0
 fi
 

@@ -1,7 +1,408 @@
 ## Vibey development notes
 
-### 2026-06-04
+### 2026-06-05
 
+The key, or door, to vibey is the AI harness. This is what most people are most profitably using lately. The text editor, by itself, is a non-starter to many, and something where vibey is also underpowered. Same goes for the terminal, or the chat. The zero-config containers with autogit are very nice and not easy to find, but you have to be a programmer to understand that concept.
+
+The key is the harness. A harness that 1) has beautiful rendering of each message; 2) has access to tools without requesting permission; 3) lives in a persistent space that you own and understand, and where the other datums are too; 4) (for cloud) you can send emails and API calls to.
+
+What makes the space "click" is that we use the paradigm of file for everything, even for dialogs and apps (through embeds). So we double down on unix's dear "everything's a file" idea. Even if it's not a file, you can at least get ahold of it through the file, which is a path on a single space. On top of that, you can see it in a special way which allows for non-linear interactions (think of a cell dataspace there).
+
+Vibey should be seeded with an initial dialog. Starting on main and then having to create a dialog and send the first message is too much of an ask.
+
+> Hi! Why are you here?
+> Hi! What shall we do?
+
+And the dialog box is not a clunky thing at the bottom, but inside the dialog.
+
+The question disappears as soon as we enter the first message.
+
+What makes it different from an UI harness? 1) having all the data (even the dialog) under a single project under the file paradigm; 2) cloud: being able to reach it from the outside.
+
+What makes it different from a TUI harness? 1) same, because it's not in your computer, but inside the project; 2) cloud: same; 3) much clearer way to read previous messages when scrolling up, or search.
+
+Idea for signature on emails: the humans of altocode
+
+Three modes for dialog: AI, shell and chat.
+
+Things that appear on top of any file: "access" (barrier icon). On top of dialogs, too: "hit" (for calls from emails or API, with a lightning icon).
+
+Hit 1: chatgpt
+- Talk to AI
+- Web UI
+
+Hit 2: claude code
+- Lose: web, UI, cloud
+- Gain: tool access, file persistence
+
+Hit 3: openclaw
+- Lose: cloud
+- Gain: can work on multiple remote channels
+
+Vibey:
+- Lose: remote channels that don't work through the web, TUI
+- Recover: web, UI, cloud, file persistence
+- Gain: container, server, everything's a file
+
+A dialog in chat mode could be also public, as a sort of stream of consciousness of public interest. When we have a number of paid users, I can write there things like "here comes the hetzner bill".
+
+The way to implement something like that would be to tail (or head) the file directly from the request into the FS, with client rendering on top.
+
+> Remember that great chat with AI from 2024? Where is it now?
+
+> Your AI needs files. And you need a server.
+
+> You already have AI. All you need now is files and a server.
+
+> Your data belongs with you. Make AI a guest in your digital office.
+
+The keeper:
+
+> You already have AI. All you need now is files and a server.
+
+Why files?
+- Memory: stop re-explaining yourself. Keep the main ideas in one file. Keep other files to explain specific contexts.
+- Persistence: dialogs with AI are just files that you can refer back to, export and keep forever.
+- One place: your dialog and what you make are side by side. No more going back and forth.
+
+Why a server?
+- Access for you: use vibey from any browser.
+- Access for everyone: serve your public files directly to the world, no need for a blog.
+- Connect: send emails or API calls to start or continue dialogs.
+
+Another take:
+
+> You already have AI. You can now own what it does for you. Conveniently.
+
+- Dialogs as files: your conversations are readable, exportable. Switch to a different model or provider in mid-conversation.
+- Memories as files: your context is one file. Instead of explaining yourself, AI starts with your main context file and takes it from there.
+- Work in one place: both your dialog and the final product live in the same place. Work side by side instead of back and forth.
+- Accessible from any device: works on any device with internet access and a browser.
+- Comes with a server: host apps, serve documents, forward emails and send API calls to your agent, keep it working 24/7 while your computer is asleep.
+- Powerful yet contained: AI doesn't ask for permission, but it cannot touch anything beyond the project on which you're working. Every change is automatically versioned.
+- (For the hardcore): open source. If you prefer to run it yourself, you can run vibey locally or in your own server.
+
+List of problems:
+
+  1. Locked conversations — Your conversations are trapped inside one provider. Switch and you start from zero. You can't even read them outside the app.
+  2. Invisible memories — You've explained yourself dozens of times and the AI still forgets. It "remembers" things but you can't see what, edit it, or take
+  it with you.
+  3. Copy-paste loop — You live between two windows: ask AI in one, apply it in another, go back to check, copy again. Back and forth all day.
+  4. Too much or too little control — Either AI asks permission for every little thing (slow, annoying) or it has access to your whole system (terrifying).
+  And when it breaks something, good luck undoing it.
+  5. Trapped on one machine — Your AI setup is stuck on one computer. Switch to your phone or another device and you're back to vanilla ChatGPT.
+  6. Stops when you stop — Your AI goes dark when you close your laptop. You can't point a URL or an email at it. It can't do anything while you sleep.
+
+#### Research by Claude
+
+- Please do some web research (I can wait 30 mins easily), incrementally write the results in research.md, and investigate how the big players and a few smaller ones are working on this problem.
+
+```
+# Research: How players are solving the AI persistence problem
+
+The core problem: AI conversations are ephemeral. You talk to an AI, get a result, copy-paste it somewhere, lose context, start over. The work doesn't accumulate. How are different players addressing this?
+
+## Big players
+
+### OpenAI (ChatGPT)
+
+**Projects** (launched Nov 2025): Groups conversations under shared context — instructions, uploaded files, and "Project Memory" that persists across chats within a project. Memory is partitioned: project memories don't leak into other projects or main chat. Supports 5–40 uploaded files depending on tier.
+
+**Canvas**: Side-by-side editing mode where the AI's output appears as a live collaborative document. You edit directly, ask for revisions, track changes. This is OpenAI's attempt to move beyond the chat transcript — the output is a *thing* you can work on, not a message in a stream.
+
+**Project Sharing** (Teams/Enterprise): Multiple team members contribute to and benefit from the same AI workspace.
+
+**Hard limits (verified June 2026)**: Projects allow **20 files per project** on Plus and Pro plans. Users on the OpenAI forums report hitting a 10-file bug even on Pro. Enterprise gets up to 160 files per 3 hours. These limits are not per-conversation — they're per *project*. Twenty files is less than most real-world project directories.
+
+**Assessment**: OpenAI's approach is to make the *chat interface* accumulate state — memory, files, instructions. But the outputs still live inside ChatGPT. You can copy an artifact out, but the system doesn't produce durable external results. The work accumulates inside OpenAI's walled garden, not in a space you own. And the storage limits reveal the fundamental constraint: persistence is bolted onto a chat product, so the filing cabinet inherits the messaging app's limits.
+
+Sources:
+- [ChatGPT Features 2026](https://suprmind.ai/hub/chatgpt/features/)
+- [Projects in ChatGPT](https://help.openai.com/en/articles/10169521-projects-in-chatgpt)
+- [ChatGPT Projects 20 file limit (community complaint)](https://community.openai.com/t/chatgpt-projects-20-file-limit/1064482)
+- [Pro user hitting 10-file limit bug](https://community.openai.com/t/pro-user-hitting-10-file-limit-in-chatgpt-projects-uploads-freeze-edits-fail-despite-20-file-allowance-anyone-else-experiencing-this/1304217)
+- [ChatGPT file upload limits 2026](https://fast.io/resources/chatgpt-file-upload-limit/)
+
+### Anthropic (Claude)
+
+**Projects**: Workspace grouping conversations, files, and custom instructions under persistent context. 30MB per file, "unlimited" files in the knowledge base — but the 200K token context window is the real ceiling. Claude can't read the entire knowledge base at once; it does RAG retrieval, pulling relevant sections at query time.
+
+**Artifacts**: Generated content (code, documents, apps) rendered in a side panel. In 2026, artifacts gained persistent storage, direct API calls, and MCP integrations. They evolved from disposable previews into small persistent apps.
+
+**Hard limits (verified June 2026)**: Artifact persistent storage is capped at **20MB per artifact**. Text-only input — no images, files, or binary data. Only works for *published* artifacts on paid plans (Pro, Max, Team, Enterprise). During development and testing, storage operations don't work at all. Unpublishing permanently deletes all associated storage data. 20MB is less than a single high-resolution image.
+
+**Live Artifacts** (April 2026): Dashboards and trackers that refresh with current data when reopened. Connected to data sources — KPI monitoring, pipeline tracking, content calendars. This is the most aggressive move toward making AI outputs *alive* rather than static snapshots.
+
+**Assessment**: Anthropic is pushing artifacts from "preview pane" toward "persistent micro-app." Live Artifacts are the boldest move here — an AI-generated dashboard that stays current is genuinely durable output. But everything still lives inside claude.ai. You don't own the file, you own access to it through Anthropic's platform. And the 20MB artifact limit reveals how thin the "persistence" really is — these are demo-sized constraints, not workspace-sized ones.
+
+Sources:
+- [Claude Features 2026](https://suprmind.ai/hub/claude/features/)
+- [Claude Live Artifacts Guide](https://www.eigent.ai/blog/claude-live-artifacts-guide)
+- [What are artifacts (official docs, confirms 20MB limit)](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them)
+- [Claude file upload limits 2026](https://fast.io/resources/claude-file-upload-limit/)
+- [Claude upload limits](https://amazetech.co/claude-upload-limit/)
+
+### Google (Gemini + NotebookLM)
+
+**Notebooks in Gemini** (April 2026): Project workspaces organizing chats, files, and custom AI instructions. Sync across Gemini app and NotebookLM — sources added in one appear in the other.
+
+**NotebookLM integration**: Notebooks can contain hundreds of sources. Gems (custom AI agents) can now connect to a NotebookLM notebook, massively expanding their knowledge base.
+
+**Assessment**: Google's angle is unique: they own the productivity suite (Docs, Sheets, Drive, Gmail). Their persistence story is "the AI lives inside your existing workspace." NotebookLM is the closest to a document-centric model, where the notebook *is* the durable artifact and the AI is a lens on it. The weakness is fragmentation — Gemini, NotebookLM, Workspace AI, and Gems are four different surfaces that are slowly being stitched together.
+
+Sources:
+- [Notebooks in Gemini](https://blog.google/innovation-and-ai/products/gemini-app/notebooks-gemini-notebooklm/)
+- [NotebookLM in Gemini](https://workspaceupdates.googleblog.com/2026/01/take-notebooks-further-notebooklm-gemini.html)
+- [Gemini Notebooks rollout](https://9to5google.com/2026/04/08/gemini-app-notebooks/)
+
+## Developer-focused tools
+
+### Cursor
+
+Agent-centric IDE. Version 2.0 shipped a redesigned interface, Background Agents running in isolated VMs, and Mission Control for parallel agent workflows. Cursor 3 (April 2026) added cloud-to-local handoff, Design Mode, and Composer 2 (their own frontier coding model). Best-in-class for complex multi-file edits on large codebases.
+
+**Persistence model**: The codebase *is* the persistent artifact. The AI modifies files directly. Context is the project itself. But dialogs are ephemeral — you can't easily revisit or search past agent conversations.
+
+### Windsurf
+
+Cascade agent reads codebase, builds a mental model, executes multi-step plans (creating files, editing code, running commands). Wave 13 added parallel agents. But no persistent background-agent mode — agents stop when you close the IDE.
+
+**Persistence model**: Same as Cursor — the codebase persists, the conversations don't.
+
+### Replit
+
+End-to-end cloud dev environment. Agent 4 works autonomously with built-in browser testing and self-fixing. The only tool in comparisons that reliably gets to publicly accessible deployment with minimal intervention.
+
+**Persistence model**: The strongest persistence story among dev tools — the project, its deployment, and its environment all persist in the cloud. But it's developer-focused and the dialog is still ephemeral.
+
+Sources:
+- [Cursor vs Windsurf vs Replit 2026 Tests](https://www.emergingtechdaily.com/post/cursor-vs-windsurf-vs-replit-agent-2026-tests)
+- [Best AI Code Editors 2026](https://www.mindstudio.ai/blog/best-ai-code-editors)
+
+### GitHub Copilot
+
+Copilot Workspace (GA 2026): Reasons across an entire repository, proposes multi-file edits, runs tests, iterates autonomously. Autonomous Agent Mode (July 2026) for Enterprise: writes, tests, and commits entire feature branches — still requires human approval before merge. Fleet mode and Autopilot mode allow autonomous operation on background tasks.
+
+**Copilot Spaces**: A collaborative container pulling in repositories, issues, documentation, and custom instructions as persistent grounding context for Copilot Chat.
+
+**Persistence model**: `.github/copilot-instructions.md` gives agents persistent context about coding standards and project goals. The repo is the durable artifact. But like Cursor/Windsurf, the dialogs are ephemeral — the conversation is disposable, only the code changes stick.
+
+Sources:
+- [GitHub Copilot coding agent](https://github.blog/news-insights/product-news/github-copilot-meet-the-new-coding-agent/)
+- [GitHub Copilot cloud sandboxes](https://github.blog/changelog/2026-06-02-cloud-and-local-sandboxes-for-github-copilot-now-in-public-preview/)
+
+## App builders
+
+### v0 (Vercel)
+
+Approaching $50M annualized revenue. February 2026 update added Git integration, VS Code-style editor, database connectivity (Upstash, Neon, Supabase, Snowflake, AWS), and agentic workflows. Persistent project context means "add a search filter to the products page" works because v0 knows the products page. One-click deploy to Vercel with preview URLs.
+
+**Persistence model**: The *deployed app* is the persistent artifact. The project persists and accumulates. But you're locked into Vercel's deployment pipeline and the AI workspace is not self-hostable.
+
+### Bolt / Lovable
+
+Bolt gets you a hosted frontend quickly but without persistent data — "a demo, not a product." Lovable combines description-to-app with visual editing, deployable on React and Supabase. Both require external services for anything beyond frontend.
+
+**Persistence model**: The generated app persists, but the workspace is thin. Neither produces a durable, ownable project space — they're app factories, not workspaces.
+
+Sources:
+- [Vercel v0 in 2026](https://makeanapplike.com/news/launches/vercel-v0-production-ready-2026)
+- [v0 review 2026](https://www.taskade.com/blog/v0-review)
+- [Best AI App Builder 2026](https://getmocha.com/blog/best-ai-app-builder-2026)
+
+## Document-centric / workspace tools
+
+### Notion AI
+
+AI bundled with every paid plan (the $10/user add-on retired May 2025). Custom Agents (February 2026) turn Business workspaces into autonomous automation platforms — run on autopilot with schedules and triggers. Notion Mail and offline editing integrated directly. AI maintains context across the entire workspace: databases, meeting notes, project docs.
+
+**Persistence model**: The workspace *is* the persistent artifact, and AI is an overlay on it. Strongest integration between documents, databases, and AI in the productivity space. But it's proprietary, not file-based, and you don't own the underlying data format.
+
+### Obsidian + AI plugins
+
+1.5M users (Feb 2026, 22% YoY growth). The local-first, markdown-based vault is the foundation — plain `.md` files on your device. AI agent plugins (NoClaw, Claude Code via MCP, obsidian-local-llm-hub) add persistent memory, semantic search, and autonomous task execution. NoClaw decouples agents from engines: assign Claude Code, Codex, Gemini CLI, or any ACP CLI to the same agent.
+
+**Persistence model**: The closest philosophy to Vibey — everything is a markdown file you own, AI is a layer on top. But it's a personal knowledge tool, not a project workspace with containers, deployment, or agent isolation. No walled autonomy. The AI plugins are community-built and fragmented.
+
+Sources:
+- [Notion AI vs Coda AI 2026](https://genesysgrowth.com/blog/notion-ai-vs-coda-ai-vs-google-docs-ai)
+- [Obsidian AI Second Brain 2026](https://www.nxcode.io/resources/news/obsidian-ai-second-brain-complete-guide-2026)
+- [NoClaw plugin](https://community.obsidian.md/plugins/noclaw)
+
+### Taskade
+
+Self-described "agentic workspace." Workspace DNA architecture: Memory feeds Intelligence, Intelligence triggers Execution, Execution creates Memory. Agents have 22+ built-in skills, persistent memory across sessions, custom knowledge bases. Multi-agent teams with human-in-the-loop controls.
+
+**Persistence model**: Projects and agent memory persist. Heavy on AI orchestration and productivity features. But it's a SaaS platform — your data lives on their servers, and the file paradigm is not central.
+
+Sources:
+- [Agentic Workspaces Guide](https://www.taskade.com/blog/agentic-workspaces)
+- [Workspace DNA](https://www.taskade.com/blog/workspace-dna-context)
+
+## Self-hosted / open source
+
+### Odysseus (PewDiePie)
+
+Launched May 31, 2026. 22.4K+ GitHub stars in 48 hours. Self-hosted AI workspace: chat, autonomous agents, Deep Research, email, calendar, notes, image generation. Docker Compose with ChromaDB, SearXNG, ntfy. Supports Ollama, llama.cpp, vLLM locally, plus OpenAI/OpenRouter APIs. VRAM-aware model recommendations from 270+ models.
+
+**Persistence model**: Local-first, privacy-first, no telemetry. Everything runs on your hardware. Agents have built-in tools (bash, files, web, memory) plus MCP servers. The strongest self-hosted competitor. **But**: it's a ChatGPT replacement UI, not a project workspace. It doesn't have the "everything is a file" paradigm, no containers per project, no walled autonomy. It's self-hosted chat with tools, not a persistent project space.
+
+### Fastio
+
+Persistent filesystem for AI agents, accessible via APIs or MCP. 50GB free storage, built-in RAG ("Intelligence Mode"), semantic search without separate vector database. Native MCP server with 19 tools for file management, search, sharing. Compatible with Claude Desktop, Cursor, and other agentic IDEs.
+
+**Persistence model**: Interesting infrastructure play — provides the "persistent hard drive" that agents lack. But it's storage, not a workspace. No editor, no dialog, no container isolation.
+
+Sources:
+- [Odysseus](https://pewdiepie-archdaemon.github.io/odysseus/)
+- [Odysseus GitHub](https://github.com/pewdiepie-archdaemon/odysseus)
+- [Fastio AI Agent Blob Storage](https://fast.io/resources/ai-agent-blob-storage/)
+
+## Platform-level moves
+
+### Microsoft (Build 2026)
+
+Windows reframed as an "agent runtime" — not an OS for people running apps, but a runtime for AI agents doing work on behalf of users. Agent Runtime Service (ARS) ships with Windows 11 24H2. Project Solara: dynamic desktop that replaces static icons with context-aware "spaces" assembled by lightweight agents. Visual Studio agents take persistent roles (code reviewer, test architect).
+
+**Assessment**: The most ambitious move. Microsoft is trying to make the *OS itself* the persistent workspace for AI agents. If it works, every other tool becomes a layer on top of Windows. But it's Windows-only, closed-source, and the ambition may exceed execution.
+
+Sources:
+- [Microsoft Build 2026: Windows as Agent OS](https://techjournal.org/microsoft-build-2026-windows-ai-agents)
+- [Windows Agent Runtime](https://windowsforum.com/threads/microsoft-build-2026-windows-becomes-the-agent-runtime-for-ai-tools.422696/)
+
+### Claude Cowork (Anthropic)
+
+Desktop agent with file-level access. Each Project is a dedicated local folder with context files, working files, scheduled tasks, and conversation history. Can read/write local files directly — drop a PDF, ask for a summary, get the result written to disk. Folder-level permissions (authorize per folder, revoke anytime).
+
+**Assessment**: Anthropic's boldest move toward persistence. The project is a *local folder*, not a cloud artifact. This is the closest any big player gets to the "everything is a file you own" philosophy. But it's still a desktop app that requires Claude's cloud API — not self-hostable, not containerized, no walled autonomy.
+
+Sources:
+- [Claude Cowork](https://www.anthropic.com/product/claude-cowork)
+- [Claude Cowork Guide 2026](https://techsy.io/en/blog/claude-cowork-guide)
+
+## Other notable players
+
+### Devin (Cognition AI)
+
+Autonomous AI software engineer at $500/month. Persistent state across sandbox sessions: long-horizon reasoning, persistent memory system, and tool use (browser, terminal, code editor). Spawns sandboxed environments, coordinates sub-agents for planning/execution/verification. February 2026 added parallel sessions and improved context retention.
+
+**Persistence model**: The sandbox persists state. The strongest autonomous agent for software engineering specifically. But it's expensive, developer-only, and the workspace is a sandbox VM, not a project you own.
+
+Sources:
+- [Devin AI Review 2026](https://aitoolranked.com/blog/devin-ai-review)
+- [Devin AI Guide 2026](https://singularitymoments.com/devin-ai-coding-agent-guide/)
+
+### Manus AI
+
+General-purpose autonomous agent running inside a virtual computer — browser, terminal, file system. Persistent workspaces with instructions, files, and reusable context. Cloud-based file system for persistent storage. **But**: contradictory reports — some reviews say "every session starts from zero, agent does not remember what it learned yesterday." The persistence story may be aspirational rather than fully realized.
+
+Sources:
+- [Manus AI Review (Taskade)](https://www.taskade.com/blog/manus-ai-review)
+- [Manus AI (Wikipedia)](https://en.wikipedia.org/wiki/Manus_(AI_agent))
+
+### Lindy
+
+No-code AI agent builder for non-devs. Visual workflow builder, 4,000+ integrations, plain-language instructions. Designed for automating repetitive tasks without technical skills.
+
+**Persistence model**: Workflows persist, not workspaces. It's an automation tool (think Zapier + AI), not a project space.
+
+Sources:
+- [No-Code AI Agent Builders 2026](https://www.lindy.ai/blog/no-code-ai-agent-builder)
+
+### Apple (WWDC 2026, June 8)
+
+Redesigned Siri as a standalone app with persistent context and text input. Native MCP support. App Intents framework for AI agents controlling app functionality. On-device processing as privacy advantage. Agent integration with App Store.
+
+**Assessment**: Not yet announced at time of writing (WWDC is June 8). If Apple delivers persistent AI context across the device layer, it could be the most seamless consumer experience. But Apple's AI story has been consistently behind — this may be catch-up rather than leap.
+
+Sources:
+- [WWDC 2026 expectations (TechCrunch)](https://techcrunch.com/2026/06/04/what-to-expect-from-wwdc-2026-siris-highly-anticipated-revamp-and-apple-intelligence-updates/)
+- [Apple AI strategy](https://www.mindstudio.ai/blog/apple-wwdc-ai-strategy-siri-app-intents-mcp)
+
+## The market context
+
+The AI agent memory market was valued at $6.27 billion in 2025, projected to reach $28.45 billion within five years (35% CAGR). The frustration with ephemeral conversations is the single most commonly reported user complaint across all major AI platforms.
+
+The technical consensus in 2026: "the models are good enough, the context windows are large enough. The missing layer is the memory architecture that treats context windows as fast, volatile, expensive working memory that needs a persistent storage layer beneath it."
+
+Sources:
+- [AI Chat with Memory 2026](https://www.jenova.ai/en/resources/ai-chat-with-memory)
+- [State of AI Agent Memory 2026](https://mem0.ai/blog/state-of-ai-agent-memory-2026)
+- [Agent Context Windows 2026](https://sparkco.ai/blog/agent-context-windows-in-2026-how-to-stop-your-ai-from-forgetting-everything)
+
+---
+
+## The storage limits are absurd (verified June 2026)
+
+When you look at what the big players actually offer as "persistent workspace," the numbers are startling:
+
+| Platform | Files per project | Storage per artifact/file | Notes |
+|---|---|---|---|
+| **ChatGPT Projects** (Plus/Pro) | **20 files** | 512MB per file upload | Users report hitting 10-file bug on Pro. Enterprise: 160 files/3hr. |
+| **Claude Artifacts** | N/A | **20MB per artifact** | Text-only. Must be published. Unpublishing deletes all data permanently. |
+| **Claude Projects** | "Unlimited" | 30MB per file | But 200K token context window is the real ceiling — RAG retrieval, not full read. |
+| **Gemini Notebooks** | Syncs with NotebookLM | Tied to Google Drive | Most generous via Drive, but fragmented across 4 different surfaces. |
+
+For comparison: a typical small software project has 50–500 files. A single photo from a modern phone is 5–15MB. A modest website codebase is 100MB+. These "workspace" limits are smaller than a USB drive from 2005.
+
+**Why so small?** Because persistence is retrofitted onto a chat product. The underlying architecture is a conversation with attachments, not a filesystem with an AI layer. The limits aren't technical (storage is cheap) — they're architectural. The chat paradigm constrains the storage model.
+
+**Vibey's structural advantage**: When the project *is* a filesystem inside a container, there are no file count limits, no per-artifact storage caps, no "unpublishing deletes your data" footguns. The constraint is disk space, not product design. This isn't a feature Vibey chose to build — it's a consequence of the "everything is a file" decision.
+
+Sources:
+- [ChatGPT Projects 20 file limit (community)](https://community.openai.com/t/chatgpt-projects-20-file-limit/1064482)
+- [Claude Artifacts limits (official docs)](https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them)
+- [ChatGPT file upload limits 2026](https://fast.io/resources/chatgpt-file-upload-limit/)
+- [Claude file upload limits 2026](https://amazetech.co/claude-upload-limit/)
+
+---
+
+## Synthesis: The landscape and where Vibey sits
+
+### How everyone is solving persistence
+
+The approaches cluster into five strategies:
+
+| Strategy | Who | What persists | What doesn't |
+|---|---|---|---|
+| **Memory-in-chat** | ChatGPT Projects, Gemini Notebooks | Context, instructions, files within a chat product | Outputs live inside the vendor's platform. You don't own the files. |
+| **Artifact-as-app** | Claude Artifacts/Live Artifacts, Canvas | Generated content becomes interactive, sometimes live | Still inside the vendor's cloud. Not files you own. |
+| **Code-is-the-artifact** | Cursor, Windsurf, Copilot, Devin | The codebase persists — AI modifies files directly | Dialogs are disposable. You can't revisit the conversation that produced the code. |
+| **App-is-the-artifact** | v0, Bolt, Lovable, Replit | The deployed app persists | The workspace is thin. The project space isn't a durable thing you own. |
+| **Workspace-as-OS** | Microsoft (Windows ARS), Notion, Taskade | The workspace itself persists, AI is a layer on it | Proprietary formats, vendor lock-in, no file-level ownership. |
+
+Two outliers:
+- **Obsidian + AI plugins**: Everything is a markdown file you own. Closest philosophy to Vibey. But it's a personal knowledge tool — no containers, no deployment, no agent isolation.
+- **Odysseus**: Self-hosted, local-first, privacy-first. But it's a ChatGPT replacement UI — no file paradigm, no container isolation, no project-as-filesystem.
+
+### What nobody is doing
+
+No player in the landscape combines all of these:
+
+1. **Everything is a file you own** — not a database row in someone's SaaS, not a proprietary format, but actual files on a filesystem you control.
+2. **Dialogs persist as files** — the conversation is not ephemeral and not trapped in a vendor's UI. It's a markdown file in your project, alongside the things it produced. Searchable, readable, continuable.
+3. **Walled autonomy** — agents run without asking permission (full speed), but inside isolated containers (limited blast radius). No one else has this exact combination. Cursor/Devin have sandboxes but require developer expertise. Replit has cloud containers but no explicit isolation model marketed this way.
+4. **Non-coder audience + real project persistence** — v0/Bolt/Lovable target non-coders but don't give them a durable workspace. Notion gives a workspace but the AI is an overlay, not an agent. No one gives non-coders an agent in a persistent, owned, file-based project space.
+5. **The dialog and its results live together** — in every other tool, the conversation is in one place and the output is in another (or the conversation is disposable). Vibey's dialogs are files in the same tree as the deed.
+
+### Closest competitors by angle
+
+- **For "self-hosted + privacy"**: Odysseus. Missing: file paradigm, containers, non-coder UX.
+- **For "everything is a document"**: Obsidian. Missing: agent isolation, deployment, not a project workspace.
+- **For "non-coders building things"**: v0, Replit, Lovable. Missing: ownership, file paradigm, dialog persistence.
+- **For "persistent AI workspace"**: Claude Cowork. Missing: self-hostable, containers, open source. Closest big-player competitor in philosophy (local folders as projects, file-level access), but locked to Anthropic's ecosystem.
+- **For "agentic workspace with memory"**: Taskade. Missing: file-based, self-hostable, open source, container isolation.
+
+### The gap Vibey occupies
+
+Vibey is the only tool attempting to be a **persistent, file-based, self-hosted project workspace where non-coders talk to autonomous agents that work inside isolated containers, and where the dialogs, the docs, and the deed all live together as files in a space you own.**
+
+The risk is that this is a gap because it's hard to hold all these properties simultaneously (especially "non-coder audience" + "self-hosted Docker setup"). The opportunity is that the $6.27B→$28.45B market growth is driven precisely by the frustration that no existing tool solves the whole problem — everyone solves a piece.
+
+The June 5 notes are right: the harness is the door. But the reason people stay is that unlike every other harness, this one produces *files in a space you own*, and the conversation that produced them is right there too.
+```
+
+### 2026-06-04
 
 Some notes on Alexander - The process of creating life:
 - "Part of our difficulty in modern society is that accepted formal processes often fail to include natural processes, and that is how they get things screwed up."
