@@ -1,5 +1,26 @@
 ## Vibey development notes
 
+### 2026-06-06
+
+It's decided. I will rewrite vibey in full, following these principles:
+
+- Work coherently in one center at a time (Alexander).
+- Work by hand, but with help from AI to clarify things. All the work (code and documentation) has to be shaped by hand.
+- I will do a mES5 style but with async/await (instead of using astack). I will also use destructuring and spreading.
+- The resulting program will be small, useful and beautiful.
+- I will work fast.
+- I will write test as I write.
+
+This might be the next to last (or last) program I write in JS. Let's make it a great one.
+
+It makes sense to have the gatekeeper at the beginning! This gives more info about incoming requests, even when they are static or logins. The gatekeeper as an apres.
+
+==
+
+Idea: be able to bring AI to a vibey app. The vibey app could also be an iframe. There could be JS that you can use so that AI can inspect the page and do things for you. This is the opposite of firing playwright or puppeteer through the AI, which doesn't carry the context that the user has and is seeing.
+
+Watching quake videos, I'm amazed by how good the engine is to make the game feel as solid and real. Achieving even a fraction of this in an editor+harness flow would be mindblowing.
+
 ### 2026-06-05
 
 The key, or door, to vibey is the AI harness. This is what most people are most profitably using lately. The text editor, by itself, is a non-starter to many, and something where vibey is also underpowered. Same goes for the terminal, or the chat. The zero-config containers with autogit are very nice and not easy to find, but you have to be a programmer to understand that concept.
