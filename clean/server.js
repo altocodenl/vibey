@@ -60,6 +60,7 @@ cell.sorter = function (paths) {
       return result !== 0 ? result : a.length - b.length;
    });
 }
+
 cell.JSToText = function (text) {
    return cell.pathsToText (cell.JSToPaths (text));
 }
@@ -150,6 +151,17 @@ var clog = function () {
    log = {t: now (), from: cicek.isMaster ? 'main' : ('worker' + cluster.worker.id), ...log};
 
    console.log (cell.JSToText (log) + '\n');
+}
+
+var reply = function (rs, code, body, headers) {
+   if (! rs) return;
+   if (rs.headersSent || rs.writableEnded || rs.destroyed || (rs.connection && rs.connection.writable === false)) {
+      return clog ({priority: 'important', type: 'Interruped response', id: rq.log.id, method: rq.method, url: rq.url, origin: rq.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
+   }
+
+   clog ({priority: code >= 400 ? 'important' : undefined, type: 'Response', id: rs.log.id, method: rs.log.method, url: rs.log.url, code: code, ms: Date.now () - rs.log.startTime, length: JSON.stringify (body).length, origin: rs.log.origin, userId: rs.rq.user ? rs.rq.user.id : 'anonymous'});
+
+   return cicek.reply (rs, code, body, headers);
 }
 
 var formatError = function (error) {
@@ -292,7 +304,7 @@ var routes = [
          }
       }
 
-      clog ({type: 'Incoming request', id: rq.id, method: rq.method, url: rq.url, userId: rq.user ? rq.user.id : 'anonymous'});
+      clog ({type: 'Request', id: rq.log.id, method: rq.method, url: rq.url, origin: rq.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
 
       if (! rq.user) {
          var publicPath = dale.stop ([
@@ -329,6 +341,10 @@ var routes = [
 
 cicek.cluster ();
 
-cicek.log = clog;
+cicek.log = function (log) {
+   if (log [0] === 'error') return clog ({priority: 'critical', type: log [1], error: log.slice (2)});
+   if (log [0] === 'start') return clog ({priority: 'important', type: 'Server start', port: log [3]});
+   // We ignore `request`, `response` and `incomingRequest`
+}
 
 var server = cicek.listen ({port: CONFIG.port}, routes);

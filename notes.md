@@ -1,5 +1,13 @@
 ## Vibey development notes
 
+### 2026-06-07
+
+Will try running commands without queue, in vibey. If that really doesn't work then I'll add queues, but at the container level.
+
+I need a `bucketsync` (or `bsync`) linux command that syncs a local folder to a destination on a bucket, and viceversa. Backups can run like that, from each container, with a cron. It should be a bash script that uses curl and the http calls to S3 or their equivalent.
+
+It's funny that "vibey" starts with "vi". Naturally, it's vi masquerading as emacs masquerading as an AI tool.
+
 ### 2026-06-06
 
 It's decided. I will rewrite vibey in full, following these principles:

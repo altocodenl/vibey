@@ -1,0 +1,23 @@
+{
+   "name": "vibey",
+   "version": "0.0.0",
+   "dependencies": {
+      "cicek":   "3.4.5",
+      "dale":    "6.0.2",
+      "gotob":   "2.3.2",
+      "hitit":   "1.2.8",
+      "lith":    "6.0.7",
+      "teishi":  "5.1.0",
+      "redis":   "3.1.2",
+      "nodemailer":               "6.9.16",
+      "nodemailer-ses-transport": "1.5.1",
+      "smtp-server":              "3.13.6",
+      "mailparser":               "3.7.2"
+   },
+   "main": "server.js",
+   "author": "Altocode <info@altocode.nl>",
+   "license": [{
+      "type": "Public Domain",
+      "url": "http://github.com/altocodenl/vibey#license"
+   }]
+}
