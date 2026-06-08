@@ -1,5 +1,21 @@
 ## Vibey development notes
 
+### 2026-06-08
+
+The sequence for vibey:
+
+1. Auth      <--- currently here
+2. Project
+3. Editor
+4. Dialog
+5. App
+6. Access
+7. Engine
+
+idea: have a single test file! Per part, one conditional for node (server) and another one for client. Boom. One file, unified.
+
+idea for later: create two cookies on the fly, one public (vibey-public), another private (vibey). Set them in different domains. If you're logged into vibey, you also have your public cookie for visiting pages served through vibey, but without exposing your credentials.
+
 ### 2026-06-07
 
 Will try running commands without queue, in vibey. If that really doesn't work then I'll add queues, but at the container level.

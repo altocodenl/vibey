@@ -28,6 +28,11 @@ var simplifyName = function (name) {
    return name.replace (/\d{8}-\d{6}-/, '').replace (/-(active|done).md/, '.md');
 }
 
+var formatError = function (error) {
+   if (! (error instanceof Error)) return error;
+   return {error: error.name, message: error.message, stack: error.stack.split ('\n')};
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -39,6 +44,11 @@ dale.go (['keydown', 'keyup', 'blur'], function (type) {
       B.call (type, '', ev);
    });
 });
+
+window.onerror = async function (message, source, lineno, colno, error) {
+   if (type (message) === 'string' && message.indexOf ('ResizeObserver') !== -1) return;
+   B.call ('report', 'error', {message, source, lineno, colno, error: formatError (error)});
+}
 
 // *** RESPONDERS ***
 
@@ -128,10 +138,7 @@ B.mrespond ([
       var body = teishi.inc (['get', 'delete'], x.verb) ? ''   : arg1;
       var cb   = teishi.inc (['get', 'delete'], x.verb) ? arg1 : arg2;
 
-      if (B.get ('auth', 'csrf')) {
-         if (x.verb === 'delete') headers ['X-CSRF-Token'] = B.get ('auth', 'csrf');
-         else body.csrf = B.get ('auth', 'csrf');
-      }
+      if (B.get ('auth', 'csrf')) headers ['x-csrf'] = B.get ('auth', 'csrf');
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error) clog (error.responseText);
@@ -141,8 +148,16 @@ B.mrespond ([
             return;
          }
 
+         if (error) B.call (x, 'report', 'error', {type: 'ajax', method: x.verb, path: x.path [0], status: error.status, response: error.responseText});
+
          if (cb) cb (x, error, rs);
       });
+   }],
+
+   // *** ERROR ***
+
+   ['report', 'error', function (x, error) {
+      c.ajax ('post', 'error', {}, {priority: 'important', ...error});
    }],
 
    // *** AUTH ***
@@ -153,13 +168,21 @@ B.mrespond ([
 
          if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
-         B.call (x, 'set', ['auth', 'mode'], rs && rs.body.mode === 'LOCAL' ? 'local' : 'cloud');
+         B.call (x, 'set', ['auth', 'mode'], rs && rs.body.mode === 'local' ? 'local' : 'cloud');
 
          if (error && error.status === 403) return B.call (x, 'navigate', 'login');
 
-         if (rs.body.mode !== 'LOCAL') B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
+         if (rs.body.mode !== 'local') B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
 
          B.call (x, 'read', 'hash');
+      });
+   }],
+
+   ['signup', [], function (x, email) {
+      if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
+      B.call (x, 'post', 'auth/signup', {email: email.trim ().toLowerCase ()}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to request invite');
+         B.call (x, 'set', ['auth', 'signupRequested'], true);
       });
    }],
 
@@ -182,14 +205,6 @@ B.mrespond ([
          B.call (x, 'load', 'projects');
          B.call (x, 'load', 'settings');
          B.call (x, 'navigate', 'projects');
-      });
-   }],
-
-   ['signup', [], function (x, email) {
-      if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
-      B.call (x, 'post', 'auth/signup', {email: email.trim ().toLowerCase ()}, function (x, error) {
-         if (error) return B.call (x, 'snackbar', 'error', 'Failed to request invite');
-         B.call (x, 'set', ['auth', 'signupRequested'], true);
       });
    }],
 
