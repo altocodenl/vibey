@@ -2,6 +2,11 @@
 
 > "Thou shalt not make a machine in the likeness of a human mind." -- Orange Catholic Bible
 
+## Running vibey yourself
+
+```
+```
+
 ## Dataspace
 
 ### Server

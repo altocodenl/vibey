@@ -148,7 +148,7 @@ B.mrespond ([
             return;
          }
 
-         if (error) B.call (x, 'report', 'error', {type: 'ajax', method: x.verb, path: x.path [0], status: error.status, response: error.responseText});
+         if (error && x.path [0] !== 'auth/csrf') B.call (x, 'report', 'error', {type: 'ajax', method: x.verb, path: x.path [0], status: error.status, response: error.responseText});
 
          if (cb) cb (x, error, rs);
       });

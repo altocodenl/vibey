@@ -1,5 +1,23 @@
 ## Vibey development notes
 
+### 2026-06-09
+
+Some notes on Alexander - The process of creating life:
+- "The simple transformations work because, being context sensitive, they take different forms in each context within the embryo, and this produces appropriate and different results in each place where they are used." Every transformation is context sensitive!
+- "But the organism does not get repetition by addition. It gets it, most typically, by differentiation and division. (...) Most of the repetition in the organism comes from division, not from addition. This is a far more subtle type of thing. The whole determines the parts. Parts are formed according to their position in the whole."
+- "There are fifty time intervals in which such transormations occur. But in each time interval, there may be ten, or a hundred, or a thousand essentially different contexts or spatial zones, and the master process applies"
+- "When we apply them successfully, we shall get cohrent results, much as the generaltransformations in the embryo get consistent and coherent results" the prize is coherence. Accidental complexity as absence of coherence.
+- "Possibly the most basic and necessary feature of any living process is the fact that it goes *gradually*. (...) Yet in architecture (...) there is a conception of a desired end-state (the design), and the system of architectural and constructional processes is geared up to *producing* this desired end-state (...) almost entirely without realistic feedback and improvement and adaptation while the processes are going on. Changing architecture to a new form in which feedback *does* occur, will require a massive transformation."
+- "the core of *all* living process is step-by-step adaptation (...) *It is a necessary, unavoidable core*."
+- "historically, all building process (...) worked because they went forward in an overall context that allowed slow, careful, adaptation to occur step by step."
+
+Idea: send diffs on the post/put file, so we can send small updates. not a crdt, but perhaps useful enough for editing concurrently in different lines.
+
+Open low-level questions right now:
+- How to pass env variables to the server?
+- How to create the account for admin on first login? It could be just a creation on auth/signup instead of sending an invite. [DONE]
+- How to serve the css files directly from the server for full local mode?
+
 ### 2026-06-08
 
 The sequence for vibey:

@@ -3,7 +3,7 @@
 var CONFIG = {
    admin: 'info@altocode.nl',
    baseURL: 'http://localhost:5353',
-   cloud: false,
+   cloud: process.argv [2] === 'cloud',
    cookie: {
       expires: 7 * 24 * 60 * 60,
       name:    'vibey'
@@ -154,13 +154,25 @@ var now = function () {
    return new Date ().toISOString ();
 }
 
+var ansi = function (types, text) {
+   var colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+   return dale.go (types, function (type) {
+      if (type === 'bold') return '\u001b[1m';
+      if (inc (colors, type)) return '\u001b[3' + colors.indexOf (type) + 'm';
+      if (inc (colors, type.replace (/^i/, ''))) return '\u001b[4' + colors.indexOf (type) + 'm';
+   }).join ('') + text + '\u001b[0m';
+}
+
 var clog = function () {
    if (arguments.length > 1 || type (arguments [0]) !== 'object') var log = {args: teishi.copy (arguments)};
    else var log = arguments [0];
 
    log = {t: now (), from: cicek.isMaster ? 'main' : ('worker' + cluster.worker.id), ...log};
+   var color = [];
+   if (log.priority === 'important') color.push ('yellow');
+   if (log.priority === 'critical') color.push ('red', 'bold');
 
-   console.log (cell.JSToText (log) + '\n');
+   console.log (ansi (color, cell.JSToText (log)) + '\n');
 }
 
 var reply = function (rs, code, body, headers) {
@@ -298,7 +310,7 @@ var sendmail = function (options) {
          else       resolve ();
       });
    });
-};
+}
 
 // *** ERROR ***
 
@@ -353,13 +365,18 @@ var routes = [
       if (! rq.user) {
          var publicPath = dale.stop ([
             ['get', '/'],
-            ['get', 'cclient.js'],
-            ['post', '/auth/signup'],
-            ['post', '/auth/login'],
-            ['post', '/auth/verify'],
+            ...dale.go (['client', 'gotoB', 'marked'], function (v) {
+               return ['get', '/' + v + '.js'];
+            }),
+            ...dale.go (['signup', 'login', 'verify'], function (v) {
+               return ['post', '/auth/' + v];
+            }),
+            ['post', '/error'],
             ['get', /^\/public\//],
          ], true, function (endpoint) {
-            if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp (cicek.escape ('^' + endpoint [1] + '$'));
+            if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
+            //]clog ('che', rq.method, endpoint [0], rq.url, rq.url.match (endpoint [1]));
+
             return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
          });
 
@@ -390,15 +407,23 @@ var routes = [
             ['link', {rel: 'stylesheet', href: 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css'}],
          ]],
          ['body', [
-            ['script', {src: 'gotoB.min.js'}],
-            ['script', {src: 'marked.umd.js'}],
+            ['script', {src: 'gotoB.js'}],
+            ['script', {src: 'marked.js'}],
             ['script', {src: 'client.js'}],
          ]]
       ]]
    ])],
-   ['get', 'gotoB.min.js', cicek.file, 'node_modules/gotob/gotoB.min.js'],
-   ['get', 'marked.umd.js', cicek.file, 'node_modules/marked/lib/marked.umd.js'],
+   ['get', 'gotoB.js', cicek.file, 'node_modules/gotob/gotoB.min.js'],
+   ['get', 'marked.js', cicek.file, 'node_modules/marked/lib/marked.umd.js'],
    ['get', 'client.js', cicek.file],
+
+   // *** ERROR REPORTING ***
+
+   ['post', 'error', function (rq, rs) {
+      var error = type (rq.body.error) === 'object' ? rq.body : {error: rq.body};
+      clog ({priority: 'important', type: 'client error', ...error});
+      reply (rs, 200);
+   }],
 
    // *** AUTH ***
 
@@ -417,32 +442,52 @@ var routes = [
          }
       ])) return;
 
-      await redis ('hmset', 'invite:' + email, {email: email, created: now ()});
+      if (email === CONFIG.admin) {
+         var userId = crypto.randomUUID ();
 
-      await sendmail (CONFIG.adminEmail, {
-         to: CONFIG.email.address,
-         subject: 'Vibey signup request',
-         message: ['p', [
-            'New signup request from: ' + email,
-            ['br'],
-            now ()
-         ]]
-      });
+         await redis ([
+            ['set', 'email:' + rq.body.email, userId],
+            ['hmset', 'user:' + userId, {
+               created: now (),
+               email: rq.body.email,
+               id: userId,
+            }],
+         ]);
+      }
+      else {
+         await redis ('hmset', 'invite:' + email, {email: email, created: now ()});
 
-      reply (rs, 200, {ok: true});
+         await sendmail (CONFIG.adminEmail, {
+            to: CONFIG.email.address,
+            subject: 'Vibey signup request',
+            message: ['p', [
+               'New signup request from: ' + email,
+               ['br'],
+               now ()
+            ]]
+         });
+      }
+
+      reply (rs, 200);
    }],
 
    ['post', 'auth/signup/accept', async function (rq, rs) {
 
       if (rq.user.email !== CONFIG.admin) return reply (rs, 403);
 
+      var existingUser = await redis ('get', 'email:' + rq.body.email);
+      if (existingUser) return reply (rs, 409);
+
       var userId = crypto.randomUUID ();
 
-      await redis ('hmset', 'user:' + userId, {
-         id: userId,
-         email: rq.body.email,
-         created: now (),
-      });
+      await redis ([
+         ['set', 'email:' + rq.body.email, userId],
+         ['hmset', 'user:' + userId, {
+            created: now (),
+            email: rq.body.email,
+            id: userId,
+         }],
+      ]);
 
       reply (rs, 200);
    }],
@@ -474,7 +519,7 @@ var routes = [
          ]
       });
 
-      reply (rs, 200, {ok: true});
+      reply (rs, 200);
    }],
 
    ['post', 'auth/verify', async function (rq, rs) {
@@ -533,7 +578,21 @@ cicek.log = function (log) {
 }
 
 cicek.apres = function (rs) {
-   clog ({priority: rs.log.code >= 400 ? 'important' : undefined, type: 'Response', id: rs.log.id, method: rs.log.method, path: rs.log.url, code: rs.log.code, ms: Date.now () - rs.log.startTime, length: {rq: rs.log.requestBody === '' ? 0 : JSON.stringify (rs.log.requestBody).length, rs: rs.log.responseBody === undefined ? 0 : JSON.stringify (rs.log.responseBody).length}, origin: rs.log.origin, userId: ! CONFIG.cloud ? undefined : (rs.request.user ? rs.request.user.id : 'anonymous')});
+   clog ({
+      priority: rs.log.code >= 400 ? 'important' : undefined,
+      type: 'Response',
+      id: rs.log.id,
+      method: rs.log.method,
+      path: rs.log.url,
+      code: rs.log.code,
+      ms: Date.now () - rs.log.startTime,
+      length: {
+         rq: rs.log.requestBody === ''         ? 0 : JSON.stringify (rs.log.requestBody).length,
+         rs: rs.log.responseBody === undefined ? 0 : JSON.stringify (rs.log.responseBody).length
+      },
+      origin: rs.log.origin,
+      userId: ! CONFIG.cloud ? undefined : (rs.request.user ? rs.request.user.id : 'anonymous')
+   });
    cicek.Apres (rs);
 }
 
