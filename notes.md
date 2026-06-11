@@ -1,5 +1,9 @@
 ## Vibey development notes
 
+### 2026-06-11
+
+The state is to the client exactly as the database is to the backend.
+
 ### 2026-06-09
 
 Some notes on Alexander - The process of creating life:
