@@ -1,5 +1,159 @@
 ## Vibey development notes
 
+### 2026-06-14
+
+To Dockerize or not to Dockerize?
+- For running the containers, there's no alternative. And that's OK.
+- For running the host, I prefer it non-dockerized. But most people who'd run it would need node + redis, whereas Docker just gives you both indirectly but in one command. So docker it is.
+
+How do the calls flow? I'm tempted of doing everything through bash, rather than cli, to run commands in engines that are not localhost. But not. We need to go step by step.
+
+Another analysis from Claude:
+
+```
+# Where Vibey sits: a landscape analysis (June 2026)
+
+## The question
+
+Is there a real gap in the market for a persistent, file-based workspace where non-coders direct autonomous AI agents inside isolated containers? Or does something like this already exist?
+
+## What we researched
+
+~40 products across seven categories: big AI platforms (ChatGPT, Claude, Gemini), developer tools (Cursor, Windsurf, Copilot, Devin), automation platforms (Zapier, Make, n8n, Clay, Lindy, Relevance AI), app builders (Replit, Lovable, Bolt, v0, Taskade Genesis), AI-enhanced knowledge tools (Notion AI, Obsidian+plugins, Mem, Coda, Granola), self-hosted AI platforms (OpenWebUI, AnythingLLM, LibreChat, Khoj, Dify, OpenClaw, Jan), and personal server platforms (Umbrel, CasaOS, Cloudron, YunoHost).
+
+## What everyone is doing
+
+The products cluster into patterns, and each pattern leaves something out.
+
+**Chat interfaces with features bolted on** (OpenWebUI, LibreChat, Jan, TypingMind, AnythingLLM). Better ways to talk to LLMs. Some have workspaces and document retrieval. None give you a persistent filesystem where agents work autonomously. When you close the tab, nothing keeps running.
+
+**Knowledge tools with AI** (Notion AI, Obsidian+plugins, Mem, Coda). Help you organize and retrieve information. Notion's agents are the most capable: they run for up to 20 minutes autonomously and can be triggered on schedules. But they operate within Notion's data model (pages and databases), not a filesystem. Your output is Notion pages, not files you own on disk. Obsidian is philosophically closest (markdown files you own) but has no containers, no code execution, no autonomy beyond plugins.
+
+**Automation platforms** (Zapier, Make, n8n, Lindy, Relevance AI, MindStudio). Connect apps and run workflows. Data flows through and lands in whatever SaaS you connected. Nothing accumulates in a space you own. n8n is the most honest: self-hosted, open source, no per-task cost, genuine AI agent capabilities via LangChain. But it requires technical skill to set up and is a tool, not a space.
+
+**App builders** (Replit Agent, Taskade Genesis, v0, Lovable, Bolt). Produce apps, not workspaces. Replit Agent 3 is impressive (autonomous for up to 200 minutes, self-fixing, deploying to live URLs). But the output is a deployed app, not a personal workspace where artifacts accumulate over time.
+
+**Developer agent tools** (Cursor, Windsurf, Copilot, Devin). The codebase is the artifact, the AI modifies files directly. But dialogs are ephemeral; you can't revisit the conversation that produced the code. Developer-only. Devin at $500/month is the most autonomous but also the most expensive.
+
+**Self-hosted agent platforms** (Dify, Khoj, OpenClaw, Flowise). Developer tools for building agent workflows. Khoj runs scheduled autonomous research and delivers summaries by email. OpenClaw has persistent memory and installs on Umbrel with one click. But these are agent-centric, not workspace-centric: there's no unified space where your files, dialogs, and agent output live together.
+
+**Personal server platforms** (Umbrel, CasaOS, Cloudron, YunoHost). Umbrel is the leader: a $699 palm-sized home server with an app store including 18+ AI apps. The self-hosting market is projected to grow from $15.6B to $85.2B by 2034. The convergence of self-hosting and AI is already happening. But these platforms host apps; they don't integrate them into a single coherent workspace.
+
+## The closest competitor
+
+**Endstack** gives every user a cloud Linux desktop in the browser: persistent filesystem, terminal, code editor, browser, and a built-in AI agent at the OS level. The agent can see your files, run terminal commands, browse the web. Everything lives on your container's filesystem. It runs 24/7.
+
+Architecturally, this is very close to Vibey. The difference: Endstack presents as a cloud Linux desktop. Terminal, code editor, the full developer surface. A non-coder landing on Endstack would feel like they walked into a cockpit. Whether you present through documents and dialogs or through a terminal and IDE is a UI and positioning choice, not a technical one, but it's a load-bearing choice for the audience.
+
+## The storage limits are telling
+
+The big AI platforms reveal their architectural constraints through their storage limits:
+
+| Platform | Files per project | Storage per artifact |
+|---|---|---|
+| ChatGPT Projects (Plus/Pro) | 20 files | 512MB per upload |
+| Claude Artifacts | N/A | 20MB per artifact |
+| Claude Projects | "Unlimited" | 30MB per file |
+| Gemini Notebooks | Syncs with Drive | Tied to Google Drive |
+
+These aren't engineering constraints. Storage is cheap. They're *architectural* constraints: persistence was bolted onto a chat product, so the filing cabinet inherits the messaging app's limits. When the project is a filesystem inside a container, there are no file count limits. The constraint is disk space, not product design.
+
+## The cost gap is real
+
+For a use case like automated data enrichment (1,000 leads/month):
+
+- **Zapier + Clay**: $775-$1,825/month (per-task + per-credit pricing, failed lookups still consume credits)
+- **Raw API approach** (what you'd do inside Vibey): $190-$380/month (direct API costs for scraping, enrichment, and LLM reasoning)
+
+The 3-5x difference comes from removing the platform tax. BYOAI (bring your own AI credentials) means paying the provider directly for what you use, with no markup.
+
+## The five properties no one combines
+
+Across all ~40 products, no single tool combines these five properties:
+
+1. **Non-coder interface**: documents and dialogs, not terminals and IDEs
+2. **Persistent file-based workspace**: not a chat, not a database, not proprietary pages
+3. **Autonomous agents in isolated containers**: not semi-autonomous, not uncontained
+4. **User ownership of everything**: exportable files, open source, self-hostable
+5. **Cloud-capable**: runs while you sleep, reachable from any device
+
+Endstack has 2, 3, and 5 but not 1 (developer UI). Notion has 1 and partly 3 but not 2 or 4 (not files, not owned). Obsidian has 1, 2, and 4 but not 3 or 5 (no containers, no cloud). n8n has 3 and 4 but not 1 or 2 (technical, not a workspace). Umbrel has 4 and 5 but is infrastructure without a unified product on top.
+
+## Market numbers
+
+- AI agents market: $10.9B in 2026, projected $183B by 2033 (49.6% CAGR)
+- AI agent memory market: $6.27B in 2025, projected $28.45B within five years (35% CAGR)
+- Self-hosting market: $15.6B in 2024, projected $85.2B by 2034
+- 84% of people surveyed used AI in the past 6 months (EY, 18,000 respondents, 23 markets)
+- 16% globally have used AI that acts without human intervention
+- The frustration with ephemeral AI conversations is the single most commonly reported user complaint across all major AI platforms
+
+## The risk
+
+The gap could close from two directions: big AI platforms adding real persistence (Notion adding containers, Claude Cowork evolving into a full workspace), or self-hosting platforms building a unified product layer (Umbrel integrating its AI apps into a single coherent workspace). But both require hard architectural pivots. Bolting containers onto a document tool and simplifying a Linux desktop for non-coders are both large, non-obvious moves.
+
+## Conclusion
+
+The combination of file-based persistence, agent autonomy, container isolation, user ownership, and accessibility for non-coders remains unoccupied. The technical building blocks exist across the landscape (containerized agents, self-hosting platforms, AI-enhanced workspaces), but no one has assembled them into a single product designed for people who describe what they want in words rather than code.
+```
+
+**Describe what your company does in 50 characters or less.**
+
+Editor, harness, container as one in a browser.
+
+50 word version
+See and edit files in your browser. Your files live in a container. Bring your AI subscription to read/write files and run commands in your container. Publish documents and host apps immediately. Send emails and API requests to kickstart AI.
+
+**What is your company going to make? Please describe your product and what it does or will do.**
+
+Vibey is a browser-based workspace where your files live inside isolated Docker containers and AI agents work on them autonomously.
+
+You see and edit your files in the browser. You bring your own AI subscription (OpenAI, Anthropic) and the agent reads files, writes files, and runs commands inside your container — without asking permission. Every change is auto-committed to git, so nothing is irreversible.
+
+Your dialogs with AI are themselves files in the project, readable and searchable alongside everything they produced. Your context is also a file: instead of re-explaining yourself, AI starts from it. You can switch model or provider mid-conversation.
+
+You can publish documents and host apps from your container immediately. You can send an email or an API request to trigger an agent while you sleep.
+
+Vibey runs locally with Docker, or in the cloud at buildwithvibey.com. Both run the same open-source code. Cloud users pay 10 EUR/month plus their own AI costs. They can request additional engines (VPSes) for which we charge them at cost.
+
+**If you are applying with the same idea as a previous batch, did anything change? If you applied with a different idea, why did you pivot and what did you learn from the last idea?**
+
+My previous idea (cell) was an integrated programming language that would reduce fragmentation and give an unified interface to all data. The goal was to reduce overwhelm and encourage more people to build their own tools. Vibey is even more fundamental than that, because it works at a more fundamental level: how do you even open a file? Where do you store it, so that you can always access it? Where do you run your code? How can you make it keep on going when you close your computer?
+
+What I learned from the last idea is that it pays off to question deep assumptions and aim for something fundamental.
+
+**Who are your competitors? What do you understand about your business that they don't?**
+
+- Chat AI platforms (ChatGPT, Claude, Gemini) trap your conversations and output inside their apps. ChatGPT Projects caps at 20 files. Claude Artifacts caps at 20MB. These aren't engineering limits — they're architectural: persistence was bolted onto a chat product, so the workspace inherits the messaging app's constraints.
+
+- Automation tools (Zapier, Make, Lindy) charge per action and own the workflow. A lead enrichment pipeline that costs $800/month on Zapier+Clay costs $200/month through Vibey because you pay raw API prices with no platform tax.
+
+- Vibe coding tools (Replit, Lovable, Bolt, v0) build apps but don't give you a workspace. The output is a deployed app; the dialog that produced it is disposable.
+
+- Developer agents (Cursor, Copilot, Devin) are powerful but require you to be a developer.
+
+- n8n is open-source, self-hosted, and has real AI agents — the closest in philosophy. But it's a workflow wiring tool for technical users, not a workspace you inhabit.
+
+- What we understand that they don't: the right unit of AI persistence is the file, not the chat message. When everything is a file — dialogs, context, orchestration, output — you get ownership, portability, unlimited storage, provider independence, and searchability as free consequences of the architecture, not as features to be built. Everyone else is building features on top of chat. We built a filesystem and put AI inside it.
+
+**How do or will you make money? How much could you make?**
+
+Cloud users pay 10 USD/month. Half covers the VPS that runs their containers. Half is our margin. AI costs are paid directly by the user to their provider - we don't mark up tokens. Additional cloud services (storage, backups) are provided at cost.
+
+At 5 USD net margin per user, we need 20,000 paying users for $1.2M ARR. The self-hosting market is growing from $15.6B to $85.2B by 2034. The AI agent market is projected at $183B by 2033. We sit at the intersection: personal AI workspaces that you own.
+
+Our pricing is deliberately low. Zapier charges $30-6,000/month. Clay starts at $185/month. Cursor is $20/month. Devin is $500/month. We're 10 USD because the product is open source and the architecture is simple — one container per project, no orchestration layer to maintain, no token margin to protect. Low price means low churn and word of mouth from users who feel they're getting an unfair deal.
+
+The upside isn't in raising the price. It's in the number of people who will want a personal server with an AI agent once they realize they need one — which is the same trajectory as smartphones in 2007. Nobody thought they needed a computer in their pocket until they had one.
+
+**Why did you pick this idea to work on? Do you have domain expertise in this area? How do you know people need what you're making?**
+
+I've been building web applications and writing open source for 15 years. I run Altocode, an open-source company. I built a photo management app (tagaway) and a set of JavaScript libraries before this. I've spent most of my career thinking about how to make software simpler and more habitable for users.
+
+I started Vibey because I needed it myself. I was using AI agents (Claude Code, ChatGPT) daily and kept hitting the same walls: conversations trapped inside one provider, context that vanished between sessions, output in one place and the dialog that produced it in another, agents that either asked permission for everything or had access to my whole machine. I wanted a space where agents could work freely but safely, where everything was a readable file, and where I could see and own every artifact.
+
+The people who need this are those who work with data and really want to own it.
+
 ### 2026-06-11
 
 The state is to the client exactly as the database is to the backend.

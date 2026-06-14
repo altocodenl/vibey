@@ -1,0 +1,16 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache redis bash
+
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install --production
+
+COPY server.js client.js ./
+
+# Entrypoint seeds config into volume on first run, then starts node
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -3,7 +3,7 @@
 var CONFIG = {
    admin: 'info@altocode.nl',
    baseURL: 'http://localhost:5353',
-   cloud: process.argv [2] === 'cloud',
+   cloud: process.env.CLOUD === '1',
    cookie: {
       expires: 7 * 24 * 60 * 60,
       name:    'vibey'
