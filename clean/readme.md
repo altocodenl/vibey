@@ -5,9 +5,46 @@
 ## Running vibey yourself
 
 ```
+docker compose up --build
+```
+
+To run in cloud mode:
+
+```
+cloud=1 docker compose up --build
+```
+
+To run with both email on and cloud mode on:
+
+```
+cloud=1 email=1 docker compose up --build
+```
+
+If you're meddling with the Dockerfiles and you need to bust the cache:
+
+```
+docker compose build --no-cache && cloud=1 docker compose up
 ```
 
 ## Dataspace
+
+### secret.js
+
+```
+{
+   ses: {
+      accessKeyId: '...',
+      secretAccessKey: '...+d9PrIV/Z4Jes',
+   }
+}
+```
+
+### Environment variables
+
+```
+cloud <"1"|anything else> // To enable cloud mode
+email <"1"|anything else> // To enable sending emails
+```
 
 ### Server
 
@@ -30,7 +67,6 @@ auth csrf "<CSRF token>"
      mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
      otp "<otp code entered in the login form>"
      otpRequested <0|1> // Whether the OTP request was sent
-     signupRequested <0|1> // Whether a signup was just requested
 file content "..." // Current file selected
      dialogMode <ai|human|terminal> // Dialog mode
      mode <edit|view> // Whether we're editing the file we're viewing or not

@@ -180,9 +180,9 @@ B.mrespond ([
 
    ['signup', [], function (x, email) {
       if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
-      B.call (x, 'post', 'auth/signup', {email: email.trim ().toLowerCase ()}, function (x, error) {
+      B.call (x, 'post', 'auth/signup', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to request invite');
-         B.call (x, 'set', ['auth', 'signupRequested'], true);
+         B.call (x, 'snackbar', 'ok', rs.body.admin ? 'Account created, please log in' : 'Invite requested. Thank you for your interest!');
       });
    }],
 
@@ -190,6 +190,7 @@ B.mrespond ([
       if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
       B.call (x, 'post', 'auth/login', {email: email.trim ().toLowerCase ()}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to send login code');
+         B.call (x, 'snackbar', 'ok', 'Code sent, please check your inbox');
          B.call (x, 'set', ['auth', 'otpRequested'], true);
       });
    }],
@@ -197,9 +198,10 @@ B.mrespond ([
    ['verify', [], function (x, email, otp) {
       if (! email || ! otp) return B.call (x, 'snackbar', 'error', 'Please enter your email and code');
       B.call (x, 'post', 'auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
+         alert (error ? 'error' : 'ok');
          if (error) return B.call (x, 'snackbar', 'error', 'Invalid code');
-
          B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
+
 
          B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
@@ -696,7 +698,6 @@ views.auth = function (page) {
             oninput: B.ev ('set', ['auth', 'email']),
             class: css.input
          }],
-         auth.signupRequested ? ['div', {class: 'mb3 text-success'}, 'Invite requested. Thank you for your interest!'] : '',
          ['button', {class: css.buttonWide, onclick: B.ev ('signup', [], auth.email)}, 'Request invite']
       ]], ['div', {class: linkWrap}, [
          ['a', {href: '#/login', class: linkClass}, 'Already have access? Log in']

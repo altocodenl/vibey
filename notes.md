@@ -1,5 +1,21 @@
 ## Vibey development notes
 
+### 2026-06-15
+
+The sixth element is not access, it is publishing!
+
+The sequence for vibey:
+
+1. Auth      <--- currently here
+2. Project
+3. Editor
+4. Dialog
+5. App
+6. Publish
+7. Engine
+
+Idea: apps are not just apps you make yourself. If we could embed (say) a google spreadsheet, that'd be tectonic. It could really bring a lot of things to the dataspace. A proper, non-opaque way to have integrations: the file metaphor.
+
 ### 2026-06-14
 
 To Dockerize or not to Dockerize?

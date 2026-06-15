@@ -1,16 +1,28 @@
 // *** CONFIG ***
 
+try {
+   var SECRET = require ('./secret.js');
+}
+catch (error) {
+   var SECRET = {};
+}
+
 var CONFIG = {
    admin: 'info@altocode.nl',
    baseURL: 'http://localhost:5353',
-   cloud: process.env.CLOUD === '1',
+   cloud: process.env.cloud === '1',
    cookie: {
       expires: 7 * 24 * 60 * 60,
       name:    'vibey'
    },
    email: {
       address: 'info@altocode.nl',
-      disable: false,
+      enable: process.env.email === '1',
+      ses: {
+         accessKeyId:     SECRET.ses?.access,
+         region:          'eu-west-1',
+         secretAccessKey: SECRET.ses?.secret
+      },
       name: 'A friend from Vibey',
    },
    port: 5353,
@@ -175,8 +187,12 @@ var clog = function () {
    console.log (ansi (color, cell.JSToText (log)) + '\n');
 }
 
-var reply = function (rs, code, body, headers) {
-   if (! rs) return;
+var reply = function () {
+   var args = arguments;
+   var [rs, code, body, headers] = dale.go (dale.times (4, arguments [0].writable === undefined ? 1 : 0), function (k) {
+      return args [k];
+   });
+
    if (rs.headersSent || rs.writableEnded || rs.destroyed || (rs.connection && rs.connection.writable === false)) {
       return clog ({priority: 'important', type: 'Interrupted response', id: rs.log.id, method: rs.request.method, path: rs.request.url, origin: rs.log.origin, userId: rs.request.user ? rs.request.user.id : 'anonymous'});
    }
@@ -184,7 +200,7 @@ var reply = function (rs, code, body, headers) {
    return cicek.reply (rs, code, body, headers);
 }
 
-var validEmail = /^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i
+var validEmail = /^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i;
 
 var stop = function (rs, rules) {
    return teishi.stop (rules, function (error) {
@@ -291,12 +307,27 @@ var redis = function (command) {
    return promise (Redis [command].bind (Redis), [].slice.call (arguments, 1));
 }
 
+// *** RATE LIMIT ***
+
+var rateLimit = async function (prefix, max, ttl) {
+   var [result] = await redis ([
+      ['incr',   'rateLimit:' + prefix],
+      ['expire', 'rateLimit:' + prefix, ttl]
+   ]);
+   return result > max;
+}
+
 // *** EMAIL ***
+
+var mailer;
+if (CONFIG.email.ses.accessKeyId && CONFIG.ses.secretAccessKey) {
+   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (CONFIG.ses));
+}
 
 var sendmail = function (options) {
    return new Promise (function (resolve, reject) {
-      if (! CONFIG.cloud || CONFIG.email.disable) {
-         clog ({type: 'Skipping email', to: to, subject: options.subject});
+      if (! CONFIG.email.enable) {
+         clog ({type: 'Skipping email', to: options.to, subject: options.subject});
          return resolve ();
       }
       mailer.sendMail ({
@@ -340,7 +371,7 @@ var routes = [
          return rs.next ();
       }
 
-      var session = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookiename] : undefined;
+      var session = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
 
       if (session) {
          var userId = await redis ('get', 'session:' + session);
@@ -360,8 +391,7 @@ var routes = [
 
       clog ({type: 'Request', id: rs.log.id, method: rq.method, url: rq.url, origin: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
 
-      if (rq.user && inc (['get', 'post', 'delete'], rq.method) && rq.headers ['x-csrf'] !== csrf) return reply (rs, 403, {error: 'csrf'});
-
+      if (rq.user && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== csrf) return reply (rs, 403, {error: 'csrf'});
       if (! rq.user) {
          var publicPath = dale.stop ([
             ['get', '/'],
@@ -432,8 +462,8 @@ var routes = [
       reply (rs, 200, {admin: rq.user.email === CONFIG.admin ? true : undefined, csrf: rq.user.csrf});
    }],
 
-   ['post', 'auth/signup', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
+   ['post', '*', function (rq, rs) {
+      if (! inc (['auth/signup', 'auth/signup/accept', 'auth/login', 'auth/verify'])) return rs.next ();
 
       if (stop (rs, [
          ['email', rq.body.email, 'string'],
@@ -442,7 +472,16 @@ var routes = [
          }
       ])) return;
 
-      if (email === CONFIG.admin) {
+      rq.body.email = rq.body.email.toLowerCase ();
+      rs.next ();
+
+   }],
+
+   ['post', 'auth/signup', async function (rq, rs) {
+      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      clog ('cheee', rq.body.email, CONFIG.admin);
+      if (rq.body.email === CONFIG.admin) {
          var userId = crypto.randomUUID ();
 
          await redis ([
@@ -468,7 +507,7 @@ var routes = [
          });
       }
 
-      reply (rs, 200);
+      reply (rs, 200, {admin: rq.body.email === CONFIG.admin ? true : undefined});
    }],
 
    ['post', 'auth/signup/accept', async function (rq, rs) {
@@ -495,19 +534,16 @@ var routes = [
    ['post', 'auth/login', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404);
 
-      if (stop (rs, [
-         ['email', rq.body.email, 'string'],
-         function () {
-            return ['email', rq.body.email, validEmail, teishi.test.match];
-         }
-      ])) return;
+      if (await rateLimit ('login:' + rq.body.email, 5, 300)) return reply (rs, 403);
 
-      var userId = await redis ('get', 'email:' + rq.body.email.toLowerCase ());
+      var userId = await redis ('get', 'email:' + rq.body.email);
       if (! userId) return reply (rs, 403);
 
       var otp = String (crypto.randomInt (100000, 999999));
 
       await redis ('setex', 'otp:' + userId, 60 * 5, otp);
+
+      if (! CONFIG.email.enable) clog ({type: 'New OTP', email: rq.body.email, otp});
 
       await sendmail ({
          from: rq.body.email,
@@ -525,25 +561,21 @@ var routes = [
    ['post', 'auth/verify', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404);
 
-      if (stop (rs, [
-         ['email', rq.body.email, 'string'],
-         function () {
-            return ['email', rq.body.email, validEmail, teishi.test.match];
-         },
-         ['otp', rq.body.otp, 'string'],
-      ])) return;
+      if (stop (rs, ['otp', rq.body.otp, 'string'])) return;
 
-      var userId = await redis ('get', 'email:' + rq.body.email.toLowerCase ());
+      if (await rateLimit ('otp:' + rq.body.email, 5, 300)) return reply (rs, 403);
+
+      var userId = await redis ('get', 'email:' + rq.body.email);
       if (! userId) return reply (rs, 403);
 
       var [otp] = await redis ([
          ['get', 'otp:' + userId],
-         ['del', 'otp:' + userId]
+         ['del', 'otp:' + userId, 'rateLimit:login:' + rq.body.email, 'rateLimit:verify:' + rq.body.email]
       ]);
       if (rq.body.otp !== otp) return reply (rs, 403);
 
-      var csrf    = crypto.randomBytes (bytes || 32).toString ('hex');
-      var session = crypto.randomBytes (bytes || 32).toString ('hex');
+      var csrf    = crypto.randomBytes (32).toString ('hex');
+      var session = crypto.randomBytes (32).toString ('hex');
 
       await redis ([
          ['setex', 'session:' + session, CONFIG.cookie.expires, userId],

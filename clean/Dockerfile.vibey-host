@@ -2,15 +2,20 @@ FROM node:22-alpine
 
 RUN apk add --no-cache redis bash
 
+RUN apk add --no-cache --virtual .build-deps build-base curl\
+ && mkdir /tmp/mon && cd /tmp/mon \
+ && curl -L# https://github.com/tj/mon/archive/master.tar.gz | tar zx --strip 1 \
+ && make install \
+ && rm -rf /tmp/mon \
+ && apk del .build-deps
+
 WORKDIR /app
 
 COPY package.json ./
 RUN npm install --production
 
 COPY server.js client.js ./
+RUN echo 'module.exports = {}' > secret.js
+COPY secret.js* ./
 
-# Entrypoint seeds config into volume on first run, then starts node
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
-
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["sh", "-c", "redis-server --daemonize yes --dir /app/data --appendonly yes && exec mon 'node server.js' --log /tmp/vibey.log"]
