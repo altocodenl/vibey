@@ -168,11 +168,13 @@ var now = function () {
 
 var ansi = function (types, text) {
    var colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
-   return dale.go (types, function (type) {
+   var prefix = dale.go (types, function (type) {
       if (type === 'bold') return '\u001b[1m';
       if (inc (colors, type)) return '\u001b[3' + colors.indexOf (type) + 'm';
       if (inc (colors, type.replace (/^i/, ''))) return '\u001b[4' + colors.indexOf (type) + 'm';
-   }).join ('') + text + '\u001b[0m';
+   }).join ('');
+   // Apply the color to each line, so that it will be respected by docker logging
+   return prefix + text.split ('\n').join ('\n' + prefix) + '\u001b[0m';
 }
 
 var clog = function () {
@@ -182,7 +184,9 @@ var clog = function () {
    log = {t: now (), from: cicek.isMaster ? 'main' : ('worker' + cluster.worker.id), ...log};
    var color = [];
    if (log.priority === 'important') color.push ('yellow');
-   if (log.priority === 'critical') color.push ('red', 'bold');
+   else if (log.priority === 'critical') color.push ('red', 'bold');
+   else if (log.type === 'Request') color.push ('cyan');
+   else if (log.type === 'Response') color.push ('green');
 
    console.log (ansi (color, cell.JSToText (log)) + '\n');
 }
@@ -194,7 +198,7 @@ var reply = function () {
    });
 
    if (rs.headersSent || rs.writableEnded || rs.destroyed || (rs.connection && rs.connection.writable === false)) {
-      return clog ({priority: 'important', type: 'Interrupted response', id: rs.log.id, method: rs.request.method, path: rs.request.url, origin: rs.log.origin, userId: rs.request.user ? rs.request.user.id : 'anonymous'});
+      return clog ({priority: 'important', type: 'Interrupted response', rqId: rs.log.id, method: rs.request.method, path: rs.request.url, ip: rs.log.origin, userId: rs.request.user ? rs.request.user.id : 'anonymous'});
    }
 
    return cicek.reply (rs, code, body, headers);
@@ -320,8 +324,8 @@ var rateLimit = async function (prefix, max, ttl) {
 // *** EMAIL ***
 
 var mailer;
-if (CONFIG.email.ses.accessKeyId && CONFIG.ses.secretAccessKey) {
-   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (CONFIG.ses));
+if (CONFIG.email.ses.accessKeyId && CONFIG.email.ses.secretAccessKey) {
+   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (CONFIG.email.ses));
 }
 
 var sendmail = function (options) {
@@ -332,7 +336,7 @@ var sendmail = function (options) {
       }
       mailer.sendMail ({
          from:    CONFIG.email.name + ' <' + CONFIG.email.address + '>',
-         to:      to,
+         to:      options.to,
          replyTo: CONFIG.email.address,
          subject: options.subject,
          html:    lith.g (options.message)
@@ -367,7 +371,7 @@ var routes = [
    ['all', '*', async function (rq, rs) {
 
       if (! CONFIG.cloud) {
-         clog ({type: 'Request', id: rs.log.id, method: rq.method, url: rq.url, origin: rs.log.origin});
+         clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, ip: rs.log.origin});
          return rs.next ();
       }
 
@@ -383,35 +387,35 @@ var routes = [
                ['get',     'csrf:' + session],
             ]);
 
-            if (! user || ! csrf) return reply (rs, 500, {priority: 'critical', type: 'User or CSRF token not found'});
+            if (! user || ! csrf) return reply (rs, 500, {priority: 'critical', type: 'User or CSRF token not found', userId});
 
             rq.user = {csrf, session, ...user};
          }
       }
 
-      clog ({type: 'Request', id: rs.log.id, method: rq.method, url: rq.url, origin: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
+      clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
 
-      if (rq.user && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== csrf) return reply (rs, 403, {error: 'csrf'});
-      if (! rq.user) {
-         var publicPath = dale.stop ([
-            ['get', '/'],
-            ...dale.go (['client', 'gotoB', 'marked'], function (v) {
-               return ['get', '/' + v + '.js'];
-            }),
-            ...dale.go (['signup', 'login', 'verify'], function (v) {
-               return ['post', '/auth/' + v];
-            }),
-            ['post', '/error'],
-            ['get', /^\/public\//],
-         ], true, function (endpoint) {
-            if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
-            //]clog ('che', rq.method, endpoint [0], rq.url, rq.url.match (endpoint [1]));
+      var publicPath = dale.stop ([
+         ['get', '/'],
+         ...dale.go (['client', 'gotoB', 'marked'], function (v) {
+            return ['get', '/' + v + '.js'];
+         }),
+         ...dale.go (['signup', 'login', 'verify'], function (v) {
+            return ['post', '/auth/' + v];
+         }),
+         ['post', '/error'],
+         ['get', /^\/public\//],
+      ], true, function (endpoint) {
+         if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
+         return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
+      });
 
-            return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
-         });
-
-         if (! publicPath) return reply (rs, 403);
+      if (! rq.user && ! publicPath) {
+         if (session) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
+         else         return reply (rs, 403, {error: 'No session'});
       }
+
+      if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== csrf) return reply (rs, 403, {error: 'Invalid csrf token', csrf: rq.headers ['x-csrf']});
 
       rs.next ();
 
@@ -463,7 +467,9 @@ var routes = [
    }],
 
    ['post', '*', function (rq, rs) {
-      if (! inc (['auth/signup', 'auth/signup/accept', 'auth/login', 'auth/verify'])) return rs.next ();
+      if (! inc (['/auth/signup', '/auth/signup/accept', '/auth/login', '/auth/verify'], rq.url)) return rs.next ();
+
+      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
       if (stop (rs, [
          ['email', rq.body.email, 'string'],
@@ -478,9 +484,10 @@ var routes = [
    }],
 
    ['post', 'auth/signup', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
-      clog ('cheee', rq.body.email, CONFIG.admin);
+      var exists = await redis ('exists', 'email:' + rq.body.email);
+      if (exists) return reply (rs, 409);
+
       if (rq.body.email === CONFIG.admin) {
          var userId = crypto.randomUUID ();
 
@@ -494,13 +501,13 @@ var routes = [
          ]);
       }
       else {
-         await redis ('hmset', 'invite:' + email, {email: email, created: now ()});
+         await redis ('hmset', 'invite:' + rq.body.email, {email: rq.body.email, created: now ()});
 
-         await sendmail (CONFIG.adminEmail, {
+         await sendmail ({
             to: CONFIG.email.address,
             subject: 'Vibey signup request',
             message: ['p', [
-               'New signup request from: ' + email,
+               'New signup request from: ' + rq.body.email,
                ['br'],
                now ()
             ]]
@@ -512,19 +519,24 @@ var routes = [
 
    ['post', 'auth/signup/accept', async function (rq, rs) {
 
-      if (rq.user.email !== CONFIG.admin) return reply (rs, 403);
+      if (rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
       var existingUser = await redis ('get', 'email:' + rq.body.email);
       if (existingUser) return reply (rs, 409);
 
       var userId = crypto.randomUUID ();
 
+      var invite = await redis ('hgetall', 'invite:' + rq.body.email);
+      if (! invite) return reply (rs, 404);
+
       await redis ([
          ['set', 'email:' + rq.body.email, userId],
+         ['del', 'invite:' + rq.body.email],
          ['hmset', 'user:' + userId, {
             created: now (),
             email: rq.body.email,
             id: userId,
+            invite: invite.created,
          }],
       ]);
 
@@ -532,12 +544,11 @@ var routes = [
    }],
 
    ['post', 'auth/login', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 404);
 
-      if (await rateLimit ('login:' + rq.body.email, 5, 300)) return reply (rs, 403);
+      if (await rateLimit ('login:' + rq.body.email, 5, 300)) return reply (rs, 403, {error: 'Rate limited'});
 
       var userId = await redis ('get', 'email:' + rq.body.email);
-      if (! userId) return reply (rs, 403);
+      if (! userId) return reply (rs, 403, {error: 'No such email'});
 
       var otp = String (crypto.randomInt (100000, 999999));
 
@@ -546,7 +557,7 @@ var routes = [
       if (! CONFIG.email.enable) clog ({type: 'New OTP', email: rq.body.email, otp});
 
       await sendmail ({
-         from: rq.body.email,
+         to: rq.body.email,
          subject: 'Your Vibey login code',
          message: [
             ['p', ['Use this code to log in at ', ['a', {href: CONFIG.baseURL}, CONFIG.baseURL.replace (/^https?:\/\//, '')], ':']],
@@ -559,20 +570,16 @@ var routes = [
    }],
 
    ['post', 'auth/verify', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 404);
 
       if (stop (rs, ['otp', rq.body.otp, 'string'])) return;
 
-      if (await rateLimit ('otp:' + rq.body.email, 5, 300)) return reply (rs, 403);
+      if (await rateLimit ('verify:' + rq.body.email, 5, 300)) return reply (rs, 403, {error: 'Rate limited'});
 
       var userId = await redis ('get', 'email:' + rq.body.email);
-      if (! userId) return reply (rs, 403);
+      if (! userId) return reply (rs, 403, {error: 'No such email'});
 
-      var [otp] = await redis ([
-         ['get', 'otp:' + userId],
-         ['del', 'otp:' + userId, 'rateLimit:login:' + rq.body.email, 'rateLimit:verify:' + rq.body.email]
-      ]);
-      if (rq.body.otp !== otp) return reply (rs, 403);
+      var otp = await redis ('get', 'otp:' + userId);
+      if (rq.body.otp !== otp) return reply (rs, 403, {error: 'Invalid OTP', otp: rq.body.otp});
 
       var csrf    = crypto.randomBytes (32).toString ('hex');
       var session = crypto.randomBytes (32).toString ('hex');
@@ -580,6 +587,7 @@ var routes = [
       await redis ([
          ['setex', 'session:' + session, CONFIG.cookie.expires, userId],
          ['setex', 'csrf:'    + session, CONFIG.cookie.expires, csrf],
+         ['del', 'otp:' + userId, 'rateLimit:login:' + rq.body.email, 'rateLimit:verify:' + rq.body.email]
       ]);
 
       reply (rs, 200, {csrf}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, session, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
@@ -587,11 +595,11 @@ var routes = [
    }],
 
    ['post', 'auth/logout', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 404);
+      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
       await redis ([
-         ['del:', 'csrf:'    + sessionId],
-         ['del:', 'session:' + sessionId],
+         ['del', 'csrf:'    + rq.user.session],
+         ['del', 'session:' + rq.user.session],
       ]);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
@@ -613,16 +621,16 @@ cicek.apres = function (rs) {
    clog ({
       priority: rs.log.code >= 400 ? 'important' : undefined,
       type: 'Response',
-      id: rs.log.id,
+      rqId: rs.log.id,
       method: rs.log.method,
       path: rs.log.url,
       code: rs.log.code,
       ms: Date.now () - rs.log.startTime,
+      ip: rs.log.origin,
       length: {
          rq: rs.log.requestBody === ''         ? 0 : JSON.stringify (rs.log.requestBody).length,
          rs: rs.log.responseBody === undefined ? 0 : JSON.stringify (rs.log.responseBody).length
       },
-      origin: rs.log.origin,
       userId: ! CONFIG.cloud ? undefined : (rs.request.user ? rs.request.user.id : 'anonymous')
    });
    cicek.Apres (rs);

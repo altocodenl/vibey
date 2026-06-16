@@ -1,5 +1,45 @@
 ## Vibey development notes
 
+### 2026-06-16
+
+Mnemonics of the ten elements of living processes, by Alexander:
+
+1. Step
+2. Whole
+3. Centers
+4. Sequence
+5. Local
+6. Patterns
+7. Feeling
+8. Aperiodic grid
+9. Combinatory rules
+10. Simplicity
+
+Some notes on Alexander - The process of creating life:
+- "To make a building - one which lives - is not such a different matter. It, too, must be allowed to unfold. And that means that, like the daffodil, it must take form step by step, in real time, both before construction and during construction. The geometry of living structure *cannot* be created by static design and production."
+- "It is the *history* of this process, and the thousand steps which form this history, that crate the shape. The shape *can* be created by a computer simulation, because such a simulation, at least in principle, may resemble the real process by creating a succession of adaptations that build up the shape gradually. But it cannot be created by a static, non-dynamic act of draftsmanship or design. It is in the nature of the falling water drop that its shape can only be created dynamically."
+- "This is not an intellectually derived conclusion. It is, I believe, a direct perception."
+- "Insofar as unfolded buildings are lovable, what we love about them is not their age but the rightness which we experience in them. This rightness got into them *as a result of a step-by-step unfolding process.*"
+- Note: the answer to the problems of modernity lies in the answer to the question: how can we use our technology to create living structure? This goes beyond architecture, software or city planning. It also goes into the realm of policy. What we call complexity right now is perhaps simply the trillions of errors we deal with because of the fabricated/dead nature of what's produced by our modern processes. This complexity is what makes us ambivalent about technology. If we can combine living structure with technology, the ambivalence disappears (perhaps).
+- "if I want something harmonious, I cannot separate the process of actually building the step, and of having it materialize concretely (...) I must literally "get" the step - its size, shape, height - from the surroundings"
+- "Thus to create a living center at all - even in this one tiny case - I must try to do it in the actual place, and be thinking while I do it. Such a dynamic process is a necessity which must be going on in order to make living centers *at all*."
+- "What is needed for all this is an ultra-modern process - by that I mean a process far beyond our present understanding of planning and construction - which can build streets, bridges, concernt halls, housing, shops and factories in a way that craetes satisfying adaptation as well as it does in my example of the simple doorstep. That means a process - no matter how complex - which allows each part, each decision, each aspect, to be measured, thought about, tested, made just right, and which then goes on and on and on, repeating thousands of times, creating living centers."
+- "A building has too many aspects, too many variables. We cannot get each aspect of the building right unless it is possible to work out one aspect at a time."
+- "Of course, it is not enough merely to go step by step. As part of the step-by-step adaptation, there must also be a *feedback* process. In traditional society, while a thing was being made, it was also *continually* being assessed for its degree of life."
+- "However, in modern society (...) *Feedback is not allowed to be effective.*"
+- Note: test driven development as simply the constant application of feedback.
+- "by that time, the drawing, in its outline, is all but set, containing hundreds of untested decisions."
+- "There are comments from th client, from others in the office, and so forth. But little *true* feedback about *the actual behavior* of the proposed building."
+- "The crux of the difficulty is to find a medium in which we can make sufficiently subtle three-dimensional simulations."
+- "Very simple, intentionally rough paper and cardboard models do work."
+- "The result must be unpredictable. To make the feedback meaningful in a step-by-step process, the process must be open-ended, hence partly unpredictable. It must *lack* a fixed, predetermined end-state. (...) By definition, such changes cannot be foreseen."
+- Note: what would be the equivalent in programming? This is also reminding me of P != NP, and the impossibility of knowing beforehand, in closed-form solution, without traversing the space.
+- "This kind of judgment *can only be made well in the real world*. No detailed architectural drawing, no matter how careful, can reflect this kind of subtlety."
+- "Mechanistic 19th-century science created a thought-model in which the next stage would be easily predictable from the previous stage. (...) there is no way to predict the path of the emerging system accurately ahead of time."
+- Note: an interesting consequence: you cannot automate a living process, unless you can automate feeling.
+- Claude: "This connects to the Vibey vision too: if the tool already knows where you're going, it's automation. If you don't know where you're going until you've taken the step and felt the feedback, that's play — and that's where the meaning lives."
+- "Thus the field of centers which is at the very heart of living structure - *is inherently so subtle that it can only be created dynamically, and is inherently unpredictable in the precise definition of its end-state."
+
 ### 2026-06-15
 
 The sixth element is not access, it is publishing!

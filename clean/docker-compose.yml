@@ -1,5 +1,6 @@
 services:
   vibey-host:
+    container_name: vibey-host
     build:
       context: .
       dockerfile: Dockerfile.vibey-host

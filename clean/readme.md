@@ -46,17 +46,21 @@ cloud <"1"|anything else> // To enable cloud mode
 email <"1"|anything else> // To enable sending emails
 ```
 
-### Server
+### Redis
 
 ```
 csrf:<session> <csrfToken>
 email:<email> <userId>
-invite:<email> <email>
+invite:<email> created <date>
+               email <email>
 otp:<userId> <otp>
+rateLimit:<identifier> <number>
 session:<session> <userId>
-user:<id> created "..."
-          id "..."
-          seen "..."
+user:<id> created <date>
+          email <email>
+          id <id>
+          invite <date>
+          seen <date>
 ```
 
 ### Client

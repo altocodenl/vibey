@@ -70,8 +70,13 @@ B.mrespond ([
 
       if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
 
-      if (inc (loggedViews, hash [0]) && ! B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'login');
-      if (inc (authViews,   hash [0]) &&   B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'projects');
+      if (B.get ('auth', 'mode') === 'cloud') {
+         if (inc (loggedViews, hash [0]) && ! B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'login');
+         if (inc (authViews,   hash [0]) &&   B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'projects');
+      }
+      else {
+         if (inc (authViews, hash [0])) return B.call (x, 'navigate', 'projects');
+      }
 
       if (hash.length > 1 && hash [0] !== 'project') return B.call (x, 'navigate', 'projects');
 
@@ -198,7 +203,6 @@ B.mrespond ([
    ['verify', [], function (x, email, otp) {
       if (! email || ! otp) return B.call (x, 'snackbar', 'error', 'Please enter your email and code');
       B.call (x, 'post', 'auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
-         alert (error ? 'error' : 'ok');
          if (error) return B.call (x, 'snackbar', 'error', 'Invalid code');
          B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
 
@@ -261,8 +265,6 @@ B.mrespond ([
       return ['load', entity, function (x) {
          B.call (x, 'get', entity, function (x, error, rs) {
             if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + entity);
-
-            if (entity === 'files') rs.body.sort ();
             B.call (x, 'set', entity, rs.body);
          });
       }];
@@ -340,7 +342,7 @@ B.mrespond ([
             }
          }
          if (B.get ('new', 'file') !== undefined) {
-            if (ev.key === 'o') return call ('set', ['new', 'type'], 'doc');
+            if (ev.key === 'e') return call ('set', ['new', 'type'], 'doc');
             if (ev.key === 'i') return call ('set', ['new', 'type'], 'dialog');
             if (ev.key === 'x') return call ('rem', 'new', 'file');
             if (ev.key === 'd') return call ('create', 'file');
@@ -415,7 +417,7 @@ B.mrespond ([
    }],
 
    ['remove', 'file', function (x, name) {
-      if (! confirm ('Delete file"' + name + '"? This cannot be undone.')) return;
+      if (! confirm ('Delete file "' + name + '"? This cannot be undone.')) return;
 
       B.call (x, 'delete', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + name, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
@@ -912,7 +914,7 @@ views.project = function () {
                                  style: ! isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.border, color: css.colors.textMuted}),
                                  onclick: B.ev ('set', ['new', 'type'], 'doc')
                               }, [
-                                 command ? ['span', {class: 'cmd-tooltip'}, 'O'] : '',
+                                 command ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
                                  ['i', {class: 'bi bi-file-text mr1'}], 'Doc'
                               ]],
                               ['button', {
