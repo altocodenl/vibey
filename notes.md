@@ -1,5 +1,18 @@
 ## Vibey development notes
 
+### 2026-06-17
+
+Some notes on Alexander - The process of creating life:
+
+- "Concentration on space, as in the spaces of the Nolli plan of Rome, paves the way for a beautiful and ordered whole."
+- "What is the essential difference between Matisse's successful process and the unsuccessful process typical of our professional architecture today? (...) The critical difference is the absence of feedback. (...) *Matisse is watching the actual painting; his hand is hovering over it.*"
+- "this architect, if challenged on this point, might claim that this is just where is experience lies: that he can tell, from the pencil lines, what the real building would be doing and that it is this ability which makes him an architect. But this is a polite fiction. It is a polite lie on which our 20-th century architecture was based. The truth is that *on one* can tell what the three-dimensional reality of the building is going to be based on a few pencil strokes or a few lines on a computer screen."
+- "We must imagine a world where (...) go forward in very small steps with feedback, so that they can be corrected. It is this self-correcting aspect of the building process which has all but vanished in recent times."
+- "That one thing alone, as akind of bedrock for all design and all planning and all building, will change the world. We must reject the statist conception in which the future is planned now, and embrace a new world of architectural design in which the future of each building is not known, remains open to experiment and change, and above all to success."
+- "Awareness of the idea that living process is both necessary - and likely to change our means of production entirely - is perhaps only now beginning to sink in."
+
+Figured out how to write the tests!!
+
 ### 2026-06-16
 
 Mnemonics of the ten elements of living processes, by Alexander:

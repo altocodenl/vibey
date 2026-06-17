@@ -31,6 +31,10 @@ var CONFIG = {
    }
 }
 
+// *** TEST ***
+
+var test = require ('./test.js') (CONFIG);
+
 // *** SETUP ***
 
 var child   = require ('child_process')
@@ -188,7 +192,7 @@ var clog = function () {
    else if (log.type === 'Request') color.push ('cyan');
    else if (log.type === 'Response') color.push ('green');
 
-   console.log (ansi (color, cell.JSToText (log)) + '\n');
+   console.log (ansi (color, cell.JSToText (log)) + '\n\n');
 }
 
 var reply = function () {
@@ -404,7 +408,6 @@ var routes = [
             return ['post', '/auth/' + v];
          }),
          ['post', '/error'],
-         ['get', /^\/public\//],
       ], true, function (endpoint) {
          if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
          return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
@@ -424,6 +427,15 @@ var routes = [
          ['expire',  'session:' + session, CONFIG.cookie.expires],
          ['hset',    'user:'    + userId, {seen: now ()}]
       ]);
+   }],
+
+   ['get', 'test', async function (rq, rs) {
+
+      if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+
+      test ('public', function (error, rdata) {
+         reply (rs, 200, JSON.stringify (error ? {error} : rdata, null, '   '));
+      });
    }],
 
    // *** STATIC ***

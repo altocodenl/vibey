@@ -14,7 +14,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --production
 
-COPY server.js client.js ./
+COPY server.js client.js test.js ./
 RUN echo 'module.exports = {}' > secret.js
 COPY secret.js* ./
 
