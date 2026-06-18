@@ -185,7 +185,7 @@ B.mrespond ([
 
    ['signup', [], function (x, email) {
       if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
-      B.call (x, 'post', 'auth/signup', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
+      B.call (x, 'post', 'auth/signup/request', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to request invite');
          B.call (x, 'snackbar', 'ok', rs.body.admin ? 'Account created, please log in' : 'Invite requested. Thank you for your interest!');
       });

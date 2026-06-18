@@ -385,7 +385,6 @@ var routes = [
          var userId = await redis ('get', 'session:' + session);
 
          if (userId) {
-
             var [user, csrf] = await redis ([
                ['hgetall', 'user:' + userId],
                ['get',     'csrf:' + session],
@@ -401,12 +400,16 @@ var routes = [
 
       var publicPath = dale.stop ([
          ['get', '/'],
+         ...dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
+            return ['get', '/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
+         }),
          ...dale.go (['client', 'gotoB', 'marked'], function (v) {
             return ['get', '/' + v + '.js'];
          }),
-         ...dale.go (['signup', 'login', 'verify'], function (v) {
+         ...dale.go (['signup/request', 'login', 'verify'], function (v) {
             return ['post', '/auth/' + v];
          }),
+         ['get', '/favicon.ico'],
          ['post', '/error'],
       ], true, function (endpoint) {
          if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
@@ -433,9 +436,10 @@ var routes = [
 
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
-      test ('public', function (error, rdata) {
-         reply (rs, 200, JSON.stringify (error ? {error} : rdata, null, '   '));
-      });
+      //test ('all', function (error, rdata) {
+      test ('auth', function (error, rdata) {
+         reply (rs, 200, cell.JSToText (error ? {error} : rdata));
+      }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis);
    }],
 
    // *** STATIC ***
@@ -448,9 +452,9 @@ var routes = [
             ['meta', {charset: 'utf-8'}],
             CONFIG.domain && CONFIG.domain.match (/\/app\/?$/) ? ['base', {href: '/app/'}] : '',
             ['title', 'vibey'],
-            ['link', {rel: 'stylesheet', href: 'https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css'}],
-            ['link', {rel: 'stylesheet', href: 'https://unpkg.com/tachyons@4.12.0/css/tachyons.min.css'}],
-            ['link', {rel: 'stylesheet', href: 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css'}],
+            ['link', {rel: 'stylesheet', href: 'normalize.css'}],
+            ['link', {rel: 'stylesheet', href: 'tachyons.css'}],
+            ['link', {rel: 'stylesheet', href: 'bootstrap-icons.css'}],
          ]],
          ['body', [
             ['script', {src: 'gotoB.js'}],
@@ -459,9 +463,23 @@ var routes = [
          ]]
       ]]
    ])],
-   ['get', 'gotoB.js', cicek.file, 'node_modules/gotob/gotoB.min.js'],
-   ['get', 'marked.js', cicek.file, 'node_modules/marked/lib/marked.umd.js'],
+   ...dale.go ([
+      ['normalize.css', 'normalize.css/normalize.css'],
+      ['tachyons.css', 'tachyons/css/tachyons.min.css'],
+      ['bootstrap-icons.css', 'bootstrap-icons/font/bootstrap-icons.min.css'],
+      ['fonts/bootstrap-icons.woff2', 'bootstrap-icons/font/fonts/bootstrap-icons.woff2'],
+      ['fonts/bootstrap-icons.woff',  'bootstrap-icons/font/fonts/bootstrap-icons.woff'],
+      ['gotoB.js', 'gotob/gotoB.min.js'],
+      ['marked.js', 'marked/lib/marked.umd.js'],
+   ], function (route) {
+      return ['get', route [0], cicek.file, 'node_modules/' + route [1]];
+   }),
    ['get', 'client.js', cicek.file],
+   ['get', 'favicon.ico', function (rq, rs) {
+      rs.writeHead (200, {'content-type': 'image/x-icon'});
+      rs.end (Buffer.from ('AAABAAEAEBAAAAEAIACKAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAFFJREFUeJxjEJRQ/08JZgARMEBIMTZ11DGAGENwyVPPAEKGoMvBAFEGYBPHagAhxdj4BA0gZCCGAegKqG4AOh+rAcgKCYUH7QwgOSnTxQBsGAAft/+qqAkz2wAAAABJRU5ErkJggg==', 'base64'));
+   }],
+
 
    // *** ERROR REPORTING ***
 
@@ -479,7 +497,7 @@ var routes = [
    }],
 
    ['post', '*', function (rq, rs) {
-      if (! inc (['/auth/signup', '/auth/signup/accept', '/auth/login', '/auth/verify'], rq.url)) return rs.next ();
+      if (! inc (['/auth/signup/request', '/auth/signup/accept', '/auth/login', '/auth/verify'], rq.url)) return rs.next ();
 
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
@@ -495,7 +513,7 @@ var routes = [
 
    }],
 
-   ['post', 'auth/signup', async function (rq, rs) {
+   ['post', 'auth/signup/request', async function (rq, rs) {
 
       var exists = await redis ('exists', 'email:' + rq.body.email);
       if (exists) return reply (rs, 409);
@@ -578,7 +596,13 @@ var routes = [
          ]
       });
 
+      if (rq.headers ['x-test'] === '1') {
+         if (! ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes (rs.log.origin) && ! /^::ffff:172\.(1[6-9]|2\d|3[01])\./.test (rs.log.origin)) return reply (rs, 403, {error: 'Not a local request'});
+         return reply (rs, 200, {otp: otp});
+      }
+
       reply (rs, 200);
+
    }],
 
    ['post', 'auth/verify', async function (rq, rs) {
