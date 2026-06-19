@@ -1,9 +1,18 @@
 ## Vibey development notes
 
+### 2026-06-19
+
+Some notes on Alexander - The process of creating life:
+- "I included a draft rule which stated: "*Any proposed new apartment building must help the life of the street and of the neighborhood in some tangible way.*" This is the most obvious common sense. (...) THe chairman of the PLanning Commission was outraged by this proposal and asked me, at the very first public hearing where I presented it, what I meant (...) when he heard my explanation (...) asked me in heavily ironic but angry tones if I was a Communist, and then requested that I remove this item from the draft without further discussion."
+- "in many circles, it may be necessary to prepare the ground rather carefully, so that people understand the point of what one is trying to do."
+- "This is a kind of mental inhibition (sometimes fueled by ego, sometimes by greed) which continually makes us focus on the local, *and forget, or ignore, the extent to which we must make something living or beautiful happen in the large* - or forget that it is our responsibility, at every turn, to heal and make more whole, the structure of the world. Let us say, then, that extension, enhancement, and deepening of the whole is the crux and target of all living process."
+- "the ugliness we see all around us, comes largely from the fact that builders - architects, contractors, developers - no longer know, or only rarely achieve, the making of a building which is truly one with its surroundings."
+- "to be whole, it has to be "lost", that is, not separate from its surroundings (..) each is to be distinct, to be an entity. Yet it is to be invisible in order to be lost and not separate"
+- "making the whole is the essence, the beginning and the end of our work as artists."
+
 ### 2026-06-17
 
 Some notes on Alexander - The process of creating life:
-
 - "Concentration on space, as in the spaces of the Nolli plan of Rome, paves the way for a beautiful and ordered whole."
 - "What is the essential difference between Matisse's successful process and the unsuccessful process typical of our professional architecture today? (...) The critical difference is the absence of feedback. (...) *Matisse is watching the actual painting; his hand is hovering over it.*"
 - "this architect, if challenged on this point, might claim that this is just where is experience lies: that he can tell, from the pencil lines, what the real building would be doing and that it is this ability which makes him an architect. But this is a polite fiction. It is a polite lie on which our 20-th century architecture was based. The truth is that *on one* can tell what the three-dimensional reality of the building is going to be based on a few pencil strokes or a few lines on a computer screen."

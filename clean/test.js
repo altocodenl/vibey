@@ -9,6 +9,10 @@ if (mode === 'server') {
    var hitit  = require ('hitit');
    var {inc, last, type} = teishi;
 
+   var getCookie = function (headers) {
+      return headers ['set-cookie'] [0];
+   }
+
    module.exports = function (CONFIG) {
       return function (suite, cb, admin, redis) {
 
@@ -22,6 +26,12 @@ if (mode === 'server') {
             if (result === true) return true;
             validationError = result;
             return false;
+         }
+
+         var assertBody = function (body) {
+            return function (s, rq, rs) {
+               return assert (['body', rs.body, body, teishi.test.equal]);
+            }
          }
 
          // *** PUBLIC ***
@@ -55,7 +65,7 @@ if (mode === 'server') {
                (async function () {
                   // Cleanup before auth suite
                   var testUserId = await redis ('get', 'email:hello@example.com');
-                  await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'user:' + testUserId);
+                  await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
                   next ();
                }) ();
             }],
@@ -67,9 +77,7 @@ if (mode === 'server') {
             }],
             dale.go (['/auth/signup/request', '/auth/login', '/auth/verify'], function (path) {
                if (CONFIG.cloud) return [
-                  ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, function (s, rq, rs) {
-                     return assert (['body', rs.body, {error: 'email should have as type string but instead is undefined with type undefined'}, teishi.test.equal]);
-                  }],
+                  ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'})],
                   dale.go ([1, '1', 'a@a', 'this@is.not.really.an.emai.l'], function (email, k) {
                      return ['Call auth path with invalid email: #' + (k + 1), 'post', path, {email: email}, 400, function (s, rq, rs) {
                         return assert ([
@@ -86,15 +94,11 @@ if (mode === 'server') {
                ];
 
                /*
-                login
-                verify
-                logout
-                delete
+                TODO:
+                missing assertions
                 */
 
-               if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, 404, function (s, rq, rs) {
-                  return assert (['body', rq.body, {error: 'Not in cloud mode'}, teishi.test.equal]);
-               }];
+               if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, 404, assertBody ({error: 'Not in cloud mode'})];
             }),
             CONFIG.cloud ? [
                ['Request invite', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 200],
@@ -105,16 +109,53 @@ if (mode === 'server') {
                   s.otp = rs.body.otp;
                   return true;
                }],
-               ['Verify', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
-                  s.headers.cookie = rs.headers ['set-cookie'];
-                  return true;
-               }],
-               ['Get csrf token', 'get', 'auth/csrf', 200, function (s, rq, rs) {
+               ['Verify login (malformed otp)', 'post', 'auth/verify', {email: 'hello@example.com', otp: 123456}, 400, assertBody ({error: 'otp should have as type string but instead is 123456 with type integer'})],
+               ['Verify login (invalid otp)', 'post', 'auth/verify', {email: 'hello@example.com', otp: '123456'}, 403, assertBody ({error: 'Invalid OTP', otp: '123456'})], // This test fails about once every million times
+               ['Verify login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+                  if (! assert ([
+                     ['cookie', getCookie (rs.headers), 'string'],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '=.+'), teishi.test.match],
+                     ['csrf token', rs.body.csrf, 'string']
+                  ])) return false;
+                  s.headers.cookie = getCookie (rs.headers);
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
                ['Logout', 'post', 'auth/logout', 200],
-               ['Logout again', 'post', 'auth/logout', {}, 403],
+               ['Logout again', 'post', 'auth/logout', {}, 403, assertBody ({error: 'Invalid session'})],
+               dale.go (dale.times (5), function (v) {
+                  return ['Login buildup for rate limit #' + (v + 1), 'post', 'auth/login', {email: 'hello@example.com'}, 200];
+               }),
+               ['Login rate limited', 'post', 'auth/login', {email: 'hello@example.com'}, 403, function (s, rq, rs, next) {
+                  if (! assert (['body', rs.body, {error: 'Rate limited'}, teishi.test.equal])) return false;
+                  (async function () {
+                     await redis ('del', 'rateLimit:login:hello@example.com');
+                     next ();
+                  }) ();
+               }],
+               dale.go (dale.times (4), function (v) {
+                  return ['Login buildup for almost rate limit #' + (v + 1), 'post', 'auth/login', {email: 'hello@example.com'}, 200];
+               }),
+               ['Login', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
+                  s.otp = rs.body.otp;
+                  return true;
+               }],
+               ['Verify login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+                  s.headers.cookie = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  return true;
+               }],
+               ['Login again also OK (rate limit resetted by successful verify)', 'post', 'auth/login', {email: 'hello@example.com'}, 200],
+               dale.go (dale.times (5), function (v) {
+                  return ['Login verify buildup for rate limit #' + (v + 1), 'post', 'auth/verify', {email: 'hello@example.com', otp: 'foo'}, 403, assertBody ({error: 'Invalid OTP', otp: 'foo'})];
+               }),
+               ['Verify login rate limited', 'post', 'auth/verify', {email: 'hello@example.com', otp: 'foo'}, 403, function (s, rq, rs, next) {
+                  if (! assert (['body', rs.body, {error: 'Rate limited'}, teishi.test.equal])) return false;
+                  (async function () {
+                     await redis ('del', 'rateLimit:verify:hello@example.com');
+                     next ();
+                  }) ();
+               }],
             ] : [],
          ];
 

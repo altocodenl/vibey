@@ -379,20 +379,18 @@ var routes = [
          return rs.next ();
       }
 
-      var session = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
+      var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
 
-      if (session) {
-         var userId = await redis ('get', 'session:' + session);
+      if (sessionId) {
+         var session = await redis ('hgetall', 'session:' + sessionId);
 
-         if (userId) {
-            var [user, csrf] = await redis ([
-               ['hgetall', 'user:' + userId],
-               ['get',     'csrf:' + session],
-            ]);
+         if (session) {
 
-            if (! user || ! csrf) return reply (rs, 500, {priority: 'critical', type: 'User or CSRF token not found', userId});
+            var user = await redis ('hgetall', 'user:' + session.user);
 
-            rq.user = {csrf, session, ...user};
+            if (! user) return reply (rs, 500, {priority: 'critical', type: 'User not found', user: session.user});
+
+            rq.user = {csrf: session.csrf, session: sessionId, ...user};
          }
       }
 
@@ -417,27 +415,28 @@ var routes = [
       });
 
       if (! rq.user && ! publicPath) {
-         if (session) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
+         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
          else         return reply (rs, 403, {error: 'No session'});
       }
 
-      if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== csrf) return reply (rs, 403, {error: 'Invalid csrf token', csrf: rq.headers ['x-csrf']});
+      if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== session.csrf) return reply (rs, 403, {error: 'Invalid csrf token', csrf: rq.headers ['x-csrf']});
 
       rs.next ();
 
-      if (rq.user) await redis ([
-         ['expire',  'csrf:'    + session, CONFIG.cookie.expires],
-         ['expire',  'session:' + session, CONFIG.cookie.expires],
-         ['hset',    'user:'    + userId, {seen: now ()}]
+      if (rq.user && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
+         ['expire',  'session:' + sessionId, CONFIG.cookie.expires],
+         ['hset',    'session:' + sessionId,    'last', now ()],
+         ['hset',    'user:'    + session.user, 'last', now ()]
       ]);
+
    }],
 
    ['get', 'test', async function (rq, rs) {
 
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
-      //test ('all', function (error, rdata) {
-      test ('auth', function (error, rdata) {
+      test ('all', function (error, rdata) {
+      //test ('auth', function (error, rdata) {
          reply (rs, 200, cell.JSToText (error ? {error} : rdata));
       }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis);
    }],
@@ -617,26 +616,23 @@ var routes = [
       var otp = await redis ('get', 'otp:' + userId);
       if (rq.body.otp !== otp) return reply (rs, 403, {error: 'Invalid OTP', otp: rq.body.otp});
 
-      var csrf    = crypto.randomBytes (32).toString ('hex');
-      var session = crypto.randomBytes (32).toString ('hex');
+      var csrf      = crypto.randomBytes (32).toString ('hex');
+      var sessionId = crypto.randomBytes (32).toString ('hex');
 
       await redis ([
-         ['setex', 'session:' + session, CONFIG.cookie.expires, userId],
-         ['setex', 'csrf:'    + session, CONFIG.cookie.expires, csrf],
+         ['hmset',  'session:' + sessionId, {csrf, last: now (), user: userId}],
+         ['expire', 'session:' + sessionId, CONFIG.cookie.expires],
          ['del', 'otp:' + userId, 'rateLimit:login:' + rq.body.email, 'rateLimit:verify:' + rq.body.email]
       ]);
 
-      reply (rs, 200, {csrf}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, session, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
+      reply (rs, 200, {csrf}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
 
    }],
 
    ['post', 'auth/logout', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
-      await redis ([
-         ['del', 'csrf:'    + rq.user.session],
-         ['del', 'session:' + rq.user.session],
-      ]);
+      await redis ('del', 'session:' + rq.user.session);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
    }],
@@ -655,7 +651,7 @@ cicek.log = function (log) {
 
 cicek.apres = function (rs) {
    clog ({
-      priority: rs.log.code >= 400 ? 'important' : undefined,
+      priority: rs.log.code >= 500 ? 'critical' : (rs.log >= 400 ? 'important' : undefined),
       type: 'Response',
       rqId: rs.log.id,
       method: rs.log.method,
@@ -672,4 +668,17 @@ cicek.apres = function (rs) {
    cicek.Apres (rs);
 }
 
-var server = cicek.listen ({port: CONFIG.port}, routes);
+var server = cicek.listen ({port: CONFIG.port}, dale.go (routes, function (route) {
+   var fn = route [2];
+   route [2] = async function (rq, rs) {
+      try {
+         await fn.apply (fn, [rq, rs].concat (route.slice (3)));
+      }
+      catch (error) {
+         clog ({priority: 'critical', type: 'Route internal error', error: formatError (error), rqId: rs.log.id});
+         reply (rs, 500, {error: 'Internal server error'});
+      }
+   }
+   return route;
+}));
+

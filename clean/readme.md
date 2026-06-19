@@ -49,18 +49,19 @@ email <"1"|anything else> // To enable sending emails
 ### Redis
 
 ```
-csrf:<session> <csrfToken>
 email:<email> <userId>
 invite:<email> created <date>
                email <email>
 otp:<userId> <otp>
 rateLimit:<identifier> <number>
-session:<session> <userId>
+session:<session> csrf <csrfToken>
+                  last <date>
+                  user <userId>
 user:<id> created <date>
           email <email>
           id <id>
           invite <date>
-          seen <date>
+          last <date>
 ```
 
 ### Client
