@@ -1,5 +1,25 @@
 ## Vibey development notes
 
+### 2026-06-21
+
+The server/logic is about correctness/consistency/security, the client/interface is about accessibility.
+
+Three things that can be owned by an user: sessions, projects and engines.
+
+Projects should work by id, then you can just rename at the db.
+
+Sequence for client tests:
+- Logout
+- Login & verify for info@example.com, ask in alert for OTP
+- Do auth sequence and logout
+- Login & verify for admin user, ask in alert for OTP. Done!
+
+Don't duplicate server tests in the client!
+
+### 2026-06-20
+
+Don't say "refactor", say "rewrite", because that's what it is.
+
 ### 2026-06-19
 
 Some notes on Alexander - The process of creating life:

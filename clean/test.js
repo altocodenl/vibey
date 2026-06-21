@@ -95,7 +95,8 @@ if (mode === 'server') {
 
                /*
                 TODO:
-                missing assertions
+                missing assertions: cookie unset, try invalidated cookie, try invalid
+                add auth/delete
                 */
 
                if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, 404, assertBody ({error: 'Not in cloud mode'})];
