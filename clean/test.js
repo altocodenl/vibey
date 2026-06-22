@@ -66,7 +66,7 @@ if (mode === 'server') {
          // *** AUTH ***
 
          suites.auth = [
-            ['Dummy request for doing cleanup in apres', 'get', '/', 200, function (s, rq, rs, next) {
+            ['Cleanup', 'get', '/', 200, function (s, rq, rs, next) {
                (async function () {
                   // Cleanup before auth suite
                   var testUserId = await redis ('get', 'email:hello@example.com');
@@ -188,12 +188,69 @@ if (mode === 'server') {
                ['Verify second login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
                   // Update csrf token but not cookie so there's a mismatch for the next test
                   s.headers ['x-csrf'] = rs.body.csrf;
+                  s.cookie2 = getCookie (rs.headers);
                   return true;
                }],
                ['Private route with mismatched csrf token', 'post', 'auth/logout', {}, 403, assertBody ({error: 'Invalid csrf token'})],
                ['Public route with mismatched csrf token', 'post', 'error', {hi: 'there'}, 200],
+
+               // *** SESSION LIST & DELETE ***
+               ['Login for session tests', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
+                  s.otp = rs.body.otp;
+                  return true;
+               }],
+               ['Verify for session tests', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+                  s.headers.cookie = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  return true;
+               }],
+               ['List sessions', 'get', 'auth/list', 200, function (s, rq, rs) {
+                  if (! assert ([
+                     ['body', rs.body, 'array'],
+                     ['body.length', rs.body.length, 3, teishi.test.equal],
+                  ])) return false;
+                  return dale.stop (rs.body, false, function (session) {
+                     return assert ([
+                        ['session.expired', session.expired, false, teishi.test.equal],
+                        ['session.last.date', session.last.date, 'string'],
+                        ['session.last.ip', session.last.ip, 'string'],
+                     ]);
+                  }) !== false;
+               }],
+               ['Expire a session', 'get', '/', 200, function (s, rq, rs, next) {
+                  (async function () {
+                     await redis ('hset', 'session:' + s.cookie2.match (/"[0-9a-f]+"/) [0].replace (/"/g, ''), 'expires', new Date ().toISOString ());
+                     next ();
+                  }) ();
+               }],
+               ['List sessions (one expired)', 'get', 'auth/list', 200, function (s, rq, rs) {
+                  var expired = dale.fil (rs.body, undefined, function (v) { if (v.expired) return v });
+                  var active  = dale.fil (rs.body, undefined, function (v) { if (! v.expired) return v });
+                  return assert ([
+                     ['expired count', expired.length, 1, teishi.test.equal],
+                     ['active count',  active.length,  2, teishi.test.equal],
+                  ]);
+               }],
+               ['Delete account', 'post', 'auth/delete', {}, 200, function (s, rq, rs) {
+                  return assert ([
+                     ['cookie', getCookie (rs.headers), 'string'],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
+                  ]);
+               }],
+               ['List sessions after delete', 'get', 'auth/list', 403, assertBody ({error: 'Invalid session'})],
+               ['Login after delete', 'post', 'auth/login', {email: 'hello@example.com'}, 403, assertBody ({error: 'No such email'})],
+               ['Signup request after delete', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 200],
+               ['Cleanup', 'get', '/', 200, function (s, rq, rs, next) {
+                  (async function () {
+                     // Cleanup before auth suite
+                     var testUserId = await redis ('get', 'email:hello@example.com');
+                     await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
+                     next ();
+                  }) ();
+               }],
             ] : [
-               ['Logout', 'post', 'auth/logout', {}, 404, assertBody ({error: 'Not in cloud mode'})]
+               ['Logout', 'post', 'auth/logout', {}, 404, assertBody ({error: 'Not in cloud mode'})],
+               ['List sessions', 'post', 'auth/list', {}, 404, assertBody ({error: 'Not in cloud mode'})],
             ],
          ];
 

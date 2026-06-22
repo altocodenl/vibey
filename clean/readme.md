@@ -28,6 +28,28 @@ docker compose build --no-cache && cloud=1 docker compose up
 
 ## Dataspace
 
+### Redis
+
+```
+email:<email> <userId>
+invite:<email> created <date>
+               email <email>
+owner:<userId> session:<sessionId>
+               ...
+otp:<userId> <otp>
+rateLimit:<identifier> <number>
+session:<session> csrf <csrfToken>
+                  expires <date>
+                  last date <date>
+                       ip <ip>
+                  user <userId>
+user:<id> created <date>
+          email <email>
+          id <id>
+          invite <date>
+          last <date>
+```
+
 ### secret.js
 
 ```
@@ -46,23 +68,37 @@ cloud <"1"|anything else> // To enable cloud mode
 email <"1"|anything else> // To enable sending emails
 ```
 
-### Redis
+### Server config
 
-```
-email:<email> <userId>
-invite:<email> created <date>
-               email <email>
-otp:<userId> <otp>
-rateLimit:<identifier> <number>
-session:<session> csrf <csrfToken>
-                  last <date>
-                  user <userId>
-user:<id> created <date>
-          email <email>
-          id <id>
-          invite <date>
-          last <date>
-```
+TODO: complete
+
+### API
+
+#### Public
+
+- **Static**: `GET /`.
+- **Post error**: `POST /error`: accepts any body.
+
+#### Auth
+
+- **Get CSRF token**: `GET /auth/csrf`: returns `{csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
+- **Request invite*: `POST /auth/signup/request`: expects `{email: <email>}`. Returns 409 if the invite or user exists. 200 if successful.
+
+TODO: complete
+- login
+- verify
+- list
+- verify
+- logout
+- delete
+
+#### Admin
+
+- **Accept invite**: `POST /auth/signup/accept`: expects `{email: <email>}`. Returns 404 if invite not found, 409 if user exists. 200 if successful.
+
+### Responders
+
+TODO: complete
 
 ### Client
 

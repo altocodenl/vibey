@@ -384,7 +384,7 @@ var routes = [
       if (sessionId) {
          var session = await redis ('hgetall', 'session:' + sessionId);
 
-         if (session) {
+         if (session && new Date (session.expires).getTime () > new Date ().getTime ()) {
 
             var user = await redis ('hgetall', 'user:' + session.user);
 
@@ -424,9 +424,14 @@ var routes = [
       rs.next ();
 
       if (rq.user && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
-         ['expire',  'session:' + sessionId, CONFIG.cookie.expires],
-         ['hset',    'session:' + sessionId,    'last', now ()],
-         ['hset',    'user:'    + session.user, 'last', now ()]
+         ['hmset', 'session:' + sessionId, {
+            expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
+            last: JSON.stringify ({
+               date: now (),
+               ip:   rs.log.origin
+            })
+         }],
+         ['hset', 'user:' + rq.user.id, 'last', now ()],
       ]);
 
    }],
@@ -610,19 +615,36 @@ var routes = [
       var sessionId = crypto.randomBytes (32).toString ('hex');
 
       await redis ([
-         ['hmset',  'session:' + sessionId, {csrf, last: now (), user: userId}],
-         ['expire', 'session:' + sessionId, CONFIG.cookie.expires],
+         ['hmset',  'session:' + sessionId, {
+            csrf,
+            expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
+            last: JSON.stringify ({
+               date: now (),
+               ip:   rs.log.origin
+            }),
+            user: userId
+         }],
+         ['sadd', 'owner:' + userId, 'session:' + sessionId],
          ['del', 'otp:' + userId, 'rateLimit:login:' + rq.body.email, 'rateLimit:verify:' + rq.body.email]
       ]);
 
       reply (rs, 200, {csrf}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
    }],
 
-   ['post', 'auth/list', async function (rq, rs) {
+   ['get', 'auth/list', async function (rq, rs) {
       var sessions = dale.fil (await redis ('smembers', 'owner:' + rq.user.id), undefined, function (key) {
-         if (key.match (/^session:/)) return key.replace ('session:', '');
+         if (key.match (/^session:/)) return key;
       });
-      reply (rs, 200, {activeSessions: sessions.length});
+      sessions = await redis (dale.go (sessions, function (session) {
+         return ['hgetall', session];
+      }));
+
+      reply (rs, 200, dale.go (sessions, function (session) {
+         return {
+            expired: new Date (session.expires).getTime () < new Date ().getTime (),
+            last: JSON.parse (session.last)
+         };
+      }))
    }],
 
    ['post', 'auth/logout', async function (rq, rs) {
@@ -630,7 +652,21 @@ var routes = [
 
       await redis ([
          ['del', 'session:' + rq.user.session],
+         ['srem', 'owner:' + rq.user.id, 'session:' + rq.user.session]
       ]);
+
+      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
+   }],
+
+   ['post', 'auth/delete', async function (rq, rs) {
+      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      var [user, keys] = await redis ([
+         ['hgetall', 'user:' + rq.user.id],
+         ['smembers', 'owner:' + rq.user.id]
+      ]);
+
+      await redis ('del', ...['user:' + rq.user.id, 'email:' + rq.user.email, 'owner:' + rq.user.id, ...keys]);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
    }],
