@@ -419,7 +419,7 @@ var routes = [
          else         return reply (rs, 403, {error: 'No session'});
       }
 
-      if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== session.csrf) return reply (rs, 403, {error: 'Invalid csrf token', csrf: rq.headers ['x-csrf']});
+      if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== session.csrf) return reply (rs, 403, {error: 'Invalid csrf token'});
 
       rs.next ();
 
@@ -429,16 +429,6 @@ var routes = [
          ['hset',    'user:'    + session.user, 'last', now ()]
       ]);
 
-   }],
-
-   ['get', 'test', async function (rq, rs) {
-
-      if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
-
-      test ('all', function (error, rdata) {
-      //test ('auth', function (error, rdata) {
-         reply (rs, 200, cell.JSToText (error ? {error} : rdata));
-      }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis);
    }],
 
    // *** STATIC ***
@@ -626,17 +616,35 @@ var routes = [
       ]);
 
       reply (rs, 200, {csrf}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
+   }],
 
+   ['post', 'auth/list', async function (rq, rs) {
+      var sessions = dale.fil (await redis ('smembers', 'owner:' + rq.user.id), undefined, function (key) {
+         if (key.match (/^session:/)) return key.replace ('session:', '');
+      });
+      reply (rs, 200, {activeSessions: sessions.length});
    }],
 
    ['post', 'auth/logout', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
-      await redis ('del', 'session:' + rq.user.session);
+      await redis ([
+         ['del', 'session:' + rq.user.session],
+      ]);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
    }],
 
+   // *** TESTS ***
+
+   ['get', 'test', async function (rq, rs) {
+
+      if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+
+      test ('all', function (error, rdata) {
+         reply (rs, 200, cell.JSToText (error ? {error} : rdata));
+      }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis);
+   }],
 ];
 
 // *** SERVER ***

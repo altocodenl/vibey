@@ -38,6 +38,7 @@ if (mode === 'server') {
 
          suites.public = dale.go ([
             ['get', '/'],
+            ['get', 'favicon.ico'],
             ...dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
                return ['get', '/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
             }),
@@ -49,6 +50,10 @@ if (mode === 'server') {
             if (route [0] === 'get') return ['Get public route: ' + route [1], 'get', route [1], 200];
             return ['Post public route: ' + route [1], 'post', route [1], {test: 'hello'}, 200];
          });
+
+         // *** TEST ***
+
+         suites.test = CONFIG.cloud ? ['Trigger tests without session', 'get', 'test', 403, assertBody ({error: 'No session'})] : [];
 
          // *** ERROR REPORTING ***
 
@@ -65,7 +70,7 @@ if (mode === 'server') {
                (async function () {
                   // Cleanup before auth suite
                   var testUserId = await redis ('get', 'email:hello@example.com');
-                  await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
+                  await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
                   next ();
                }) ();
             }],
@@ -75,10 +80,10 @@ if (mode === 'server') {
                   ['body', rs.body, CONFIG.cloud ? {error: 'No session'} : {mode: 'local'}, teishi.test.equal],
                ]);
             }],
-            dale.go (['/auth/signup/request', '/auth/login', '/auth/verify'], function (path) {
+            dale.go (['/auth/signup/request', 'auth/signup/accept', '/auth/login', '/auth/verify'], function (path) {
                if (CONFIG.cloud) return [
-                  ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'})],
-                  dale.go ([1, '1', 'a@a', 'this@is.not.really.an.emai.l'], function (email, k) {
+                  ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === 'auth/signup/accept' ? adminHeaders : {}],
+                  dale.go ([undefined, null, 1, '', '1', 'a@a', 'hello@example', 'this@is.not.really.an.emai.l'], function (email, k) {
                      return ['Call auth path with invalid email: #' + (k + 1), 'post', path, {email: email}, 400, function (s, rq, rs) {
                         return assert ([
                            ['body', rs.body, 'object'],
@@ -89,15 +94,9 @@ if (mode === 'server') {
                               return ['body.error', rs.body.error, /^email should/, teishi.test.match];
                            }
                         ]);
-                     }];
+                     }, path === 'auth/signup/accept' ? adminHeaders : {}];
                   }),
                ];
-
-               /*
-                TODO:
-                missing assertions: cookie unset, try invalidated cookie, try invalid
-                add auth/delete
-                */
 
                if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, 404, assertBody ({error: 'Not in cloud mode'})];
             }),
@@ -106,23 +105,35 @@ if (mode === 'server') {
                ['Request invite again', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 200],
                ['Accept invite', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 200, adminHeaders],
                ['Accept invite again', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 409, adminHeaders],
+               ['Accept invite for nonexisting account', 'post', 'auth/signup/accept', {email: 'foo@example.com'}, 404, adminHeaders],
+               ['Request invite after account is created', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 409],
+               ['Login with no such email', 'post', 'auth/login', {email: 'foo@example.com'}, 403, assertBody ({error: 'No such email'})],
                ['Login', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
                   s.otp = rs.body.otp;
                   return true;
                }],
+               ['Verify login (no such email)', 'post', 'auth/verify', {email: 'foo@example.com', otp: '123456'}, 403, assertBody ({error: 'No such email'})],
                ['Verify login (malformed otp)', 'post', 'auth/verify', {email: 'hello@example.com', otp: 123456}, 400, assertBody ({error: 'otp should have as type string but instead is 123456 with type integer'})],
                ['Verify login (invalid otp)', 'post', 'auth/verify', {email: 'hello@example.com', otp: '123456'}, 403, assertBody ({error: 'Invalid OTP', otp: '123456'})], // This test fails about once every million times
                ['Verify login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
                   if (! assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '=.+'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="[a-f0-9]{64}"; HttpOnly; SameSite=Lax; Path=\\/; Expires=.+' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10)), teishi.test.match],
                      ['csrf token', rs.body.csrf, 'string']
                   ])) return false;
                   s.headers.cookie = getCookie (rs.headers);
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
-               ['Logout', 'post', 'auth/logout', 200],
+               ['Get csrf token', 'get', 'auth/csrf', 200, function (s, rq, rs) {
+                  return assert (['body', rs.body, {csrf: s.headers ['x-csrf']}, teishi.test.equal]);
+               }],
+               ['Logout', 'post', 'auth/logout', {}, 200, function (s, rq, rs) {
+                  return assert ([
+                     ['cookie', getCookie (rs.headers), 'string'],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
+                  ]);
+               }],
                ['Logout again', 'post', 'auth/logout', {}, 403, assertBody ({error: 'Invalid session'})],
                dale.go (dale.times (5), function (v) {
                   return ['Login buildup for rate limit #' + (v + 1), 'post', 'auth/login', {email: 'hello@example.com'}, 200];
@@ -157,7 +168,33 @@ if (mode === 'server') {
                      next ();
                   }) ();
                }],
-            ] : [],
+
+               ['Private route with invalid session', 'post', 'auth/logout', {}, 403, function (s, rq, rs) {
+                  return assert ([
+                     ['cookie', getCookie (rs.headers), 'string'],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
+                     ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
+                  ]);
+               }, {cookie: CONFIG.cookie.name + '="foo"'}],
+               ['Private route with no session', 'post', 'auth/logout', {}, 403, assertBody ({error: 'No session'}), {cookie: ''}],
+               ['Public route with invalid session', 'get', '/', 200, {cookie: CONFIG.cookie.name + '="foo"'}],
+               ['Private route with invalid csrf token', 'post', 'auth/logout', {}, 403, assertBody ({error: 'Invalid csrf token'}), {'x-csrf': 'foo'}],
+               ['Public route with invalid csrf token', 'post', 'error', {hi: 'there'}, 200],
+               ['Accept invite without being admin', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 403],
+               ['Login again (second session)', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
+                  s.otp = rs.body.otp;
+                  return true;
+               }],
+               ['Verify second login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+                  // Update csrf token but not cookie so there's a mismatch for the next test
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  return true;
+               }],
+               ['Private route with mismatched csrf token', 'post', 'auth/logout', {}, 403, assertBody ({error: 'Invalid csrf token'})],
+               ['Public route with mismatched csrf token', 'post', 'error', {hi: 'there'}, 200],
+            ] : [
+               ['Logout', 'post', 'auth/logout', {}, 404, assertBody ({error: 'Not in cloud mode'})]
+            ],
          ];
 
          suites.all = Object.values (suites);
@@ -207,14 +244,3 @@ if (mode === 'server') {
       }
    }
 }
-
-/*
-- public routes
-*/
-
-/*
- auth: signup, login, verify, logout
- access: public routes, private routes
- invalid csrf
-*/
-//suite.auth =
