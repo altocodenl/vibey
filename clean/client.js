@@ -54,6 +54,12 @@ window.onerror = async function (message, source, lineno, colno, error) {
 
 B.mrespond ([
 
+   // *** TEST ***
+
+   ['test', '*', function (x) {
+      if (B.get ('auth', 'admin')) c.loadScript ('test.js');
+   }],
+
    // *** NAVIGATION ***
 
    ['navigate', '*', function (x) {
@@ -179,6 +185,8 @@ B.mrespond ([
 
          if (rs.body.mode !== 'local') B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
 
+         if (rs.body.admin) B.call (x, 'set', ['auth', 'admin'], 1);
+
          B.call (x, 'read', 'hash');
       });
    }],
@@ -205,7 +213,7 @@ B.mrespond ([
       B.call (x, 'post', 'auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Invalid code');
          B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
-
+         if (rs.body.admin) B.call (x, 'set', ['auth', 'admin'], 1);
 
          B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
@@ -319,6 +327,10 @@ B.mrespond ([
       var call = function (verb, path, arg) {
          ev.preventDefault ();
          return B.call (x, verb, path, arg);
+      }
+
+      if (ev.metaKey && B.get ('auth', 'admin')) {
+         if (ev.key === 'l') return call ('test', 'all');
       }
 
       // Shortcuts for inner view

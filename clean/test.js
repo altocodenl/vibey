@@ -186,29 +186,26 @@ if (mode === 'server') {
                   return true;
                }],
                ['Verify second login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+                  // Store old and new session
+                  s.sessions = [{cookie: s.headers.cookie, csrf: s.headers ['x-csrf']}, {cookie: getCookie (rs.headers), csrf: rs.body.csrf}];
                   // Update csrf token but not cookie so there's a mismatch for the next test
-                  s.headers ['x-csrf'] = rs.body.csrf;
-                  s.cookie2 = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = s.sessions [1].csrf;
                   return true;
                }],
                ['Private route with mismatched csrf token', 'post', 'auth/logout', {}, 403, assertBody ({error: 'Invalid csrf token'})],
-               ['Public route with mismatched csrf token', 'post', 'error', {hi: 'there'}, 200],
+               ['Public route with mismatched csrf token', 'post', 'error', {hi: 'there'}, 200, function (s, rq, rs) {
+                  // Restore correct csrf token
+                  s.headers ['x-csrf'] = s.sessions [0].csrf;
+                  return true;
+               }],
 
                // *** SESSION LIST & DELETE ***
-               ['Login for session tests', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
-                  s.otp = rs.body.otp;
-                  return true;
-               }],
-               ['Verify for session tests', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
-                  s.headers.cookie = getCookie (rs.headers);
-                  s.headers ['x-csrf'] = rs.body.csrf;
-                  return true;
-               }],
                ['List sessions', 'get', 'auth/list', 200, function (s, rq, rs) {
                   if (! assert ([
                      ['body', rs.body, 'array'],
-                     ['body.length', rs.body.length, 3, teishi.test.equal],
+                     ['body.length', rs.body.length, 2, teishi.test.equal],
                   ])) return false;
+
                   return dale.stop (rs.body, false, function (session) {
                      return assert ([
                         ['session.expired', session.expired, false, teishi.test.equal],
@@ -219,16 +216,33 @@ if (mode === 'server') {
                }],
                ['Expire a session', 'get', '/', 200, function (s, rq, rs, next) {
                   (async function () {
-                     await redis ('hset', 'session:' + s.cookie2.match (/"[0-9a-f]+"/) [0].replace (/"/g, ''), 'expires', new Date ().toISOString ());
+                     await redis ('hset', 'session:' + s.sessions [1].cookie.match (/"[0-9a-f]+"/) [0].replace (/"/g, ''), 'expires', new Date ().toISOString ());
                      next ();
                   }) ();
                }],
                ['List sessions (one expired)', 'get', 'auth/list', 200, function (s, rq, rs) {
                   var expired = dale.fil (rs.body, undefined, function (v) { if (v.expired) return v });
                   var active  = dale.fil (rs.body, undefined, function (v) { if (! v.expired) return v });
+
+                  // Switch to expired session
+                  s.headers.cookie     = s.sessions [1].cookie;
+                  s.headers ['x-csrf'] = s.sessions [1].csrf;
+
                   return assert ([
                      ['expired count', expired.length, 1, teishi.test.equal],
-                     ['active count',  active.length,  2, teishi.test.equal],
+                     ['active count',  active.length,  1, teishi.test.equal],
+                  ]);
+               }],
+               ['List sessions with expired session', 'get', 'auth/list', 403, function (s, rq, rs) {
+
+                  // Switch to active session
+                  s.headers.cookie     = s.sessions [0].cookie;
+                  s.headers ['x-csrf'] = s.sessions [0].csrf;
+
+                  return assert ([
+                     ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
+                     ['cookie', getCookie (rs.headers), 'string'],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
                   ]);
                }],
                ['Delete account', 'post', 'auth/delete', {}, 200, function (s, rq, rs) {
@@ -300,4 +314,8 @@ if (mode === 'server') {
          });
       }
    }
+}
+
+if (mode === 'client') {
+   B.call ('logout', []);
 }

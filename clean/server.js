@@ -16,14 +16,16 @@ var CONFIG = {
       name:    'vibey'
    },
    email: {
-      address: 'info@altocode.nl',
       enable: process.env.email === '1',
+      from: {
+         address: 'info@altocode.nl',
+         name: 'A friend from Vibey',
+      },
       ses: {
          accessKeyId:     SECRET.ses?.access,
          region:          'eu-west-1',
          secretAccessKey: SECRET.ses?.secret
       },
-      name: 'A friend from Vibey',
    },
    port: 5353,
    redis: {
@@ -339,7 +341,7 @@ var sendmail = function (options) {
          return resolve ();
       }
       mailer.sendMail ({
-         from:    CONFIG.email.name + ' <' + CONFIG.email.address + '>',
+         from:    CONFIG.email.from.name + ' <' + CONFIG.email.from.address + '>',
          to:      options.to,
          replyTo: CONFIG.email.address,
          subject: options.subject,
@@ -680,6 +682,13 @@ var routes = [
       test ('all', function (error, rdata) {
          reply (rs, 200, cell.JSToText (error ? {error} : rdata));
       }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis);
+   }],
+
+   ['get', 'test.js', async function (rq, rs) {
+
+      if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+
+      cicek.file (rq, rs, 'test.js');
    }],
 ];
 

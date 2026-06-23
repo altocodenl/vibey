@@ -70,7 +70,21 @@ email <"1"|anything else> // To enable sending emails
 
 ### Server config
 
-TODO: complete
+```
+admin <adminEmail>
+baseUrl <url>
+cloud <0|1>
+cookie expires <expiration in seconds>
+       name <cookieName>
+email enable <0|1>
+      from address <email>
+           name <name>
+      ses accessKeyId <accessKey>
+          region <region>
+          secretAccessKey <secretKey>
+port <portNumber>
+redis db <number>
+```
 
 ### API
 
@@ -84,13 +98,11 @@ TODO: complete
 - **Get CSRF token**: `GET /auth/csrf`: returns `{csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
 - **Request invite*: `POST /auth/signup/request`: expects `{email: <email>}`. Returns 409 if the invite or user exists. 200 if successful.
 
-TODO: complete
-- login
-- verify
-- list
-- verify
-- logout
-- delete
+- **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited or email not found. Sends a 6-digit OTP by email. 200 if successful.
+- **Verify OTP**: `POST /auth/verify`: expects `{email: <email>, otp: <otp>}`. Returns 403 if rate limited, email not found, or OTP invalid. Returns `{csrf: <token>}` with a session cookie. 200 if successful.
+- **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
+- **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie. 200 if successful.
+- **Delete account**: `POST /auth/delete`: deletes the user and all their sessions. Clears the cookie. 200 if successful.
 
 #### Admin
 
@@ -98,12 +110,23 @@ TODO: complete
 
 ### Responders
 
-TODO: complete
+- `navigate <targetPath>`: reads and optionally updates the hash. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
+- `read hash`: checks that the view in the hash exists and should be reachable by the user. If on the `projects` view, sets `project`. If on the `project` view, it sets `file`.
+- `stop propagation`: a helper to stop the bubbling up of an event (like a click).
+- `snackbar <type> [message]`: shows a notification with type (`ok`, `warning`, `error`). Auto-clears after 4 seconds. `snackbar clear` dismisses it immediately.
+- `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Attaches the CSRF header if available. On 403 from a non-auth path, resets auth state and redirects to login. Reports errors to the server.
+- `report error <error>`: posts an error to the server via `POST /error`.
+- `load csrf`: fetches the CSRF token from `GET /auth/csrf`. Sets `auth.mode` to `local` or `cloud`. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
+- `signup <email>`: requests a signup invite via `POST /auth/signup/request`. Shows a snackbar with the result.
+- `login <email>`: requests an OTP via `POST /auth/login`. On success, sets `auth.otpRequested`.
+- `verify <email> <otp>`: verifies the OTP via `POST /auth/verify`. On success, stores the CSRF token, loads models/projects/settings, and navigates to projects.
+- `logout`: logs out via `POST /auth/logout`. Resets auth state and navigates to login.
 
 ### Client
 
 ```
-auth csrf "<CSRF token>"
+auth admin <0|1>
+     csrf "<CSRF token>"
      email "<email entered in the login/signupform>"
      mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
      otp "<otp code entered in the login form>"
