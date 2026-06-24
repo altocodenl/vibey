@@ -1,7 +1,34 @@
 ## Vibey development notes
 
+### 2026-06-24
+
+Some notes on Alexander - The process of creating life:
+- "I ask myself what is the biggest difference this canyon might have, *as a whole*, compared with the way it is now. What could we conceive that might be better, as a whole, than it is today? Hre I was asking myself for changes in the whole, that would improve our feeling about the whole, that would make us respond to it, as a whole, with deeper feeling."
+- "Each step we take, everything I try to do, is to visualize a feature of the whole, large enough it ints impact to help form the whole, and chosen so that the *whole* creates deep feeling in us."
+- "each of these ideas remains in verbal form, part of a strongly, powerfully felt visualized whole. (...) I tis not like the rather dead and inaccurate information one gets from a drawing, which would be wrong in so many places (...) It is more vivid in the mind's eye."
+- "All of them are rooted in the canyon as it is - so by its essence what I have been doing was always structure-preserving."
+- Note: this is an interesting point to innovators.
+- "So, I was not drawing *from* life, but trying to create a drawing which would *give off* life"
+- "Every step is made with the idea that the feeling of this very large whole is being made deeper, more intense."
+
+The sequence of vibey:
+
+1. Auth: you develop a personal space, an identity, which gives you access to the overall whole.
+2. Project: you create projects which are self-contained. Each project is versioned, backed up, can hold files and can run commands. The project is exportable/importable too.
+3. Editor: the door to creating and seeing text files, for natural language and code. A lot of our time is spent here, reading and writing.
+4. Dialog: the other half of language, communicating between two or more. Variants: AI agent (harness), other humans (chat), computer (terminal). Adds hooks to receive messages from email and API calls.
+5. App: run own apps, connect with external apps. Bring them into the dataspace of files. The key way to integrate is through an embedding on a document.
+6. Publish: make files and apps public, so they can be used "from outside".
+7. Engine: this could be step #2, really. The project lives always in an engine. The engine allows to give more room to projects, as well as bound it to a specific domain to improve publishing. The engine (VPS) is kept up to date and fresh.
+
+If engine is #2, then we get:
+- Infrastructure: auth, engine, project
+- User-level: editor, dialog, apps
+- External user: publish
+
 ### 2026-06-23
 
+Some notes on Alexander - The process of creating life:
 - "What, precisely, is the relation between a transformation that is structure-*preserving*, and one that is structure-*enhancing*?"
 - "The two can be reconciled, because in every wholeness, in every structure, there are *latent* centers. These are centers caused by the overall configuraiton, dimly present in the structure, yet not yet fully developed. (...) In developing these latent centers, one is then both respecting the structure which exists, yet also paving a path to some as-yet unborn new structure."
 - "As any designer will tell you, it is the first steps in a design process which count for the most. The first few strokes, which create the form, carry within them the destiny of the rest."

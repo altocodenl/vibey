@@ -2,6 +2,8 @@
 
 > "Thou shalt not make a machine in the likeness of a human mind." -- Orange Catholic Bible
 
+You already have AI. All you need now is files and a server.
+
 ## Running vibey yourself
 
 ```

@@ -630,7 +630,7 @@ var routes = [
          ['del', 'otp:' + userId, 'rateLimit:login:' + rq.body.email, 'rateLimit:verify:' + rq.body.email]
       ]);
 
-      reply (rs, 200, {csrf}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
+      reply (rs, 200, {csrf, admin: rq.body.email === CONFIG.admin ? true : undefined}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
    }],
 
    ['get', 'auth/list', async function (rq, rs) {
@@ -687,6 +687,10 @@ var routes = [
    ['get', 'test.js', async function (rq, rs) {
 
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+
+      // Cleanup before auth suite
+      var testUserId = await redis ('get', 'email:hello@example.com');
+      await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
 
       cicek.file (rq, rs, 'test.js');
    }],

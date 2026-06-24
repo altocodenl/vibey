@@ -130,7 +130,7 @@ B.mrespond ([
 
       var snackbar = B.get ('snackbar');
       if (snackbar) {
-         if (snackbar.timeout) clearTimeout (snackbar.timeout);
+         clearTimeout (snackbar.timeout);
          B.call (x, 'rem', [], 'snackbar');
       }
       if (type === 'clear') return;
@@ -150,11 +150,13 @@ B.mrespond ([
       var cb   = teishi.inc (['get', 'delete'], x.verb) ? arg1 : arg2;
 
       if (B.get ('auth', 'csrf')) headers ['x-csrf'] = B.get ('auth', 'csrf');
+      // TODO: remove after testing auth
+      headers ['x-test'] = 1;
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error) clog (error.responseText);
          if (error && error.status === 403 && x.path [0].indexOf ('auth/') !== 0) {
-            B.call (x, 'set', [], {auth: {mode: 'cloud'}});
+            B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar')});
             B.call (x, 'navigate', 'login');
             return;
          }
@@ -201,10 +203,16 @@ B.mrespond ([
 
    ['login', [], function (x, email) {
       if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
-      B.call (x, 'post', 'auth/login', {email: email.trim ().toLowerCase ()}, function (x, error) {
-         if (error) return B.call (x, 'snackbar', 'error', 'Failed to send login code');
+      B.call (x, 'post', 'auth/login', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
+         if (error) {
+            if (error.responseText) error = (teishi.parse (error.responseText) || {}).error;
+            return B.call (x, 'snackbar', 'error', error || 'Failed to send login code');
+         }
          B.call (x, 'snackbar', 'ok', 'Code sent, please check your inbox');
          B.call (x, 'set', ['auth', 'otpRequested'], true);
+
+         // TODO: remove after testing auth
+         if (rs.body.otp) B.call (x, 'set', ['auth', 'otp'], rs.body.otp);
       });
    }],
 
@@ -224,7 +232,7 @@ B.mrespond ([
 
    ['logout', [], function (x) {
       B.call (x, 'post', 'auth/logout', {}, function (x, error) {
-         B.call (x, 'set', [], {auth: {mode: 'cloud'}});
+         B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar')});
          B.call (x, 'navigate', 'login');
       });
    }],

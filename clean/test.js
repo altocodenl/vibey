@@ -317,5 +317,69 @@ if (mode === 'server') {
 }
 
 if (mode === 'client') {
-   B.call ('logout', []);
+
+   var validationError;
+
+   var assert = function (assertion) {
+      var result = teishi.v (assertion, true);
+      if (result === true) return true;
+      validationError = result;
+      return false;
+   }
+
+   var suites = {};
+
+   var find = function (selector, text) {
+      return dale.stopNot (c (selector), undefined, function (element) {
+         if (element.innerHTML.match (text)) return element;
+      });
+   }
+
+   suites.auth = [
+      ['Logout to begin', function (next) {
+         var logoutButton = find ('button', 'Logout');
+         c.fire (logoutButton, 'click');
+         next (1000, 10);
+      }, function () {
+         return assert ([
+            ['auth.csrf', B.get ('auth', 'csrf'), undefined, teishi.test.equal],
+            ['view', B.get ('view'), 'login', teishi.test.equal],
+            ['inputs present', c ('input').length, 1, teishi.test.equal],
+         ]);
+      }],
+      ['Login as hello@example.com', function (next) {
+         var input = c ('input') [0];
+         input.value = 'hello@example.com';
+         c.fire (input, 'input');
+
+         var submitButton = find ('button', 'Send code');
+         c.fire (submitButton, 'click');
+         next (1000, 10);
+      }, function () {
+         var snackbar = B.get ('snackbar') || {};
+         return assert ([
+            ['snackbar type', snackbar.type, 'error', teishi.test.equal],
+            ['snackbar message', snackbar.message, 'No such email', teishi.test.equal],
+         ]);
+      }],
+      ['Go to signup page', function (next) {
+         var link = find ('a', 'Need an invite');
+         c.fire (link, 'click');
+         next (1000, 10);
+      }, function () {
+         return assert ([
+            ['view', B.get ('view'), 'signup', teishi.test.equal],
+            ['inputs present', c ('input').length, 1, teishi.test.equal],
+         ]);
+      }],
+   ];
+
+   c.test (suites.auth, function (error, time) {
+      if (error) {
+         error.validationError = validationError;
+         console.log (error);
+      }
+      if (error) B.call ('snackbar', 'error', JSON.stringify (error));
+      else       B.call ('snackbar', 'ok', 'All tests passed in ' + time + 'ms');
+   });
 }
