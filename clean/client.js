@@ -57,6 +57,7 @@ B.mrespond ([
    // *** TEST ***
 
    ['test', '*', function (x) {
+      B.call (x, 'set', 'test', true);
       if (B.get ('auth', 'admin')) c.loadScript ('test.js');
    }],
 
@@ -150,13 +151,13 @@ B.mrespond ([
       var cb   = teishi.inc (['get', 'delete'], x.verb) ? arg1 : arg2;
 
       if (B.get ('auth', 'csrf')) headers ['x-csrf'] = B.get ('auth', 'csrf');
-      // TODO: remove after testing auth
-      headers ['x-test'] = 1;
+
+      if (B.get ('test')) headers ['x-test'] = 1;
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error) clog (error.responseText);
          if (error && error.status === 403 && x.path [0].indexOf ('auth/') !== 0) {
-            B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar')});
+            B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
             B.call (x, 'navigate', 'login');
             return;
          }
@@ -211,8 +212,7 @@ B.mrespond ([
          B.call (x, 'snackbar', 'ok', 'Code sent, please check your inbox');
          B.call (x, 'set', ['auth', 'otpRequested'], true);
 
-         // TODO: remove after testing auth
-         if (rs.body.otp) B.call (x, 'set', ['auth', 'otp'], rs.body.otp);
+         if (B.get ('test')) B.call (x, 'set', ['test', 'otp'], rs.body.otp);
       });
    }],
 
@@ -220,6 +220,7 @@ B.mrespond ([
       if (! email || ! otp) return B.call (x, 'snackbar', 'error', 'Please enter your email and code');
       B.call (x, 'post', 'auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Invalid code');
+         B.call (x, 'rem', 'auth', 'email', 'otp');
          B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
          if (rs.body.admin) B.call (x, 'set', ['auth', 'admin'], 1);
 
@@ -232,7 +233,7 @@ B.mrespond ([
 
    ['logout', [], function (x) {
       B.call (x, 'post', 'auth/logout', {}, function (x, error) {
-         B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar')});
+         B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
          B.call (x, 'navigate', 'login');
       });
    }],
@@ -733,7 +734,7 @@ views.auth = function (page) {
             oninput: B.ev ('set', ['auth', 'email']),
             class: css.input
          }],
-         ['button', {class: css.buttonWide + ' mb3', onclick: B.ev ('login', [], auth.email)}, auth.otpRequested ? 'Send another code' : 'Send code'],
+         ['button', {class: css.buttonWide + ' mb3', onclick: B.ev ('login', [], auth.email)}, auth.otpRequested ? 'Request another code' : 'Request code'],
          auth.otpRequested ? ['div', [
             ['input', {
                type: 'text',

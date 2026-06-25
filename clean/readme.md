@@ -166,5 +166,7 @@ settings claude hasKey <0|1>
                      loggedIn <0|1>
          show <0|1> // Flips the settings panel open
          testButton <0|1>
+test enabled <0|1> // Whether test mode is enabled
+     otp // OTP for logging in
 view "<view name>"
 ```

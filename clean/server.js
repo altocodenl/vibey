@@ -398,6 +398,11 @@ var routes = [
 
       clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
 
+      if (rq.headers ['x-test'] === '1') {
+         if (CONFIG.baseURL !== 'http://localhost:5353') return reply (rs, 403, {error: 'Not a local request'});
+         rq.test = true;
+      }
+
       var publicPath = dale.stop ([
          ['get', '/'],
          ...dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
@@ -411,6 +416,7 @@ var routes = [
          }),
          ['get', '/favicon.ico'],
          ['post', '/error'],
+         ... (rq.test ? [['post', '/auth/signup/accept']] : []),
       ], true, function (endpoint) {
          if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
          return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
@@ -545,7 +551,7 @@ var routes = [
 
    ['post', 'auth/signup/accept', async function (rq, rs) {
 
-      if (rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+      if (! rq.test && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
       var existingUser = await redis ('get', 'email:' + rq.body.email);
       if (existingUser) return reply (rs, 409);
@@ -592,10 +598,7 @@ var routes = [
          ]
       });
 
-      if (rq.headers ['x-test'] === '1') {
-         if (! ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes (rs.log.origin) && ! /^::ffff:172\.(1[6-9]|2\d|3[01])\./.test (rs.log.origin)) return reply (rs, 403, {error: 'Not a local request'});
-         return reply (rs, 200, {otp: otp});
-      }
+      if (rq.test) return reply (rs, 200, {otp: otp});
 
       reply (rs, 200);
 

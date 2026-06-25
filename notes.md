@@ -1,5 +1,46 @@
 ## Vibey development notes
 
+### 2026-06-25
+
+To be concrete is vulnerable. it's easy to defend abstraction that has no teeth, because you can always justify yourself in the multiple gaps left by that abstraction. You can only truly build on concrete abstractions, that is, abstractions that let you bring to life whatever you are building. Abstractions that give you a sequence to make them concrete.
+
+Going back to the sequence of vibey:
+
+Infra:
+   1. Auth: identity & personal access.
+   2. Project: containment. Versioning. Backups.
+   3. Engine: assign resources to projects. IP address & domain.
+User:
+   4. Editor: see text/code, write text/code, see other files.
+   5. Dialog: talk with AI, talk with humans, talk with a command line. External hooks to send messages by email.
+   6. Apps: usually non-verbal interfaces. Internal apps. External apps. Both work through embeds in files. I dream of having email here.
+External:
+   7. Publish: publish text/code. Other types of files. Apps.
+
+When local/offline, what's left is:
+- Infra: project (auth and engine are gone)
+- User level: editor, dialog, apps (everything)
+- External: nothing (publish is gone)
+
+From gpt5.5:
+"So the question I’d keep asking is:
+
+ │ Would a smart non-programmer understand what to do here in the first 30 seconds?
+
+ The concept has real force because it chooses a primitive: the project as a file-based, containerized, AI-inhabited space. That is a better primitive than
+ chat, workflow, or generated app.
+
+ The main work now is subtraction and sharpening:
+
+ - Make Dialog the entry point.
+ - Keep Project as the enduring object.
+ - Hide Engine until necessary.
+ - Define App very tightly.
+ - Treat Publish as the moment the private workspace touches the world.
+ - Keep “everything is a file” as the central doctrine.
+
+ If you execute that sequence concretely, it feels like a genuinely coherent product, not just another AI wrapper."
+
 ### 2026-06-24
 
 Some notes on Alexander - The process of creating life:
@@ -25,6 +66,11 @@ If engine is #2, then we get:
 - Infrastructure: auth, engine, project
 - User-level: editor, dialog, apps
 - External user: publish
+
+At the user level, within each vertical:
+- Editor x3: edit text, see text, see other files
+- Dialog x3: AI, human, terminal
+- Apps: internal/own apps, integration of external apps
 
 ### 2026-06-23
 

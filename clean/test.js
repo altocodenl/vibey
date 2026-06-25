@@ -180,7 +180,7 @@ if (mode === 'server') {
                ['Public route with invalid session', 'get', '/', 200, {cookie: CONFIG.cookie.name + '="foo"'}],
                ['Private route with invalid csrf token', 'post', 'auth/logout', {}, 403, assertBody ({error: 'Invalid csrf token'}), {'x-csrf': 'foo'}],
                ['Public route with invalid csrf token', 'post', 'error', {hi: 'there'}, 200],
-               ['Accept invite without being admin', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 403],
+               ['Accept invite without being admin', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 403, {'x-test': 0}],
                ['Login again (second session)', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
                   s.otp = rs.body.otp;
                   return true;
@@ -330,6 +330,10 @@ if (mode === 'client') {
    var suites = {};
 
    var find = function (selector, text) {
+
+      var toEscape = ['-', '[', ']', '{', '}', '(', ')', '|', '+', '*', '?', '.', '/', '\\', '^', '$'];
+      text = text.replace (new RegExp ('[' + toEscape.join ('\\') + ']', 'g'), '\\$&');
+
       return dale.stopNot (c (selector), undefined, function (element) {
          if (element.innerHTML.match (text)) return element;
       });
@@ -337,9 +341,8 @@ if (mode === 'client') {
 
    suites.auth = [
       ['Logout to begin', function (next) {
-         var logoutButton = find ('button', 'Logout');
-         c.fire (logoutButton, 'click');
-         next (1000, 10);
+         find ('button', 'Logout').click ();
+         next (1000, 1);
       }, function () {
          return assert ([
             ['auth.csrf', B.get ('auth', 'csrf'), undefined, teishi.test.equal],
@@ -352,9 +355,8 @@ if (mode === 'client') {
          input.value = 'hello@example.com';
          c.fire (input, 'input');
 
-         var submitButton = find ('button', 'Send code');
-         c.fire (submitButton, 'click');
-         next (1000, 10);
+         find ('button', 'Request code').click ();
+         next (1000, 1);
       }, function () {
          var snackbar = B.get ('snackbar') || {};
          return assert ([
@@ -363,23 +365,93 @@ if (mode === 'client') {
          ]);
       }],
       ['Go to signup page', function (next) {
-         var link = find ('a', 'Need an invite');
-         c.fire (link, 'click');
-         next (1000, 10);
+         find ('a', 'Need an invite').click ();
+         next (1000, 1);
       }, function () {
          return assert ([
             ['view', B.get ('view'), 'signup', teishi.test.equal],
             ['inputs present', c ('input').length, 1, teishi.test.equal],
          ]);
       }],
+      ['Request invite as hello@example.com', function (next) {
+         var input = c ('input') [0];
+         input.value = 'hello@example.com';
+         c.fire (input, 'input');
+
+         find ('button', 'Request invite').click ();
+         next (1000, 1);
+      }, function () {
+         var snackbar = B.get ('snackbar') || {};
+         return assert ([
+            ['snackbar type', snackbar.type, 'ok', teishi.test.equal],
+            ['snackbar message', snackbar.message, 'Invite requested. Thank you for your interest!', teishi.test.equal],
+         ]);
+      }],
+      ['Go to login page', function (next) {
+         find ('a', 'Already have access? Log in').click ();
+
+         B.call ('post', 'auth/signup/accept', {email: 'hello@example.com'}, function (x, error, rs) {
+            if (error) return B.call (x, 'snackbar', 'error', 'Could not accept invite');
+            next (1000, 1);
+         });
+      }, function () {
+         return assert ([
+            ['view', B.get ('view'), 'login', teishi.test.equal],
+            ['inputs present', c ('input').length, 1, teishi.test.equal],
+            ['input still retains email after switching view', (c ('input') [0] || {}).value, 'hello@example.com', teishi.test.equal],
+         ]);
+      }],
+      ['Login after invite accepted', function (next) {
+         find ('button', 'Request code').click ();
+         next (1000, 1);
+      }, function () {
+         return assert ([
+            ['otp', B.get ('test', 'otp'), 'string'],
+         ]);
+      }],
+      ['Enter wrong OTP and see failed login', function (next) {
+         var input = c ('input') [1];
+         input.value = 'xxxxxx';
+         c.fire (input, 'input');
+
+         find ('button', 'Verify').click ();
+         next (1000, 1);
+      }, function () {
+         var snackbar = B.get ('snackbar') || {};
+         return assert ([
+            ['snackbar type', snackbar.type, 'error', teishi.test.equal],
+            ['snackbar message', snackbar.message, 'Invalid code', teishi.test.equal],
+         ]);
+      }],
+      ['Enter OTP and verify login', function (next) {
+         var input = c ('input') [1];
+         input.value = B.get ('test', 'otp');
+         c.fire (input, 'input');
+
+         find ('button', 'Verify').click ();
+         next (1000, 1);
+      }, function () {
+         return assert ([
+            ['otp', B.get ('auth', 'otp'), 'undefined'],
+            ['view', B.get ('view'), 'projects', teishi.test.equal],
+         ]);
+      }],
    ];
 
-   c.test (suites.auth, function (error, time) {
+   suites.project = [
+   ];
+
+   c.test (Object.values (suites).flat (), function (error, time) {
       if (error) {
          error.validationError = validationError;
-         console.log (error);
+         console.log ('Test error', error);
+         B.call ('snackbar', 'error', JSON.stringify (error));
       }
-      if (error) B.call ('snackbar', 'error', JSON.stringify (error));
-      else       B.call ('snackbar', 'ok', 'All tests passed in ' + time + 'ms');
+      else {
+         console.log ('All tests OK');
+         B.call ('snackbar', 'ok', 'All tests passed in ' + time + 'ms');
+      }
+
+      B.call ('rem', [], 'test');
    });
 }
