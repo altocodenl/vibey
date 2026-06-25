@@ -41,6 +41,37 @@ From gpt5.5:
 
  If you execute that sequence concretely, it feels like a genuinely coherent product, not just another AI wrapper."
 
+OK, auth is good enough. Onwards to project!
+
+1. Auth
+2. Project   <--- currently here
+3. Editor
+4. Dialog
+5. App
+6. Publish
+7. Engine
+
+TODO project:
+
+- create:
+   - structure: name, created, last
+   - create volume, create container, create directories (can we do dirs in the image building directly as RUN?)
+   - initialize git
+   - create main.md
+- run command
+   - send command
+   - get reply
+   - autogit
+   - backup to s3 (async)
+- commands
+   - read file (optional diff with git sha for small update)
+   - write file
+   - delete file
+   - edit file (diff)
+   - another command
+
+Perhaps we only need to send a single command only and let the other ones fork from there?
+
 ### 2026-06-24
 
 Some notes on Alexander - The process of creating life:

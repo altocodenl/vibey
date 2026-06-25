@@ -36,7 +36,8 @@ docker compose build --no-cache && cloud=1 docker compose up
 email:<email> <userId>
 invite:<email> created <date>
                email <email>
-owner:<userId> session:<sessionId>
+owner:<userId> 1 session:<sessionId>
+               2 project:<projectId>
                ...
 otp:<userId> <otp>
 rateLimit:<identifier> <number>

@@ -317,6 +317,16 @@ var redis = function (command) {
    return promise (Redis [command].bind (Redis), [].slice.call (arguments, 1));
 }
 
+var getForUser = function (userId, entity) {
+   var items = dale.fil (await redis ('smembers', 'owner:' + userId), undefined, function (key) {
+      if (key.match (new RegExp ('^' + entity + ':'))) return key;
+   });
+
+   return await redis (dale.go (items, function (item) {
+      return ['hgetall', item];
+   }));
+}
+
 // *** RATE LIMIT ***
 
 var rateLimit = async function (prefix, max, ttl) {
@@ -637,14 +647,8 @@ var routes = [
    }],
 
    ['get', 'auth/list', async function (rq, rs) {
-      var sessions = dale.fil (await redis ('smembers', 'owner:' + rq.user.id), undefined, function (key) {
-         if (key.match (/^session:/)) return key;
-      });
-      sessions = await redis (dale.go (sessions, function (session) {
-         return ['hgetall', session];
-      }));
 
-      reply (rs, 200, dale.go (sessions, function (session) {
+      reply (rs, 200, dale.go (await getForUser (rq.user.id, 'sessions'), function (session) {
          return {
             expired: new Date (session.expires).getTime () < new Date ().getTime (),
             last: JSON.parse (session.last)
@@ -676,6 +680,38 @@ var routes = [
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
    }],
 
+   // *** PROJECT ***
+
+   ['get', 'projects', async function (rq, rs) {
+      reply (rs, 200, await getForUser (rq.user.id, 'projects'));
+   }],
+
+   ['post', 'project', async function (rq, rs) {
+
+      if (stop (rs, [
+         ['name', rq.body.name, 'string'],
+         function () {
+            return ['email', rq.body.name, validEmail, teishi.test.match];
+         }
+      ])) return;
+
+      rq.body.name = rq.body.name.trim ();
+
+      var projects = await getForUser (rq.user.id, 'projects');
+      var conflict = dale.stopNot (projects, undefined, function (project) {
+         if (project.name === rq.body.name) return project;
+      });
+      if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
+
+      // name, created, last
+      // create volume, create container, create directories (can we do dirs in the image building directly as RUN?)
+      // initialize git
+      // create main.md
+
+   }],
+
+   // rename project
+
    // *** TESTS ***
 
    ['get', 'test', async function (rq, rs) {
@@ -706,7 +742,7 @@ cicek.cluster ();
 cicek.log = function (log) {
    if (log [0] === 'error') return clog ({priority: 'critical', type: log [1], error: log.slice (2)});
    if (log [0] === 'start') return clog ({priority: 'important', type: 'Server start', port: log [3]});
-   // We ignore `request`, `response` and `incomingRequest`
+   // We ignore `request`, `requestContent` and `response`
 }
 
 cicek.apres = function (rs) {
@@ -735,10 +771,9 @@ var server = cicek.listen ({port: CONFIG.port}, dale.go (routes, function (route
          await fn.apply (fn, [rq, rs].concat (route.slice (3)));
       }
       catch (error) {
-         clog ({priority: 'critical', type: 'Route internal error', error: formatError (error), rqId: rs.log.id});
+         clog ({priority: 'critical', type: 'Internal route error', error: formatError (error), rqId: rs.log.id});
          reply (rs, 500, {error: 'Internal server error'});
       }
    }
    return route;
 }));
-
