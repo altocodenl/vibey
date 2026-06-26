@@ -317,7 +317,7 @@ var redis = function (command) {
    return promise (Redis [command].bind (Redis), [].slice.call (arguments, 1));
 }
 
-var getForUser = function (userId, entity) {
+var getForUser = async function (userId, entity) {
    var items = dale.fil (await redis ('smembers', 'owner:' + userId), undefined, function (key) {
       if (key.match (new RegExp ('^' + entity + ':'))) return key;
    });
@@ -648,7 +648,7 @@ var routes = [
 
    ['get', 'auth/list', async function (rq, rs) {
 
-      reply (rs, 200, dale.go (await getForUser (rq.user.id, 'sessions'), function (session) {
+      reply (rs, 200, dale.go (await getForUser (rq.user.id, 'session'), function (session) {
          return {
             expired: new Date (session.expires).getTime () < new Date ().getTime (),
             last: JSON.parse (session.last)
@@ -683,7 +683,7 @@ var routes = [
    // *** PROJECT ***
 
    ['get', 'projects', async function (rq, rs) {
-      reply (rs, 200, await getForUser (rq.user.id, 'projects'));
+      reply (rs, 200, await getForUser (rq.user.id, 'project'));
    }],
 
    ['post', 'project', async function (rq, rs) {
@@ -697,7 +697,7 @@ var routes = [
 
       rq.body.name = rq.body.name.trim ();
 
-      var projects = await getForUser (rq.user.id, 'projects');
+      var projects = await getForUser (rq.user.id, 'project');
       var conflict = dale.stopNot (projects, undefined, function (project) {
          if (project.name === rq.body.name) return project;
       });
