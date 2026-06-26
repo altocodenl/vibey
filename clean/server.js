@@ -703,10 +703,21 @@ var routes = [
       });
       if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
 
-      // name, created, last
+      var project = {
+         created: now (),
+         id:      crypto.randomUUID ();
+         name:    rq.body.name,
+         last:    now (),
+         user:    rq.user.id,
+      }
+
+      var dockerName = 'vibey-project-' + id;
+
       // create volume, create container, create directories (can we do dirs in the image building directly as RUN?)
-      // initialize git
-      // create main.md
+      await runCommand ('docker', 'run -v ' + dockerName + ':/project --name ' + dockerName + ' -d vibey-project');
+
+      // initialize git repo (inside dockerfile?)
+      // create main.md (has to be after, because name is not known at docker image time)
 
    }],
 

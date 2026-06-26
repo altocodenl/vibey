@@ -1,5 +1,17 @@
 ## Vibey development notes
 
+### 2026-06-26
+
+Basics for project:
+
+- create:
+   - structure: name, created, last
+   - create volume, create container, create directories (can we do dirs in the image building directly as RUN?)
+   - initialize git
+   - create main.md
+- run command
+
+
 ### 2026-06-25
 
 To be concrete is vulnerable. it's easy to defend abstraction that has no teeth, because you can always justify yourself in the multiple gaps left by that abstraction. You can only truly build on concrete abstractions, that is, abstractions that let you bring to life whatever you are building. Abstractions that give you a sequence to make them concrete.

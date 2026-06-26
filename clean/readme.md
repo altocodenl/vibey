@@ -36,6 +36,11 @@ docker compose build --no-cache && cloud=1 docker compose up
 email:<email> <userId>
 invite:<email> created <date>
                email <email>
+project created <date>
+        id <id>
+        last <date>
+        name <name>
+        user <userId>
 owner:<userId> 1 session:<sessionId>
                2 project:<projectId>
                ...
