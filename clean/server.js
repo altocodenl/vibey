@@ -42,6 +42,7 @@ var test = require ('./test.js') (CONFIG);
 var child   = require ('child_process')
 var cluster = require ('cluster');
 var crypto  = require ('crypto');
+var Path    = require ('path');
 var util    = require ('util');
 
 var dale   = require ('dale');
@@ -266,6 +267,33 @@ dale.async = async function (input, fun, options) {
    return results;
 }
 
+// *** REDIS ***
+
+var redis = function (command) {
+   // Multi
+   if (type (command) === 'array') {
+      var m = Redis.multi ();
+      dale.go (command, function (c) {
+         m [c [0]].apply (m, c.slice (1));
+      });
+      return promise (m.exec.bind (m));
+   }
+   // Simple
+   return promise (Redis [command].bind (Redis), [].slice.call (arguments, 1));
+}
+
+var getForUser = async function (userId, entity) {
+   var items = dale.fil (await redis ('smembers', 'owner:' + userId), undefined, function (key) {
+      if (key.match (new RegExp ('^' + entity + ':'))) return key;
+   });
+
+   return await redis (dale.go (items, function (item) {
+      return ['hgetall', item];
+   }));
+}
+
+// *** COMMANDS ***
+
 var run = async function (...args) {
 
    if (type (last (args)) === 'object') {
@@ -277,6 +305,11 @@ var run = async function (...args) {
    return new Promise (function (resolve) {
 
       var proc = child.spawn (command [0], command.slice (1), options);
+
+      if (options.input !== undefined) {
+         proc.stdin.write (options.input);
+         proc.stdin.end ();
+      }
 
       var output = {stdout: '', stderr: ''};
       var wait = 3;
@@ -304,27 +337,40 @@ var run = async function (...args) {
    });
 }
 
-var redis = function (command) {
-   // Multi
-   if (type (command) === 'array') {
-      var m = Redis.multi ();
-      dale.go (command, function (c) {
-         m [c [0]].apply (m, c.slice (1));
-      });
-      return promise (m.exec.bind (m));
-   }
-   // Simple
-   return promise (Redis [command].bind (Redis), [].slice.call (arguments, 1));
+var docker = {};
+
+docker.run = function (id, ...args) {
+   var opts = type (last (args)) === 'object' ? last (args) : {};
+   var flag = opts.input !== undefined ? '-i' : '';
+   if (flag) return run ('docker', 'exec', '-i', id, ...args);
+   return run ('docker', 'exec', id, ...args);
 }
 
-var getForUser = async function (userId, entity) {
-   var items = dale.fil (await redis ('smembers', 'owner:' + userId), undefined, function (key) {
-      if (key.match (new RegExp ('^' + entity + ':'))) return key;
-   });
+docker.quotePath = function (path) {
+   return "'" + path.replace (/'/g, "'\\''") + "'";
+}
 
-   return await redis (dale.go (items, function (item) {
-      return ['hgetall', item];
-   }));
+docker.read = async function (id, path) {
+   var output = await docker.run (id, 'cat', '/project/' + path);
+   if (output.code !== 0) return {error: output.stderr};
+   return {text: output.stdout};
+}
+
+docker.write = async function (id, path, text) {
+   var qpath = docker.quotePath ('/project/' + path);
+   var command = 'mkdir -p ' + docker.quotePath ('/project/' + Path.dirname (path)) + ' && cat > ' + qpath;
+   return await docker.run (id, 'sh', '-c', command, {input: text});
+}
+
+docker.edit = async function (id, path, oldText, newText) {
+   var file = await docker.read (id, path);
+   if (file.error) return file;
+
+   var count = file.text.split (oldText).length - 1;
+   if (count === 0) return {error: 'Old text not found in file'};
+   if (count > 1) return {error: 'Old text' + count + ' times - must be unique, please provide more context'};
+
+   return await docker.write (id, path, file.text.replace (oldText, function () {return newText})); // We return `newText` as function to avoid special characters being interpreted non-literally.
 }
 
 // *** RATE LIMIT ***
@@ -688,14 +734,14 @@ var routes = [
 
    ['post', 'project', async function (rq, rs) {
 
+      if (type (rq.body.name) === 'string') rq.body.name = rq.body.name.trim ();
+
       if (stop (rs, [
          ['name', rq.body.name, 'string'],
          function () {
-            return ['email', rq.body.name, validEmail, teishi.test.match];
+            return ['name', rq.body.name.length, {min: 2}, teishi.test.match];
          }
       ])) return;
-
-      rq.body.name = rq.body.name.trim ();
 
       var projects = await getForUser (rq.user.id, 'project');
       var conflict = dale.stopNot (projects, undefined, function (project) {
@@ -711,10 +757,15 @@ var routes = [
          user:    rq.user.id,
       }
 
-      var dockerName = 'vibey-project-' + id;
+      var containerId = 'vibey-project-' + id;
 
-      // create volume, create container, create directories (can we do dirs in the image building directly as RUN?)
-      await runCommand ('docker', 'run -v ' + dockerName + ':/project --name ' + dockerName + ' -d vibey-project');
+      await runCommand ('docker', 'run -v ' + containerId + ':/project --name ' + containerId + ' -d vibey-project');
+
+      await runDocker (id, 'sh', '-c', 'git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local');
+
+
+
+
 
       // initialize git repo (inside dockerfile?)
       // create main.md (has to be after, because name is not known at docker image time)

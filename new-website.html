@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vibey — Own what AI does for you.</title>
-<meta name="description" content="You already have AI. You can now own what it does for you. Conveniently.">
+<title>Vibey - AI + files + server = work in one place</title>
+<meta name="description" content="Vibey - AI + files + server = work in one place">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
@@ -42,6 +42,49 @@ body {
   max-width: 520px;
   margin: 0 auto;
   line-height: 1.6;
+}
+
+.problems {
+  padding-bottom: 32px;
+}
+.problems h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #999;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.problem {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 4px 20px;
+  padding: 14px 0;
+  border-top: 1px solid #1a1a1a;
+}
+.problem:last-child {
+  border-bottom: 1px solid #1a1a1a;
+}
+.problem strong {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.problem:nth-child(2) strong { color: #ff7a7a; }
+.problem:nth-child(3) strong { color: #ffb74a; }
+.problem:nth-child(4) strong { color: #e07aff; }
+.problem span {
+  color: #999;
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
 }
 
 .features {
@@ -107,6 +150,7 @@ body {
   .hero h1 { font-size: 2.2rem; }
   .hero { padding-top: 60px; padding-bottom: 40px; }
   .wrap { padding: 0 16px; }
+  .problem { grid-template-columns: 1fr; gap: 4px; }
   .feature { grid-template-columns: 1fr; gap: 4px; }
 }
 </style>
@@ -116,13 +160,22 @@ body {
 
   <div class="hero">
     <h1><em>Vibey</em></h1>
-    <p class="lead">You already have AI.<br>You can now own what it does for you.<br>Conveniently.</p>
+    <p class="lead">You already have AI.<br>What you need now is files and a server.<br>All in one place.</p>
   </div>
+
+  <div class="problems">
+    <h2>The problems to solve</h2>
+    <div class="problem"><strong>Fragmentation</strong> <span>Your work is all over the place. You have to switch between 2-4 places to get anything done. For example: email + sharepoint + chat, editor + terminal + browser.</span></div>
+    <div class="problem"><strong>Amnesia</strong> <span>Your conversations and notes quickly evaporate. Where is that memorable conversation you had with AI three years ago?</span></div>
+    <div class="problem"><strong>Lock-in</strong> <span>Your work lives in your vendor's house and they make it hard to take it somewhere else. That somewhere else is usually another vendor's house.</span></div>
+  </div>
+
+  <h2 class="section-title">How Vibey solves them</h2>
 
   <div class="features">
     <div class="feature">
       <h3>Dialogs as files</h3>
-      <p>Your conversations are readable, exportable. Switch to a different model or provider in mid-conversation.</p>
+      <p>Your conversations with AI and other humans are readable, exportable. Switch to a different model or provider in mid-conversation.</p>
     </div>
     <div class="feature">
       <h3>Memories as files</h3>

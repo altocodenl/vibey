@@ -1,5 +1,50 @@
 ## Vibey development notes
 
+### 2026-06-30
+
+Some notes on Alexander - The process of creating life:
+- "Such a process is not a living process, because it has no component which draws attention to the good of the whole landscape where this is to occur. (...) But as things stand, the center-forming process it not represented in the present process by any present political power, or by any operational step in the present process. Yet, in principle, such a process is clearly possible."
+- "But knowing what to do does not mean knowing what the target is. It means, having the ability to go towards an unformulated whole, because the life and wholeness of the system is visible, "feelable" as a process, even in the absence of a concrete model of the desired end-state."
+- Note: compare the above to spec-driven development.
+- "The key fact, and the essence of all iving process, is that experiments *can* be devised to help us to determine what the wholeness needs"
+- "the important thing is that such experiments can be done, they do bring results, and the results have measurable degree of life to an extent that is verifiable and sharable (at least to reasonable degree). (...) Thus it puts the process of unfolding on an operational basis."
+- "By comparison, a center is itself mdate of smaller centers which are centers too."
+- "This is typical of postmodern architectre - which gains its forms and plans, by making copies of historical plans and images - and literally cutting and pasting them into the plans."
+- "Instead, they are cut and transplanted. Thus, they appear context-less and cut off. They do not extend the surrounding structure."
+- "From a structural point of view the essential point is this. A real center starts many diameters outside its skin or boundary (...) This is an essential attribute of any real center. But these centers, because they are cut and transplanted, do not have this feature. They are very weak centeres, because they do not extend outward far enough."
+- "When it comes to working out a building, achieving something which has living centers in it and in which living structure of the whole occurs is quite a trick."
+- "The work of creating geometric centers, in a piece of land, is really a *geometrical*, physical activity. (...) This activity is something so *geometricl*, so *formal*, that it is almost automatic; it is really an artist's song"
+- "The head adds level of scale."
+- "I can move this head around, and try and try to place it so that the whole configuration is more profound, feels more a picture of my self; has life."
+
+### 2026-06-29
+
+You already have AI. All you need now is files and a server. Work in one place.
+
+The problems to solve:
+
+- Fragmentation: your work is all over the place. You have to switch between 2-4 places to get anything done. For example: email + sharepoint + chat, editor + terminal + browser.
+- Amnesia: your conversations and notes quickly evaporate. Where is that memorable conversation you had with AI three years ago?
+- Lock-in: your work lives in your vendor's house and they make it hard to take it somewhere else. That somewhere else is usually another vendor's house.
+
+How vibey solves them:
+...
+
+Some notes on Alexander - The process of creating life:
+- "many of these centers which are present when a structure has life are not chiefly obvious distinct *components* but very often nearly invisible pieces of space whose "centeredness" acts within a shape"
+- "All this, I have summarized by calling the wholeness a "field" of centers."
+- "Let us therefore now discuss, concretely, the way that centers are *made*"
+- "The answer comes from the theory of wholeness itself. Centers are not atomic, and are not in any normal sense building blocks. (...) centers are above all, labile, they are *foci* of wholeness, they are not *things*, but regions, qualities, focal ponits of centeredness (...) while they are fused into the wholeness, as they go forward."
+- "This is not a process of adding a building block of some kind. It is a question of injecting a field-like centrality into the existing wholeness at that point where it can do most good"
+- "The dominant feature of a process that is working correctly is summarized in the statement: *at every step, the process does its utmost to enhance the structure of the whole, and shapes its parts to make this enhancement happen.* The complementary view of the same point is that the parts are formed within the whole and by the whole."
+- "In a mechanical process, parts are formed independently of the whole, and then added together to form an aggregation. In a living structure, the parts come into being within the whole, they break out from the whole, they are determined and shaped by their presence in the whole, and above all they transform the whole according to the latent structure which exists in it. That is the rule which marks the living, and distinguishes it from the mechanical."
+- "The part is *influenced* by its position in the whole. The snow block is not modular, but uniquely shaped according to its position (...) Second, the aprt is made in such a way as to *increase* the life of the emerging whole *in its large aspects*. (...) In the warehouse you see more of the aprts as they go up, but the building is not getting better. The igloo gets better, since each new snow block creates opportunities for refinement and improvement as it is introduced."
+- Note: the unfolding process feels almost meditative. It's a linear, reflective and one-threaded process. It asks to look inside when looking outside, and find within a truth that is evident to everyone who would attempt to do the same thing.
+
+Store command outputs in dialog! First class calls. Large outputs (20k?) go to files automatically, a la pi. Commands should stream, with the same mechanism as AI conversations.
+
+We should provide some sort of uptime monitoring with warnings by email or API, that'd be mighty useful for those running small apps.
+
 ### 2026-06-26
 
 Basics for project:
