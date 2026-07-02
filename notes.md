@@ -1,5 +1,14 @@
 ## Vibey development notes
 
+### 2026-07-01
+
+Decisions for running commands in project:
+- Three write commands: write, edit, any run command. The big exception: docker.read.
+- Every write command runs in a queue to be done one at a time. The queue must naturally live in redis.
+- Why a queue? So we can have a single commit for each command that modifies the state of the project. No other reason.
+- After each command, we do a diff and if it's not null, we make a commit with the name of the command and the description if any.
+
+
 ### 2026-06-30
 
 Some notes on Alexander - The process of creating life:
