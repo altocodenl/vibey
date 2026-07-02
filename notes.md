@@ -1,5 +1,110 @@
 ## Vibey development notes
 
+### 2026-07-02
+
+Decisions for running commands in project, redux
+- Three write commands: write, edit, any run command. The big exception: docker.read.
+- Every write command runs in a queue to be done one at a time. The queue must naturally live in redis.
+- Why a queue? So we can have a single commit for each command that modifies the state of the project. No other reason.
+- After each command, we do a diff and if it's not null, we make a commit with the name of the command and the description if any.
+- Reads don't go through the queue.
+- Reads can have a line segment, and also do tail or head. For tail, we use negative numbers. So, from and to.
+- Some operations can take a sha. Read takes an optional sha to give you a diff, which will be a faster read. Should edit take a sha? This would prevent the editing of a file without reading it first. I think it's useful, as long as the sha can be provided after a read. It'd force the llm to always read first before editing. The client would have the sha too. What about write? There's no point, because it overwrites the file. So it assumes a destruction of the whole thing. But then, we need to make sure that all edits can happen as edits.
+- Algorithm for finding out oldText: do it line based (which is reasonable for text files), take the first and last modified line as the new_text, then take the same range in old_text and verify if it's unique. If not, add one line to the top of old_text, try again. If not, add one to the bottom. And so forth. Try in client until you find something. The pathological corner case is the whole file.
+- API calls and tool calls should map to the project primitives (read, edit, write, command). They are just ways to get to it. Not much else should be needed besides that!
+- The fourth command (run) is the equivalent of a programming language: run arbitrary code. In this analogy, the more basic calls are the "os" calls: read, write, edit.
+
+Project is then:
+- 1. CRUD of project
+- 2. Container
+- 3. Four commands
+- 4. Autogit
+- 5. Backup (s3/backblaze)
+
+- There can be a single endpoint for running commands, where the verb (read, edit, write, run) is specified. This means a single API endpoint, perhaps a single tool (or perhaps four, whatever the clanker will use reliably).
+- We will have the equivalent of the inode in redis, but per project? No, also per file, or path. So inodes, to a certain extent.
+
+
+claude: "The challenge is execution speed at a solo/small-team scale." Yeah, tell me about it.
+
+re-entrant code as a low-level way of seeing a pure function.
+
+https://www.cs.cornell.edu/courses/cs4410/2019fa/resources/unix.pdf
+"Thus a file exists independently of any directory entry, although in practice a file is made to disappear along with the last link to it."
+
+"There is a threefold advantage in treating I/O devices this way: file and device I/O are as similar as possible; file and device names have the same syntax and meaning, so that a program expecting a file name as a parameter can be passed a device name; finally, special files are subject to the same protection mechanism as regular files."
+
+"There is only one exception to the rule of identical treatment of files on different devices: no link may exist between one file system hierarchy and another."
+
+"Since the actual user ID of the invoker of any program is always available, set-user-ID programs may take any measures desired to satisfy themselves as to their invoker's credentials."
+
+"The file system maintains no locks visible to the user, nor is there any restriction on the number of users who may have a file open for reading or writing. Although it is possible for the contents of a file to become scrambled when two users write on it simultaneously, in practice difficulties do not arise. We take the view that locks are neither necessary nor sufficient, in our environment, to prevent interference between users of the same file."
+
+"For each open file there is a pointer, maintained inside the system, that indicates the next byte to be read or written. If n bytes are read or written, the pointer advances by n bytes."
+
+"The notion of the i-list is an unusual feature of UNIX. In practice, this method of organizing the file system has proved quite reliable and easy to deal with. To the system itself, one of its strengths is the fact that each file has a short, unambiguous name related in a simple way to the protection, addressing, and other information needed to access the file."
+
+"Processes may communicate with related processes using the same system read and write calls that are used for file-system I/O."
+
+"Although inter-process communication via pipes is a quite valuable tool (see Section 6.2), it is not a completely general mechanism, because the pipe must be set up by a common ancestor of the processes involved."
+
+"For most users, communication with the system is carried on with the aid of a program called the shell. The shell is a command-line interpreter: it reads lines typed by the user and interprets them as requests to execute other programs."
+the shell as the first interpreter!
+
+"Programs executed by the shell, however, start off with three open files with file descriptors 0, 1, and 2. As such a program begins execution, file 1 is open for writing, and is best understood as the standard output file."
+0 is stdin, 1 is stdout, 2 is stderr
+
+"Actually it would be surprising, and in fact unwise for efficiency reasons, to expect authors of commands such as Is to provide such a wide variety of output options."
+
+"If a command is followed by "&" the shell will not wait for the command to finish before prompting again."
+this is a fork!
+
+"The shell is itself a command, and may be called recursively."
+
+"The shell has further capabilities, including the ability to substitute parameters and to construct argument lists from a specified subset of the file names in a directory. It also provides general conditional and looping constructions."
+almost a language.
+
+"When the newline character ending the line is typed, the shell's read call returns. The shell analyzes the command line, putting the arguments in a Form appropriate For execute. Then fork is called. The child process, whose code oF course is still that oF the shell, attempts to perform an execute with the appropriate arguments. If successful, this will bring in and start execution of the program whose name was given. Meanwhile, the other process resulting from the fork, which is the parent process, waits for the child process to die. When this happens, the shell knows the command is finished, so it types its prompt and reads the keyboard to obtain another command. Given this framework, the implementation of background processes is trivial; whenever a command line contains "&", the shell merely refrains from waiting for the process that it created to execute the command."
+
+"Happily, all of this mechanism meshes very nicely with the notion of standard input and output files. When a process is created by the fork primitive, it inherits not only the memory image of its parent but also all the files currently open in its parent, including those with file descriptors 0, 1, and 2. The shell, of course, uses these files to read command lines and to write its prompts and diagnostics, and in the ordinary case its children—the command programsinherit them automatically."
+
+"Therefore the shell need not know the actual names of the files that are its own standard input and output, because it need never reopen them."
+
+"Such faults cause the processor to trap to a system routine. Unless other arrangements have been made, an illegal action causes the system to terminate the process and to write its image on file core in the current directory. A debugger can be used to determine the state of the program at the time of the fault."
+
+"Perhaps paradoxically, the success of the UNIX system is largely due to the fact that it was not designed to meet any predefined objectives."
+this is absolutely alexandrian.
+
+"Our goals throughout the effort, when articulated at all, have always been to build a comfortable relationship with the machine and to explore ideas and inventions in operating systems and other software. We have not been faced with the need to satisfy someone else's requirements, and for this freedom we are grateful."
+
+"We believe that a properly designed interactive system is much more productive and satisfying to use than a "batch" system. Moreover, such a system is rather easily adaptable to noninteractive use, while the converse is not true."
+
+"the size constraint has encouraged not only economy, but also a certain elegance of design. This may be a thinly disguised version of the "salvation through suffering" philosophy, but in our case it worked."
+
+"Third: nearly from the start, the system was able to, and did, maintain itself. This fact is more important than it might seem. If designers of a system are forced to use that system, they quickly become aware of its functional and superficial deficiencies and are strongly motivated to correct them before it is too late. Because all source programs were always available and easily modified on-line, we were willing to revise and rewrite the system and its software when new ideas were invented, discovered, or suggested by others."
+
+triad: interactive, elegant through limitations, dogfooding
+
+"No large "access method" routines are required to insulate the programmer from the system calls; in fact, all user programs either call the system directly or use a small library program, less than a page long, that buffers a number of characters and reads or writes them all at once."
+
+"Generally speaking, the contents of a program's address space are the property of the program, and we have tried to avoid placing restrictions on the data structures within that address space."
+
+"The success of UNIX lies not so much in new inventions but rather in the full exploitation of a carefully selected set of fertile ideas, and especially in showing that they can be keys to the implementation of a small yet powerful operating system."
+
+"Overall, we have today:
+125 user population
+33 maximum simultaneous users
+1,630 directories
+28,300 files
+301,700 512-byte secondary storage blocks used
+There is a "background" process that runs at the lowest possible priority; it is used to soak up any idle CPU time. It has been used to produce a million-digit approximation to the constant e, and other semi-infinite problems. Not counting this background work, we average daily:
+
+13,500 commands
+9.6 CPU hours
+230 connect hours
+62 different users
+240 log-ins"
+
 ### 2026-07-01
 
 Decisions for running commands in project:
@@ -7,7 +112,6 @@ Decisions for running commands in project:
 - Every write command runs in a queue to be done one at a time. The queue must naturally live in redis.
 - Why a queue? So we can have a single commit for each command that modifies the state of the project. No other reason.
 - After each command, we do a diff and if it's not null, we make a commit with the name of the command and the description if any.
-
 
 ### 2026-06-30
 
