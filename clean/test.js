@@ -268,6 +268,26 @@ if (mode === 'server') {
             ],
          ];
 
+         suites.project = [
+            CONFIG.cloud ? [
+               ['Signup request for invite', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 200],
+               ['Accept invite', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 200, adminHeaders],
+               ['Login', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
+                  s.otp = rs.body.otp;
+                  return true;
+               }],
+               ['Verify login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+                  s.headers.cookie = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  return true;
+               }],
+            ] : [],
+            ['List projects before creation', 'get', 'projects', 200, assertBody ([])],
+            ['Create project without a name', 'post', 'project', {}, 400, assertBody ({error: 'name should have as type string but instead is undefined with type undefined'})],
+            ['Create project', 'post', 'project', {name: 'el norte'}, 200],
+            CONFIG.cloud ? ['Delete account', 'post', 'auth/delete', {}, 200] : [],
+         ];
+
          suites.all = Object.values (suites);
 
          hitit.seq ({port: CONFIG.port, headers: {'x-test': '1'}}, suites [suite], function (error, rdata) {

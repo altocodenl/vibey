@@ -194,6 +194,8 @@ var clog = function () {
    else if (log.priority === 'critical') color.push ('red', 'bold');
    else if (log.type === 'Request') color.push ('cyan');
    else if (log.type === 'Response') color.push ('green');
+   else if (log.type === 'Command request') color.push ('magenta');
+   else if (log.type === 'Command response') color.push ('magenta', 'bold');
 
    console.log (ansi (color, cell.JSToText (log)) + '\n\n');
 }
@@ -302,9 +304,13 @@ var run = async function (...args) {
    }
    else var command = teishi.copy (args), options = {};
 
-   return new Promise (function (resolve) {
+   var id = cicek.pseudorandom ();
+
+   return new Promise (function (resolve, reject) {
 
       var proc = child.spawn (command [0], command.slice (1), options);
+
+      clog ({type: 'Command request', id, command});
 
       if (options.input !== undefined) {
          proc.stdin.write (options.input);
@@ -314,7 +320,15 @@ var run = async function (...args) {
       var output = {stdout: '', stderr: ''};
       var wait = 3;
       var done = function () {
-         if (--wait === 0) resolve (output);
+         if (--wait === 0) {
+            var logOutput = dale.obj (output, function (v, k) {
+               if (k === 'stdout') return [k, '(' + v.length + ' characters)'];
+               return [k, v];
+            });
+            clog ({type: 'Command response', id, command, output: logOutput});
+            if (output.code === 0 || options.noThrow) resolve (output);
+            else reject (output);
+         }
       }
 
       dale.go (['stdout', 'stderr'], function (v) {
@@ -339,27 +353,22 @@ var run = async function (...args) {
 
 var docker = {};
 
-docker.run = function (id, ...args) {
-   var opts = type (last (args)) === 'object' ? last (args) : {};
-   var flag = opts.input !== undefined ? '-i' : '';
-   if (flag) return run ('docker', 'exec', '-i', id, ...args);
-   return run ('docker', 'exec', id, ...args);
+docker.run = function (id, command, input) {
+   if (type (command) === 'array') command = command.join (' ');
+   return run ('docker', 'exec', '-i', id, 'sh', '-c', command, input ? {input: input} : {});
 }
 
-docker.quotePath = function (path) {
-   return "'" + path.replace (/'/g, "'\\''") + "'";
+docker.read = function (id, path) {
+   return docker.run (id, ['cat', '/project/' + path]);
 }
 
-docker.read = async function (id, path) {
-   var output = await docker.run (id, 'cat', '/project/' + path);
-   if (output.code !== 0) return {error: output.stderr};
-   return {text: output.stdout};
-}
+docker.write = function (id, path, text) {
+   var quote = function (path) {
+      return path.replace (/'/g, "'\\''") + "'";
+   }
 
-docker.write = async function (id, path, text) {
-   var qpath = docker.quotePath ('/project/' + path);
-   var command = 'mkdir -p ' + docker.quotePath ('/project/' + Path.dirname (path)) + ' && cat > ' + qpath;
-   return await docker.run (id, 'sh', '-c', command, {input: text});
+   var command = 'mkdir -p ' + quote ('/project/' + Path.dirname (path)) + ' && cat > ' + quote ('/project/' + path);
+   return docker.run (id, command, text);
 }
 
 docker.edit = async function (id, path, oldText, newText) {
@@ -370,7 +379,7 @@ docker.edit = async function (id, path, oldText, newText) {
    if (count === 0) return {error: 'Old text not found in file'};
    if (count > 1) return {error: 'Old text' + count + ' times - must be unique, please provide more context'};
 
-   return await docker.write (id, path, file.text.replace (oldText, function () {return newText})); // We return `newText` as function to avoid special characters being interpreted non-literally.
+   return docker.write (id, path, file.text.replace (oldText, function () {return newText})); // We return `newText` as function to avoid special characters being interpreted non-literally.
 }
 
 // *** RATE LIMIT ***
@@ -721,6 +730,17 @@ var routes = [
          ['smembers', 'owner:' + rq.user.id]
       ]);
 
+      await dale.async (keys, async function (key) {
+         clog ('DEBUG', key);
+         if (! key.match (/^project:/)) return;
+         var projectId = key.replace ('project:', '');
+         var containerId = 'vibey-project-' + projectId;
+
+         await run ('docker', 'stop', containerId);
+         await run ('docker', 'rm', containerId);
+         await run ('docker', 'volume', 'rm', containerId);
+      }, {concurrent: 5})
+
       await redis ('del', ...['user:' + rq.user.id, 'email:' + rq.user.email, 'owner:' + rq.user.id, ...keys]);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
@@ -734,12 +754,10 @@ var routes = [
 
    ['post', 'project', async function (rq, rs) {
 
-      if (type (rq.body.name) === 'string') rq.body.name = rq.body.name.trim ();
-
       if (stop (rs, [
          ['name', rq.body.name, 'string'],
          function () {
-            return ['name', rq.body.name.length, {min: 2}, teishi.test.match];
+            return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
          }
       ])) return;
 
@@ -751,28 +769,73 @@ var routes = [
 
       var project = {
          created: now (),
-         id:      crypto.randomUUID ();
+         id:      crypto.randomUUID (),
          name:    rq.body.name,
          last:    now (),
          user:    rq.user.id,
       }
 
-      var containerId = 'vibey-project-' + id;
+      await redis ([
+         ['hmset', 'project:' + project.id, project],
+         ['sadd',  'owner:' + rq.user.id, project.id]
+      ]);
 
-      await runCommand ('docker', 'run -v ' + containerId + ':/project --name ' + containerId + ' -d vibey-project');
+      var containerId = 'vibey-project-' + project.id;
 
-      await runDocker (id, 'sh', '-c', 'git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local');
+      await run ('docker', 'run', '-v', containerId + ':/project', '--name', containerId, '-d', 'vibey-project');
 
+      await docker.run (containerId, 'git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local');
 
+      await docker.write (containerId, 'main.md', '# ' + rq.body.name);
 
-
-
-      // initialize git repo (inside dockerfile?)
-      // create main.md (has to be after, because name is not known at docker image time)
+      reply (rs, 200);
 
    }],
 
-   // rename project
+   ['put', 'project', async function (rq, rs) {
+
+      if (stop (rs, [
+         ['id', rq.body.id, 'string'],
+         ['name', rq.body.name, 'string'],
+         function () {
+            return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
+         }
+      ])) return;
+
+      var projects = await getForUser (rq.user.id, 'project');
+      var match = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === rq.body.id) return project;
+      });
+      if (! match) return reply (rs, 404);
+      var conflict = dale.stopNot (projects, undefined, function (project) {
+         if (project.name === rq.body.name) return project;
+      });
+      if (conflict && conflict.id !== rq.body.id) return reply (rs, 409, {error: 'There is already a project with that name'});
+
+      await redis ('hset', 'project:' + project.id, 'name', rq.body.name);
+   }],
+
+   ['delete', 'project/:id', async function (rq, rs) {
+
+      var projects = await getForUser (rq.user.id, 'project');
+      var match = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === rq.data.params.id) return project;
+      });
+      if (! match) return reply (rs, 404);
+
+      var containerId = 'vibey-project-' + rq.data.params.id;
+
+      await run ('docker', 'stop', containerId);
+      await run ('docker', 'rm', containerId);
+      await run ('docker', 'volume', 'rm', containerId);
+
+      await redis ([
+         ['del',  'project:' + rq.data.params.id],
+         ['srem', 'owner:' + rq.user.id, rq.data.params.id]
+      ]);
+
+      reply (rs, 200);
+   }],
 
    // *** TESTS ***
 

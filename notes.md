@@ -1,5 +1,28 @@
 ## Vibey development notes
 
+### 2026-07-03
+
+Some notes on Alexander - The process of creating life:
+- "What is it that I have been doing in applying these transformations? I am not trying to be clever. I am not trying to follow any special archetype, ancient or modern. I am just trying to make that thing, which when its centers have been created, will most honestly make me feel a tremor, make me feel that my life is (even if only slightly) illuminated by the existence of this thing."
+- "I had to keep asking myself this: Is it going in such a direction? (...) so that all the uncertainty and fear of everyday life, is wrapped up, made worth something, summarized and justified, by the existence of this thing?"
+- "Most often the answer is, No. (...) But sometimes, if I feel even a little tiny bit of yes, I can move the building more towards the yes."
+- "But I haven't done anything until, *because of the existence of the center emerging in my care*, my life is more worth while than it was before, and my knowledge of the meaning of existence has become more real." That is a tall order. It is a great demand. Perhaps too great a demand. But that *is* the demand, anyway, that I must make of things, while I am making them."
+- "Being afraid of such magnificence is only the sad underside of our too mundane late 20th century."
+- Note: it's perhaps not about the indirect approach, but rather the approach that builds from what exists, which could be interpreted as indirect from a perspective that doesn't have the benefit of Alexander.
+- "Superficially, it seems difficult to see all these apparently distinct operations, as versions of the same fundamental process. Nevertheless, I wish to re-emphasize that it is indeed this fundamental process which presents itself in a thousand versions."
+- "The design is not necessarily growing on paper, nor necessarily on the actual site. At first it is only growing in my mind."
+- "So, I have in my mind, a kind of partially field (wholeness) which has some of its structure sketched in, some of its structure not yet sketched in. At each moment, I am struggling to get more clear about this emerging field."
+- "everything I know, at any given moment - absolutely everything - is always summarized by some system of centers."
+- Note: this sounds like a statement of the principle of unified representation. Centers are unified/sole representation of the wholeness.
+- "sometimes, I may get a great insight by removing material or structure."
+- "It is this operation through which I increase the subtlety of the centers which form the field."
+- Note: perhaps "subtlety" is a good approximation of "life".
+
+By giving files/file descriptors, unix has already streams and you can use results right away, rather than waiting for the end.
+claude: "When the pipe buffer fills up, the writer is forced to wait. When it's empty, the reader is forced to wait. That waiting is the synchronization — it keeps the two processes in lockstep without them needing to know about each other."
+
+Read should eventually take an optional buffer, so the command can directly stream there. The stream just goes to the file. The file is read by the agent or the client.
+
 ### 2026-07-02
 
 Decisions for running commands in project, redux

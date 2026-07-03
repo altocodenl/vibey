@@ -104,17 +104,24 @@ redis db <number>
 #### Auth
 
 - **Get CSRF token**: `GET /auth/csrf`: returns `{csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
-- **Request invite*: `POST /auth/signup/request`: expects `{email: <email>}`. Returns 409 if the invite or user exists. 200 if successful.
+- **Request invite*: `POST /auth/signup/request`: expects `{email: <email>}`. Returns 409 if the invite or user exists.
 
-- **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited or email not found. Sends a 6-digit OTP by email. 200 if successful.
-- **Verify OTP**: `POST /auth/verify`: expects `{email: <email>, otp: <otp>}`. Returns 403 if rate limited, email not found, or OTP invalid. Returns `{csrf: <token>}` with a session cookie. 200 if successful.
+- **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited or email not found. Sends a 6-digit OTP by email.
+- **Verify OTP**: `POST /auth/verify`: expects `{email: <email>, otp: <otp>}`. Returns 403 if rate limited, email not found, or OTP invalid. Returns `{csrf: <token>}` with a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
-- **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie. 200 if successful.
-- **Delete account**: `POST /auth/delete`: deletes the user and all their sessions. Clears the cookie. 200 if successful.
+- **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie.
+- **Delete account**: `POST /auth/delete`: deletes the user and all their sessions. Clears the cookie.
 
 #### Admin
 
-- **Accept invite**: `POST /auth/signup/accept`: expects `{email: <email>}`. Returns 404 if invite not found, 409 if user exists. 200 if successful.
+- **Accept invite**: `POST /auth/signup/accept`: expects `{email: <email>}`. Returns 404 if invite not found, 409 if user exists.
+
+#### Project
+
+- **Get projects**: `GET /projects`
+- **Create project**: `POST /project`: expects `{name: <name>}`. Returns 409 if a project with that names exists.
+- **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
+- **Delete project**: `DELETE /project`
 
 ### Responders
 

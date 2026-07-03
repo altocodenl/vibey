@@ -1,6 +1,6 @@
 FROM node:22-alpine
 
-RUN apk add --no-cache redis bash
+RUN apk add --no-cache redis bash docker-cli
 
 RUN apk add --no-cache --virtual .build-deps build-base curl\
  && mkdir /tmp/mon && cd /tmp/mon \
