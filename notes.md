@@ -1,5 +1,14 @@
 ## Vibey development notes
 
+### 2026-07-04
+
+- Idea: whenever we have public access already, provide already a public doc so you already have a place to put public thoughts. Public access can be turned off, or the file itself deleted.
+- Something key is that when something is public, you see the link to it shown in the editor already, always visible. A reminder in your visual cortex that you're working somewhere public.
+
+One of the keys to the alexandrian understanding of the world is that we need to be driven by feeling, not vision. Feeling is (amazingly) objective in that we can reach *replicable* agreement towards it; whereas image is (paradoxically) misleading and impossible to agree on (because it is subjective/ego-driven).
+
+Leafing through volume III, my main takeaway is that new techniques and materials can and should be used (for time and cost reasons) but in service of creating deep feeling through the fundamental process. Going to the past doesn't work, staying in the pre-fab disconnected world throws out too much. The structure preserving transformation is to regain and surpass the deep feeling of the past with the materials and techniques of the present and future.
+
 ### 2026-07-03
 
 Some notes on Alexander - The process of creating life:
