@@ -1,5 +1,43 @@
 ## Vibey development notes
 
+### 2026-07-05
+
+Some notes on Meier - Memoir!
+- "there is one thing every game in this book has in common. They are fundamentally comprised, as all games are, of a series of interesting decisions."
+- "But the most important takeaway is that it’s a mindset that looks outward, rather than inward. We are surrounded by decisions, and therefore games, in everything we do. “Interesting” might be subject to personal taste to some degree, but the gift of agency—that is, the ability of players to exert free will over their surroundings rather than obediently following a narrative—is what sets games apart from other media"
+- "it takes only a single interaction to transform an observer into a participant, and thus a player."
+- "the primary job of a game designer is not to make something fun, but to find the fun."
+- "Once you isolate the most interesting part of any given decision, then you’re ready to build an interactive experience for the player that feels fascinatingly new, yet comfortingly familiar. That’s my philosophy, anyway. It seems to have worked out pretty well."
+- "I find it mind-boggling that a life spent dedicated to gaming is the exception, rather than the rule."
+- "So with $1,500 in savings, we bought a stack of floppy disks, a package of label stickers, and a box of plastic baggies to put them in. This was standard packaging back then, even for professional releases—no one would have thought to waste an entire cardboard box on just a disk and a half-sheet of instructions."
+- "Somehow he could stonewall a person in a way that made them feel glad for the opportunity."
+- "I couldn’t calculate pi to 10,000 digits—or at the very least it would take me a long, long time—but I could write a program that could. The ability to say, in relatively few words, “Do something cool,” and then have that cool thing pop out the other side, was unbelievably exciting. I wouldn’t even say it was magical. It was technological, and that was better than magic."
+- "The good old days were yet to come; these were still very much the bad old days."
+- "I wanted a computer that could model complex future possibilities, and eliminate undesirable outcomes until it had settled on the ideal course of action. In short, I wanted a computer that could game."
+- "With the right layout of text, I realized, I could transform it from ASCII art into ASCII animation."
+- "But all of these seemed geared toward the engineer, rather than the programmer, and none took into account the needs of gaming at all."
+- "his own career as a professional typesetter was being phased out of existence by this newfangled thing I’d brought into their living room."
+- "Games could make you feel. If great literature could wield its power through nothing but black squiggles on a page, how much more could be done with movement, sound, and color?"
+- "I had useful knowledge that others didn’t have, but I would have to rely on those who had *knowledge of* my knowledge, who could be my link to the non-programming world."
+- "But I went ahead and made a version of Pac-Man, too, just for the practice. The time to flex my creative muscle would be later, I figured, after I had mastered the basics."
+- "Like many games I made later in my career, Formula 1 Racing was fundamentally based on reality, which remains, at least for now, uncopyrightable."
+- "Though we’d technically doubled our workforce, MicroProse was still a nights-and-weekends operation out of our own homes, so it didn’t feel like much had changed."
+- "Our philosophy had always been to avoid loans and venture capital, and it would only take a couple months of slow sales to drag us under. I decided it would be more prudent for me to go half-time, spending two days a week at the new MicroProse office space and three at General Instrument."
+- "Bill and I were the technological version of hometown heroes, and they were rooting for our success as much as we were."
+- "3D gets taken for granted now, but there is a ton of trigonometry involved, and I can’t express enough how relatively powerless these computers were. If you have children, you probably have a pile of toys in your house with more processing speed than what we were working with."
+- "A distributor stumbling upon our game at a local shop was about as likely as a major record producer scouting out karaoke night at the dive bar. To get the attention we needed, Bill said, we had to get ourselves to CES in Chicago."
+- "Lucasfilm and Electronic Arts had rows of demo stations, while we had a single Atari hooked up to a monitor swiped from someone’s desk, probably my own."
+- "While I was at it, I tweaked the enemy AI in Chopper Rescue, and converted all of the code for both games into SidTran, a more efficient programming language that I had created myself. SidTran’s main advantage over other languages was the same one provided by Dr. Sherman’s teletype over the punch card system: instant gratification. You could see the results of your code changes faster, and make twice as many corrections in half the time."
+- "A few months after signing the Solo Flight deal, Bill said the words I’d been waiting to hear ever since the ad consultant had walked into our users’ group four years earlier. “Sid, we’re making enough money. You can quit your day job.”"
+- "what had started out as a labor of love now finally qualified as a legitimate labor that we all happened to love."
+- "All that mattered to me was that I got to make games for a living."
+- "For the first time, flying a plane had become more like playing a videogame, instead of the other way around. I couldn’t cram any more instrument data into the bottom half of the computer screen, so the military had helpfully moved it up into the top half for me. The mountain had come to Mohammed."
+- "ONE OF THE THINGS MICRO-PROSE was famous for was our game manuals, which over time became as long and informative as textbooks."
+- "given the amount of software pirating I may have done in my younger days, I didn’t have a peg leg to stand on when it came to casual sharing."
+- "The term “open-source” only had to be created after companies figured out how to make things closed-sourced, and genuine encryption belonged only to the military."
+- "But if the manual contained crucial information that the player couldn’t progress without, then its absence would break the game without altering one bit of data. It’s hard to pinpoint exactly whose idea it was, but there are several examples of “manual lookup” copy protection in games from 1984, and none from 1983, so clearly it caught on fast."
+- "I think people in general are honest, as long as the dishonest choice isn’t ridiculously easy."
+
 ### 2026-07-04
 
 - Idea: whenever we have public access already, provide already a public doc so you already have a place to put public thoughts. Public access can be turned off, or the file itself deleted.
