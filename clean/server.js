@@ -202,7 +202,7 @@ var clog = function () {
 
 var reply = function () {
    var args = arguments;
-   var [rs, code, body, headers] = dale.go (dale.times (4, arguments [0].writable === undefined ? 1 : 0), function (k) {
+   var [rs, code, body, headers, contentType] = dale.go (dale.times (5, arguments [0].writable === undefined ? 1 : 0), function (k) {
       return args [k];
    });
 
@@ -210,7 +210,7 @@ var reply = function () {
       return clog ({priority: 'important', type: 'Interrupted response', rqId: rs.log.id, method: rs.request.method, path: rs.request.url, ip: rs.log.origin, userId: rs.request.user ? rs.request.user.id : 'anonymous'});
    }
 
-   return cicek.reply (rs, code, body, headers);
+   return cicek.reply (rs, code, body, headers, contentType);
 }
 
 var validEmail = /^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i;
@@ -304,7 +304,7 @@ var run = async function (...args) {
    }
    else var command = teishi.copy (args), options = {};
 
-   var id = cicek.pseudorandom ();
+   var id = cicek.pseudorandom (), t = Date.now ();
 
    return new Promise (function (resolve, reject) {
 
@@ -322,11 +322,12 @@ var run = async function (...args) {
       var done = function () {
          if (--wait === 0) {
             var logOutput = dale.obj (output, function (v, k) {
-               if (k === 'stdout') return [k, '(' + v.length + ' characters)'];
+               if (k === 'stdout' && v.length) return [k, '(' + v.length + ' characters)'];
                return [k, v];
             });
-            clog ({type: 'Command response', id, command, output: logOutput});
-            if (output.code === 0 || options.noThrow) resolve (output);
+            var ms = Date.now () - t;
+            clog ({type: 'Command response', id, command, output: logOutput, ms});
+            if (output.code === 0 || options.catch) resolve (output);
             else reject (output);
          }
       }
@@ -354,6 +355,7 @@ var run = async function (...args) {
 var docker = {};
 
 docker.run = function (id, command, input) {
+   id = 'vibey-project-' + id;
    if (type (command) === 'array') command = command.join (' ');
    return run ('docker', 'exec', '-i', id, 'sh', '-c', command, input ? {input: input} : {});
 }
@@ -362,16 +364,16 @@ docker.read = function (id, path) {
    return docker.run (id, ['cat', '/project/' + path]);
 }
 
-docker.write = function (id, path, text) {
+docker.write = function (id, path, content) {
    var quote = function (path) {
       return path.replace (/'/g, "'\\''") + "'";
    }
 
    var command = 'mkdir -p ' + quote ('/project/' + Path.dirname (path)) + ' && cat > ' + quote ('/project/' + path);
-   return docker.run (id, command, text);
+   return docker.run (id, command, content);
 }
 
-docker.edit = async function (id, path, oldText, newText) {
+docker.edit = async function (id, path, oldContent, newContent) {
    var file = await docker.read (id, path);
    if (file.error) return file;
 
@@ -731,7 +733,6 @@ var routes = [
       ]);
 
       await dale.async (keys, async function (key) {
-         clog ('DEBUG', key);
          if (! key.match (/^project:/)) return;
          var projectId = key.replace ('project:', '');
          var containerId = 'vibey-project-' + projectId;
@@ -777,19 +778,18 @@ var routes = [
 
       await redis ([
          ['hmset', 'project:' + project.id, project],
-         ['sadd',  'owner:' + rq.user.id, project.id]
+         ['sadd',  'owner:' + rq.user.id, 'project:' + project.id]
       ]);
 
       var containerId = 'vibey-project-' + project.id;
 
       await run ('docker', 'run', '-v', containerId + ':/project', '--name', containerId, '-d', 'vibey-project');
 
-      await docker.run (containerId, 'git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local');
+      await docker.run (project.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local');
 
-      await docker.write (containerId, 'main.md', '# ' + rq.body.name);
+      await docker.write (project.id, 'main.md', '# ' + rq.body.name);
 
-      reply (rs, 200);
-
+      reply (rs, 200, {id: project.id});
    }],
 
    ['put', 'project', async function (rq, rs) {
@@ -812,7 +812,68 @@ var routes = [
       });
       if (conflict && conflict.id !== rq.body.id) return reply (rs, 409, {error: 'There is already a project with that name'});
 
-      await redis ('hset', 'project:' + project.id, 'name', rq.body.name);
+      await redis ('hset', 'project:' + match.id, 'name', rq.body.name);
+
+      reply (rs, 200);
+   }],
+
+   ['post', ['project/read', 'project/write', 'project/edit', 'project/run'], async function (rq, rs) {
+
+      if (stop (rs, ['id', rq.body.id, 'string'])) return;
+
+      var projects = await getForUser (rq.user.id, 'project');
+      var match = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === rq.body.id) return project;
+      });
+      if (! match) return reply (rs, 404);
+
+      rs.next ();
+   }],
+
+   ['post', 'project/read', async function (rq, rs) {
+
+      if (stop (rs, [
+         ['path', rq.body.path, 'string'],
+         ['sha', rq.body.sha, ['string', 'undefined'], 'oneOf'],
+      ])) return;
+
+      try {
+         if (! rq.body.sha) var file = await docker.read (rq.body.id, rq.body.path);
+      }
+      catch (error) {
+         if (error.code === 1 && error.stderr.match ('No such file or directory')) return reply (rs, 404);
+         throw error;
+      }
+
+      reply (rs, 200, file, {}, rq.body.path);
+   }],
+
+   ['post', 'project/write', async function (rq, rs) {
+
+      if (stop (rs, [
+         ['path', rq.body.path, 'string'],
+         ['content', rq.body.content, 'string'],
+         ['base64', rq.body.base64, ['boolean', 'undefined'], 'oneOf'],
+      ])) return;
+
+      var content = rq.body.base64 ? Buffer.from (rq.body.content, 'base64') : rq.body.content;
+
+      await docker.write (rq.body.id, rq.body.path, content);
+
+      reply (rs, 200);
+   }],
+
+   ['post', 'project/edit', async function (rq, rs) {
+
+      if (stop (rs, [
+         ['path', rq.body.path, 'string'],
+         ['oldContent', rq.body.oldContent, 'string'],
+         ['newContent', rq.body.newContent, 'string'],
+      ])) return;
+
+      var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldContent, rq.body.newContent);
+
+      result.error ? reply (rs, 400, result) : reply (rs, 200);
    }],
 
    ['delete', 'project/:id', async function (rq, rs) {

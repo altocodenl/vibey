@@ -285,6 +285,25 @@ if (mode === 'server') {
             ['List projects before creation', 'get', 'projects', 200, assertBody ([])],
             ['Create project without a name', 'post', 'project', {}, 400, assertBody ({error: 'name should have as type string but instead is undefined with type undefined'})],
             ['Create project', 'post', 'project', {name: 'el norte'}, 200],
+            ['List projects after creation', 'get', 'projects', 200, function (s, rq, rs) {
+               if (! assert (['length', rs.body.length, 1, teishi.test.equal])) return false;
+               s.projectId = rs.body [0].id;
+               return true;
+            }],
+            ['Create a second project with the same name', 'post', 'project', {name: 'el norte'}, 409, assertBody ({error: 'There is already a project with that name'})],
+            ['Rename project', 'put', 'project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
+            ['Rename project (noop)', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
+            ['Rename project', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],
+            ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ({})],
+            ['List projects after rename', 'get', 'projects', 200, function (s, rq, rs) {
+               return assert ([
+                  ['length', rs.body.length, 1, teishi.test.equal],
+                  function () {return [
+                     ['project id', rs.body [0].id, s.projectId, teishi.test.equal],
+                     ['project name', rs.body [0].name, 'el norte!', teishi.test.equal],
+                  ]}
+               ]);
+            }],
             CONFIG.cloud ? ['Delete account', 'post', 'auth/delete', {}, 200] : [],
          ];
 

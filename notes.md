@@ -1,5 +1,47 @@
 ## Vibey development notes
 
+### 2026-07-06
+
+Wow! I just realized that if you have a dialog X that is done, and then an agent in a dialog Y, agent Y can talk to agent X by reading its file, then sending a call to it. Agents can talk to each other through files! One would be a guest, just like a human user!! Agents talk to each other through files. It's completely unixy.
+
+Seeing the menu from civ1 in a video, with the first (or second letter) highlighted for quick access with keyboard, reminds me about the vibey keyboard shortcuts.
+
+What's next in project:
+- Commands: read, write, edit, run
+- Add head/tail to read
+- Read with sha
+
+Some notes on Meier - Memoir!
+- "In those first crucial minutes, the player absolutely must win, whether it’s a kid alone on his computer or a gaggle of salespeople around a conference table."
+- "Every item on the screen was rendered in 3D, from the landscape to the projectiles to the enemy aircraft. I saw nothing left to improve."
+- "Now that art had been taken from me, I was even more determined to make the map special, and soon I worked out a programming trick based on fractals that allowed nearly infinite zoom"
+- "scrolling slowly back and forth across multiple screens sucked the energy right out of that experience. (...) This may have been the reason I became fixated on a zoom-able map for Silent Service, I can’t remember."
+- "The most elementary, defining feature of gaming is its interactivity."
+- "I had also introduced too much AI into the units. My hope had been to eliminate pesky micromanaging, but instead players had ended up with very little to do. (...) Many reviewers were impressed with this—or at least they thought they were. But in reality, it wasn’t fun to watch more than a couple of times."
+- "At the center of it all was the latest holy grail of processor technology: the 68K chipset, code-named Lorraine."
+- "The Amiga wasn’t a bad computer by any means, but it failed to live up to its promise in sales numbers, and to a small business like ours, that mattered."
+- "We set our sights on four frames per second, which wasn’t so lofty. Even my original Star Trek game on the servers at General Instrument had run that fast, though of course moving text wasn’t a fair comparison to a swerving hillside. Other games we’d made at MicroProse had run faster, but four was the bare minimum. Anything less would leave the game unplayable."
+- Note: 250ms.
+- "The important thing to note is that it wasn’t one lightning-bolt solution, but dozens of incremental changes, many of which we couldn’t take credit for."
+- "MicroProse won an award for our playtesting department. I guess at the time we must have been shipping with fewer bugs than everyone else. Mostly I think we were just ahead of the curve in having a quality assurance team at all"
+- "Design in the 1980s was a largely independent activity, so no one was passing business cards or networking in the modern, rung-climbing sense. No one was protective of their status. We were just excited to have a community"
+- "I don’t think any of us could have imagined back then the kind of cultural domination that gaming would someday achieve."
+- "Having noticed Gunship, the BPjM was inspired to look back at the rest of our catalog, and retroactively blacklisted Silent Service and F-15 Strike Eagle as well, which had by then been selling for years without incident."
+- "The Sid who cofounded MicroProse four years earlier would never have believed it was possible, but I was growing bored. Mostly I was tired of hyperrealism."
+- "Pirates didn’t spend all day fighting one another, I told Bill. Pirates had adventures. Unfortunately, the “adventure” moniker had already been co-opted by a certain type of game that was traditionally text-based, and involved approximately zero adventuring."
+- "Adventuring didn’t have to mean blindly groping for a set path. It could mean making up your own story, being in charge of your fate just like a pirate would be."
+- "I wanted to play a pirate game, which meant I was going to have to make a pirate game, since no one else had yet."
+- "Bill made the executive decision to call the game Sid Meier’s Pirate-Whatever, and I was too busy thinking about adventure game mechanics to question it."
+- "All I could do was keep asking myself, “Would I want to play this game?” As long as the answer was yes, the idea stayed in. I knew, for example, that I wanted to avoid the trap of a single narrative path."
+- "This was the real problem, I realized, with adventure games that tried to parse free-form commands: they had only one right answer, which was bad, but they also had an infinite number of wrong answers, which was worse."
+- "It was my job, I thought, to whittle down the options and present only the best ones to the player. So then: no wrong answers, and more than one right answer, but not too many. I began to jot down ideas."
+- "These bits of cultural shorthand allowed the player to fill in the environment without realizing they were doing it, saving us development time and, more importantly, precious computer memory."
+- "the idea was that you could create a custom font made up of small images, and it would be faster and easier to display one of those “letters” on the screen than to use the graphics chip inside the computer to draw the same picture."
+- "What Randall’s tool did was to analyze a large picture, and figure out the most efficient way to make each little eight-by-eight chunk of pixels into a font character."
+- "it could only load one font into memory at any given time, so the first seventy slots of every font were filled with an identical set of lowercase letters, uppercase letters, numbers, and a few special characters like commas and question marks. The remaining 186 brackets, ampersands, and so on were replaced with a mashup of colored pixels that made no sense unless they were laid out in precisely the right order"
+- "This game was not about life and death, I realized. It was about a lifetime. A pirate’s career would last about forty years between childhood and old age, and his goal was to accomplish as much as he could in that window—to have an adventurous life with no regrets. (...) As in real life, success could only be measured as a combination of your exploits, and how much value you put on those particular exploits yourself."
+- "Sometimes I think we’d be better off going back to a time when communication took at least a minimal amount of investment."
+
 ### 2026-07-05
 
 Some notes on Meier - Memoir!
