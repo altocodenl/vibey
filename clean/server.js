@@ -1,4 +1,13 @@
-// *** CONFIG ***
+/* *** SHAPE OF secret.js ***
+
+module.exports = {
+   ses: {
+      accessKeyId:     '...',
+      secretAccessKey: '...'
+   }
+}
+
+*/
 
 try {
    var SECRET = require ('./secret.js');
@@ -6,6 +15,8 @@ try {
 catch (error) {
    var SECRET = {};
 }
+
+// *** CONFIG ***
 
 var CONFIG = {
    admin: 'info@altocode.nl',
@@ -139,7 +150,6 @@ cell.pathsToText = function (paths) {
 
    return output.join ('\n');
 }
-
 
 cell.JSToPaths = function (v) {
 
@@ -317,26 +327,27 @@ var run = async function (...args) {
          proc.stdin.end ();
       }
 
-      var output = {stdout: '', stderr: ''};
+      var output = {};
       var wait = 3;
+
       var done = function () {
-         if (--wait === 0) {
-            var logOutput = dale.obj (output, function (v, k) {
-               if (k === 'stdout' && v.length) return [k, '(' + v.length + ' characters)'];
-               return [k, v];
-            });
-            var ms = Date.now () - t;
-            clog ({type: 'Command response', id, command, output: logOutput, ms});
-            if (output.code === 0 || options.catch) resolve (output);
-            else reject (output);
-         }
+         if (--wait > 0) return;
+         var logOutput = dale.obj (output, function (v, k) {
+            if (k === 'stdout' && v.length) return [k, '(' + v.length + ' characters)'];
+            return [k, v];
+         });
+         var ms = Date.now () - t;
+         clog ({type: 'Command response', id, command, output: logOutput, ms});
+         if (! output.code || options.catch) resolve (output);
+         else reject (output);
       }
 
-      dale.go (['stdout', 'stderr'], function (v) {
-         proc [v].on ('data', function (chunk) {
-            output [v] += chunk;
+      dale.go (['stdout', 'stderr'], function (k) {
+         proc [k].on ('data', function (chunk) {
+            if (output [k] === undefined) output [k] = '';
+            output [k] += chunk;
          });
-         proc [v].on ('end', done);
+         proc [k].on ('end', done);
       });
 
       proc.on ('error', function (error) {
@@ -345,8 +356,8 @@ var run = async function (...args) {
          done ();
       });
       proc.on ('exit', function (code, signal) {
-         output.code   = code;
-         output.signal = signal;
+         if (code !== null && code !== 0) output.code = code;
+         if (signal !== null) output.signal = signal;
          done ();
       });
    });
@@ -354,23 +365,23 @@ var run = async function (...args) {
 
 var docker = {};
 
-docker.run = function (id, command, input) {
+docker.run = function (id, command, options) {
    id = 'vibey-project-' + id;
    if (type (command) === 'array') command = command.join (' ');
-   return run ('docker', 'exec', '-i', id, 'sh', '-c', command, input ? {input: input} : {});
+   return run ('docker', 'exec', '-i', id, 'sh', '-c', command, options || {});
 }
 
 docker.read = function (id, path) {
-   return docker.run (id, ['cat', '/project/' + path]);
+   return docker.run (id, ['cat', path]);
 }
 
 docker.write = function (id, path, content) {
    var quote = function (path) {
-      return path.replace (/'/g, "'\\''") + "'";
+      return "'" + path.replace (/'/g, "'\\''") + "'";
    }
 
-   var command = 'mkdir -p ' + quote ('/project/' + Path.dirname (path)) + ' && cat > ' + quote ('/project/' + path);
-   return docker.run (id, command, content);
+   var command = 'mkdir -p ' + quote (Path.dirname (path)) + ' && cat > ' + quote (path);
+   return docker.run (id, command, {input: content});
 }
 
 docker.edit = async function (id, path, oldContent, newContent) {
@@ -491,7 +502,7 @@ var routes = [
 
       if (! rq.user && ! publicPath) {
          if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
-         else         return reply (rs, 403, {error: 'No session'});
+         else           return reply (rs, 403, {error: 'No session'});
       }
 
       if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== session.csrf) return reply (rs, 403, {error: 'Invalid csrf token'});
@@ -548,7 +559,6 @@ var routes = [
       rs.writeHead (200, {'content-type': 'image/x-icon'});
       rs.end (Buffer.from ('AAABAAEAEBAAAAEAIACKAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAFFJREFUeJxjEJRQ/08JZgARMEBIMTZ11DGAGENwyVPPAEKGoMvBAFEGYBPHagAhxdj4BA0gZCCGAegKqG4AOh+rAcgKCYUH7QwgOSnTxQBsGAAft/+qqAkz2wAAAABJRU5ErkJggg==', 'base64'));
    }],
-
 
    // *** ERROR REPORTING ***
 
@@ -668,7 +678,6 @@ var routes = [
       if (rq.test) return reply (rs, 200, {otp: otp});
 
       reply (rs, 200);
-
    }],
 
    ['post', 'auth/verify', async function (rq, rs) {
@@ -728,7 +737,7 @@ var routes = [
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
       var [user, keys] = await redis ([
-         ['hgetall', 'user:' + rq.user.id],
+         ['hgetall',  'user:'  + rq.user.id],
          ['smembers', 'owner:' + rq.user.id]
       ]);
 
@@ -785,9 +794,9 @@ var routes = [
 
       await run ('docker', 'run', '-v', containerId + ':/project', '--name', containerId, '-d', 'vibey-project');
 
-      await docker.run (project.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local');
+      await docker.run (project.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local', {catch: true});
 
-      await docker.write (project.id, 'main.md', '# ' + rq.body.name);
+      await docker.write (project.id, 'doc/main.md', '# ' + rq.body.name);
 
       reply (rs, 200, {id: project.id});
    }],
@@ -839,8 +848,10 @@ var routes = [
 
       try {
          if (! rq.body.sha) var file = await docker.read (rq.body.id, rq.body.path);
+         file = file.stdout;
       }
       catch (error) {
+         clog (error);
          if (error.code === 1 && error.stderr.match ('No such file or directory')) return reply (rs, 404);
          throw error;
       }
@@ -874,6 +885,15 @@ var routes = [
       var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldContent, rq.body.newContent);
 
       result.error ? reply (rs, 400, result) : reply (rs, 200);
+   }],
+
+   ['post', 'project/run', async function (rq, rs) {
+
+      if (stop (rs, ['command', rq.body.command, 'string'])) return;
+
+      var result = await docker.run (rq.body.id, rq.body.command);
+
+      reply (rs, 200, result);
    }],
 
    ['delete', 'project/:id', async function (rq, rs) {

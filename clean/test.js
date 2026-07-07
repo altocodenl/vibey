@@ -200,6 +200,7 @@ if (mode === 'server') {
                }],
 
                // *** SESSION LIST & DELETE ***
+
                ['List sessions', 'get', 'auth/list', 200, function (s, rq, rs) {
                   if (! assert ([
                      ['body', rs.body, 'array'],
@@ -294,7 +295,8 @@ if (mode === 'server') {
             ['Rename project', 'put', 'project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Rename project (noop)', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
             ['Rename project', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],
-            ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ({})],
+            ['List files', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
+            ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
             ['List projects after rename', 'get', 'projects', 200, function (s, rq, rs) {
                return assert ([
                   ['length', rs.body.length, 1, teishi.test.equal],

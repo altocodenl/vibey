@@ -1,5 +1,68 @@
 ## Vibey development notes
 
+### 2026-07-07
+
+1. Auth 2x: signup/delete, login/authenticate
+2. Project 2x: create/update/delete, run commands (4x)
+3. Editor 2x: edit text, read text & other formats
+4. Dialog 2x: send message to AI/terminal, AI tool usage
+5. App 2x: own app, external app.
+6. Access 2x: publish file, publish app
+7. Engine 2x: create/update/delete engine, assign/unassign project from engine
+
+Important things not above:
+- S3 backups
+- Email & API triggers to dialog
+
+Idea: make messages to AI non-blocking: you can keep on sending messages and they will be held. When AI responds, the server sends all the queued messages to AI.
+
+Does it make sense to put the outputs of commands on the wire? In many cases, they will go straight into the dialog. But for some (read, write) we need to return it on the wire, to support the editor.
+
+Some notes on Meier - Memoir!
+- "As a company, we were now releasing three or four games a year and generating around $15 million in revenue."
+- "He’d wanted to play a particular type of game, and the fact that it didn’t exist yet was no deterrent—hardware included. It was a feeling I could relate to."
+- "Dan was absolutely evangelical about multiplayer, and many of his games shipped without a single-player option at all, even when his publishers begged for one. He felt that the most important thing computers could offer us was a connection with each other, and without it, they were essentially worthless."
+- "We had actually discussed the possibility of a female option in Pirates!, but it would have required an alternate set of art for the entire “wooing the Governor’s daughter” portion of the game. There was only so much we could hope to get away with in 1987, even as our own publisher, and a female pirate making the moves on a female aristocrat was definitely not on the list."
+- "Excessive gore is, at best, a cheap and short-lived path to player engagement. There is a line to walk, an audience to tailor to, and a purpose to consider in everything we do."
+- "Once the mystery was solved, why would anyone play our game a second time? No problem, I thought. We’ll just have the computer write new mysteries! It was only a little bit impossible, which is not the same as completely impossible."
+- "The industry term for this type of randomized template—or more specifically, the ideal of perfecting randomized templates into actual creativity—is known as procedural generation."
+- "Give a computer a starting point, tell it what pieces are allowed to change and in what kinds of ways—you can’t swap Denmark with bees, for example, only other locations—and that’s procedural generation."
+- "How cool would it be to have a game that could sneak in that one crucial piece of evidence in the beginning, just waiting for you to deduce its meaning? Not from a preplanned list of clues, like a worn keyhole or a dirty shoeprint, but from a more general understanding of what is normal, and what would therefore not be normal."
+- "I was contending with The Future, and it was making The Past look sort of universally rusty."
+- "I hadn’t intended to come back with something dramatically different, but over the next several years it would become a fairly reliable pattern. Apparently, I do a lot of my most inspired work while on vacation."
+- "Most days, I have about two or three hours’ worth of ideas to play around with, and after that I have to go recharge elsewhere. But to me, my computer is the very definition of a leisure activity:
+- "“That’s how they do it in America!” I successfully applied this social blackmail to missed bedtimes, scattered toys, uneaten vegetables, and pretty much anything else I wanted to get away with. I wasn’t being disobedient, I assured her. I was being American."
+- "I never lost that childhood fascination with schedules and routing, which is how I ended up with the model train simulator that Bruce was now holding in his hands."
+- "It wasn’t a game, really, just a way to lay out tracks without making your fingertips sore."
+- "Then, something revolutionary happened. Fellow designer Will Wright released his magnum opus, SimCity, and the phrase “god game” entered the lexicon. The idea had come to him while working on a different title, Raid on Bungeling Bay, after he realized that he enjoyed designing the levels more than bombing them."
+- "It was a game. It was about creating, rather than destroying . . . and it was a game. The objective was dominance over one’s own limitations, rather than a morally inferior antagonist . . . and it was a game. My railroad simulator was a game, too."
+- "It’s hard to think outside the box when there is no box."
+- "A sudden reversal of fortune is only exciting or dramatic when it happens to someone else. When it happens to you, it’s just a bummer. (...) All random obstacles are, on some level, crafted with an “imagine the look on their faces when” mentality"
+- "By giving the player control over how much risk they would tolerate, the floods not only stopped feeling unfair, they became a source of genuine reward."
+- "I had released several games in the interim without my name, and frankly, the executives seemed to be using it as a mark of low confidence rather than any kind of personal exaltation."
+- "The best working relationships are between people with complementary skills."
+- "Even talented people have mostly bad ideas, and it’s critical in creative fields to let go of your ego and immediately bag anything that isn’t pulling its weight."
+- "We were not the type to turn down an interesting challenge. At the age of twenty-eight, I had declared in my very first instruction manual that I would one day “write the ultimate strategy game.” Now, at thirty-six, I figured I was ready. Age and experience may bring wisdom, but sometimes it’s useful to be a young person who hasn’t learned how to doubt himself yet."
+- "This was the eternal divide in the strategy genre: real-time versus turn-based. When the clock keeps running and everyone can play at once, there is an immediate increase in excitement. Quick thinking is rewarded over precision, and those with short attention spans finally get their day in the sun. But while the payoff is instant and ongoing, the ratcheting intensity can easily overflow into confusion and frustration. Turn-based gaming, on the other hand, is slow and methodical, and any excitement felt in the beginning is anticipatory at best."
+- "Just like in Pirates!, the primary gameplay feature of Covert Action was jumping back and forth between the overarching story and the various minigames—lock picking, code breaking, and so on. What had made Pirates! successful, however, was the fact that the main story line was relatively simple. With Covert Action, I had tried to increase the narrative complexity without sacrificing any details in the minigames. It was like two games in one, which sounds great in theory, but in practice was as distracting as switching back and forth between two different movies."
+- "The notion that “one good game is better than two great games” was such a revelation that it became known in my mind as “The Covert Action Rule.”"
+- "Finally, it occurred to me to try it as a turn-based game, and just like it would have in chess or racing, that one decision changed everything. Suddenly, the player was doing instead of watching, anticipating instead of scrambling to figure out what had just happened."
+- "But a hidden map—a single settler dropped into the wilderness, able to see nothing but the nine squares surrounding them—was quietly grand."
+- "To this day, when I play Civilization, I almost always choose the Romans."
+- "I began laying out the various cultural advancements into a complicated flowchart I dubbed the “tech tree.” No branch of it could be neglected forever, but players should be able to decide whether mapmaking or ironworking was a higher priority for them"
+- "More choices meant more personal investment in the outcome, and more reasons to try again for a successful one."
+- "I’ve never been able to decide if it was a mistake to keep Civ isolated as long as I did. On the one hand, I do think it’s better to have as many eyes as possible on a product while it’s in development. (...) I didn’t have to waste my time on a bunch of meetings with myself."
+- "The idea of not wasting time is perhaps the most important factor in my whole career. Each new version of a game—or anything else it suits you to make—is another opportunity to take a step forward. The more iterations you can rapidly cycle through, the more precise your final product will be."
+- "I can’t chip away at marble. I only know how to sculpt with clay. Start with a lump. Add a bit here. Does that make it look more or less interesting? Add another bit—no, that went too far. Scrape it off."
+- "Mistakes are a given, and the important thing is to catch as many as you can, as fast as you can. Ideally, you’ll reevaluate your creation every single day, perhaps even multiple times a day, and each iteration is an opportunity not to pat yourself on the back, but to figure out where you’ve already gone wrong."
+- Note: fundamental process!
+- "One of my big rules has always been, “double it, or cut it in half.” Don’t waste your time adjusting something by 5 percent"
+- "Less than a month before Civilization was published, I cut the size of the map in half."
+- "This is also why I never write design documents (...) to me, that’s like drawing a map before you’ve visited the terrain (...) The mountain is where the mountain is, and your job is to find it, not insist where it should have been."
+- "The moment the Krakatoa volcano blew up, or the bubonic plague came marching through, all anybody wanted to do was reload from a saved game."
+- "The point is, there are bad things in my games, at least until I manage to pin them down, but I don’t let the possibility of mistakes hold me back. I won’t ponder for hours whether a feature would be a good idea, I just throw it in the game and find out for sure."
+- "There is no map before you’ve explored the wilderness, and no overriding artistic vision on Day One. There’s just the hard, consistent work of making something a little better each day, and being as efficient as possible in your discovery of what it’s going to turn out to be."
+
 ### 2026-07-06
 
 Wow! I just realized that if you have a dialog X that is done, and then an agent in a dialog Y, agent Y can talk to agent X by reading its file, then sending a call to it. Agents can talk to each other through files! One would be a guest, just like a human user!! Agents talk to each other through files. It's completely unixy.
