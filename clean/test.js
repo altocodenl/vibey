@@ -295,8 +295,6 @@ if (mode === 'server') {
             ['Rename project', 'put', 'project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Rename project (noop)', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
             ['Rename project', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],
-            ['List files', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
-            ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
             ['List projects after rename', 'get', 'projects', 200, function (s, rq, rs) {
                return assert ([
                   ['length', rs.body.length, 1, teishi.test.equal],
@@ -306,6 +304,12 @@ if (mode === 'server') {
                   ]}
                ]);
             }],
+            ['List files', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
+            ['Get file that is not there', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
+            ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
+            ['Edit main file', 'post', 'project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200],
+            ['Get main file after edit', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# El Norte!')],
+            ['Run a command with pipe', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: './doc/main.md\n'})],
             CONFIG.cloud ? ['Delete account', 'post', 'auth/delete', {}, 200] : [],
          ];
 

@@ -365,6 +365,10 @@ var run = async function (...args) {
 
 var docker = {};
 
+Path.quote = function (path) {
+   return "'" + path.replace (/'/g, "'\\''") + "'";
+}
+
 docker.run = function (id, command, options) {
    id = 'vibey-project-' + id;
    if (type (command) === 'array') command = command.join (' ');
@@ -376,23 +380,46 @@ docker.read = function (id, path) {
 }
 
 docker.write = function (id, path, content) {
-   var quote = function (path) {
-      return "'" + path.replace (/'/g, "'\\''") + "'";
-   }
-
-   var command = 'mkdir -p ' + quote (Path.dirname (path)) + ' && cat > ' + quote (path);
+   var command = 'mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > ' + Path.quote (path);
    return docker.run (id, command, {input: content});
 }
 
-docker.edit = async function (id, path, oldContent, newContent) {
-   var file = await docker.read (id, path);
-   if (file.error) return file;
+docker.edit = async function (id, path, oldText, newText) {
+   oldText = Buffer.from (oldText);
+   newText = Buffer.from (newText);
+   var input = Buffer.concat ([Buffer.from (oldText.length + '\n' + newText.length + '\n'), oldText, newText]);
 
-   var count = file.text.split (oldText).length - 1;
-   if (count === 0) return {error: 'Old text not found in file'};
-   if (count > 1) return {error: 'Old text' + count + ' times - must be unique, please provide more context'};
+   var script = 'read old_len; read new_len;'
+      + ' dd bs=1 count=$old_len of=/tmp/_old 2>/dev/null;'
+      + ' dd bs=1 count=$new_len of=/tmp/_new 2>/dev/null;'
+      + " awk '"
+      +    'BEGIN {RS = sprintf ("%c", 1)}'
+      +    ' function rf(f,   _s, _l) {while ((getline _l < f) > 0) _s = _s (length (_s) ? RS : "") _l; close (f); return _s}'
+      +    ' {file = file (NR > 1 ? RS : "") $0}'
+      +    ' END {'
+      +       'old = rf("/tmp/_old"); new_ = rf("/tmp/_new"); olen = length (old);'
+      +       ' s = file; count = 0;'
+      +       ' while ((i = index (s, old)) > 0) {count++; s = substr (s, i + olen)}'
+      +       ' if (count == 0) {print "Old text not found" > "/dev/stderr"; exit 1}'
+      +       ' if (count > 1) {print "Old text found " count " times - must be unique" > "/dev/stderr"; exit 1}'
+      +       ' i = index (file, old);'
+      +       ' printf "%s", substr (file, 1, i - 1) new_ substr (file, i + olen) > target'
+      +    "}"
+      + "' target=" + Path.quote (path) + ' ' + Path.quote (path);
 
-   return docker.write (id, path, file.text.replace (oldText, function () {return newText})); // We return `newText` as function to avoid special characters being interpreted non-literally.
+   var result = await docker.run (id, script, {input: input, catch: true});
+   if (result.stderr) return {error: result.stderr};
+   return result;
+}
+
+docker.cleanup = async function () {
+   var result = await run ('docker', 'ps', '-aq', '-f', 'name=vibey-project-', {catch: true});
+   if (result.stdout) {
+      var ids = result.stdout.trim ().split ('\n');
+      await run ('docker', 'stop', ...ids, {catch: true});
+      await run ('docker', 'rm', ...ids, {catch: true});
+   }
+   process.exit (0);
 }
 
 // *** RATE LIMIT ***
@@ -430,21 +457,6 @@ var sendmail = function (options) {
       });
    });
 }
-
-// *** ERROR ***
-
-var fatal = function (type, error) {
-   clog ({type: type, priority: 'critical', ...error});
-   process.exit (1);
-}
-
-process.on ('uncaughtException', function (error, origin) {
-   fatal ('Uncaught exception', {error: formatError (error), origin});
-});
-
-process.on ('unhandledRejection', function (error) {
-   fatal ('Uncaught promise rejection', {error: formatError (error)});
-});
 
 // *** ROUTES ***
 
@@ -842,6 +854,7 @@ var routes = [
    ['post', 'project/read', async function (rq, rs) {
 
       if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['id', 'path', 'sha'], 'eachOf', teishi.test.equal],
          ['path', rq.body.path, 'string'],
          ['sha', rq.body.sha, ['string', 'undefined'], 'oneOf'],
       ])) return;
@@ -862,6 +875,7 @@ var routes = [
    ['post', 'project/write', async function (rq, rs) {
 
       if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['id', 'path', 'content', 'base64'], 'eachOf', teishi.test.equal],
          ['path', rq.body.path, 'string'],
          ['content', rq.body.content, 'string'],
          ['base64', rq.body.base64, ['boolean', 'undefined'], 'oneOf'],
@@ -877,21 +891,25 @@ var routes = [
    ['post', 'project/edit', async function (rq, rs) {
 
       if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['id', 'path', 'oldText', 'newText'], 'eachOf', teishi.test.equal],
          ['path', rq.body.path, 'string'],
-         ['oldContent', rq.body.oldContent, 'string'],
-         ['newContent', rq.body.newContent, 'string'],
+         ['oldText', rq.body.oldText, 'string'],
+         ['newText', rq.body.newText, 'string'],
       ])) return;
 
-      var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldContent, rq.body.newContent);
+      var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
 
       result.error ? reply (rs, 400, result) : reply (rs, 200);
    }],
 
    ['post', 'project/run', async function (rq, rs) {
 
-      if (stop (rs, ['command', rq.body.command, 'string'])) return;
+      if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['id', 'command'], 'eachOf', teishi.test.equal],
+         ['command', rq.body.command, 'string']
+      ])) return;
 
-      var result = await docker.run (rq.body.id, rq.body.command);
+      var result = await docker.run (rq.body.id, rq.body.command, {catch: true});
 
       reply (rs, 200, result);
    }],
@@ -945,8 +963,42 @@ var routes = [
 
 cicek.cluster ();
 
+var exiting;
+
+dale.go (['SIGTERM', 'SIGINT'], function (signal) {
+   process.on (signal, function () {
+      exiting = true;
+      if (cicek.isMaster) docker.cleanup ();
+      else                process.exit (0);
+   });
+});
+
+dale.go (['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT', 'SIGUSR1', 'SIGUSR2', 'SIGPIPE', 'SIGALRM'], function (signal) {
+   process.on (signal, function () {
+      clog ({type: 'Signal received', priority: 'important', signal: signal});
+   });
+});
+
+var fatal = function (type, error) {
+   if (exiting) return;
+   clog ({type: type, priority: 'critical', ...error});
+   process.exit (1);
+}
+
+process.on ('uncaughtException', function (error, origin) {
+   fatal ('Uncaught exception', {error: formatError (error), origin});
+});
+
+process.on ('unhandledRejection', function (error) {
+   fatal ('Uncaught promise rejection', {error: formatError (error)});
+});
+
 cicek.log = function (log) {
-   if (log [0] === 'error') return clog ({priority: 'critical', type: log [1], error: log.slice (2)});
+   if (log [0] === 'error') {
+      console.log (cicek.isMaster, exiting, log [1]);
+      if (cicek.isMaster && exiting && (log [1] === 'worker died' || log [1] === 'worker error')) return;
+      return clog ({priority: 'critical', type: log [1], error: log.slice (2)});
+   }
    if (log [0] === 'start') return clog ({priority: 'important', type: 'Server start', port: log [3]});
    // We ignore `request`, `requestContent` and `response`
 }

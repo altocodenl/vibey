@@ -1,5 +1,48 @@
 ## Vibey development notes
 
+### 2026-07-08
+
+Some notes on Alexander - The process of creating life:
+- "The building process started, of course, with a list of generic centers (patterns), which we worked out with some of the homeless people in San Jose."
+- "They told me then, from the very beginning: the main issue is "who has the key?" It was clear that establishing private domains, places which people could see as theirs, was the most vital feeling."
+- Note: what are our digital homes? Do we feel like we own them?
+- "It was clear that establishing private domains, places which people could see as theirs, was the most vital feeling. Beyond that, we were looking for a system of large centers which could provide a haven for the sanctity of private territory."
+- "The centers created in this way do not have a striking individualistic shapes like the centers in the Berlin library, but they have shapes which are softer, arising from the fabric of the space and its wholeness as they present themselves yet as far as possible reasonably coherent as centers (...) That is what makes them living."
+- "At each step the intent was to make the space as good as possible, while not juggling spaces, rather doing each one correctly - and then taking the consequences morphologically and allowing the next one to be formed in relation to the first."
+- "In my discussion about the Berlin library, I said that there are four main weaknesses: (a) Lack of smaller centers; (b) Centers being image-like copies of other centers; (c) Centers do not emerge from the surrounding wholeness; (d) Centers do not help form any larger centers."
+- "the main problem was in the fact that none of these tiles had yet managed to unify the concrete and the tile."
+- "The main job, of any task of creating centers is *always* to melt away the divisions between things."
+- Note: wow. The diametral opposite of modular.
+- "all this finally achieves the one elusive thing, which has been the object of all this effort. *The wall no longer has divisions in it*"
+- "we had to paint four thousand of the tiles by hand. That is what it took to unify that wall."
+- "The process able to carry out these thosands of adaptations, and the process by which centers may be formed as living structures, within living structure, depends on the detailed conditions of the actual laying out, and of the making process."
+- and said to me, out of the blue: "This is the only building I have ever been in, where absolutely everything is necessary." (...) The smaller details contributed to the life of the larger centers: and that is why he judged them to be "necessary"."
+- "In design, color, glaze, and softness, these tiles were fabricated, precisely, in relation to the whole and their position in it."
+- "But such intellectual knowledge is far removed from the practical awakening to the idea that *there really is nothing else going on in the process which creates life* - that when we make something, every single moment, every single act of attention, every single act of design - no matter at what scale - is controlled by oour ability to make strong centers of everything we have to touch."
+- "This is a new point of view. It is no longer true to say that the same chair is there, and has merely been juxtaposed with some scrap iron. (..) the chair after the scrap iron is a different chair from what it was before, even though the scrap iron is not touching it."
+- "It recognizes that wholeness is a very subtle structure, changing all the time, and vulnerable to very small encrachments in its surroundings."
+- "He examined neighborhoods in San Fracisco, asked people what places were damaged and what was well, and what kinds of actions would be needed to fix the damaged places. Yodan discovered astonishing degrees of agreement, and tabulated them statistically."
+
+Idea for cursor: highlight it quite a bit with a hazy color, so it's always clear where you're editing. The cursor is usually too subtle, particularly when working with large texts.
+
+The roundtrip of a fast command is about 50ms, local. This seems slow. I'm also seeing if the edit could be a single round trip, currently it's two and it's not transactional in the sense that we do the change in js, then send the modified output back. During the entire duration of the roundtrip, there could be other changes, whereas a chained command could take way less than that.
+
+A good env will be one where an agent can modify a part of the same file I'm modifying elsewhere, without my cursor jumping and neither overwriting each other's changes, if we're working on different parts of the file.
+
+A dialog could perhaps always have someone you're talking to. Talking to someone else: that's a mention. Talking to AI, that sends a message to AI, if you send more messages while it's processing, the server will buffer and then send them. And for terminal, send messages too. The from is you, the to is an other you choose.
+
+The first three pairs (2x) I mention in yesterday's notes have/are an external and an internal component, also engine. Outer and inner, just like the main views.
+
+Had to add the pid of the main host process to a file on startup so we could have a graeful shutdown that would stop and remove all the vibey projects.
+
+Really cool to have logs on signals.
+
+TODO:
+- Bring error handler down?
+- Get rid of the ugly redis errors when ctrl+c
+- Make pipes work
+
+
 ### 2026-07-07
 
 1. Auth 2x: signup/delete, login/authenticate
@@ -299,7 +342,7 @@ Some notes on Alexander - The process of creating life:
 - "By comparison, a center is itself mdate of smaller centers which are centers too."
 - "This is typical of postmodern architectre - which gains its forms and plans, by making copies of historical plans and images - and literally cutting and pasting them into the plans."
 - "Instead, they are cut and transplanted. Thus, they appear context-less and cut off. They do not extend the surrounding structure."
-- "From a structural point of view the essential point is this. A real center starts many diameters outside its skin or boundary (...) This is an essential attribute of any real center. But these centers, because they are cut and transplanted, do not have this feature. They are very weak centeres, because they do not extend outward far enough."
+- "From a structural point of view the essential point is this. A real center starts many diameters outside its skin or boundary (...) This is an essential attribute of any real center. But these centers, because they are cut and transplanted, do not have this feature. They are very weak centers, because they do not extend outward far enough."
 - "When it comes to working out a building, achieving something which has living centers in it and in which living structure of the whole occurs is quite a trick."
 - "The work of creating geometric centers, in a piece of land, is really a *geometrical*, physical activity. (...) This activity is something so *geometricl*, so *formal*, that it is almost automatic; it is really an artist's song"
 - "The head adds level of scale."

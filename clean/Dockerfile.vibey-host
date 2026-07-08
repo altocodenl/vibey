@@ -18,4 +18,4 @@ COPY server.js client.js test.js ./
 RUN echo 'module.exports = {}' > secret.js
 COPY secret.js* ./
 
-CMD ["sh", "-c", "redis-server --daemonize yes --dir /app/data --appendonly yes && exec mon 'node server.js' --log /tmp/vibey.log"]
+CMD ["sh", "-c", "redis-server --daemonize yes --dir /app/data --appendonly yes && exec mon -p /tmp/mon.pid 'node server.js' --log /tmp/vibey.log"]
