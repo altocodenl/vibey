@@ -320,7 +320,7 @@ var run = async function (...args) {
 
       var proc = child.spawn (command [0], command.slice (1), options);
 
-      clog ({type: 'Command request', id, command});
+      clog ({type: 'Command request', id, command: command.join (' ')});
 
       if (options.input !== undefined) {
          proc.stdin.write (options.input);
@@ -337,7 +337,7 @@ var run = async function (...args) {
             return [k, v];
          });
          var ms = Date.now () - t;
-         clog ({type: 'Command response', id, command, output: logOutput, ms});
+         clog ({type: 'Command response', id, command: command.join (' '), ms, ...logOutput});
          if (! output.code || options.catch) resolve (output);
          else reject (output);
       }
@@ -369,10 +369,22 @@ Path.quote = function (path) {
    return "'" + path.replace (/'/g, "'\\''") + "'";
 }
 
-docker.run = function (id, command, options) {
+docker.run = async function (id, command, options) {
    id = 'vibey-project-' + id;
    if (type (command) === 'array') command = command.join (' ');
-   return run ('docker', 'exec', '-i', id, 'sh', '-c', command, options || {});
+
+   var commit = options && options.commit;
+   if (commit) {
+      command += ' && if [ -n "$(git status --porcelain)" ]; then git add -A && git commit -m ' + Path.quote ('vibey:auto ' + commit) + ' > /dev/null 2>&1 && git rev-parse HEAD; else echo; fi';
+      delete options.commit;
+   }
+
+   var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, options || {});
+   if (commit && result.stdout) {
+      result.sha = last (result.stdout.split ('\n'), 2) || undefined;
+      result.stdout = result.stdout.replace (/\n[^\n]{0,}\n$/, '\n');
+   }
+   return result;
 }
 
 docker.read = function (id, path) {
@@ -381,7 +393,7 @@ docker.read = function (id, path) {
 
 docker.write = function (id, path, content) {
    var command = 'mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > ' + Path.quote (path);
-   return docker.run (id, command, {input: content});
+   return docker.run (id, command, {input: content, commit: 'Write ' + Path.quote (path)});
 }
 
 docker.edit = async function (id, path, oldText, newText) {
@@ -407,7 +419,7 @@ docker.edit = async function (id, path, oldText, newText) {
       +    "}"
       + "' target=" + Path.quote (path) + ' ' + Path.quote (path);
 
-   var result = await docker.run (id, script, {input: input, catch: true});
+   var result = await docker.run (id, script, {input: input, catch: true, commit: 'Edit ' + Path.quote (path)});
    if (result.stderr) return {error: result.stderr};
    return result;
 }
@@ -909,7 +921,7 @@ var routes = [
          ['command', rq.body.command, 'string']
       ])) return;
 
-      var result = await docker.run (rq.body.id, rq.body.command, {catch: true});
+      var result = await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
 
       reply (rs, 200, result);
    }],
@@ -961,21 +973,22 @@ var routes = [
 
 // *** SERVER ***
 
-cicek.cluster ();
-
 var exiting;
-
-dale.go (['SIGTERM', 'SIGINT'], function (signal) {
-   process.on (signal, function () {
-      exiting = true;
-      if (cicek.isMaster) docker.cleanup ();
-      else                process.exit (0);
-   });
-});
 
 dale.go (['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT', 'SIGUSR1', 'SIGUSR2', 'SIGPIPE', 'SIGALRM'], function (signal) {
    process.on (signal, function () {
       clog ({type: 'Signal received', priority: 'important', signal: signal});
+      if (inc (['SIGTERM', 'SIGINT'], signal)) {
+         exiting = true;
+         if (cicek.isMaster) docker.cleanup ();
+      }
+   });
+});
+
+cicek.cluster (undefined, function (worker, code, signal) {
+   if (exiting) return;
+   cluster.fork ().on ('message', function (message) {
+      cicek.log (JSON.parse (message), true);
    });
 });
 
@@ -995,8 +1008,7 @@ process.on ('unhandledRejection', function (error) {
 
 cicek.log = function (log) {
    if (log [0] === 'error') {
-      console.log (cicek.isMaster, exiting, log [1]);
-      if (cicek.isMaster && exiting && (log [1] === 'worker died' || log [1] === 'worker error')) return;
+      if (exiting && inc (['worker died', 'worker error'], log [1])) return;
       return clog ({priority: 'critical', type: log [1], error: log.slice (2)});
    }
    if (log [0] === 'start') return clog ({priority: 'important', type: 'Server start', port: log [3]});

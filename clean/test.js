@@ -309,7 +309,8 @@ if (mode === 'server') {
             ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
             ['Edit main file', 'post', 'project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200],
             ['Get main file after edit', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# El Norte!')],
-            ['Run a command with pipe', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: './doc/main.md\n'})],
+            ['Run a command with pipe', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep Norte'}}, 200, assertBody ({stdout: '# El Norte!\n'})],
+            ['Run a command with change and output', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: '# El Norte!\n'})],
             CONFIG.cloud ? ['Delete account', 'post', 'auth/delete', {}, 200] : [],
          ];
 

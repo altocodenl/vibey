@@ -1,5 +1,27 @@
 ## Vibey development notes
 
+### 2026-07-09
+
+Some notes on Alexander - The process of creating life:
+- "Unfolding, the essential feature of all living process - which we may also call differentiation - comes about, and succeeds, because it always occurs in a certain kind of *sequence*. It goes step by step, we already know that. But it goes step by step *in a certain order*."
+- Note: daily habits could be seen as a sequence, or a narrow family of sequences.
+- "It is a fundamental rule in *all* unfolding. It is linked, inevitably, to the differentiating aspect of the fundamental process."
+- Note: a probable corollary of this is that sequences that don't pay attention to the order of things are not going to be good sequences.
+- "among the features of living process described in these chapters, it may be both the most surprising rule, and also the most essential one, the one which goes deepest to provide the necessary underpinning of all living structure."
+- Note: perhaps the most important question is: what to work on next?
+- "If the dining hall had been placed first it might have been placed anywhere, and the courtyards would then have had more difficulty finding their most useful size and proper shape." The reason is that in a morphological sense the courtyards were bigger than the dining hall - bigger in their impact on the wholeness." To make the process work smoothly (...) they had, therefore, to be fixed earlier.
+- "In every process aimed at getting life, centers must be created in the right order. If we create centers in random sequence (...) the evolving form will likely turn out confusing and chaotic."
+- "When properly constructed, the sequences which arise from proper use of the fundamental process are *generative*. That means they can create living structure, easily, nicely, smoothly. Tat is indeed, just what we ean by *unfolding*."
+- "Living structure comes into being effortlessly, simply as a result of following the sequence."
+- "In traditional society, these generative sequences, being precious, wre known, remembered, recorded, and re-used many times over."
+- "The Samoan canoe chant is an example of a generative sequence. It *generates* canoes. The generative sequence is essentially the same each time that it is used, but each canoe that is generated is unique."
+- Note: are great algorithms generative sequences? Are great information systems also constructed in a proper sequence?
+- "because of the way the successive operations act on one another and on the context (which is always unique)."
+- "Even when there are only two steps to be taken, the order in which they are done may be all-important. And it may be highly surprising."
+- ""Common sense" says that you should *first* place the house, and *then* place the garden. This is common sense; but it is wrong. (...) BUt if you locate the garden first and then place the house volume in a way which supports the wholeness of the garden, the garden will come out better *and so will the house*."
+- "Of the two available sequences for these two operations, one sequence is wrong, and one is right (90% of the time."
+- "how much more significant it will be when dealing with ten, or twenty, or fifty steps. There the chance of getting the sequence right by accident, is extremely small."
+
 ### 2026-07-08
 
 Some notes on Alexander - The process of creating life:
