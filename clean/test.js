@@ -307,10 +307,39 @@ if (mode === 'server') {
             ['List files', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
             ['Get file that is not there', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
             ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
-            ['Edit main file', 'post', 'project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200],
+            ['Edit main file', 'post', 'project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
+                  ['sha', rs.body.sha, 'string'],
+                  function () {return [
+                     ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]
+                  ]}
+               ]);
+            }],
             ['Get main file after edit', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# El Norte!')],
-            ['Run a command with pipe', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep Norte'}}, 200, assertBody ({stdout: '# El Norte!\n'})],
-            ['Run a command with change and output', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: '# El Norte!\n'})],
+            ['Edit main file (noop)', 'post', 'project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
+            ['Overwrite file', 'post', 'project/write', function (s) {return {id: s.projectId, path: 'doc/main.md', content: '# el norte'}}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
+                  ['sha', rs.body.sha, 'string'],
+                  function () {return [
+                     ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]
+                  ]}
+               ]);
+            }],
+            ['Overwrite file (noop)', 'post', 'project/write', function (s) {return {id: s.projectId, path: 'doc/main.md', content: '# el norte'}}, 200, assertBody ({})],
+            ['Run a command with pipe', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
+            ['Run a command with change and output', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['keys', dale.keys (rs.body), ['stdout', 'sha'], 'eachOf', teishi.test.equal],
+                  ['stdout', rs.body.stdout, 'foo\n', teishi.test.equal],
+                  ['sha', rs.body.sha, 'string'],
+                  function () {return [
+                     ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]
+                  ]}
+               ]);
+            }],
+
             CONFIG.cloud ? ['Delete account', 'post', 'auth/delete', {}, 200] : [],
          ];
 

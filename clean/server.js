@@ -382,7 +382,8 @@ docker.run = async function (id, command, options) {
    var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, options || {});
    if (commit && result.stdout) {
       result.sha = last (result.stdout.split ('\n'), 2) || undefined;
-      result.stdout = result.stdout.replace (/\n[^\n]{0,}\n$/, '\n');
+      result.stdout = result.stdout.replace (/[^\n]{0,}\n$/, '');
+      if (result.stdout === '') delete result.stdout;
    }
    return result;
 }
@@ -895,9 +896,9 @@ var routes = [
 
       var content = rq.body.base64 ? Buffer.from (rq.body.content, 'base64') : rq.body.content;
 
-      await docker.write (rq.body.id, rq.body.path, content);
+      var result = await docker.write (rq.body.id, rq.body.path, content);
 
-      reply (rs, 200);
+      reply (rs, 200, result);
    }],
 
    ['post', 'project/edit', async function (rq, rs) {
@@ -911,7 +912,7 @@ var routes = [
 
       var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
 
-      result.error ? reply (rs, 400, result) : reply (rs, 200);
+      return reply (rs, result.error ? 400 : 200, result);
    }],
 
    ['post', 'project/run', async function (rq, rs) {

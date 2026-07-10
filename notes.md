@@ -1,5 +1,33 @@
 ## Vibey development notes
 
+### 2026-07-10
+
+Idea: the dialog is about [social interaction](https://federicopereiro.com/apps-are-social/). Talking with AI is also a social interaction, because it involves an other and language. Language could be seen as an interface to the other. Which makes it also interesting because it can be an interface to oneself, when thinking, particularly when thinking in writing.
+
+Idea: allow vibey to send you emails when you're addressed in a dialog. So that you can be reached. When clicking on the link, it should take you exactly to that message in the scrolling position.
+
+Something I articulated earlier, I think, but is worth of restating: each message should be a visually strong center. The boundaries should be clear. This sucks right now in TUIs, it's hard to see where a response ends and your next message begins.
+
+Two things I've been thinking about lately:
+- Natural language is the next high level language, but only for certain uses. I still think we can do much better than that for describing information systems.
+- LLMs: most of the time seemingly correct, but very often *fundamentally off* when you check. Reminds me of what Alexander says about "mechanical copying", which, even when faithful to the image of what's being copied, doesn't really reflect the field of centers.
+
+Some notes on Alexander - The process of creating life:
+- "The process is effortless because the differentiations have been read to you in the right order."
+- "The next center emerges easily and naturally, because the evolving structure which gives birth to the new center is complete and coherent at each step and gives birth to the new center almost by itself. This is what we mean by a process of unfolding."
+- "A coherent picture hsa built up in your mind because the steps are arranged in such a sequence that no step contradicts the structure which has been built up by the steps before it."
+- "At each moment you have a wholeness in your mind. (...) Each step is designed to operate on the previously existing wholeness that is in your mind."
+- "The user was able to pull a new design almost directly from the interaction of the generative sequence with the specifics of their own needs and context."
+- Note: instead of components, we need sequences. All the advantages of reuse and battle-tested, without the rigidness of the module.
+- "I can make the structure-preserving process work, only if things come *at the right time, in the right order*."
+- "So, the chief ingredient of unfolding sequences, and the feature that makes them work, is this: *A sequence works, or does not work, according to the order of the steps*."
+
+TODO:
+- rsync to S3 on commit
+- client for project (shell/outer view)
+
+When I'm saving a 10mb file in vim, I can feel the slowness. I am thinking how it could be when I don't have to save (autosave) and the saves are much faster, as well as versioned and backed up immediately.
+
 ### 2026-07-09
 
 Some notes on Alexander - The process of creating life:
@@ -64,13 +92,12 @@ TODO:
 - Get rid of the ugly redis errors when ctrl+c
 - Make pipes work
 
-
 ### 2026-07-07
 
 1. Auth 2x: signup/delete, login/authenticate
 2. Project 2x: create/update/delete, run commands (4x)
-3. Editor 2x: edit text, read text & other formats
-4. Dialog 2x: send message to AI/terminal, AI tool usage
+3. Editor 2x: read text & other formats, edit text
+4. Dialog 2x: send message (AI/terminal/human), AI tool usage
 5. App 2x: own app, external app.
 6. Access 2x: publish file, publish app
 7. Engine 2x: create/update/delete engine, assign/unassign project from engine
