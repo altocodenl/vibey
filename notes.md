@@ -1,5 +1,75 @@
 ## Vibey development notes
 
+### 2026-07-12
+
+Ideas for auth:
+- No otp, don't make the users jump through this hoop. Login with link or copy url and paste
+- Autoclose login tab on login, or refresh? Probably autoclose, but when? We can just tell the user to close the tab, or close it with a button that the user can click.
+
+Vibey becomes my normal way to:
+- Take notes
+- Take notes on my phone too
+- Read markdown (copy link to read it in vibey?)
+- Run small scripts
+- Interact with ai
+- Communicate with teammates
+- Publish text
+- Publish small apps
+- Use the terminal
+- Back up my files
+
+On mobile, just show the list of files, and when you click, you see the file. Slack does the same with channels.
+
+How can the player win in the first few moments?
+- Easy login.
+- Easy creation of first project.
+- Easy fork: take notes or dialog. Perhaps a first time context in the menu, but not a tour. Tours are too different from the ui itself and the urge to skip is overwhelming.
+- The fork is triggered on a big plus when there's no file selected? But we start with the main file! Perhaps we should start with no file selected.
+- When new file, its text.
+- Easy rename kf all files, next to title. Same with project. Warn on duplicate.
+- Easy set up of ai credentials
+
+Idea: settings should be files too, or cards. Openai settings, claude, later Editor. Pseudo files. Instead of the typical scrollbox of settings. But how do you create or delete them? Perhaps they are just there? No. Movable amount, you cannot have Anthropic settings if you didn't set them up. No empty boxes. When you see the settings, you just see those "files". No need for a separate view!
+
+Run claude code inside the project docker, send the credentials on the wire. Is this secure over ssh? Almost certainly, but check.
+How to avoid cache busting, both with normal.mode (openai, or api) and with the cc proxy? How do we avoid the Metadata busting cache?
+
+Vibey as a comprehensive, living os. Cell as the follow up: the language.
+
+As for paid accounts: if you want to create projects, you need a paying account. It's as simple as that. You can invite other users to work on your projects and they don't have to be paid users. During pre-engine time, users get free engines because they are running in my own dedicated servers, until I write the logic for running own engines. The communication has to be there from the start that the engines will be paid when going out of alpha/beta. I think 10 bucks a month for the base fee is reasonable.
+
+- A major idea came my way. I was thinking about providing a dedicated postgres, as a service. We'd do it at cost, mount it on an engine, and the value would be on the best practices and how it's managed (updated, kept fresh, backed up). The idea then ramified towards making it not just for dedicated dbs or services of a special kind (wordpress, for example), but also runtimes! Think node, python.
+- What are the difficult parts of running code in production, besides the code correctness itself? I think it's just a few things: 1) keeping the service alive (and being able to turn it off and restart it); 2) having the logs available and rotated and backed up; 3) some basic monitoring (cpu/mem usage, slow requests), including uptime checks. We could provide this: a "managed" layer that is simply some good, curated code for running an X service, to which you give the code through the entrypoint.
+- And it really comes together by making the managed db, or the managed process, as a *file*. You can also access it on the same dataspace. You'll see its port, its logs, it will be like a little app view, but integrated. So can AI and your collaborators. It gives a place to the process, a file-like place for it. Even a non "managed" process can go here too, if you have node running on port 5353, you can see it there on the files. It's not hard to add that, and it's very useful. But the managed versions are even more useful, because a lot of difficult stuff is solved. You're always free to do this yourself, within the same project, but you can use the managed option at no extra cost. That's a great deal of value.
+- Managed apps from altocode can be followed by a "store" of sorts where other creators can put managed apps (which are scripts, really), either for free or for a payment (subscription or one-time). Altocode doesn't need to take a cut for this, perhaps, or perhaps a cut only to verify the absence of malware and basic competence of the app being offered. Perhaps it could be a flat fee for verifying the app.
+- When engines come along, you can put a dedicated engine just for running a project with a single prod db, for example. This hints at having a "group" that collects engines, as a higher level project. But that can come later.
+- I cannot overstate how much potential I see in this. It would allow more people to create good apps with minimum effort, with a lot of the devops part already done, and done quite well. You could set up a db, a node, and you'd already have updates and monitoring and logs and off you go. You don't need to connect seven services to do this, or figure out the pricing. It's obvious, if it fits the engine, you're good to go.
+- I can see a lot of small and medium companies building on vibey. If the editor works, the dialog works and the apps work, you can work there.
+- This can be a tremendous price and proposition simplification. Claude: "Process supervision, log rotation, backup schedules, health checks — these are solved problems, they're just scattered across dozens of tools right now. Curating them into a single managed layer that's invisible until you need it is where the craft is."
+
+### 2026-07-11
+
+Designing the s3 backup script:
+- A node script that does the upload.
+- Only one instance of the script running at once. Triggered per commit.
+- Read-only from the perspective of the docker.
+- Maybe the credentials can be baked into the script.
+- The script either makes a remote list (if there's no list, or we're in consistency check mode) or gets it from S3.
+- The script does a find of files in the project with name, date and size, which makes a new list.
+- It takes the diff of the online and local versions and creates the list of things to upload (either updated or new).
+- It uploads things in parallel with n swimlanes.
+- It deletes the extraneous things in the remote (locally deleted files).
+- When it's done, if there was a commit in the meantime, it calls itself recursively.
+- We could make the script report to the server so we have the evolution of project size for s3 billing purposes.
+
+Thinking about the "shell" view with five slots arranged in a fibonacci shell. Click on one that has a plus, the central area carries the text that tells you what to do next (name the project) and you do it right there, then second click to create it. When jumping, also: click to see what project is that one, click to jump.
+
+For engine view: reverse project view and see instead the engines. Isomorphic to the flipping of the inner view to see the project settings, but with the same form of view.
+
+The shell is like an inventory picker in a game. More engaging, memorable and perhaps useful than a list.
+
+Rename in place: project next to its title in the inner view, same with files.
+
 ### 2026-07-10
 
 Idea: the dialog is about [social interaction](https://federicopereiro.com/apps-are-social/). Talking with AI is also a social interaction, because it involves an other and language. Language could be seen as an interface to the other. Which makes it also interesting because it can be an interface to oneself, when thinking, particularly when thinking in writing.
