@@ -1,5 +1,91 @@
 ## Vibey development notes
 
+### 2026-07-13
+
+An app is a script that 1) is expected to be constantly running; 2) receives requests instead of just originating them.
+
+The editor definitely comes before dialog. AI and humans need files to work with.
+
+TODO:
+- Better login
+- Project to S3
+- Project shell view
+
+in the same way you cannot put feeling into art (but good art must evoke feeling), you cannot put your desire to be an entrepreneur into the company. You need to put your energy into creating something good for its own sake and for the sake of others, and yourself as a user. The energy must be focused on working on something that gives, not giving yourself. This is the trap of voluntarism. And the antidote is to put the energy on something else that is yourself. To put it into work that is simple and useful.
+
+Some notes on Meier - Memoir!
+- "But when my brother disappeared for most of a day into a barely playable prototype, that got my attention."
+- "The game wasn’t terribly complex yet, just a few simple systems tossed together into one space, yet he’d apparently been conquering and surrendering the terrain over and over, just rearranging and exploring those same basic parameters."
+- "My brother’s interaction with the game would end up illustrating one of the most important features of Civ, that “simple plus simple equals complex.” (...) Like chess, each piece’s function was easily understood, and only after you began looking at moves in combination did the really interesting paths emerge."
+- "Considered in this light, *Civilization* seemed less like a stroke of genius and more like a logical progression that I'd been building up to for years. Without its older siblings to lay the groundwork, I'd venture to say the game never could have been made at all."
+- "As long as I’m proud of my work, then it’s a success."
+- "Once I finally allowed the game to spread beyond people named Bruce, the excitement among the other developers was fierce."
+- "The more they played Civilization, the more ideas they all had, and every idea brought with it dozens of potential interactions that I couldn’t help but include. Every element of the game was connected, and every cool new suggestion spiderwebbed out into days (and nights, and weekends) of code changes. Eventually, I had to close my door and enlist Bruce as my gatekeeper, just so I could get any work done at all."
+- "My projects had been straying farther off the beaten path each time, and I was occasionally referred to in the press as a “designer’s designer,” implying that my games possessed a deeper brilliance that could only be appreciated by the connoisseur."
+- "it did hold up in the sense that (1) I was a designer, and (2) I made games that I personally wanted to play. It didn’t bother me that strategy remained a dirty word in the industry"
+- "Conventional wisdom said you could make a specialized product for the hardcore audience, and it might turn a profit if you kept development costs down, but a strategy title would never make the big money."
+- "MicroProse hadn’t put a big marketing push behind it, so like most of my recent games, it started as a slow burn. Ironically, the game still seemed to appeal mostly to game designers, it was just that Civilization brought out the inner game designer in everyone."
+- "Rather than being discouraged, I saw the critiques as a net positive, because it meant we had gotten players thinking on a deeper level. They were interacting with the game as a tool, rather than an experience. Other games offered entertainment, but somehow—and I wasn’t quite sure what all the magic ingredients were yet—Civilization offered empowerment. Fans had enough control over the outcome that they no longer saw a boundary between the fantasy and the game itself. All of it belonged to them."
+- Note: civ is *habitable*.
+- "I had poured everything I had into Civilization, and I was honestly ready to think about something else for a while."
+- "But mostly, I just struggled to find a path forward, and quietly worried about how long a state of burnout could persist before it became permanent."
+- "How do you top the thing that critics were calling “more addictive than crack,” and “as perfectly executed as any simulation we’ve seen?” How many Game of the Year awards can you receive before you start to worry that you’ll never be this good again? It wasn’t hard to see that madness lay in that direction. I couldn’t let myself get caught in a cycle of always trying to outdo my last game, or I would lose whatever sliver of sanity I still retained after such an exhausting, complicated endeavor. It wouldn’t even be enough for me to step outside the strategy genre, I realized. I had to do something that no one could possibly compare to Civ, including myself."
+- "but perhaps it’s fair to say that “math genius” is to “virtuoso” as “math enthusiast” is to “basement band keyboardist.”"
+- "More than anything else, I was fascinated by the way in which Bach’s music seemed simultaneously surprising and inevitable. There was clearly a secret, and I wanted to understand it."
+- "Armed with a cheat sheet of chords for “Celebration” and about twenty other radio hits, I technically became a professional musician only a few months after becoming a professional programmer, though of course one paid considerably better than the other."
+- "The thing that makes Bach’s work so extraordinary is the degree to which it manages to be both predictable and stunning, like the pattern of a snowflake. He routinely used something called invertible counterpoint, in which the notes are designed to be reversible for an entirely new, but still enjoyable, sound."
+- "At the top of one famous piece, The Well-Tempered Clavier, he drew a strange, looping flourish that scholars now believe is a coded set of instructions for how to tune the piano to play in every possible key, opening up new possibilities for variation and modulation."
+- "Today, we recognize these and many other signs of genius, but when he died, Bach was not especially revered."
+- "It’s a little hard to explain why I find Bach’s music to be so transcendent. The sense I get when I listen to his work is that he’s not telling me his story, but humanity’s story. He’s sharing the joys and sorrows of his life in a more universal sense, a language that doesn’t require me to understand the specifics of his situation."
+- "Bach isn’t bogged down in those things—he’s cutting straight to the heart of what we already have in common. (...) Bach’s music is a perfect illustration of the idea that it’s not the artist that matters, but the connection between us."
+- "People take it personally when you suggest computers can create art, let alone art that rivals our best."
+- "So, I don’t think we’re in any danger of making either art or humanity obsolete."
+- "Regardless of whether my musical experiments were successful, or even passable, nothing could be more human than the act of trying in the first place. Plus, it was about as orthogonal to Civ as I could get."
+
+S3/backblaze upload. The problem: I cannot have one key per project, I will hit backblaze or s3 limits for keys too quickly. Another option is to put the key in a place that can be used but not read directly by the user, but the temptation/surface area is huge. If someone gets ahold of it, they could read anyone else's files. It's just too big of a honeypot. I think that leaves me with the obligation to do this from the central server.
+
+Then, each project would request a backup to the central server. The project can do the work of summarizing the local files, or even send the diff to the server. The server then needs to do the sync to the remote.
+Ah, claude suggests using presigned urls for uploads. The central server can do the deletion.
+If we keep old versions of files in backblaze for n days, we have a way to restore old versions if someone catastrophically deletes the entire project. I think it's worth it. I still don't know how to make it first class, but at least we have that line of defense.
+
+Then, the endpoint would be POST /backup/<id>, with the list of files (name, last modified date, size). The sequence:
+- After the commit, the container executes a script that sends that list.
+- The server gets the container list, gets the bucket list, does the diff and 1) deletes the extraneous files in one call; 2) sends upload URL for the files to be created.
+
+Wait, I have too many questions.
+
+Threads:
+- The uploads take long and the urls expire. How to deal with it: retry a single file.
+- The user keeps on modifying files, so we don't have a pure snapshot of the app at one moment. Possible mitigation: it's all in git, and git uses immutable files inside.
+- Idea: just upload the .git folder! It has everything you need to restore.
+- Turn off git repacking? No, git has its defaults for good reasons.
+
+What's really throwing me off is the batch operation. This shouldn't be a batch, it should just be per file edited. I don't need to resync the entire repo like it was a typical backup: I have the diff from git! What I need is something that can guarantee me that a certain versino of the repo will be posted to the bucket. The list of files can then be smaller, instead of the entire repo, just what changed, plus the .git files.
+
+An option to ensure consistency is to upload the oldest files first (by mtime), one at a time. You guarantee that up to a time N, the changes are in the bucket. That would work! Unless you're monkeying around with the mtimes, but I don't think that will be likely (and we can of course warn the user in the advanced manual).
+
+Then, the script is much simpler: send a request for what's the last update on the...
+
+No, even easier. Do it per file. Per file modified, do it in parallel: tell the server what's the file's name, size and date. The server responds either with a OK (no change) or an upload URL. If you get an upload URL, you use it. You're done.
+
+Then, the script needs to know what changed. What's outside of .git you know, because git can tell you. What's inside, you have to figure out by mtime.
+
+Why send name, size and date? To do a resync, if there's an error. If there's an error, you can rerun that file (or the entire project, if necessary) and do a rsync without keeping lists. The lists are already there: the local calls, and the API calls to the bucket to get the metadata.
+
+How do we get the files changed in .git? We could do it by mtime on what changed after a date X, where X is the beginning of the command? Or even better, the date of the last commit.
+`git log -1 --format=%ct`
+
+Then, I don't even need to know which files changed. After the commit is done, I get the date of the last commit, and do a find of everything that changed after the mtime of the last commit, then send N parallel requests for each of them to the server, which return with urls or no-ops, then upload. On failure, simply retry.
+
+Taking the mtime of the last commit vs the present and doing a find by date is essentially a diff. Then, upload the files in parallel. If we need to scale things, we could later add quotas. I remember that S3 allowed 3.6k requests per second.
+
+Oh, the find needs to respect .gitignore.
+
+I still didn't solve the deletions, that does call for a sweep of sorts, which is not nice. The thing is, can we count on the deletions being also in git?
+
+But for just the uploads, a single endpoint should be enough. An immutable awk script, if we can handle the curl there and we don't need any special signing and the connection is https, should be good enough. I would have each uplaod as a separate script instance/execution, so that they run independently. Let the OS handle it. They can be called from a command itself, chaining the find and doing a fork right there on the console.
+claude: "The whole sync client could be a shell one-liner piped from find into xargs."
+
 ### 2026-07-12
 
 Ideas for auth:
