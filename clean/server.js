@@ -435,6 +435,26 @@ docker.cleanup = async function () {
    process.exit (0);
 }
 
+docker.backup = async function () {
+   // do a find on files only, get also their mtimes
+   // find /project -type f -printf '%T@ %p\n'
+
+   // iterate the files to be uploaded: everything with a mtime greater than the last commit
+   // git -C /project log -1 --format=%ct
+
+   // for each of the files:
+   //    - generate presigned url
+   //    - s3.getSignedUrl('putObject', {Bucket, Key: '<project-id>/<path>.<mtime>', Expires: 300})
+   //    - run a command that uploads it from the project itself
+   //    - curl -X PUT -T <local-path> '<presigned-url>'
+
+   // do the delete sweep:
+   //    - s3.listObjectsV2({Bucket, Prefix: '<project-id>/'})
+   //    - anything extraneous in the bucket, outside of .git, goes away
+   //    - inside of .git, anything extraneous that is older than 7 days
+}
+
+
 // *** RATE LIMIT ***
 
 var rateLimit = async function (prefix, max, ttl) {

@@ -1,5 +1,53 @@
 ## Vibey development notes
 
+### 2026-07-14
+
+Working out the backup. Threads to be solved:
+
+- Race condition on the same file being uploaded twice, and the old one is slower and wins. If we don't use a queue, is ther a header we can use to prevent the upload? Or an immediate invalidation of the old URL midflight?
+- A path that was a file and now becomes a folder, or viceversa. The only danger is on restore, but we can solve it by deleting extraneous keys.
+- Ignoring dots (..). How does s3/backblaze treat them? It takes them as literals. I will just forbid them on the server, when generating the signed urls.
+
+Claude had the brilliant idea of appending the mtime to each file. Then, we have the mtime baked in, there's no conflict, and I can compare that to delete extraneous versions. If every file is appended with a mtime, there can be no conflict.
+
+This has the "immutability" vibe that seems to scale well for both git and dropbox.
+
+For extraneous sweeps/deletions, you can take the state of the files at a moment N, and not delete anything that has a mtime after N (they could be new uploads running concurrently). So we avoid the extraneous sweep deleting new files.
+
+Leave seven days of old files there, in case there's a catastrophic accidental deletion in a project. I wonder if I just would do it from the server directly, don't sweep things older than seven days. In that way, those files are still there and I don't have to do any s3/backblaze resurrection of them.
+
+The only failure mode I see is a high traffic server that appends logs to a large file (>100mb) several times per second. But that would also blow up git.
+
+Claude: "The UI would need to be extraordinary to make this feel simple to someone who's never seen a terminal. The notes show deep architectural thinking but no evidence of a non-technical person using it."
+
+Back to the design:
+- Upload the newly modified files with the timestamp behind, always. This prevents all sorts of race conditions.
+- When doing delete sweeps:
+   - Outside of the .git folder, delete everything that is not in the latest listing you did on the project.
+   - Inside the .git folder, respect older versions of existing files for up to seven days.
+
+I don't need an endpoint to trigger a backup. If all changes come from commands, and commands are run from the server, then the server knows when there was a change! As part of every command being run, once the command is run, a backup is also run. It can be as simple as that. The only exception would be long running processes creating changes, but then there would be no autogit there either.
+
+Some notes on Alexander - The process of creating life:
+- "In principle, a good sequence (steps in the right order) can be defined mathematically by asking, for each center, which other centers need to be in position before that center can be formed. One sets up a flow chart among the steps, defining an arrow for every case where one center must precede another. This gives a partial order of the steps: And one can then define a linear sequence (a collapsed partial order) which minimizes the cases where arrows form cycles or are reversed."
+- Note: the sequence as a direct acyclic graph
+- "For a given task, the number of all sequences which work is tiny by comparison with the huge number of all possible sequences."
+- "From observation of working sequences, I believe, further, that the sequences which work are all variants of the same broad flow, all essentially similar, in which one or two steps may be transposed, but which have broadly the same overall pattern of unfolding."
+- Note: local and global maxima would be the same.
+- "This underscores the difficulty of finding a *good* sequence for such an unfolding process."
+- "It is not possible, at present, to give a precisely defined way of identifying the sequences which work (...) That is to say, we don not yet know a purely mathematical procedure which can identify the sequences which work."
+- "However, the sequences which work can be identified experimentally by a well-defined procedure. If one applies a sequence of steps to a given context, and if one then observes the unfolding process, it is possible to identify, unambiguously, whether the process engendered by the sequence at any time contradicts itself - that means, whether one is forced to backtrack, because step B which comes at a certain point in the sequences forces one to undo the reuslts of the previously taken step A."
+- Note: NP: easy verification. Can we generate the sequence easily? (p == np). Also echoes of backtracking and optimal regular languages engines.
+- "One technique for finding good sequences is to identify bad *sub*sequences, and eliminating all sequences which contain these bad subsequences."
+- "There are a variety of ways of getting to the good sequences, and it is very hard work. But, with time, it can be done."
+- "it is clear that the concept of backtrack-free sequences is - in principle - well-defined even though in practice hard to discover. THe important thing is that such backtrack-free sequences are relatively stable. Once discovered, a backtrack-free sequence remains backtrack-free for nearly all contexts. Thus the backtrack-free sequences lie at the core of the theory of living process."
+- Note: this feels like the foundation for a theory of computation.
+- "What surprised nearly everyone associated with the project was that it was possible to write a successful and fairly simple generative sequence for apartment buildings of this type. The sequence was of such a nature that it allowed the creator, or designer, to produce a design for a particular site by an unfolding process that automatically met the necessary conditions for a good apartment building."
+- "To get the sequence, a pattern language similar to the languages illustrated later (chapter 13), was first constructed for these multi-family apartment buildings, then re-formulated as a generative sequence."
+- "Since the sequence is based on what we consider as essential patternss, one can say that any successful apartment building, for this context, *must* meet these conditions. The sequence is therefore essential, functional, and does not merely satisfy legal requirements. It goes - my colleagues and I believe - to the root of a successful apartment building in Pasadena."
+- "Any windows on next-door buildings facing your lot, which serve living areas, and must have good light preserved."
+- Note: how important it is to consider the adjacent lots. You're never King of your own lot, if you're building life.
+
 ### 2026-07-13
 
 An app is a script that 1) is expected to be constantly running; 2) receives requests instead of just originating them.
