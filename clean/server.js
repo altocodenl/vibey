@@ -248,6 +248,7 @@ dale.async = async function (input, fun, options) {
 
    options = options || {};
    if (options.concurrent === undefined) options.concurrent = 1;
+   if (options.concurrent === true) options.concurrent = dale.keys (input).length;
 
    var index = 0, keys = dale.keys (input), results = [], error;
 
@@ -384,6 +385,7 @@ docker.run = async function (id, command, options) {
       result.sha = last (result.stdout.split ('\n'), 2) || undefined;
       result.stdout = result.stdout.replace (/[^\n]{0,}\n$/, '');
       if (result.stdout === '') delete result.stdout;
+      if (result.sha) await docker.backup (id.replace ('vibey-project-', ''));
    }
    return result;
 }
@@ -435,9 +437,29 @@ docker.cleanup = async function () {
    process.exit (0);
 }
 
-docker.backup = async function () {
-   // do a find on files only, get also their mtimes
-   // find /project -type f -printf '%T@ %p\n'
+docker.backup = async function (id) {
+
+   var [tracked, files, lastCommit] = await dale.async (dale.times (3), function (k) {
+      if (k === 1) return docker.run (id, 'git -C /project ls-files -co --exclude-standard');
+      if (k === 2) return docker.run (id, "find /project -type f -printf '%T@ %p\\n'");
+      if (k === 3) return docker.run (id, 'git -C /project log -1 --format=%ct');
+   }, {concurrent: true});
+
+   tracked = dale.obj (tracked.stdout.split ('\n'), function (file) {
+      if (file !== '') return [file, true];
+   });
+   files = dale.fil (files.stdout.split ('\n'), undefined, function (file) {
+      if (file === '') return;
+      file = file.split (/\s+/);
+      var name = file [1].replace ('/project/', ''), mtime = file [0].split ('.');
+      if (! tracked [name] && ! name.match (/^.git/)) return;
+      var mtime = parseInt (mtime [0] + mtime [1].slice (0, 3));
+      return [name, mtime];
+   });
+
+   lastCommit = parseInt (lastCommit.stdout.replace ('\n', '') + '000');
+
+   clog ({tracked, files, lastCommit});
 
    // iterate the files to be uploaded: everything with a mtime greater than the last commit
    // git -C /project log -1 --format=%ct

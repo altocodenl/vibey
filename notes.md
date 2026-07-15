@@ -1,5 +1,94 @@
 ## Vibey development notes
 
+Some notes on Meier - Memoir!
+- "The obscure subject matter and minimal interactivity definitely played a role, but those weren’t the only reasons C.P.U. Bach was a commercial failure. The other major pitfall was the console we chose for the game’s release, a new machine called the 3DO."
+- "Things like virtual reality and internet connectivity were barely in their infancy, but advertisements and news profiles promised us that they would completely infiltrate our lives any day now. What had previously been thought of as merely inevitable suddenly seemed imminent, and everyone agreed that a comprehensive media center was at the top of the innovation list. Music, movies, games, telephone calls, and more would come from a single, universal box—along with a propeller function to blow everyone’s hair back, if you believed the ads."
+- "My friend Noah Falstein, who worked for 3DO at the time, has ruefully admitted to “convincing” me to release my game with them, as has Trip Hawkins, but I don’t remember getting a hard sell from anyone in particular."
+- "My only regret is that the game is essentially unplayable today, now that the physical console has become a lost relic."
+- "CIVILIZATION MAY HAVE LEFT ME burnt out for several years, but other designers in the building were just getting started. We’d made the world safe for strategy games, and there were plenty of ideas that we hadn’t had the time or wisdom to fit into ours. Some of the best belonged to a young designer named Brian Reynolds."
+- "Without being asked, he created a working prototype of a game he called Colonization, which he pitched to the executive team as a narrower, deeper version of Civ."
+- "unlike today’s cornucopia of flash drives, fidget toys, travel mugs, and reusable grocery bags, promotional merchandise back in the early nineties was almost always clothing"
+- "the game would focus less on expansion and more on resource gathering within the player’s society, testing its robustness primarily through the economic challenges of the era."
+- "I worked very hard not to alter the spirit of the game Brian had created. I was willing, for example, to suggest cutting the radius of the cities in half—something we pulled off at the last moment, just as we had with the world map in Civ—because it further highlighted the job-specialization mechanics that Brian had developed."
+- "Yes, I made suggestions along the way, but it had been up to Brian whether to accept them. Colonization was not Sid Meier’s game."
+- "So I conceded. “Sid Meier’s” now meant “Sid Meier mentored and approved” instead of “Sid Meier personally coded.” I think some part of me probably knew it was inevitable. I’d seen enough promotional decisions by now to understand that they inched relentlessly forward as long as you let them."
+- "I would never put my name on something I didn’t truly approve of, for a start. I would never put my name on a game if the lead designer didn’t want me to, and I certainly wouldn’t let them sell my name to the highest bidder. I hoped I’d never see the day where I’d have to fight the issue, but I resolved that I would if I had to."
+- "Fortunately, the gaming writer Alan Emrich soon coined a more permanent name for the genre, “4X,” representing the four main objectives of exploration, expansion, exploitation, and extermination."
+- "For Brian to connect to our office directly across the Atlantic would have involved by-the-minute international phone charges. So instead, the plan was for him to dial in to our UK office through a local number first"
+- "The game, of course, was Civilization II. Again, management assumed I’d be involved, and for a little while I was. While Brian worked on updates to the main game, I prototyped a new battle system that would drop players into a separate, detailed battlefield screen during conflicts, then return them to the main world map once the tactical winner had been determined. But I wasn’t pleased with the results, and after several months I emailed Brian to let him know that it wasn’t happening, and he should stick with the current battle system."
+- "being king is the heart of Civilization; slumming as a lowly general puts the player in an entirely different story (not to mention violates the Covert Action rule). Win-or-lose battles are not the only interesting choice on the path to good game design, but they’re the only choice that leads to Civ."
+- "Civilization II was built on a fancy new operating system called Windows 3.1, which kept a permanent line of menu options along the top of each program. Game, Kingdom, View, Orders—these all made perfect sense. But there, second from the end, was the word Cheat."
+- "Most bug fixes are not about broken code, they’re about closing design loopholes that players refuse to ignore. The first revision I sent out for Civ came after someone discovered you could blanket the land with a checkerboard of tiny cities, thus eliminating the cost of roads and irrigation."
+- "But Brian quietly ignored my advice, as he’d always been able to do, and Civ II shipped with a Cheat menu."
+- "The other thing I had to admit was that the cheating function directly inspired the most important part of Civilization II, which was its modification, or “modding” capability. In the very earliest days of the industry, the guts of our games were wide open, right there on the disk for anyone to play with."
+- "But modern computer languages like C and C++ allowed the program to pull active game data from text files outside the compiled code. Essentially, this meant you could set certain values to be flexible, even after the program had been finalized. Few designers had ever seen a reason to do this, but when Brian first made Colonization, he decided to leave many major parameters open to the educated player. Weaken your enemies, lower the cost of buildings, force your king to trade favorably with you—all with a few simple keystrokes inside an easy-to-understand text document."
+- "Now, with cheats out in the open for Civ II, Brian unlocked the back end even further. He made it possible for players to alter graphics, replace sound effects, modify rules, and basically create an entirely new game for themselves around the skeleton of our code."
+- "Either way, I knew that modding was a great way to ensure that Civilization never saw a third installment. I was so wrong, on all counts. The strength of the modding community is, instead, the very reason the series survived at all."
+- "What I didn’t see at the time is that imagination never diminishes reality; it only heightens it. Just like a fantasy can awaken you to new possibilities in the real world, letting the fans play in the sandbox with us only brought them closer to the universe we had created, the one that had made their fantasy possible. Every alteration, from the smallest AI tweak to the wildest comedic parody, functioned as a kind of tribute that kept Civ fresh, rather than pushing it aside."
+- "When faced with the opportunity to dismantle all challenges, most players chose instead to devise endlessly clever new ones for themselves, and banded together to support one another in their efforts."
+- "while we didn’t know it yet, the strength and loyalty of our fanbase was about to be tested like it never had been before."
+- "It was the very first trading-card game, purchased in collectible packs like baseball cards, but played head-to-head like gin rummy or war. By the time MicroProse was in talks with Wizards of the Coast to create a digital version, Magic had replaced nearly all of the other board games in the company break room."
+- "The arcade market had been a flop, as I’d feared, and Bill had been forced to sell MicroProse to a larger developer named Spectrum HoloByte in 1993. Shortly after that, around the time Colonization and C.P.U. Bach were shipping, Bill had stepped down as head of the studio. MicroProse really wasn’t ours, anymore."
+- "Their darling at the time was a license for the movie Top Gun, which already had six published games from four different companies. Meanwhile, Civilization II was given low priority despite the record-breaking success of its predecessor, and official corporate estimates anticipated sales of just 38,000 copies."
+- "Major universities had broadband connectivity, but everyone else was still stuck on dial-up."
+- "MicroProse had recently published a (slow and buggy) multiplayer version of Civilization called CivNet, and while we were developing Magic: The Gathering, a young man named Richard Garriott was writing his code for the massively multiplayer revolution known as Ultima Online. His game would eventually be released in the same year as ours, so clearly the technology was out there."
+- "The difference in our situation was twofold. First, Garriott’s company had invested in the infrastructure to handle thousands of active Ultima Online users, with racks of servers running twenty-four hours a day, and full-time employees to maintain them. MicroProse, perhaps remembering the sting of all that unsold arcade hardware, was not willing to host dedicated servers. CivNet users had to forge their own connections through a LAN or other service provider, and even then, the game routinely performed worse than open-source copycat versions written by fans."
+- "But more importantly, the design of Ultima Online was tailored for multiplayer from the start. (...) Plus, Ultima was in real time, so there was no need to wait on anyone else to take their turn. Magic was not only turn-based, but the rules frequently gave the option to play a card or not"
+- "soon we started to hear the strongest praise of all: the sound of the game being played up and down the hallway after hours."
+- "That’s when things started to go awry, in the same way that all licensed products eventually do."
+- "I just wanted to make interesting games. Bill and I may have had different definitions of interesting, but at least we’d always agreed on making products that were special, and valuing the creative process. I had a suspicion that he’d gone to bat for the design team more than once behind closed doors, and now that he was gone, we were getting even less support from the executive side than we were used to."
+- "many other early folks had moved on as well. It was time for me to do the same. Fortunately, there were others who shared my vision of small-town game design. Brian Reynolds didn’t want to find out what they’d do to Civilization now that it had a two-game track record, and Jeff Briggs wanted to compose original music, not rehash popular movie soundtracks. The three of us decided that we would form our own studio, and run it the way we wanted."
+- "So we backed away slowly with our hands in the air, and they didn’t make too much of a fuss."
+- "we were supposed to pretend I was taking some kind of sabbatical, instead of starting a new company. In return, I was allowed to take with me all of the code libraries and programming tools I’d written over the years. Technically they were property of MicroProse, but again, a legal fight would have halted everyone’s use of them until we sorted it all out. Both sides got what they needed to stay in business, with the understanding that we’d each keep to our own corner of the market"
+- "My house in Baltimore was only about an hour north of DC"
+- "Separately is probably how I work best with everyone, to be honest. I’m an introvert who likes people: I want to collaborate on the whole, but do my part individually."
+- "There are so many things in the world to be good at, and I get a thrill every time I come across someone who excels in their field. The dichotomy between someone else’s talent and your own is a cause for celebration, because the further apart you are, the more you can offer each other. But the opposite is also true."
+- "I want to combine other people’s unique expertise with mine, and create something that none of us could have made alone—not compromise on the same task until it’s less than the sum of its parts."
+- "But the creative spirit has remained strong, and for the most part, I can still go off and make what I want, when I want, with the assurance that people I trust will be ready to do their part when the time comes."
+- "“When the Civil War began,” read the introduction, “photography was only twenty-two years old; only twelve years had elapsed since the first photograph was made of a U.S. President in office; and only ten since the invention of the wet-plate process.”"
+- "I had always imagined battles to be laid out in clean, wide-open fields, with the two sides charging each other at full force. But this one had farmhouses, creeks, orchards, and even a cemetery scattered through the middle of it."
+- "The Civil War was, in my mind, the turning point when historical characters suddenly became real people. Other wars had dates and facts, but the fighters on these pages were fragile, and brave, and dutiful, and flawed."
+- "I generally saw technology in terms of progress, rather than limitations, and lived in a nearly perpetual state of excitement over what we could accomplish. But in this case, my emotional connection to the subject made it impossible to settle for less, and I found myself repeatedly shelving the idea until the technology could catch up."
+- "the overhead view was no longer top-down and flat, as my previous strategy games had been. Instead, it was isometric, or what developers refer to as “two-and-a-half-D”—that is, two-dimensional, but from an angled perspective, with stretched diamonds instead of squares."
+- "Gettysburg! was a success, and a sequel called Antietam! soon followed."
+- "Rifle technology had made cavalry obsolete by the time the Union and Confederacy were marching against each other"
+- "All of this was interesting from a gaming standpoint because the balance of artillery, cavalry, and infantry created a classic rock-paper-scissors scenario. Cavalry beats artillery, because horses can shift position faster than cannons can be re-aimed; artillery beats infantry, because people can’t move as fast as horses; and infantry doesn’t strictly beat cavalry, but depending on the formations used, it could. This kind of three-way standoff is one of the major pillars of game design, and anywhere you can find such a proportionate layout of strengths and weaknesses, you have the potential for strategic choices."
+- "It’s maybe even fair to say that games weren’t the defining theme of my childhood after all. Rather, it was their precursor: the interesting decision. I’ve always been fascinated by every type of interesting decision, and a game just happens to be a well-curated series of them."
+- "Interesting decisions are not about the specifics of what you let the player choose between, but whether the investment feels both personal and significant to the outcome. If you present players with options A, B, and C, and 90 percent of them choose A, then it’s not a well-balanced set—an interesting decision has no clear right or wrong answers."
+- Note: this approach takes you to tradeoffs, not a subtle sequence towards optimality.
+- "In the right context, a game is not just a vehicle for fun, but an exercise in self-determination and confidence. Good games teach us that there are tradeoffs to everything, actions lead to outcomes, and the chance to try again is almost always out there."
+- Note: when unfolding, there's usually only one right decision. This then is diametrally opposite to an unfolding process. If you present decisions that are not mutually exclusive or that cannot be sequenced in one best way, then the outcome cannot be living. Yet, perhaps, each path is worth to explore on its own, even if you're not sure about what you're doing. Perhaps, then, these games can be understood as testing ground for getting decisions right elsewhere, by exploring the consequences of decisions.
+
+sequence for project UI:
+- fibonacci with five empty slots, surrounding one central slot
+- the first one has a plus, on hover the center slot says create project
+- when clicking the one with a plus, the center slot becomes an input with a placeholder
+- when the placeholder is filled, the initial slot you clicked plus on switches color, to invite you to click it when you're done
+- this is new, but will it be intuitive? it's like an echo: go here, go to the center, go back here, and clicking on it takes you somewhere new. it has a similar shape when the project is there, where you just click on the slot to go to the project, and on hover you see the details in the central slot.
+- the slot with a project shows only the first word, or the first 20 characters if the first word is too long
+
+sequence of editor:
+- CRD of files and folders
+- show media files
+- text editor with markdown shown in place
+
+the normal places that could all be in vibey:
+- chat
+- ai
+- file viewer
+- text editor
+- terminal
+- email
+- github?
+
+TODO now:
+   //    - anything extraneous in the bucket, outside of .git, goes away, but not in the future (in case there are two instances of docker.backup running for the same project)
+   - also for git
+   - mark the time when you start
+   - enforce utc
+   - gitignore
+
+
 ### 2026-07-14
 
 Working out the backup. Threads to be solved:
