@@ -1,5 +1,51 @@
 ## Vibey development notes
 
+## 2026-07-16
+
+TODO now:
+   - backup
+   - delete
+   - mark the time when you start to avoid deleting stuff from the future (concurrent upload after you)
+
+Some notes on Alexander - The process of creating life:
+"1. Map the context and surroundings.
+2. Decide basic arrangement of project and its outdooor space to enhance surrounding projects and the neighborhood.
+3. Decide basic arrangement and position of th emain garden.
+4. Calculate numerical parameters (areas devoted to building, parking and driveways).
+5. Locate parking and driveway.
+6. Decide on location of building footprint and define rough shape of building volumes.
+7. Refine the garden shape in relation to building and adjacent gardens.
+8. Lay out details of parking.
+9. Division into apartments.
+10. Place and shape apartment entrances.
+11. Design details of garden."
+- "Although the sequence itself is fixed (and needs to be fixed in order to embody the dictates of the fundamental process), the variety this sequence generates, when interacting with a variety of contexts, is very great indeed - indeed, it is essentially infinite."
+- "The crux of every design process lies in finding the generative sequence for that design, and making sure that sequence is the right one for the job. Because such a generative sequence is hard to find, people do not easily grasp the fact that such sequences exist, and therefore find design much more difficult than it needs to be."
+- "perhaps the most difficult thing of all in understanding living process, and in getting a proper sequene for the unfolding of the whole, is reconciling oneself to the idea of doing one thing at a time."
+- "the prevaling wisdom [suggests] (...) a designer has to do everything all at once, in a kind of incredible artistic tour-de-force"
+- "How could one possibly succeed in design, doing one thing a t a time, since a complex whole is a unitary undivided whole which cannot be separated into parts?"
+- "*It is precisely the trick of the unfolding process to solve this problem*. The unfolding process allows you to go one step at a time, *precisely because* it is based on a sequence which permits this without disturbing or screwing up the unfolding of the whole."
+- "The key to any human unfolding process, is that the artist or builder visualizes the thing as an entirety, as a whole, from the first day. (...) You feel it as a whole, imagine it in its wholeness... and gradually tease out from it the features of this wholeness."
+- "You just take one thing at a time, and do it in the right order. That's all there is to it. Just do the most important thing. Finish it. Then do the most important thing. Finish it. And so on."
+- "I taught him that it was just the *sequence* that underlies our ability."
+- "I do not believe that it is possible to understand the nature of sequence, or the idea of generated structure, if one has not actually constructed a sequence which works."
+- "we find out that even a minor change in the sequence changes - not only the effectiveness of the sequence - *but the whole meaning and content of the form itself*."
+- "my discussion will have left the impression that the importance of generated structure lies mainly in two things: first in the tinkering that we do, to adjust things which make subtle and crrect adaptations; and second, in the differentiating process which allows the generated structure to be born from successive differentiations. It is true that these are two fascinating and important points. But we find out now, that the nature of generated struccture is much deeper still"
+- "we play with their arrangement in time, *and we have to play, also, with the actual contents of the steps themselves*."
+- "Now this is completely surprising. What it means is that the form itself, the form of the result, is nice or not nice, according as the sequence of differentiations which led to it is nice or not nice. And this means that when we see a form and consider it harmonious, *it is because it has unfolded from a nice set of differentiations*, and that we are subliminally aware of this"
+- "Thus the idea of a generated structure contains a third thing, over and aobove the step-by-step adaptations, and over and above the raw fact of the differentiations (...) a structure is truly generated (...) *inly when it has unfolded from a nice, beautiful, sequence of differentiations* - and this is perhaps the most important point of all. Here we have, finally come to a reali insight about the nature of living form."
+- "We now know that the form itself and the way it has been generated are part and parcel of the same thing, and are an indissoluble entity."
+- Note: not separateness of form and process.
+- "When I described the Pasadena apartment-building sequence and other examples to a prominent computer scientist in Silicon Valley, he said to me, with an astonished look on his face: "You mean the geneartor problem, for architecture, is solvable?""
+- "Once the problem of creating, using, and working out generative sequences for a wide variety of architectural and environmental problems has been solved and worked out practically (...) the promise of a world in which livin gstructure appears all over the face of the earth, governed by generative sequences, can becoe a reality."
+- "The single most important thing that happens during the process of making anything, is the ever watchful task of getting the next bit of sequence right and modifying it as we go along."
+- "the process of design and the process of construction are inseparable."
+- "The power and relaxedness that come from a proper sequence are *immense*."
+- "came to me and tole me that he felt the generative sequence was an offense against architects, that it abrogated the individual freedom of expression of any self-respecting architect"
+- "But the generative sequences are the *origin* of real freedom in the creative process - if that freedom is aimed at creating living structure."
+
+## 2026-07-15
+
 Some notes on Meier - Memoir!
 - "The obscure subject matter and minimal interactivity definitely played a role, but those weren’t the only reasons C.P.U. Bach was a commercial failure. The other major pitfall was the console we chose for the game’s release, a new machine called the 3DO."
 - "Things like virtual reality and internet connectivity were barely in their infancy, but advertisements and news profiles promised us that they would completely infiltrate our lives any day now. What had previously been thought of as merely inevitable suddenly seemed imminent, and everyone agreed that a comprehensive media center was at the top of the innovation list. Music, movies, games, telephone calls, and more would come from a single, universal box—along with a propeller function to blow everyone’s hair back, if you believed the ads."
@@ -87,7 +133,6 @@ TODO now:
    - mark the time when you start
    - enforce utc
    - gitignore
-
 
 ### 2026-07-14
 
