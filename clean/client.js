@@ -9,25 +9,6 @@ var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console
 
 // *** HELPERS ***
 
-// TODO: remove after the server stops requiring slug names for projects
-var slugify = function (name) {
-   // Split into runs of pass-through chars [a-zA-Z0-9_-] and runs of everything else
-   var parts = name.match (/[a-zA-Z0-9_\-]+|[^a-zA-Z0-9_\-]+/g) || [];
-   return dale.go (parts, function (part) {
-      if (/^[a-zA-Z0-9_\-]+$/.test (part)) return part;
-      return '.' + btoa(String.fromCharCode(...new TextEncoder().encode(part)))
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '') + '.';
-   }).join ('');
-}
-
-// TODO: remove after we remove date and status from dialogs
-var simplifyName = function (name) {
-   if (! name.match (/^dialog/)) return name;
-   return name.replace (/\d{8}-\d{6}-/, '').replace (/-(active|done).md/, '.md');
-}
-
 var formatError = function (error) {
    if (! (error instanceof Error)) return error;
    return {error: error.name, message: error.message, stack: error.stack.split ('\n')};
@@ -114,9 +95,7 @@ B.mrespond ([
       B.call (x, 'set', 'view', hash [0]);
 
       if (inc (loggedViews, hash [0])) {
-         B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
-         B.call (x, 'load', 'settings');
       }
    }],
 
@@ -224,9 +203,7 @@ B.mrespond ([
          B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
          if (rs.body.admin) B.call (x, 'set', ['auth', 'admin'], 1);
 
-         B.call (x, 'load', 'models');
          B.call (x, 'load', 'projects');
-         B.call (x, 'load', 'settings');
          B.call (x, 'navigate', 'projects');
       });
    }],
@@ -294,7 +271,7 @@ B.mrespond ([
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a project name');
 
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
-      B.call (x, 'post', 'projects', {name: name}, function (x, error) {
+      B.call (x, 'post', 'project', {name: name}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
 
          B.call (x, 'snackbar', 'clear');
@@ -306,10 +283,10 @@ B.mrespond ([
       });
    }],
 
-   ['remove', 'project', function (x, project) {
+   ['delete', 'project', function (x, project) {
       if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
 
-      B.call (x, 'delete', 'projects/' + project.slug, function (x, error) {
+      B.call (x, 'delete', 'project/' + project.id, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete project');
          B.call (x, 'load', 'projects');
          B.call (x, 'snackbar', 'ok', 'Project deleted');
@@ -350,8 +327,8 @@ B.mrespond ([
             if (ev.key === 'e') return call ('set', ['file', 'mode'], 'edit');
             if (ev.key === 'i') return call ('set', ['file', 'mode'], 'view');
             if (ev.key === 'd') return call ('set', ['new', 'file'], '');
-            if (ev.key === 'x') return call ('set', ['file', 'remove'], ! B.get ('file', 'remove'));
-            if (ev.key === 'v' && B.get ('file', 'remove')) return call ('remove', 'file', B.get ('file', 'name'));
+            if (ev.key === 'x') return call ('set', ['file', 'delete'], ! B.get ('file', 'delete'));
+            if (ev.key === 'v' && B.get ('file', 'delete')) return call ('delete', 'file', B.get ('file', 'name'));
             if (ev.key === 'j' || ev.key === 'k') {
                var files = B.get ('files'), current = B.get ('file', 'name');
                if (! files || ! files.length) return;
@@ -387,21 +364,21 @@ B.mrespond ([
    // *** FILES ***
 
    ['load', 'files', function (x) {
-      B.call (x, 'get', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/files', function (x, error, rs) {
+      B.call (x, 'get', 'project/' + encodeURIComponent (B.get ('project')) + '/files', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          B.call (x, 'set', 'files', rs.body);
       });
    }],
 
    ['change', ['file', 'name'], function (x) {
-      B.call (x, 'get', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
+      B.call (x, 'get', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
          B.call (x, 'set', ['file', 'content'], rs.body.content);
       });
    }],
 
    ['save', 'file', function (x, name, value, New) {
-      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + name, {content: value}, function (x, error, rs) {
+      B.call (x, 'post', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, {content: value}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
 
          if (! New) B.call (x, 'mset', ['file', 'content'], value);
@@ -425,7 +402,7 @@ B.mrespond ([
 
    ['create', 'dialog', function (x, name) {
 
-      B.call (x, 'post', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
+      B.call (x, 'post', 'project/' + encodeURIComponent (B.get ('project')) + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
 
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem creating the dialog');
 
@@ -437,10 +414,10 @@ B.mrespond ([
 
    }],
 
-   ['remove', 'file', function (x, name) {
+   ['delete', 'file', function (x, name) {
       if (! confirm ('Delete file "' + name + '"? This cannot be undone.')) return;
 
-      B.call (x, 'delete', 'project/' + encodeURIComponent (slugify (B.get ('project'))) + '/file/' + name, function (x, error, rs) {
+      B.call (x, 'delete', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'load', 'files');
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'project/' + B.get ('project') + '/doc/main.md');
@@ -804,7 +781,7 @@ views.projects = function () {
                      ['span', {class: 'f4 fw6 lh-copy'}, project.name],
                      ['span', {
                         class: 'f2 lh-solid o-70 pointer',
-                        onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'project', project])
+                        onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['delete', 'project', project])
                      }, '×']
                   ]];
                })];
@@ -836,8 +813,8 @@ views.projects = function () {
 views.project = function () {
 
    var iconAndName = function (name) {
-      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1', style: style ({color: css.colors.link})}], simplifyName (name)];
-      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1', style: style ({color: css.colors.violet})}], simplifyName (name)];
+      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1', style: style ({color: css.colors.link})}], name];
+      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1', style: style ({color: css.colors.violet})}], name];
       return name;
    }
 
@@ -859,7 +836,7 @@ views.project = function () {
             ['span', {class: 'f2 fw7 text-bright'}, project]
          ]],
          ['div', {class: 'project-main'}, [
-            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'remove'], ['key', 'command'], ['new', 'type'], ['settings', 'show']], function (files, name, newFileName, remove, command, newType, showSettings) {
+            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'delete'], ['key', 'command'], ['new', 'type'], ['settings', 'show']], function (files, name, newFileName, Delete, command, newType, showSettings) {
                return ['div', {class: 'flip-card'}, [['div', {class: 'flip-card-inner' + (showSettings ? ' flipped' : '')}, [
                   ['div', {class: 'flip-card-front project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
@@ -894,10 +871,10 @@ views.project = function () {
                                  }) (),
                                  iconAndName (file)
                               ]],
-                              remove && file !== 'doc/main.md' ? ['span', {
+                              Delete && file !== 'doc/main.md' ? ['span', {
                                  class: 'f4 lh-solid pointer relative',
                                  style: style ({color: css.colors.purple}),
-                                 onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'file', file])
+                                 onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['delete', 'file', file])
                               }, [
                                  file === name ? ['span', {class: 'cmd-tooltip', style: style ({left: 'auto', right: 0, transform: 'none'})}, 'V'] : [],
                                  '×'
@@ -918,10 +895,10 @@ views.project = function () {
                      ['button', {
                         class: css.button + ' f6 ph3 pv2 relative',
                         style: style ({'background-color': css.colors.purple}),
-                        onclick: B.ev ('set', ['file', 'remove'], ! remove)
+                        onclick: B.ev ('set', ['file', 'delete'], ! Delete)
                      }, [
                         command ? ['span', {class: 'cmd-tooltip'}, 'X'] : '',
-                        ['i', {class: 'bi ' + (remove ? 'bi-check-lg' : 'bi-eraser-fill') + ' mr1'}], remove ? 'Done removing' : 'Remove'
+                        ['i', {class: 'bi ' + (Delete ? 'bi-check-lg' : 'bi-eraser-fill') + ' mr1'}], Delete ? 'Done deleting' : 'Delete'
                      ]],
                   ]],
 

@@ -826,7 +826,10 @@ var routes = [
    // *** PROJECT ***
 
    ['get', 'projects', async function (rq, rs) {
-      reply (rs, 200, await getForUser (rq.user.id, 'project'));
+      reply (rs, 200, (await getForUser (rq.user.id, 'project')).sort (function (a, b) {
+         console.log (a.last, b.last);
+         return parseInt (a.last) - parseInt (b.last);
+      }));
    }],
 
    ['post', 'project', async function (rq, rs) {
@@ -847,9 +850,9 @@ var routes = [
       var project = {
          created: now (),
          id:      crypto.randomUUID (),
-         name:    rq.body.name,
          last:    now (),
-         user:    rq.user.id,
+         name:    rq.body.name,
+         owner:   rq.user.id,
       }
 
       await redis ([
@@ -985,7 +988,7 @@ var routes = [
 
       await redis ([
          ['del',  'project:' + rq.data.params.id],
-         ['srem', 'owner:' + rq.user.id, rq.data.params.id]
+         ['srem', 'owner:' + rq.user.id, 'project:' + rq.data.params.id]
       ]);
 
       reply (rs, 200);

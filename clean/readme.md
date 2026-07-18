@@ -40,7 +40,7 @@ project created <date>
         id <id>
         last <date>
         name <name>
-        user <userId>
+        owner <userId>
 owner:<userId> 1 session:<sessionId>
                2 project:<projectId>
                ...
@@ -136,8 +136,9 @@ redis db <number>
 - `login <email>`: requests an OTP via `POST /auth/login`. On success, sets `auth.otpRequested`.
 - `verify <email> <otp>`: verifies the OTP via `POST /auth/verify`. On success, stores the CSRF token, loads models/projects/settings, and navigates to projects.
 - `logout`: logs out via `POST /auth/logout`. Resets auth state and navigates to login.
+- `load projects` gets all projects via `GET /projects`.
 
-### Client
+### Client state
 
 ```
 auth admin <0|1>
@@ -162,8 +163,11 @@ new file "<file name>" // Name for a new file
     project "<project name>" // Enables the new project modal
     type "dialog|file" // Whether the new file is a normal file or a dialog
 project "<project slug>" // The current project selected
-projects 1 name "<project name>"
-           slug "<project slug>"
+projects 1 created <date>
+           id <id>
+           last <date>
+           name "..."
+           owner <userId>
 oauth code "<pasted callback URL or code>" // Manual OAuth code input
       loading "<provider>" // Provider currently in OAuth flow (openai or claude)
       step flow <paste_code|waiting> // Whether user must paste a code or wait for auto-callback

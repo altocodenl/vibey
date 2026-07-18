@@ -292,6 +292,18 @@ if (mode === 'server') {
                return true;
             }],
             ['Create a second project with the same name', 'post', 'project', {name: 'el norte'}, 409, assertBody ({error: 'There is already a project with that name'})],
+            ['Create a second project with another name', 'post', 'project', {name: 'second'}, 200],
+            ['List projects after second project creation', 'get', 'projects', 200, function (s, rq, rs) {
+               console.log (rs.body);
+               if (! assert (['length', rs.body.length, 2, teishi.test.equal])) return false;
+               if (rs.body [0].last < rs.body [1].last) return validationError = 'Last project should come first' && false;
+               s.secondProjectId = rs.body [0].id;
+               return true;
+            }],
+            ['Delete project', 'delete', function (s) {return 'project/' + s.secondProjectId}, 200],
+            ['List projects after second project deletion', 'get', 'projects', 200, function (s, rq, rs) {
+               return assert (['length', rs.body.length, 1, teishi.test.equal]);
+            }],
             ['Rename project', 'put', 'project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Rename project (noop)', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
             ['Rename project', 'put', 'project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],

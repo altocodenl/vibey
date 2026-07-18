@@ -1,5 +1,61 @@
 ## Vibey development notes
 
+## 2026-07-17
+
+- Email can be a bunch of text files! With ripgrep performance in today's software (ssd, fast cpu), search should be very fast. Email can be an altocode app.
+- Show bytes (b), kbytes (k), mbytes (m), gigabyes (g) on the bottom right next to each file. Round the value, no decimals. When you have 1 and less than 1000 of a certain unit, that's the unit you show.
+- A published app could be a set of files in an altocode server with public access, with an approval process. The pull itself doesn't have to be magical, it's just a get over the network.
+- I'd like to offer an app for running and looking at a redis and manipulating its results in the interface. For these not-quite libraries that I had ideas for, vibey would be a great conduit.`
+- The search bar! The search bar is the heart of the files (and dialogs). At the beginning, just by name. It should be very very fast.
+- In mobile, the search bar and the names of the files take up the screen, I already said that. Imagine being able to jump quickly not just to chats (slack does it but it's slow on old phones like mine) but to also dialogs and text files. Things like seeing code or dialogs with AI should be fast!
+- There will be great room for improvmenet in switching between alphabetical mode and "novelty" (show me what changeed since I last saw it). We need to track the last seen date (or sha) per resource/file.
+- I think we can call them "files" instead of "resources". Everything is a file. Well, a dialog is a file and an app is a file. Not quite, but you have a file-handle. Everything in level 2 (see below the note on structure) is a file.
+- Yes, cell will be a vibey app.
+- Unsolved problem with vibey apps: other dockers, therefore other projects? Or dind, inside the project that you run it? Simplicity dictates to put them on the toplevel, but then you're linking projects, which might not be bad after all and perhaps even needed to not have to navigate to the top level of the project every single time to find something inside it! Funny how this idea only came after considering the seemingly nasty and petty problem of how to create isolation for an app within a project. But still, it might have to be dind: an app to run on the files of a project X needs to have access to the files of a project X, right? We'll see.
+
+If a command is sent to a container that is not running, but there's a db entry and a data volume for it, we should start it. Otherwise, on host restart, the containers would have to be started eagerly. It's more elegant to just start them when needed, on first command. And deletion should also work on a container that's down but has data (in a volume and the db).
+
+Worked without AI on the plane. I basically have no reference manual without it and I go slower. For UI layout tasks, I feel like I can't do them (because I never invested in my ability to do those things from scratch). In short: without AI, I'm slower at what I'm good at, and can't do what I don't know how to do.
+
+The structure of vibey is like a three story structure. Auth, project, engine go at the bottom, left to right. On the middle level, editor, dialog and app go on top of the previous three. Publish goes on top of them all, because you publish files, dialogs and apps.
+
+Still, I can proceed without engine for now (a default engine) and then add engine to go from alpha to beta.
+
+The subscription will be only for those who want to create projects (and engines), but if you get invited to a project, you can create an account and use it without paying. The subscription has to be 10 bucks, not 5. I think that will make altocode possible as a business.
+
+TODO project:
+- autostart dockers that are on the db and have a data volume + test
+- don't give error if container is down and deleting an entry that exists + test
+- order of returning projects
+- Backup
+- Tests for backup & autogit
+- Fibonacci project loader
+- Tests for project loader
+
+Some notes on Meier - Memoir!
+- "six years after its release, Dan's brilliance was still compelling me to build upon it. *The Seven Cities of Gold* would randomly generate a new continent for each round, and gave you the option to behave honorably or cruelly with the natives you encountered"
+- "in fact, that term [edu-tainment] was first invented by Trip Hawkins to refer to *The Seven Cities of Gold*. The game was a cloud-parting, shackle-removing, mind-blowing masterpiece for me, and there were elements of it in nearly every game I made thereafter."
+- "The other game that directly influenced *Civilization* was called *Empire: Wargame of the Century*, by Walter Bright and Mark Baldwin. It, too, had a randomly generated map that was slowly revealed as you marched your armies across it, but unlike *Seven Cities* and the board game called *Civilization*, *Empire* had a significant military component. It also extended the timeline from the ancient into the modern era, and differentiated the types of units available as the clock progressed."
+- "I asked Bruce to make a list of ten things he would improve about *Empire*, so it obviously played a large role in my thinking. (Incidentally, this is a great strategy for revising your own game mid-development as well. It's important to step back and view your work in terms of concrete opportunities for improvement."
+- "Business maneuvering could probably make for a fun prototype, if the rest of it weren't so boring all the time."
+- "Hasbro made one attempt to do something with the name on their own, releasing *Civilization II: Test of Time*"
+- "Thus, against all odds, we were handedthe opportunity to make *Sid Meier's Civilization III* without even asking for it."
+- "The first thing Bruce made when he left MicroProse was called *Age of Empires*, which was basically *Civilization* in real time, and it was wonderful! *Rise of nations*, *Age of Wonders*, *Europa Universalis*, *Imperialism*, they're all fine. It's a philosophy I learned from the best: one of the things Dani Bnten Berry told me later in her life was how happy she was that I'd made *Pirates!*, because it had included all of the things she'd wanted to do with *Seven Cities of Gold* but couldn't at the time"
+- "The ideas didn't start with us, and they can't end with us either."
+- "Noah had greatly enjoyed the sword fighting minigame in *Pirates!*, and when he was later tasked with creating a boxing minigame for *Indiana Jones and the Last Crusade*, he couldn't see doing it any other way. (...) To be honest, they don't look all that similar to me. But apparently he felt a fair amount of guilt over it."
+- "With this flash of insight, Noah suggested that they build the duels around the combatants' rapier wits instead."
+- "Games might be stolen from games, but everything we do is stolen from non-game to begin with."
+- "It's all part of our shared human culture - or dare I say it, human civilization."
+- "Someday, if we're lucky, an entirely new industry will steal from us."
+- "The difference between creativity and theft is that creativity adds, and each addition creates potential that wasn't there before."
+- Note: the fundamental process, right here!
+- "If we don't share our ideas and help one another build, we'll never get tall enough to find out what's next."
+- Note: "what's next" -> the next good change required by the whole.
+- "Another more general concept that I took from *Seven Cities of Gold* was that the anticipation of each new story line was at least as important as the story itself."
+- Note: again, you see latent structure and are working in it.
+- "A huge portion of *Civilization* happens in this nebulous "after that" realm, stacking potential paths on top of actual. A bad game strands you in the past (as in, "What just happened?")while a mediocre one keeps you in the present ("Sure, this is cool"). But a really good game keeps you focused on what's yet to come. It's the underlying basis for that elusive "moment to learn, lifetime to master" quality."
+- Personal note: I picked my college majors, and oriented a lot of my reading and learning in high school, due to Civilization II.
+
 ## 2026-07-16
 
 TODO now:
@@ -123,6 +179,7 @@ the normal places that could all be in vibey:
 - ai
 - file viewer
 - text editor
+- epub reader
 - terminal
 - email
 - github?
