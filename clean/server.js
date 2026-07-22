@@ -374,13 +374,19 @@ docker.run = async function (id, command, options) {
    id = 'vibey-project-' + id;
    if (type (command) === 'array') command = command.join (' ');
 
-   var commit = options && options.commit;
+   var commit = options && options.commit, originalCommand;
    if (commit) {
+      originalCommand = command;
       command += ' && if [ -n "$(git status --porcelain)" ]; then git add -A && git commit -m ' + Path.quote ('vibey:auto ' + commit) + ' > /dev/null 2>&1 && git rev-parse HEAD; else echo; fi';
       delete options.commit;
    }
 
    var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, options || {});
+   if (result.code === 1 && result.stderr && result.stderr.match (/^Error response from daemon: container .+ is not running/)) {
+      var restart = await run ('docker', 'start', id);
+      if (restart.code === 1) return result;
+      return docker.run (id.replace ('vibey-project-', ''), originalCommand || command, options);
+   }
    if (commit && result.stdout) {
       result.sha = last (result.stdout.split ('\n'), 2) || undefined;
       result.stdout = result.stdout.replace (/[^\n]{0,}\n$/, '');
@@ -827,8 +833,7 @@ var routes = [
 
    ['get', 'projects', async function (rq, rs) {
       reply (rs, 200, (await getForUser (rq.user.id, 'project')).sort (function (a, b) {
-         console.log (a.last, b.last);
-         return parseInt (a.last) - parseInt (b.last);
+         return new Date (b.last) - new Date (a.last);
       }));
    }],
 
@@ -1002,7 +1007,7 @@ var routes = [
 
       test ('all', function (error, rdata) {
          reply (rs, 200, cell.JSToText (error ? {error} : rdata));
-      }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis);
+      }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis, run);
    }],
 
    ['get', 'test.js', async function (rq, rs) {

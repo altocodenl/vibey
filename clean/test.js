@@ -14,7 +14,7 @@ if (mode === 'server') {
    }
 
    module.exports = function (CONFIG) {
-      return function (suite, cb, admin, redis) {
+      return function (suite, cb, admin, redis, run) {
 
          var adminHeaders = {'x-csrf': admin.csrf, cookie: admin.cookie};
 
@@ -294,9 +294,11 @@ if (mode === 'server') {
             ['Create a second project with the same name', 'post', 'project', {name: 'el norte'}, 409, assertBody ({error: 'There is already a project with that name'})],
             ['Create a second project with another name', 'post', 'project', {name: 'second'}, 200],
             ['List projects after second project creation', 'get', 'projects', 200, function (s, rq, rs) {
-               console.log (rs.body);
                if (! assert (['length', rs.body.length, 2, teishi.test.equal])) return false;
-               if (rs.body [0].last < rs.body [1].last) return validationError = 'Last project should come first' && false;
+               if (new Date (rs.body [0].last) < new Date (rs.body [1].last)) {
+                  validationError = 'Last project should come first';
+                  return false;
+               }
                s.secondProjectId = rs.body [0].id;
                return true;
             }],
@@ -317,6 +319,11 @@ if (mode === 'server') {
                ]);
             }],
             ['List files', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
+            ['List commits when there is only the initial commit', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
+               // TODO: better assertions, also add one after each command that triggers a change
+               console.log (rs.body.stdout);
+               return true;
+            }],
             ['Get file that is not there', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
             ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
             ['Edit main file', 'post', 'project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, function (s, rq, rs) {
@@ -341,17 +348,30 @@ if (mode === 'server') {
             }],
             ['Overwrite file (noop)', 'post', 'project/write', function (s) {return {id: s.projectId, path: 'doc/main.md', content: '# el norte'}}, 200, assertBody ({})],
             ['Run a command with pipe', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
-            ['Run a command with change and output', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs) {
-               return assert ([
+            ['Run a command with change and output', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs, next) {
+               if (! assert ([
                   ['keys', dale.keys (rs.body), ['stdout', 'sha'], 'eachOf', teishi.test.equal],
                   ['stdout', rs.body.stdout, 'foo\n', teishi.test.equal],
                   ['sha', rs.body.sha, 'string'],
                   function () {return [
                      ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]
                   ]}
-               ]);
-            }],
+               ])) return false;
 
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.projectId);
+                  next ();
+               }) ();
+            }],
+            ['Run a command after container has been turned off', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nmain.md\n'})],
+            ['Create a third project', 'post', 'project', {name: 'third'}, 200, function (s, rq, rs, next) {
+               s.thirdProjectId = rs.body.id;
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.thirdProjectId);
+                  next ();
+               }) ();
+            }],
+            ['Delete project with a stopped container', 'delete', function (s) {return 'project/' + s.thirdProjectId}, 200],
             CONFIG.cloud ? ['Delete account', 'post', 'auth/delete', {}, 200] : [],
          ];
 

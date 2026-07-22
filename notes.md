@@ -1,5 +1,29 @@
 ## Vibey development notes
 
+## 2026-07-21
+
+Vibey can be a good place for notes. You can have multiple files, but still search quickly across them.
+
+Search on a dialog can give you all the messages that contain the search term. It's a compressed view of the dialog, filtering out messages. The unit/center nature of each message is key: time, author. It's a strong center.
+
+TODO:
+- Tests for autogit
+- Backup to s3 + test
+- Fibonacci project loader
+- Tests for project loader
+
+Some notes on Meier - Memoir!
+- "A game that runs on speculation can expand or shrink to fit any player's comfort level."
+- "The spectrum from interesting, to compelling, to addicting is long and nuanced."
+- "one day, my future grandchildren will sneer at whatever new thing is captivating the attention of their youth. They, too, will call it addictive"
+- "Imagination is good, compelling narratives are good, and empathy is good, in whatever form we express them. Addiction is a problem, but it can happen with any type of escapism"
+- "Fan communication was at its peak by then, and we were used to being told on a daily basis that the game was a life-changing experience."
+- "When escapism is done right, it creates a community of escapees that never existed before."
+- "the more universal and effective our games are, the more knowledge, empathy, and ambition we can inspire."
+- "I build most major revisions from scratch (...) The coding is the easy part; it's like drawing a picture of something after you've exavated it. The sweat is in the digging, not the documentation."
+- "The truth is I never really give up on anything. The ideas just sit in stasis, sometimes for decades, until I can figure out the right way to make them work. (...) once I find that perfect angle the rest falls into place pretty quickly."
+- "In my entire career, the dinosaur game is the only one I've ever had to declare totally, soul-crushingly, extinct."
+
 ## 2026-07-17
 
 - Email can be a bunch of text files! With ripgrep performance in today's software (ssd, fast cpu), search should be very fast. Email can be an altocode app.
