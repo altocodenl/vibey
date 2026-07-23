@@ -1,5 +1,25 @@
 ## Vibey development notes
 
+## 2026-07-22
+
+Some notes on Meier - Memoir!
+- "I added a button to automatically optimize the breeding, but if you have to offload the supposedly fun part of your game, that’s a pretty good indication that you’re confused about what fun is."
+- "There was usually a clear right answer to the choices in any given situation, and it almost seemed as if the computer were playing you instead of the other way around. Simplification helps when there’s too much going on at once, but if you’re investing the time needed for a turn-based game, you want all of the interesting decisions to be under your control."
+- "Otherwise, if all units are equal, it becomes a free-for-all mashup at the center of the screen, like a bunch of five-year-olds trying to play soccer. Good strategic planning can’t happen until you spread your team out, and throwing some kind of ranged weapon into the mix forces the player to do that."
+- "One of the big questions I couldn’t answer was, “Who is having the most fun in the dinosaur universe?” That’s who you want your player to be: the person with the most power, living the most exciting life. In the history of civilization, it’s the king; on the Spanish Main, it’s the captain of the pirate ship; in war, it’s the general; in the transportation industry, it’s the tycoon. But individual dinosaurs don’t really have a lot of power. T. rex can eat all the little guys, but he doesn’t build an army."
+- "The more dinosaur names a kid can rattle off, the cooler he is, as if the fundamental childhood instinct is to mentally collect all of the different species in the first place."
+- "Like Railroad Tycoon, my golfing prototype started out as a model builder rather than a competitive simulator, and I again developed it while on vacation to clear my head from a stalled title."
+- "Of course, the expectations for a prototype were much higher now, and the length of a vacation was still the same, so what was impressive in 1990 should have transitioned to impossible in 2000. But one of the secrets of being a game designer is that you get to reuse your stuff—writers can’t plagiarize their own passages; artists can’t add details to a portrait and call it new; but I can rearrange existing pieces of code into a completely different game within just a few hours."
+- "The point of a prototype is just to get across as quickly as possible what the experience could potentially feel like, if we spent the time on it."
+- Note: maybe I've yet not understood what it's like to build a prototype.
+- "What these guys really liked best, it turned out, was when a hole was easy for them, but hard for others. If Jonathan were especially good at chip shots, for example, then he had the most fun on holes that relied heavily on them. Golfers wanted to be the star in their world just as much as gamers did."
+- "The interesting thing about this system was there was essentially no AI involved. We had to lay out the complicated assessment algorithms, but the computer was never tasked with creating a good golf hole itself."
+- "Railroad Tycoon had come close to shipping without AI, but near the end of development we decided that the added urgency would be an improvement."
+- "Part of the fun is learning the patterns of the AI and successfully predicting them, and when computers don’t act like computers, the only psychologically safe assumption is that they must have accessed information they shouldn’t have."
+- "Computers are too smart to be crazy, so if they start acting that way, we can’t shake the suspicion that they know something we don’t. Thus, from the designer’s perspective, brilliant AI is usually not our highest priority."
+- "Something new is always more interesting than something I’ve already done."
+- "SimGolf wouldn’t have been as good if I hadn’t maintained an interest in music—and wouldn’t have existed at all if I hadn’t maintained an interest in golf. A designer who’s only interested in games will find it very hard to bring anything original to the table"
+
 ## 2026-07-21
 
 Vibey can be a good place for notes. You can have multiple files, but still search quickly across them.
