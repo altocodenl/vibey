@@ -1,5 +1,16 @@
 ## Vibey development notes
 
+## 2026-07-23
+
+Some notes on Meier - Memoir!
+- "CIVILIZATION III SEEMED TO ACT as a falling domino, and over the next several years, nearly all of the loose MicroProse properties would be returned to us one by one."
+- "Civilization had evolved gradually, but catapulting an old title into the modern age required both a technological and an emotional overhaul."
+- "It didn’t matter how much everyone oohed and aahed in the first 30 seconds if there weren’t enough substance beneath it to keep them coming back for more. No, two was plenty of dimensions for me."
+- "All projects ebb and flow to a certain degree, and at some point most will reach “the Valley of Despair.” It’s that moment when it seems nothing is working, no one understands your vision, the interface is ugly, the gameplay is boring, and you can’t imagine how you’ll ever finish it. Usually it happens about halfway through the project, when the game gets too big to hold in your head all at once, and the days fill up with meetings, and every adjustment throws eight other variables out of whack. But occasionally, it happens earlier, when it turns out that the plan you were stubbornly clinging to wasn’t as good as you thought it was."
+- "Of course in retrospect, Pirates! had been the perfect instrument for 3D even without the swimming scallywags. It was the most story-based game I’d ever made, ideally suited for both picturesque environments and full-scale cinematics."
+- "Obviously, I didn’t expect my art to stay in the final version of the game, but I made it anyway, because it’s important as a designer to sit in all the chairs."
+- "Ideas are cheap; execution is valuable. When people used to ask me how to get into the industry, I’d say, “Get a copy of DPaint and a C++ compiler.” These days it’s more like, “Get a copy of Photoshop and a Unity tutorial,” but the principle hasn’t changed—there’s no guarantee your talents will be discovered, but they certainly won’t be if you never make anything. The best way to prove your idea is a good one is to prove it, not with words but with actions. Sit in the programmer chair until you have something playable, then sit in the artist chair until you have something crudely recognizable, then sit in the tester chair and be honest with yourself about what’s fun and what’s not. You don’t need to be perfect at any one job, you just need to be good enough to prove your point, and inspire others to join you."
+
 ## 2026-07-22
 
 Some notes on Meier - Memoir!
