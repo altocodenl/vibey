@@ -1,5 +1,20 @@
 ## Vibey development notes
 
+## 2026-07-24
+
+Some notes on Meier - Memoir!
+- "Previous Civ designers are like grandparents: we made our major sacrifice when we were young and full of energy, and now we get to enjoy all the good parts of raising the new generation, while their caretakers handle all the diapers and tantrums."
+- "Aside from art and audio, which are fully replaced with each new technology cycle, Civ designers traditionally follow a rule of thirds. One-third of the previous version stays in place, one-third is updated, and one-third is completely new."
+- "Visually, diagonals seem fine, but mathematically, they cover significantly more ground than straight moves, and throw off the balance of the game."
+- "Oddly enough, my military titles weren’t subjected to any real scrutiny, despite being chock full of “hegemonic assumptions.” I suspect it had to do with their stated intent."
+- "It’s only once you start aiming for a universal, apolitical theme that you begin to be judged by that metric, and inevitably fall short of the ideal."
+- "The accusation that we embrace a “progress” model of civilization is also a fair one, and realistically, that’s not going to change. Games must involve accomplishment. It’s certainly not the only way to look at the world, but it’s the only way that makes sense in the context of what we’re trying to create."
+- "Scholars talk about us, and critique us, because they know us. Gamers didn’t magically gain credibility with academics; they grew up and became academics. We created our own watchdogs, and when they complain, I know it’s only evidence of how much they care."
+- "Education is somebody else telling you what to think, while learning is opening yourself to new possibilities, and grasping a concept because you understand it on a personal level."
+- "When games are done right, players don’t even realize they’re learning. Of course one could also argue that when teaching is done right, students don’t realize how much fun they’re having, either. As Marshall McLuhan famously quipped, “Anyone who tries to make a distinction between education and entertainment doesn’t know the first thing about either.”"
+- "Bruce Shelley used to joke that we do our research in the children’s section of the library, and it’s not entirely a metaphor. Kids’ books skipped the details, and got right down to the important themes."
+- "We could layer our own fantasy, humor, and drama on top of it, while remaining confident that everything underneath would resonate with that foundation of joy that adults tended to forget was inside themselves."
+
 ## 2026-07-23
 
 Some notes on Meier - Memoir!
