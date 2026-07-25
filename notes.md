@@ -1,5 +1,31 @@
 ## Vibey development notes
 
+## 2026-07-25
+
+Two of the most important interactions are the first ones:
+- How to create a new (or select an existing) project.
+- How to create a new (or select an existing) file/dialog/app.
+
+For the project, I'm thinking that shell view for the top five projects, with more below in list form. The idea is that the shell contains the vital few, automatically, unless the user pins a project to one of the positions. The many go below on a list that is searchable. The search should be really fast.
+
+For the files, the creation of a new file or dialog should be a single button that is large and comfortable, on the top left. The top right has the problem that it is too floaty and would take space away from a PDF or an image you're viewing. So I'll try with the bottom left and see how it goes. When you click on it, a modal comes up with a single decision: file or dialog? Explaining what's each. Once selected, the modal stays but the input for the name appears. We can autogenerate names based on verb + dash + noun. We can make it interesting by adding a spinny to autogenerate another name and also by using prior probabilities to connect both verb + noun, as well as to make it more likely to pick nouns and verbs in general based on the terms picked by previous files/dialogs (whatever fits the noun-verb pattern). This can be all crunched in the client. Then, the names won't be fully random, but go towards a certain path.
+
+The third important thing is to make the settings for AI as easy as possible to set up. The flip panes we have work well, but we can leverage the plus to add something, instead of the empty boxes, you add an openai subscription, or api key. Since each will be a file of sorts, we open the door later for sharing or limiting per project, so you can have granularity there. Everything's a file, even the settings.
+
+When I am AFK:
+- Design the important interactions in my mind's eye.
+- Build user journeys for people I know, and see how vibey could make their lives significantly better.
+
+What about people that don't have an AI subscription? API usage is very expensive, so that's a no go. Running local models is also too expensive given the GPU prices, so that won't fly either. I don't see a way out from this, for now.
+
+https://en.wikipedia.org/wiki/Dwarf_Fortress:
+
+"At any time, the player can create an XML dump in which players can examine history outside of the game. Similarly, players can export detailed maps that show world details such as biome boundaries, rainfall and drainage. These XML files and map images can be used in third-party software to view the generated world and its history in a more user-friendly and comprehensive interface.[41]"
+"Dwarf Fortress has attracted a significant cult following.[2][86][87] The game's difficulty, with most fortresses eventually succumbing to various forms of defeat, led to its unofficial slogan "Losing is fun!"[42][52] Adams has said that the slogan was originally a throw-away joke from the game manual, and is meant to create comfort with the concept of permadeath."
+"Adams stated that the most impressive thing he had ever seen done with the game was when a player managed to create a Turing-complete 8-bit computer powered by dwarves."
+"The game influenced Minecraft, which reviewers considered a more user-friendly version of Dwarf Fortress.[8][42][95] Adams says he is thankful for the Minecraft developers citing Dwarf Fortress because that drew more players to his game.[40]"
+"RimWorld developer Tynan Sylvester said Dwarf Fortress "amazed me because of the stories people wrote from it. I read generated tales like Boatmurdered and Gemclod and was fascinated by how the player and game could work together to create a narrative that actually worked."
+
 ## 2026-07-24
 
 Some notes on Meier - Memoir!
