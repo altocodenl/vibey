@@ -1,5 +1,23 @@
 ## Vibey development notes
 
+## 2026-07-26
+
+- The most important modal of the inner view is the one for creating a new X. I just realized that it's the three boxes of the middle layer: file, dialog and app.
+- App vs script: it would be a thought to suggest AI (in the system prompt) to make every script into an app by having a front-end and it listening. Why not? It's friendlier, and it works better for most people. You can always override it if you want something that dumps to stdout or a file. What does an app have that a script doesn't? An interactive graphical UI, and maybe the last inputs and outputs (to hint you what you used it for last time).
+- A dialog is an append only file, with an edit call and divided in entries.
+- An app is not a linear file but a graphical interface.
+- Dialogs should have files in them. I might regret it later, but accessibility rules. They have to be base64 encoded in. But what if they reference files? The reference would be trivial. What's not trivial is granting that level of access for dialogs with a certain level of access. Do you let linked through assets be read? What if someone else puts a link to your main just so it leaks? It really feels like that the base64 is the way to go, and then you can of course trivially download them to your files, or let AI do it with commands.
+- Two things that are a must, at least for me: 1) use claude with a personal subscription from within vibey; 2) decent web search for agents.
+
+More use cases:
+- Share media and comments on a big party, it can be a dialog! Share by user instead of public. Link to share (asks permission, rather than "anyone with the link").
+- Travel plans for a couple, family or small group in a dialog, where AI has access and can do web research.
+- Forward plane tickets and other travel details to a dialog, so an agent can summarize it all (and update if needed) into a quick app for access for each flight, so a person in their 60s or 70s can quickly access the travel details without having to go into their inbox.
+
+If I had a gun to my head and had to sum it up, I'd say that the key to vibey is "all in one place". But what's the purpose of this? Why all in one place? What's the deep why? What does convenience allows? Or is it a union? It's the combination of all in one place and extreme flexibility. Many apps try to be all in one place, but they limit you severely in what you can do because they give you features, not primitives you can build upon. What sucks about most apps is the moat lock in, plus structural rigidity. If we run diametrally in the opposite direction, vibey is a unified space with flexible primitives. But what's behind this? What can be possible that wasn't possible before? It has to do with empowerment, freedom, flexibility, convenience that allows you to do more, do better, do less.
+
+The purpose of vibey is perhaps about people building their own digital space, rather than consuming a digital space pre-created for them.
+
 ## 2026-07-25
 
 Two of the most important interactions are the first ones:
