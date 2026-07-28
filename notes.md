@@ -1,5 +1,13 @@
 ## Vibey development notes
 
+## 2026-07-27
+
+The why of vibey is buildability, in the Alexandrian sense. Vibey is the building materials for humans to create their own digital spaces, with a high degree of life.
+
+The ones that coulbe be having the most fun in Sid Meier's dino game could actually be the *genes*. How do they ally with other genes? How do they change? How do new genes appear? Are they always variant of existing ones? If so, where do you draw the line?
+
+Altocode's blog could be a vibey *dialog*. You have named/dated entries. You can embed files. That really resembles a dialog! Why not make it so? The one thing that'd be missing is to put the latest at the top, but that could be a mere switch.
+
 ## 2026-07-26
 
 - The most important modal of the inner view is the one for creating a new X. I just realized that it's the three boxes of the middle layer: file, dialog and app.
