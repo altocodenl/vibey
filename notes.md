@@ -1,4 +1,29 @@
-## Vibey development notes
+# Vibey development notes
+
+## 2026-07-28
+
+Some notes on Meier - Memoir!
+- "A year after Pong’s release, the first four-way gaming joystick—a word which, oddly enough, had its roots in early airplane controls—made its debut in the arcade game Astro Race."
+- "Some of the products were surprisingly forward-thinking, like Datasoft’s “Le Stick,” which detected motion through a set of liquid mercury switches that triggered whenever the freestanding cylinder was tilted more than twenty degrees in any direction."
+- "Soon, however, the third-party manufacturers fell away, and an evolutionary split emerged. On one side, the traditional knobs, buttons, and joysticks of arcade cabinets consolidated into a single proprietary controller for each console system. On the other, the personal computer industry began to drift towards more established business peripherals, namely the  mouse and alphanumeric keyboard."
+- "Major gaming companies tried to straddle the gap for as long as they could, but in late 1983, the North American console market crashed, with previous annual revenues of $3.2 billion plunging to just $100 million by 1985."
+- "For various reasons, the Japanese market remained stable (...) Japan emerged as the home console champion for the next twenty years."
+- "But the culture of each format was firmly rooted in its respective country, and very few games successfully crossed over."
+- "Only *Civilization* was successful enough to be ported everywhere, including the Super NES, PlayStation, and Sega Saturn."
+- "In the end, we took their word for it- mostly because we had no choice"
+- "when I made the announcement that I was going to design a console-only game called *Civilization Revolution*, the horrified outcry from our fans was not exactly surprising."
+- "The nature of our game inspires fierce ownership, so when faced with something new, our fans never hesitate to make their voices - and especially their displeasure - heard.
+- "It was, as we described it at the time, *Civilization* in an evening. Not everyone has eighty hours to devote to a single game"
+- "The other feature that set *Civilization Revolution* apart was that we finally managed a robust, workable multiplayer experience, thanks to those same siplifications we'd set out to pursue."
+- "As with our single-player games, we knew the *Gettysburg!* multiplayer was good when everyone in the office kept setting aside their work to play it all afternoon. (...) when you hear folks gleefully taunting each other down the hall, and office mates cheering them on, you know you've hit on something special."
+- There are always to issues to consider when it comes to online play: lag and sync."
+- "The easiest solution, which we were able to get away with in *Gettysburg!", is to pass entire game-states from one to the other. (...) Any disagreements would be overwritten at the very next data transfer."
+- "To share just the changes to the board was more efficient (...) But even the tiniest sync error was a game-ending disaster, because here was no way to recover hours of built-up changes from scratch. (...) So I spent months and months rooting out sync errors, making sure that the random number generators for every possible scenario were being shared, or isolated, as necessary."
+- "When outcomes are truly random, people lose a great deal more often than they think they should. (...) randomness is the very opposite of justice."
+- "I couldn't convince our testers that it made sense for them to lose a three-to-one battle roughly one-fourth of the time."
+- Note: I think the problem behind this is that you either win or lose the entire unit in civ, which is unrealistic. Most of the time, the unit can run away, particularly when attacking.
+- "Around the Firaxis office, we have a similar saying: feedback is fact."
+
 
 ## 2026-07-27
 
