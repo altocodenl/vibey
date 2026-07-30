@@ -1,5 +1,7 @@
 var mode = typeof window === 'undefined' ? 'server' : 'client';
 
+var clog = console.log;
+
 if (mode === 'server') {
 
    // *** SETUP ***
@@ -320,9 +322,13 @@ if (mode === 'server') {
             }],
             ['List files', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
             ['List commits when there is only the initial commit', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               // TODO: better assertions, also add one after each command that triggers a change
-               console.log (rs.body.stdout);
-               return true;
+               s.assertCommit = function (stdout, length, name) {
+                  return assert ([
+                     ['commit length', stdout.split ('commit').length, length + 1, teishi.test.equal],
+                     ['last commit name', stdout.split ('\n').slice (0, 5).join ('\n'), new RegExp (name), teishi.test.match]
+                  ]);
+               }
+               return s.assertCommit (rs.body.stdout, 1, "Write 'doc/main.md'");
             }],
             ['Get file that is not there', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
             ['Get main file', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
@@ -335,8 +341,14 @@ if (mode === 'server') {
                   ]}
                ]);
             }],
+            ['List commits after edit', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
+               return s.assertCommit (rs.body.stdout, 2, "Edit 'doc/main.md'");
+            }],
             ['Get main file after edit', 'post', 'project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# El Norte!')],
             ['Edit main file (noop)', 'post', 'project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
+            ['List commits after noop edit', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
+               return s.assertCommit (rs.body.stdout, 2, "Edit 'doc/main.md'");
+            }],
             ['Overwrite file', 'post', 'project/write', function (s) {return {id: s.projectId, path: 'doc/main.md', content: '# el norte'}}, 200, function (s, rq, rs) {
                return assert ([
                   ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
@@ -346,7 +358,13 @@ if (mode === 'server') {
                   ]}
                ]);
             }],
+            ['List commits after write', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
+               return s.assertCommit (rs.body.stdout, 3, "Write 'doc/main.md'");
+            }],
             ['Overwrite file (noop)', 'post', 'project/write', function (s) {return {id: s.projectId, path: 'doc/main.md', content: '# el norte'}}, 200, assertBody ({})],
+            ['List commits after noop write', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
+               return s.assertCommit (rs.body.stdout, 3, "Write 'doc/main.md'");
+            }],
             ['Run a command with pipe', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command with change and output', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs, next) {
                if (! assert ([
@@ -362,6 +380,9 @@ if (mode === 'server') {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   next ();
                }) ();
+            }],
+            ['List commits after command with change and output', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
+               return s.assertCommit (rs.body.stdout, 4, "Run 'echo foo > doc/another.md && cat doc/another.md'");
             }],
             ['Run a command after container has been turned off', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nmain.md\n'})],
             ['Create a third project', 'post', 'project', {name: 'third'}, 200, function (s, rq, rs, next) {

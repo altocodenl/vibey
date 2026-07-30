@@ -377,7 +377,7 @@ docker.run = async function (id, command, options) {
    var commit = options && options.commit, originalCommand;
    if (commit) {
       originalCommand = command;
-      command += ' && if [ -n "$(git status --porcelain)" ]; then git add -A && git commit -m ' + Path.quote ('vibey:auto ' + commit) + ' > /dev/null 2>&1 && git rev-parse HEAD; else echo; fi';
+      command += ' && if [ -n "$(git status --porcelain)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && git rev-parse HEAD; else echo; fi';
       delete options.commit;
    }
 
