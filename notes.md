@@ -1,5 +1,45 @@
 # Vibey development notes
 
+## 2026-07-30
+
+Some notes on Meier - Memoir!
+- "Turns in Leonardi's game were paced, but simultaneous, with each player selecting their move and announcing together the page their opponent should turn to, until eventually, one appeared in the other's crosshairs."
+- "as our first exclusively mobile game, it did raise the questino of pricing. Specifically, we had to decide whethe to charge one upfront premium for the game, as was traditional, or try out the trendy new model of downloadable content, in which a limited version of the game would be given away for free and then subsequent levels would have to be individually purchased."
+- "Nexon, the company that invented the notion of small purchases within a free game, first used it as a Hail Mary pass for an online server that was about to be shut down for lack of subscribers."
+- "A full 70 percent of *Candy Crush Saga* users have never paid a dime for the game"
+- "But there's no escaping the fact that many free-to-play games are predatory, especially when they target young children (...) There has to be a worthwhile product underneath, and a respectful, honest relationship with players about what they're getting for their money."
+- "The thing I like about Mel Brooks, and comedians in general, is that they're actually very analytical."
+- "Both are trying to engage the audience with a sharpened version of reality"
+- "I value quiet competence."
+- "Those four days of nearly continuous news coverage, from the rising of the rocket to the landing of Neil Armstrong's boot in the dust, were the first unified, real-time experience of a nation, the first hint of the constant connectivity that we now live with every day."
+- "The original *Star Trek* had aired its series finale just six weeks before the Apollo 11 launch"
+- "So many of our wildest dreams have turned out to be laughably conservaive that it's hard to write off anything as impossible."
+- "Kirk's crew had a lot of the same problems we did, which were the same problems Bach's parishioners had, and so on."
+- "Once you start atlking about your own legacy, you're done - and I'm definitely not done."
+- "Most people's vision of me isn't about me at all, but about the joy they felt, and I want to maintain that happy memory for them."
+- "I think that in life, as in game design, you have to find the fun."
+- "Take action as quickly and repeatedly as possible, take advantage of what you already know, and take liberties with tradition. But most importantly, take the time to appreciate the possibilities, and make sure all of your decisions are interesting ones."
+
+Ideas:
+- Permissions on projects as something in the db is not first class. What if we just have special files (.access) that regulate access for everything in that folder and below? We can start with "everything is closed", and then add access to things by prefix plus a list of emails (on the same line). We can take it from there, eventually it might evolve into a pseudo language. At query time, the server would pick up the .access and resolve if there's access or not. You would have lists of emails as whitelists and that'd be it for granting access. The UI, if necessary, would be some sugar on top of .access. I'd use emails, not user ids, because how could you even know the user ids of people yourself? And usernames are usually quite extraneous, and subject to change, etc. Email seems the sweet spot.
+- Credentials could also be files, and just be read from the project (.settings). So we can avoid the problem of settings being something outside of the dataspace.
+- A special type of embed for logging in, but instead of to vibey, to a different domain where the app is exposed. That would just proxy the login to vibey, as a vibey cookie, but set it in the browser on the domain where the app was accessed from. On later query, the session is relayed to the embed and vibey picks it up and resolves it. So you can host an app in vibey without having to build auth, just letting vibey resolve identity for you. And by app here, I also (and mainly) refer to a page with some js that loads up a couple of dynamic files (say, json or md) and builds a dashboard out of them dynamically.
+
+## 2026-07-29
+
+Some notes on Meier - Memoir!
+- "Many of the earliest "weblogs" came from the gaming community, starting in 1996 when *Doom* developer John Carmack decided to convert his Unix .plan file - something most programmers used as a public to-do list - into a more conversational status update for his fans."
+- "One ongoing issue with even the best multipayer code was the fact that strangers on the internet tend to behave in weird, antisocial, or downright offensive ways."
+- "once an online game falls below certain participation levels, the financial reality dictates that it must be taken away from everyone."
+- "But my first love would always be the streamlined process of indie development."
+- "*Sid Meier's Ace Patrol* would be a streategy game from start to finish, which meant, among other things, that the battles would be turn-based."
+- "since the height of a plane mattered as well as its coordinates, they'd have to strategize across all three dimensions."
+
+TODO:
+- Backup to s3 + test
+- Fibonacci project loader
+- Tests for project loader
+
 ## 2026-07-28
 
 Some notes on Meier - Memoir!
