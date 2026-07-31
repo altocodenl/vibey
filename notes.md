@@ -1,5 +1,15 @@
 # Vibey development notes
 
+## 2026-07-31
+
+- Open design problems:
+   - Structure of .access
+   - Structure of .settings
+   - How to relay login with own domain
+   - How to build a simple dynamic frontend
+
+Seeing a good AI model search the web and search for files and patterns, if the harness has great inspectability (or rather, transparency), can be like watching a master at work. The opaqueness, not the automation, is what getting in the way of human learning.
+
 ## 2026-07-30
 
 Some notes on Meier - Memoir!
