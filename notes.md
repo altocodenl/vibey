@@ -1,10 +1,65 @@
 # Vibey development notes
 
+## 2026-08-02
+
+Files: search (outside + inside), see, edit. make editor be to position language.
+On upload, take text of non .txt/.md files (anything not directly greppable) and make a .<filename>.text that is greppable, so that search within can
+
+Any domain you map to vibey should fall on one project only. To resolve path, we can do it inside the project.
+
+Proxying a path can be done in a settings file: .proxy!
+
+Thinking of having a single file with all settings: .access, .credentials, .proxy. It could be a single fourdata file, with some sugar on top on the settings view.
+
+TODO next:
+- rework login: do we need signup vs login, or just login? do we need otp or can we just have a magic link that we copy or open on a button? to send the email, you could click on a button that will close that tab on vibey.
+- autogit
+- shell view for project
+- file crud (including calls that will be tools)
+- file search: generate .txt files for pdfs and csv/xls, so they are searchable too.
+
+```
+1 auth A signup/login
+       B whois
+       C access
+2 proj A crud
+       B calls
+       C autobackup/autogit
+3 engi A crud
+       B "assign project/domain"
+       C update
+4 file A search
+       B see
+       C edit
+5 dialog A human
+         B AI
+         C shell
+6 app A auth
+      B internal
+      C external
+7 access A domain
+         B api/email
+         C public/auth
+```
+
+dialog format:
+- triple schwa to open a new message (no need for triple schwa to close it). The server can add it when we send a new call to the dialog.
+- headers: from, to, id, t (iso string), content type
+- because it will be utf8, we'll use base64 for encoding binary. we can also do a link to a file, but it can definitely be in the dialog, one per message.
+- when you send a message to the dialog, it's `to: dialog`. To AI, you'd do `to: <model slug>`. When AI responds, it does so to the dialog, unless it wants to do a tool call, in which case it is `to: vibey`. Calls to the shell are also `to: vibey`. It'd make sense to reply to an id, though. vibey tool calls respond to the id of the message that called them. Same with AI calls, assuming that they respond to the last message addressed to it that it received.
+- one file per message, rather than mixing text and binary in the messages. more basic and decomposable would work well, let the client group images.
+- images or other binaries could also have a `preview` key with the thumb in base64.
+
+login to vibey as a simple special embed that creates a page that lets you login to vibey, but just with the box for the email and without logo, so you can use it on your own app. the process should set a cookie when the server responds, and the cookie should stay in that other domain. then, the cookie should be proxied to vibey when the app is requested. the page should do an auth check and redirect to an url specified in the embed when you're logged in. the "logged in" view should be opened only to certain emails.
+
+at this level, auth is simply something that ties a session to an email. with 2fa, it'd be a more demanding way to prove that email or an email + phone. it's an asymmetric proof that you have access to X without actually us having access to X.
+
 ## 2026-07-31
 
 - Open design problems:
    - Structure of .access
    - Structure of .settings
+   - Structure of dialog
    - How to relay login with own domain
    - How to build a simple dynamic frontend
 
