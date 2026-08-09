@@ -1,5 +1,59 @@
 # Vibey development notes
 
+## 2026-08-08
+
+Launch date: August 31. Three weeks to alpha.
+
+Will start prepending paths on server tests with `/`, so it's more clear that it is a path.
+
+TODO:
+- Run cleanup unconditionally after server tests (client tests?)
+- Do diff of old and new keys in the DB, to know what to remove. No, actually better: scan keys, anything with `example.com` is removed.
+
+## 2026-08-07
+
+Idea: during alpha (no engines) charge 20, not 10 per month, until we have engines. So I charge about 10 EUR/mo of computing, which is like 2 servers. I would not limit the compute much (unless it was overused).
+
+There might be value in me having dedicated servers and running virtual engines on them. The bulk compute of a dedicated is perhaps 10x per RAM/CPU of what the VPS is. That would be a great value unlocker. But I need to run the numbers, perhaps it's not like that at all. Somethihg tells me Hetzner already does this very efficiently with low margins.
+
+What if I rename dialog to chat? A dialog is too formal a word for most. And a dialog is usually between two parties, whereas a chat is unlimited. Let's do it.
+
+Two things that are not strictly part of the sequence of seven, but are fundamental even at alpha: 1) claude access with personal sub; 2) decent web search.
+
+For web search: try to use the mechanisms that openai and anthropic use. If a user has openai mechanisms, in principle, chatgpt/codex mechanisms for search should work. Same goes for claude. Not the parallel search (that can happen later, as parallel chats).
+
+## 2026-08-06
+
+I want to simplify the signup/login to just login. When I remove invites from the system, that would make perfect sense. A new user would go in in the same way as an existing one. But now, requiring invite, how would that flow work?
+
+The reason I want invites now is that I don't have engines and it is all running on one host. I still don't distinguish between paying users (who have a right to create projects because they have a paid account) and non-paid users. I don't want random people that haven't paid or identify themselves to create projects (at least, not yet). So, the invite request has to be a whitelist of sorts.
+
+Options:
+- Let them login, but not let them do anything until they are whitelisted.
+- Have a whitelist of accepted invites and let those accounts do signup/login.
+
+For practical purposes, if you need to request an invite, we're still distinguishing the signup from the login.
+
+But what about users of an user X that we can whitelist?
+
+We can simply add a `creator` flag on the DB where, if the user doesn't have it, they cannot create projects. There should also be a note for non-creators to request creator access (during alpha/beta) to info@altocode.nl
+
+Then:
+- Condense signup into login.
+- Remove the request invite and accept.
+- Rely on manual setting of the creator access? No, let's just add an endpoint for that instead.
+- Add an endpoint for requesting creator access.
+
+TODO rework login:
+- backend
+- client
+- readme
+- tests
+
+## 2026-08-03
+
+Interesting consequence: if you have a vibey app that references files in the project, and the users using the app have access to those files (or they are public), vibey can host them straight, without them having to go through a backend. You'd only do a backend to communicate with a DB or do data transformation, but not serving of files.
+
 ## 2026-08-02
 
 Files: search (outside + inside), see, edit. make editor be to position language.

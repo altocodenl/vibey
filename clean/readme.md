@@ -4,6 +4,39 @@
 
 You already have AI. All you need now is files and a server.
 
+## Why vibey?
+
+So that you come alive when you work with computers.
+
+So that your digital workspace feels as comfortable as an old shoe.
+
+So that your digital memory is portable and reliable, now and in five years.
+
+So that you are able to learn and build at the speed of thought.
+
+So that you love your digital workspace and can't wait to get back to it when you're away.
+
+So that you can finally build, plan or learn what you have been dreaming of for years.
+
+So that what you do with a computer can make the world a more meaningful place.
+
+## What is vibey?
+
+A single workspace where you can have files, interact with AI and humans, and run your own apps.
+
+Available in [cloud version](https://buildwithvibey.com) and local/self-hosted version.
+
+## How vibey does it?
+
+0. Bring your own AI credentials. Vibey works with openai & anthropic (more to come on request).
+1. Auth: a simple identity layer where you log in through magic links that you get in your inbox.
+2. Project: a docker container that has your files, chats and apps.
+3. Engine: a virtual server on top of which you run your projects.
+4. File: upload, search and see files of all kinds. Edit text files.
+5. Chat: conversate with AI, interact with humans and send commands to your project, all in the same place. AI makes tool calls also in the chat.
+6. App: create and host apps that run in your project.
+7. Publish: provide public access to files (text or media) and apps. Point a domain to a project.
+
 ## Running vibey yourself
 
 ```
@@ -34,8 +67,6 @@ docker compose build --no-cache && cloud=1 docker compose up
 
 ```
 email:<email> <userId>
-invite:<email> created <date>
-               email <email>
 project created <date>
         id <id>
         last <date>
@@ -52,9 +83,9 @@ session:<session> csrf <csrfToken>
                        ip <ip>
                   user <userId>
 user:<id> created <date>
+          creator <1|undefined>
           email <email>
           id <id>
-          invite <date>
           last <date>
 ```
 
@@ -104,8 +135,6 @@ redis db <number>
 #### Auth
 
 - **Get CSRF token**: `GET /auth/csrf`: returns `{csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
-- **Request invite*: `POST /auth/signup/request`: expects `{email: <email>}`. Returns 409 if the invite or user exists.
-
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited or email not found. Sends a 6-digit OTP by email.
 - **Verify OTP**: `POST /auth/verify`: expects `{email: <email>, otp: <otp>}`. Returns 403 if rate limited, email not found, or OTP invalid. Returns `{csrf: <token>}` with a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
@@ -114,11 +143,12 @@ redis db <number>
 
 #### Admin
 
-- **Accept invite**: `POST /auth/signup/accept`: expects `{email: <email>}`. Returns 404 if invite not found, 409 if user exists.
+- **Grant/revoke creator access**: `POST /creator/grant`: expects `{email: <email>, grant: <boolean>}`. Returns 404 if `grant` is `false` and user does not exist. If `grant` is `true` and user does not exist, the endpoint creates the user.
 
 #### Project
 
-- **Get projects**: `GET /projects`
+- **Request creator access**: `POST /creator/request`: expects `{}`.
+- **Get projects**: `GET /projects`.
 - **Create project**: `POST /project`: expects `{name: <name>}`. Returns 409 if a project with that names exists.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
 - **Delete project**: `DELETE /project`

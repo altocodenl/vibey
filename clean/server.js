@@ -649,7 +649,7 @@ var routes = [
    }],
 
    ['post', '*', function (rq, rs) {
-      if (! inc (['/auth/signup/request', '/auth/signup/accept', '/auth/login', '/auth/verify'], rq.url)) return rs.next ();
+      if (! inc (['/creator/grant', '/auth/login', '/auth/verify'], rq.url)) return rs.next ();
 
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
@@ -665,12 +665,56 @@ var routes = [
 
    }],
 
-   ['post', 'auth/signup/request', async function (rq, rs) {
+   ['post', 'creator/request', async function (rq, rs) {
 
-      var exists = await redis ('exists', 'email:' + rq.body.email);
-      if (exists) return reply (rs, 409);
+      await sendmail ({
+         to: CONFIG.email.address,
+         subject: 'Vibey creator request',
+         message: ['p', [
+            'New creator request from: ' + rq.user.email,
+            ['br'],
+            now ()
+         ]]
+      });
 
-      if (rq.body.email === CONFIG.admin) {
+      reply (rs, 200);
+   }],
+
+   ['post', 'creator/grant', async function (rq, rs) {
+
+      if (stop (rs, ['grant', rq.body.grant, 'boolean'])) return;
+
+      if (rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+
+      var userId = await redis ('get', 'email:' + rq.body.email);
+
+      if (userId) await redis (rq.body.grant ? ['hset', 'user:' + userId, 'creator', 1] : ['hdel', 'user:' + userId, 'creator']);
+
+      else {
+         if (rq.body.grant === false) return reply (rs, 404);
+
+         var userId = crypto.randomUUID ();
+
+         await redis ([
+            ['set', 'email:' + rq.body.email, userId],
+            ['hmset', 'user:' + userId, {
+               created: now (),
+               creator: 1,
+               email: rq.body.email,
+               id: userId,
+            }],
+         ]);
+      }
+
+      reply (rs, 200);
+   }],
+
+   ['post', 'auth/login', async function (rq, rs) {
+
+      if (await rateLimit ('login:' + rq.body.email, 5, 300)) return reply (rs, 403, {error: 'Rate limited'});
+
+      var userId = await redis ('get', 'email:' + rq.body.email);
+      if (! userId) {
          var userId = crypto.randomUUID ();
 
          await redis ([
@@ -682,55 +726,6 @@ var routes = [
             }],
          ]);
       }
-      else {
-         await redis ('hmset', 'invite:' + rq.body.email, {email: rq.body.email, created: now ()});
-
-         await sendmail ({
-            to: CONFIG.email.address,
-            subject: 'Vibey signup request',
-            message: ['p', [
-               'New signup request from: ' + rq.body.email,
-               ['br'],
-               now ()
-            ]]
-         });
-      }
-
-      reply (rs, 200, {admin: rq.body.email === CONFIG.admin ? true : undefined});
-   }],
-
-   ['post', 'auth/signup/accept', async function (rq, rs) {
-
-      if (! rq.test && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
-
-      var existingUser = await redis ('get', 'email:' + rq.body.email);
-      if (existingUser) return reply (rs, 409);
-
-      var userId = crypto.randomUUID ();
-
-      var invite = await redis ('hgetall', 'invite:' + rq.body.email);
-      if (! invite) return reply (rs, 404);
-
-      await redis ([
-         ['set', 'email:' + rq.body.email, userId],
-         ['del', 'invite:' + rq.body.email],
-         ['hmset', 'user:' + userId, {
-            created: now (),
-            email: rq.body.email,
-            id: userId,
-            invite: invite.created,
-         }],
-      ]);
-
-      reply (rs, 200);
-   }],
-
-   ['post', 'auth/login', async function (rq, rs) {
-
-      if (await rateLimit ('login:' + rq.body.email, 5, 300)) return reply (rs, 403, {error: 'Rate limited'});
-
-      var userId = await redis ('get', 'email:' + rq.body.email);
-      if (! userId) return reply (rs, 403, {error: 'No such email'});
 
       var otp = String (crypto.randomInt (100000, 999999));
 
@@ -845,6 +840,8 @@ var routes = [
             return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
          }
       ])) return;
+
+      if (! rq.user.creator && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Please request creator access'});
 
       var projects = await getForUser (rq.user.id, 'project');
       var conflict = dale.stopNot (projects, undefined, function (project) {

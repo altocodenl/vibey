@@ -55,36 +55,51 @@ if (mode === 'server') {
 
          // *** TEST ***
 
-         suites.test = CONFIG.cloud ? ['Trigger tests without session', 'get', 'test', 403, assertBody ({error: 'No session'})] : [];
+         suites.test = CONFIG.cloud ? ['Trigger tests without session', 'get', '/test', 403, assertBody ({error: 'No session'})] : [];
 
          // *** ERROR REPORTING ***
 
          suites.error = [
-            ['Submit error: object', 'post', 'error', {error: 'Opa'}, 200],
-            ['Submit error: array', 'post', 'error', ['error', 'Opa'], 200],
-            ['Submit error: string', 'post', 'error', 'There was a problem...', 200],
+            ['Submit error: object', 'post', '/error', {error: 'Opa'}, 200],
+            ['Submit error: array', 'post', '/error', ['error', 'Opa'], 200],
+            ['Submit error: string', 'post', '/error', 'There was a problem...', 200],
          ];
 
          // *** AUTH ***
 
          suites.auth = [
-            ['Cleanup', 'get', '/', 200, function (s, rq, rs, next) {
+            ['Prepare cleanup', 'get', '/', 200, function (s, rq, rs, next) {
                (async function () {
+
+                  var keys = await redis ('keys');
+                  var toDelete = [];
+                  var users = dale.fil (keys, undefined, function (key) {
+                     if (! key.match (/example\.com$/)) return;
+                     toDelete.push (key);
+                     if (key.match (/^email:/)) return key.replace ('email:');
+                  });
+
+                  var userIds = dale.async (users, function (user) {
+                     // ??
+                     //
+
+                  await redis ('del', ...toDelete);
+
                   // Cleanup before auth suite
                   var testUserId = await redis ('get', 'email:hello@example.com');
-                  await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
+                  await redis ('del', 'email:hello@example.com', 'email:foo@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
                   next ();
                }) ();
             }],
-            ['Get auth/csrf without session', 'get', 'auth/csrf', '*', function (s, rq, rs) {
+            ['Get auth/csrf without session', 'get', '/auth/csrf', '*', function (s, rq, rs) {
                return assert ([
                   ['code', rs.code, CONFIG.cloud ? 403 : 200, teishi.test.equal],
                   ['body', rs.body, CONFIG.cloud ? {error: 'No session'} : {mode: 'local'}, teishi.test.equal],
                ]);
             }],
-            dale.go (['/auth/signup/request', 'auth/signup/accept', '/auth/login', '/auth/verify'], function (path) {
+            dale.go (['/creator/grant', '/auth/login', '/auth/verify'], function (path) {
                if (CONFIG.cloud) return [
-                  ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === 'auth/signup/accept' ? adminHeaders : {}],
+                  ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === '/creator/grant' ? adminHeaders : {}],
                   dale.go ([undefined, null, 1, '', '1', 'a@a', 'hello@example', 'this@is.not.really.an.emai.l'], function (email, k) {
                      return ['Call auth path with invalid email: #' + (k + 1), 'post', path, {email: email}, 400, function (s, rq, rs) {
                         return assert ([
@@ -96,18 +111,17 @@ if (mode === 'server') {
                               return ['body.error', rs.body.error, /^email should/, teishi.test.match];
                            }
                         ]);
-                     }, path === 'auth/signup/accept' ? adminHeaders : {}];
+                     }, path === '/creator/grant' ? adminHeaders : {}];
                   }),
                ];
 
                if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, 404, assertBody ({error: 'Not in cloud mode'})];
             }),
             CONFIG.cloud ? [
-               ['Request invite', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 200],
-               ['Request invite again', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 200],
-               ['Accept invite', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 200, adminHeaders],
-               ['Accept invite again', 'post', 'auth/signup/accept', {email: 'hello@example.com'}, 409, adminHeaders],
-               ['Accept invite for nonexisting account', 'post', 'auth/signup/accept', {email: 'foo@example.com'}, 404, adminHeaders],
+               ['Request creator access', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
+               ['Request creator access again', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
+               ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
+               ['Grant creator access for nonexisting account', 'post', '/creator/grant', {email: 'foo@example.com'}, 200, adminHeaders],
                ['Request invite after account is created', 'post', 'auth/signup/request', {email: 'hello@example.com'}, 409],
                ['Login with no such email', 'post', 'auth/login', {email: 'foo@example.com'}, 403, assertBody ({error: 'No such email'})],
                ['Login', 'post', 'auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
