@@ -141,7 +141,7 @@ B.mrespond ([
             return;
          }
 
-         if (error && x.path [0] !== 'auth/csrf') B.call (x, 'report', 'error', {type: 'ajax', method: x.verb, path: x.path [0], status: error.status, response: error.responseText});
+         if (error && x.path [0] !== '/auth/user') B.call (x, 'report', 'error', {type: 'ajax', method: x.verb, path: x.path [0], status: error.status, response: error.responseText});
 
          if (cb) cb (x, error, rs);
       });
@@ -150,14 +150,14 @@ B.mrespond ([
    // *** ERROR ***
 
    ['report', 'error', function (x, error) {
-      c.ajax ('post', 'error', {}, {priority: 'important', ...error});
+      c.ajax ('post', '/error', {}, {priority: 'important', ...error});
    }],
 
    // *** AUTH ***
 
-   ['load', 'csrf', function (x) {
+   ['load', 'user', function (x) {
 
-      B.call (x, 'get', 'auth/csrf', function (x, error, rs) {
+      B.call (x, 'get', '/auth/user', function (x, error, rs) {
 
          if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
@@ -175,7 +175,7 @@ B.mrespond ([
 
    ['signup', [], function (x, email) {
       if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
-      B.call (x, 'post', 'auth/signup/request', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
+      B.call (x, 'post', '/auth/signup/request', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to request invite');
          B.call (x, 'snackbar', 'ok', rs.body.admin ? 'Account created, please log in' : 'Invite requested. Thank you for your interest!');
       });
@@ -183,7 +183,7 @@ B.mrespond ([
 
    ['login', [], function (x, email) {
       if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
-      B.call (x, 'post', 'auth/login', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
+      B.call (x, 'post', '/auth/login', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
          if (error) {
             if (error.responseText) error = (teishi.parse (error.responseText) || {}).error;
             return B.call (x, 'snackbar', 'error', error || 'Failed to send login code');
@@ -197,7 +197,7 @@ B.mrespond ([
 
    ['verify', [], function (x, email, otp) {
       if (! email || ! otp) return B.call (x, 'snackbar', 'error', 'Please enter your email and code');
-      B.call (x, 'post', 'auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
+      B.call (x, 'post', '/auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Invalid code');
          B.call (x, 'rem', 'auth', 'email', 'otp');
          B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
@@ -209,7 +209,7 @@ B.mrespond ([
    }],
 
    ['logout', [], function (x) {
-      B.call (x, 'post', 'auth/logout', {}, function (x, error) {
+      B.call (x, 'post', '/auth/logout', {}, function (x, error) {
          B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
          B.call (x, 'navigate', 'login');
       });
@@ -219,7 +219,7 @@ B.mrespond ([
 
    ['login', 'oauth', function (x, provider) {
       B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', 'settings/login/' + provider, {}, function (x, error, rs) {
+      B.call (x, 'post', '/settings/login/' + provider, {}, function (x, error, rs) {
          if (error) {
             B.call (x, 'rem', 'oauth', 'loading');
             return B.call (x, 'snackbar', 'error', 'Failed to start login');
@@ -238,7 +238,7 @@ B.mrespond ([
 
    ['complete', 'oauth', function (x, provider, code) {
       B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', 'settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
+      B.call (x, 'post', '/settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
          B.call (x, 'rem', [], 'oauth');
          if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
          B.call (x, 'load', 'settings');
@@ -247,7 +247,7 @@ B.mrespond ([
 
    ['logout', 'oauth', function (x, provider) {
       if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
-      B.call (x, 'post', 'settings/logout/' + provider, {}, function (x, error) {
+      B.call (x, 'post', '/settings/logout/' + provider, {}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to logout');
          B.call (x, 'load', 'settings');
       });
@@ -257,7 +257,7 @@ B.mrespond ([
 
    ...dale.go (['models', 'projects', 'settings'], function (entity) {
       return ['load', entity, function (x) {
-         B.call (x, 'get', entity, function (x, error, rs) {
+         B.call (x, 'get', '/' + entity, function (x, error, rs) {
             if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + entity);
             B.call (x, 'set', entity, rs.body);
          });
@@ -271,7 +271,7 @@ B.mrespond ([
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a project name');
 
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
-      B.call (x, 'post', 'project', {name: name}, function (x, error) {
+      B.call (x, 'post', '/project', {name: name}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
 
          B.call (x, 'snackbar', 'clear');
@@ -364,21 +364,21 @@ B.mrespond ([
    // *** FILES ***
 
    ['load', 'files', function (x) {
-      B.call (x, 'get', 'project/' + encodeURIComponent (B.get ('project')) + '/files', function (x, error, rs) {
+      B.call (x, 'get', '/project/' + encodeURIComponent (B.get ('project')) + '/files', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          B.call (x, 'set', 'files', rs.body);
       });
    }],
 
    ['change', ['file', 'name'], function (x) {
-      B.call (x, 'get', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
+      B.call (x, 'get', '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
          B.call (x, 'set', ['file', 'content'], rs.body.content);
       });
    }],
 
    ['save', 'file', function (x, name, value, New) {
-      B.call (x, 'post', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, {content: value}, function (x, error, rs) {
+      B.call (x, 'post', '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, {content: value}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
 
          if (! New) B.call (x, 'mset', ['file', 'content'], value);
@@ -402,7 +402,7 @@ B.mrespond ([
 
    ['create', 'dialog', function (x, name) {
 
-      B.call (x, 'post', 'project/' + encodeURIComponent (B.get ('project')) + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
+      B.call (x, 'post', '/project/' + encodeURIComponent (B.get ('project')) + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
 
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem creating the dialog');
 
@@ -1082,5 +1082,5 @@ views.project = function () {
 
 // *** ENTRYPOINT ***
 
-B.call ('load', 'csrf');
+B.call ('load', 'user');
 B.mount ('body', views.main);

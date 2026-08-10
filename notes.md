@@ -1,5 +1,60 @@
 # Vibey development notes
 
+## 2026-08-10
+
+Rather than cutting things away from vibey anxiously to make it to a date, I will just work on adding deep feeling to it, step by step, boldly. The goal is to make something deeply useful, an everyday object through which you can express and build objects that can allow others to express themselves and build too.
+
+Add a user number to each user that signs up, to have an ordering of who came first. It will be fun to compare, at the beginning.
+
+Since vibey is b2both, companies can simply buy creator licenses for their employees, for the same price and the same rights.
+
+User resources (what a user owns): sessions, projects, engines.
+
+TODO low level:
+- Add `/` on server routes too, so it's clearer that they are paths.
+- Add user count & creator status: extra assertions.
+- Rename /auth/csrf to /auth/user, also auth to user in the client store
+- Run cleanup unconditionally after client tests.
+- Redo auth client & client tests.
+- When verifying, we need to load the user! Or we should just return the user instead on that endpoint.
+
+TODO high level:
+- Infra
+   - Auth changes and all small loose ends opened lately
+   - Autobackup
+- Features
+   - Shell view for project
+   - File
+   - Chat
+   - App
+
+Perhaps mental play (MP, as per Chuan Chang's concept)  works so well because you're building the wholeness in your mind's eye.
+
+- Login without signup with a magic link (that you can also copy if you want to open it somewhere else than the default you get when you click on the email). No OTP. No signup. No invite.
+- If logged in but have no creator access: during alpha/beta, require it. Or ask a creator to share a project with you.
+- The shell view for projects: a major shift. It gives you a spatial way to access your 80/20 projects. The tooltips are there if you press command/alt, with numbers.
+- In the background on projects: autogit/autobackup.
+- File: 1) great search from the start. 2) the ability to see files of different kinds in the same place (text/code, pdf, audio/video). 3) ease of creating new files or uploading them.
+- Chat: 1) the triptych of AI+humans+commands in one place; 2) thick boundaries on each message, including good metadata (date, tokens used, time taken); 3) easy search/jump from message to message.
+- App: 1) managed auth (to design); 2) proxying of domain & paths; 3) set port, start/stop.
+
+Auth for apps:
+- TLS termination at the project, so no interception. Cannot be done outside of the domain.
+- Login page through vibey with just whois, no vibey privileges
+- Need a httponly cookie that can get csrf like a normal cookie
+- Nginx to set it on redirect?! So it works at the engine level and requires no backend.
+- Nginx to resolve the cookie too to a known header? Who needs to read the cookie? In the end, it's vibey itself that needs to read it!
+
+Run cross-project commands! If you have permissions, why not? There should be locks too, to prevent it, particularly for overeager LLMs reading too much. Public projects could host apps, with cross-project connection you could import it.
+
+We need a sqlite integration, like an app. This is going to be interesting.
+
+Read environment variables from a file when running a script.
+
+But what about links between projects?
+
+I need to create good entity for what a vibey app really *is*.
+
 ## 2026-08-08
 
 Launch date: August 31. Three weeks to alpha.

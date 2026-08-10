@@ -166,9 +166,9 @@ cell.JSToPaths = function (v) {
 
    var recurse = function (v, path) {
       if (v === undefined) return;
-      if (teishi.simple (v)) paths.push ([...path, singleToFourdata (v)]);
+      if (teishi.simple (v)) paths.push ([... path, singleToFourdata (v)]);
       else                   dale.go (v, function (v2, k2) {
-         recurse (v2, [...path, type (k2) === 'integer' ? k2 + 1 : k2]);
+         recurse (v2, [... path, type (k2) === 'integer' ? k2 + 1 : k2]);
       });
    }
 
@@ -198,7 +198,7 @@ var clog = function () {
    if (arguments.length > 1 || type (arguments [0]) !== 'object') var log = {args: teishi.copy (arguments)};
    else var log = arguments [0];
 
-   log = {t: now (), from: cicek.isMaster ? 'main' : ('worker' + cluster.worker.id), ...log};
+   log = {t: now (), from: cicek.isMaster ? 'main' : ('worker' + cluster.worker.id), ... log};
    var color = [];
    if (log.priority === 'important') color.push ('yellow');
    else if (log.priority === 'critical') color.push ('red', 'bold');
@@ -307,7 +307,7 @@ var getForUser = async function (userId, entity) {
 
 // *** COMMANDS ***
 
-var run = async function (...args) {
+var run = async function (... args) {
 
    if (type (last (args)) === 'object') {
       var command = teishi.copy (args).slice (0, -1);
@@ -338,7 +338,7 @@ var run = async function (...args) {
             return [k, v];
          });
          var ms = Date.now () - t;
-         clog ({type: 'Command response', id, command: command.join (' '), ms, ...logOutput});
+         clog ({type: 'Command response', id, command: command.join (' '), ms, ... logOutput});
          if (! output.code || options.catch) resolve (output);
          else reject (output);
       }
@@ -436,9 +436,9 @@ docker.edit = async function (id, path, oldText, newText) {
 docker.cleanup = async function () {
    var result = await run ('docker', 'ps', '-aq', '-f', 'name=vibey-project-', {catch: true});
    if (result.stdout) {
-      var ids = result.stdout.trim ().split ('\n');
-      await run ('docker', 'stop', ...ids, {catch: true});
-      await run ('docker', 'rm', ...ids, {catch: true});
+      var projectIds = result.stdout.trim ().split ('\n');
+      await run ('docker', 'stop', ... projectIds, {catch: true});
+      await run ('docker', 'rm',   ... projectIds, {catch: true});
    }
    process.exit (0);
 }
@@ -543,7 +543,7 @@ var routes = [
 
             if (! user) return reply (rs, 500, {priority: 'critical', type: 'User not found', user: session.user});
 
-            rq.user = {csrf: session.csrf, session: sessionId, ...user};
+            rq.user = {csrf: session.csrf, session: sessionId, ... user};
          }
       }
 
@@ -556,13 +556,13 @@ var routes = [
 
       var publicPath = dale.stop ([
          ['get', '/'],
-         ...dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
+         ... dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
             return ['get', '/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
          }),
-         ...dale.go (['client', 'gotoB', 'marked'], function (v) {
+         ... dale.go (['client', 'gotoB', 'marked'], function (v) {
             return ['get', '/' + v + '.js'];
          }),
-         ...dale.go (['signup/request', 'login', 'verify'], function (v) {
+         ... dale.go (['signup/request', 'login', 'verify'], function (v) {
             return ['post', '/auth/' + v];
          }),
          ['get', '/favicon.ico'],
@@ -616,7 +616,7 @@ var routes = [
          ]]
       ]]
    ])],
-   ...dale.go ([
+   ... dale.go ([
       ['normalize.css', 'normalize.css/normalize.css'],
       ['tachyons.css', 'tachyons/css/tachyons.min.css'],
       ['bootstrap-icons.css', 'bootstrap-icons/font/bootstrap-icons.min.css'],
@@ -627,8 +627,8 @@ var routes = [
    ], function (route) {
       return ['get', route [0], cicek.file, 'node_modules/' + route [1]];
    }),
-   ['get', 'client.js', cicek.file],
-   ['get', 'favicon.ico', function (rq, rs) {
+   ['get', '/client.js', cicek.file],
+   ['get', '/favicon.ico', function (rq, rs) {
       rs.writeHead (200, {'content-type': 'image/x-icon'});
       rs.end (Buffer.from ('AAABAAEAEBAAAAEAIACKAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAFFJREFUeJxjEJRQ/08JZgARMEBIMTZ11DGAGENwyVPPAEKGoMvBAFEGYBPHagAhxdj4BA0gZCCGAegKqG4AOh+rAcgKCYUH7QwgOSnTxQBsGAAft/+qqAkz2wAAAABJRU5ErkJggg==', 'base64'));
    }],
@@ -637,15 +637,20 @@ var routes = [
 
    ['post', 'error', function (rq, rs) {
       var error = type (rq.body.error) === 'object' ? rq.body : {error: rq.body};
-      clog ({priority: 'important', type: 'client error', ...error});
+      clog ({priority: 'important', type: 'client error', ... error});
       reply (rs, 200);
    }],
 
    // *** AUTH ***
 
-   ['get', 'auth/csrf', async function (rq, rs) {
+   ['get', '/auth/user', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 200, {mode: 'local'});
-      reply (rs, 200, {admin: rq.user.email === CONFIG.admin ? true : undefined, csrf: rq.user.csrf});
+      reply (rs, 200, {
+         admin: rq.user.email === CONFIG.admin ? true : undefined,
+         count: rq.user.count,
+         creator: !! rq.user.creator
+         csrf: rq.user.csrf,
+      });
    }],
 
    ['post', '*', function (rq, rs) {
@@ -665,7 +670,7 @@ var routes = [
 
    }],
 
-   ['post', 'creator/request', async function (rq, rs) {
+   ['post', '/creator/request', async function (rq, rs) {
 
       await sendmail ({
          to: CONFIG.email.address,
@@ -680,7 +685,7 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', 'creator/grant', async function (rq, rs) {
+   ['post', '/creator/grant', async function (rq, rs) {
 
       if (stop (rs, ['grant', rq.body.grant, 'boolean'])) return;
 
@@ -693,11 +698,13 @@ var routes = [
       else {
          if (rq.body.grant === false) return reply (rs, 404);
 
-         var userId = crypto.randomUUID ();
+         var userId    = crypto.randomUUID ();
+         var userCount = redis ('incr', 'userCount');
 
          await redis ([
             ['set', 'email:' + rq.body.email, userId],
             ['hmset', 'user:' + userId, {
+               count: userCount,
                created: now (),
                creator: 1,
                email: rq.body.email,
@@ -709,17 +716,20 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', 'auth/login', async function (rq, rs) {
+   ['post', '/auth/login', async function (rq, rs) {
 
       if (await rateLimit ('login:' + rq.body.email, 5, 300)) return reply (rs, 403, {error: 'Rate limited'});
 
       var userId = await redis ('get', 'email:' + rq.body.email);
       if (! userId) {
-         var userId = crypto.randomUUID ();
+
+         var userId    = crypto.randomUUID ();
+         var userCount = redis ('incr', 'userCount');
 
          await redis ([
             ['set', 'email:' + rq.body.email, userId],
             ['hmset', 'user:' + userId, {
+               count: userCount,
                created: now (),
                email: rq.body.email,
                id: userId,
@@ -748,7 +758,7 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', 'auth/verify', async function (rq, rs) {
+   ['post', '/auth/verify', async function (rq, rs) {
 
       if (stop (rs, ['otp', rq.body.otp, 'string'])) return;
 
@@ -780,7 +790,7 @@ var routes = [
       reply (rs, 200, {csrf, admin: rq.body.email === CONFIG.admin ? true : undefined}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {httponly: true, samesite: 'Lax', path: '/', expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10)})});
    }],
 
-   ['get', 'auth/list', async function (rq, rs) {
+   ['get', '/auth/list', async function (rq, rs) {
 
       reply (rs, 200, dale.go (await getForUser (rq.user.id, 'session'), function (session) {
          return {
@@ -790,7 +800,7 @@ var routes = [
       }))
    }],
 
-   ['post', 'auth/logout', async function (rq, rs) {
+   ['post', '/auth/logout', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
       await redis ([
@@ -801,7 +811,7 @@ var routes = [
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
    }],
 
-   ['post', 'auth/delete', async function (rq, rs) {
+   ['post', '/auth/delete', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
       var [user, keys] = await redis ([
@@ -819,20 +829,20 @@ var routes = [
          await run ('docker', 'volume', 'rm', containerId);
       }, {concurrent: 5})
 
-      await redis ('del', ...['user:' + rq.user.id, 'email:' + rq.user.email, 'owner:' + rq.user.id, ...keys]);
+      await redis ('del', ... ['user:' + rq.user.id, 'email:' + rq.user.email, 'owner:' + rq.user.id, ... keys]);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {httponly: true, samesite: 'Lax', path: '/'})});
    }],
 
    // *** PROJECT ***
 
-   ['get', 'projects', async function (rq, rs) {
+   ['get', '/projects', async function (rq, rs) {
       reply (rs, 200, (await getForUser (rq.user.id, 'project')).sort (function (a, b) {
          return new Date (b.last) - new Date (a.last);
       }));
    }],
 
-   ['post', 'project', async function (rq, rs) {
+   ['post', '/project', async function (rq, rs) {
 
       if (stop (rs, [
          ['name', rq.body.name, 'string'],
@@ -873,7 +883,7 @@ var routes = [
       reply (rs, 200, {id: project.id});
    }],
 
-   ['put', 'project', async function (rq, rs) {
+   ['put', '/project', async function (rq, rs) {
 
       if (stop (rs, [
          ['id', rq.body.id, 'string'],
@@ -898,7 +908,7 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', ['project/read', 'project/write', 'project/edit', 'project/run'], async function (rq, rs) {
+   ['post', ['/project/read', '/project/write', '/project/edit', '/project/run'], async function (rq, rs) {
 
       if (stop (rs, ['id', rq.body.id, 'string'])) return;
 
@@ -911,7 +921,7 @@ var routes = [
       rs.next ();
    }],
 
-   ['post', 'project/read', async function (rq, rs) {
+   ['post', '/project/read', async function (rq, rs) {
 
       if (stop (rs, [
          ['keys of body', dale.keys (rq.body), ['id', 'path', 'sha'], 'eachOf', teishi.test.equal],
@@ -932,7 +942,7 @@ var routes = [
       reply (rs, 200, file, {}, rq.body.path);
    }],
 
-   ['post', 'project/write', async function (rq, rs) {
+   ['post', '/project/write', async function (rq, rs) {
 
       if (stop (rs, [
          ['keys of body', dale.keys (rq.body), ['id', 'path', 'content', 'base64'], 'eachOf', teishi.test.equal],
@@ -948,7 +958,7 @@ var routes = [
       reply (rs, 200, result);
    }],
 
-   ['post', 'project/edit', async function (rq, rs) {
+   ['post', '/project/edit', async function (rq, rs) {
 
       if (stop (rs, [
          ['keys of body', dale.keys (rq.body), ['id', 'path', 'oldText', 'newText'], 'eachOf', teishi.test.equal],
@@ -962,7 +972,7 @@ var routes = [
       return reply (rs, result.error ? 400 : 200, result);
    }],
 
-   ['post', 'project/run', async function (rq, rs) {
+   ['post', '/project/run', async function (rq, rs) {
 
       if (stop (rs, [
          ['keys of body', dale.keys (rq.body), ['id', 'command'], 'eachOf', teishi.test.equal],
@@ -974,7 +984,7 @@ var routes = [
       reply (rs, 200, result);
    }],
 
-   ['delete', 'project/:id', async function (rq, rs) {
+   ['delete', '/project/:id', async function (rq, rs) {
 
       var projects = await getForUser (rq.user.id, 'project');
       var match = dale.stopNot (projects, undefined, function (project) {
@@ -998,22 +1008,28 @@ var routes = [
 
    // *** TESTS ***
 
-   ['get', 'test', async function (rq, rs) {
+   ['get', '/test', async function (rq, rs) {
 
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
-      test ('all', function (error, rdata) {
+      test.run ('all', function (error, rdata) {
+         await test.cleanup (docker);
          reply (rs, 200, cell.JSToText (error ? {error} : rdata));
       }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis, run);
    }],
 
-   ['get', 'test.js', async function (rq, rs) {
+   ['post', '/test/cleanup', async function (rq, rs) {
 
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
-      // Cleanup before auth suite
-      var testUserId = await redis ('get', 'email:hello@example.com');
-      await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
+      await test.cleanup (docker);
+
+      reply (rs, 200);
+   }],
+
+   ['get', '/test.js', async function (rq, rs) {
+
+      if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
       cicek.file (rq, rs, 'test.js');
    }],
@@ -1042,7 +1058,7 @@ cicek.cluster (undefined, function (worker, code, signal) {
 
 var fatal = function (type, error) {
    if (exiting) return;
-   clog ({type: type, priority: 'critical', ...error});
+   clog ({type: type, priority: 'critical', ... error});
    process.exit (1);
 }
 

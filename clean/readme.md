@@ -82,11 +82,13 @@ session:<session> csrf <csrfToken>
                   last date <date>
                        ip <ip>
                   user <userId>
-user:<id> created <date>
+user:<id> count <integer>
+          created <date>
           creator <1|undefined>
           email <email>
           id <id>
           last <date>
+userCount <integer>
 ```
 
 ### secret.js
@@ -134,7 +136,7 @@ redis db <number>
 
 #### Auth
 
-- **Get CSRF token**: `GET /auth/csrf`: returns `{csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
+- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited or email not found. Sends a 6-digit OTP by email.
 - **Verify OTP**: `POST /auth/verify`: expects `{email: <email>, otp: <otp>}`. Returns 403 if rate limited, email not found, or OTP invalid. Returns `{csrf: <token>}` with a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
@@ -144,6 +146,9 @@ redis db <number>
 #### Admin
 
 - **Grant/revoke creator access**: `POST /creator/grant`: expects `{email: <email>, grant: <boolean>}`. Returns 404 if `grant` is `false` and user does not exist. If `grant` is `true` and user does not exist, the endpoint creates the user.
+- **Run server tests**: `GET /test`. This is a `GET` so that it can be triggered from the browser. Returns the result of running the server test suite.
+- **Get client tests**: `GET /test.js`.
+- **Cleanup after tests**: used to run after the client tests.
 
 #### Project
 
@@ -151,7 +156,7 @@ redis db <number>
 - **Get projects**: `GET /projects`.
 - **Create project**: `POST /project`: expects `{name: <name>}`. Returns 409 if a project with that names exists.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
-- **Delete project**: `DELETE /project`
+- **Delete project**: `DELETE /project:<projectId>`
 
 ### Responders
 
@@ -159,9 +164,9 @@ redis db <number>
 - `read hash`: checks that the view in the hash exists and should be reachable by the user. If on the `projects` view, sets `project`. If on the `project` view, it sets `file`.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
 - `snackbar <type> [message]`: shows a notification with type (`ok`, `warning`, `error`). Auto-clears after 4 seconds. `snackbar clear` dismisses it immediately.
-- `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Attaches the CSRF header if available. On 403 from a non-auth path, resets auth state and redirects to login. Reports errors to the server.
+- `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token isavailable. On 403 from a non-auth path, resets auth state and redirects to login. Reports errors to the server.
 - `report error <error>`: posts an error to the server via `POST /error`.
-- `load csrf`: fetches the CSRF token from `GET /auth/csrf`. Sets `auth.mode` to `local` or `cloud`. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
+- `load user`: fetches the user information from `GET /auth/user`. Sets `auth.mode` to `local` or `cloud`. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
 - `signup <email>`: requests a signup invite via `POST /auth/signup/request`. Shows a snackbar with the result.
 - `login <email>`: requests an OTP via `POST /auth/login`. On success, sets `auth.otpRequested`.
 - `verify <email> <otp>`: verifies the OTP via `POST /auth/verify`. On success, stores the CSRF token, loads models/projects/settings, and navigates to projects.

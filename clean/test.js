@@ -11,11 +11,86 @@ if (mode === 'server') {
    var hitit  = require ('hitit');
    var {inc, last, type} = teishi;
 
+   dale.async = async function (input, fun, options) {
+
+      if (input === undefined) return [];
+      if (teishi.simple (input)) input = [input];
+
+      options = options || {};
+      if (options.concurrent === undefined) options.concurrent = 1;
+      if (options.concurrent === true) options.concurrent = dale.keys (input).length;
+
+      var index = 0, keys = dale.keys (input), results = [], error;
+
+      var inner = async function () {
+         while (true) {
+            if (error) return;
+            var i = index++;
+            if (i >= keys.length) return;
+
+            try {
+               results [keys [i]] = await fun (input [keys [i]], keys [i]);
+            }
+            catch (Error) {
+               if (error) return;
+               error = Error;
+               throw Error;
+            }
+         }
+      }
+
+      try {
+         await Promise.all (dale.go (dale.times (Math.min (keys.length, options.concurrent)), inner));
+      }
+      catch (error) {
+         if (options.catch) options.catch (error);
+         else               throw error;
+      }
+
+      return results;
+   }
+
    var getCookie = function (headers) {
       return headers ['set-cookie'] [0];
    }
 
-   module.exports = function (CONFIG) {
+   module.exports = {};
+
+   // We export this so we can use it also after client tests, otherwise we'd just call it after the server tests automatically.
+   module.exports.cleanup = function (docker) {
+      var keys = await redis ('keys');
+      var toDelete = [];
+      var emails = dale.fil (keys, undefined, function (key) {
+         // Cleanup is contingent on all test users using `example.com` as their email's domain, and on no real users using this domain.
+         // Tests are not designed to run on prod environments.
+         if (! key.match (/example\.com$/)) return;
+         toDelete.push (key);
+         if (key.match (/^email:/)) return key;
+      });
+
+      var userIds = await redis ('mget', ... emails);
+
+      var resources = await redis ('sinter', ... dale.go (userIds, function (userId) {
+         return 'owner:' + userId;
+      }));
+
+      await redis ('del', ... [
+         ... dale.go (emails, (email) => [email, dale.go (['login', 'signup'], (k) => 'rateLimit:' + k + ':' + email.replace ('email:', ''))]).flat (),
+         ... dale.go (userIds, (userId) => ['user:' + userId, 'otp:' + userId]).flat (),
+         ... resources
+      ]);
+
+      var projectIds = dale.fil (resources, undefined, function (resource) {
+         if (resource.match (/^project:/)) return resource.replace ('project:', '');
+      });
+
+
+      await run ('docker', 'stop',         ... projectIds, {catch: true});
+      await run ('docker', 'rm',           ... projectIds, {catch: true});
+      await run ('docker', 'volume', 'rm', ... projectIds, {catch: true});
+   }
+
+   module.exports.run = function (CONFIG) {
       return function (suite, cb, admin, redis, run) {
 
          var adminHeaders = {'x-csrf': admin.csrf, cookie: admin.cookie};
@@ -41,10 +116,10 @@ if (mode === 'server') {
          suites.public = dale.go ([
             ['get', '/'],
             ['get', 'favicon.ico'],
-            ...dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
+            ... dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
                return ['get', '/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
             }),
-            ...dale.go (['client', 'gotoB', 'marked'], function (v) {
+            ... dale.go (['client', 'gotoB', 'marked'], function (v) {
                return ['get', '/' + v + '.js'];
             }),
             ['post', '/error'],
@@ -71,27 +146,11 @@ if (mode === 'server') {
             ['Prepare cleanup', 'get', '/', 200, function (s, rq, rs, next) {
                (async function () {
 
-                  var keys = await redis ('keys');
-                  var toDelete = [];
-                  var users = dale.fil (keys, undefined, function (key) {
-                     if (! key.match (/example\.com$/)) return;
-                     toDelete.push (key);
-                     if (key.match (/^email:/)) return key.replace ('email:');
-                  });
+                  // TODO: finish and move to the bottom, unconditionally
 
-                  var userIds = dale.async (users, function (user) {
-                     // ??
-                     //
-
-                  await redis ('del', ...toDelete);
-
-                  // Cleanup before auth suite
-                  var testUserId = await redis ('get', 'email:hello@example.com');
-                  await redis ('del', 'email:hello@example.com', 'email:foo@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
-                  next ();
                }) ();
             }],
-            ['Get auth/csrf without session', 'get', '/auth/csrf', '*', function (s, rq, rs) {
+            ['Get /auth/user without session', 'get', '/auth/user', '*', function (s, rq, rs) {
                return assert ([
                   ['code', rs.code, CONFIG.cloud ? 403 : 200, teishi.test.equal],
                   ['body', rs.body, CONFIG.cloud ? {error: 'No session'} : {mode: 'local'}, teishi.test.equal],
@@ -141,7 +200,7 @@ if (mode === 'server') {
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
-               ['Get csrf token', 'get', 'auth/csrf', 200, function (s, rq, rs) {
+               ['Get csrf token', 'get', '/auth/user', 200, function (s, rq, rs) {
                   return assert (['body', rs.body, {csrf: s.headers ['x-csrf']}, teishi.test.equal]);
                }],
                ['Logout', 'post', 'auth/logout', {}, 200, function (s, rq, rs) {
