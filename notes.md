@@ -1,5 +1,46 @@
 # Vibey development notes
 
+## 2026-08-11
+
+For auth with domain:
+- Each engine has a credential that identifies it to vibey. All API calls to vibey are proxied with that credential.
+- The user credentials are sent directly to vibey through the engine nginx, and vibey resolves the cookie!
+
+An email service that is backed by a relational db may well rely on a sqlite file instead of a postgres!
+
+Changed my mind. After a client test, if you delete the state, you cannot debug what's going on. You can just run the tests again in the server to clean up things.
+
+TODO auth:
+- Add `/` on server routes too, so it's clearer that they are paths.
+- Add user count & creator status: extra assertions.
+- Rename /auth/csrf to /auth/user, also auth to user in the client store
+- Run cleanup unconditionally after tests.
+- Redo auth client & client tests.
+- When verifying, we need to load the user! Or we should just return the user instead on that endpoint.
+- Redo email for logging in
+
+Some notes on Alexander - The process of creating life:
+- "Almost the most distinctive mark of living process lies in one aspect of the geometry of the results. Simply put, *Every part of the world that has life, and every part of every part, becomes UNIQUE. It becomes unique because each part is adapted to its context and because, in the large, no two contexts are ever the same*."
+- "Daily life itself was marked by replicas, by sterile repetition, by the *loss* of uniqueness."
+- "the uniqueness of every stop, every part of every place - is a *necessary* aspect of living structure. It is possibly the most fundamental aspect of living structure"
+- "if the structure of uniqueness at every part does *not* occur within a structure, we can be *sure* that it is not an unfolded whole, not living structure at all."
+- "it is the uniqueness of each [thing] that makes it possible to love it (...) By creating uniqueness everywhere, the living process touches, directly, the issue of wether the world will be a world we love, or not."
+- "Ultimately, all order and all form come from repetition. (...) Thus everything in the geometry of the world is essentially organized repetition."
+- "The final target of unfolding is to find and create just those repetitions which are required"
+- "quite different from the mechanical kind of repetition we learned to recognize in the 20th century. During the 20th century, our ideas about repetition and uniqueness were distorted (...) First, by a conviction (...) that it was inevitable that a modern industrial process could only make exact replicas, if it was to be efficient, via mass-production. (...) Second, our conception of repetition was distorted by a conviction about atoms and fundamental particles, which seemed to provide a basis for thinking that the wolrd is, in its essence, modular."
+- "If the unfolding of wholeness described in this book turns out to be fundamental, *then one must come to expect that each atom and each particle will be different according to its context*, and that there are no ultimate identical constituents of matter at any scale."
+- Note: invariance of uniqueness across scales.
+- "*This is a particular type of gemoetry which, though highly regular, makes every part unique because it is consistent with its context, not only with its essential character.*"
+- "In a living world every part must be different and unique according to its conditions."
+- "It is very important to observe that repetition in the world is inevitable, since indeed similar conditions do keep recurring, and since similar conditions will keep spawning *similar* configurations."
+- "Calm repetition, the calm beauty of the row of vines in a vineyard, is of the essence of living structure. But the operative word is *similar*, not *same*."
+- "Nothing that is made by combining rigidly identical modules, can have this kind of living structure."
+- Note: frameworks vs libraries.
+- "Living structure is not merely context-sensitive at a single level."
+- "To live in a world which denies this truth, by creating an appearance of sameness, and then perhaps forcing us unique creatures into that mold of sameness, is degrading and impossible to bear."
+- "A tiny point, added, can alter the the (sic) deep structure of the wholeness enormously at the scale of yards of even miles."
+- Note: butterfly effect - living structure is a chaotic system (sensitivity to conditions, invariance at different scales).
+
 ## 2026-08-10
 
 Rather than cutting things away from vibey anxiously to make it to a date, I will just work on adding deep feeling to it, step by step, boldly. The goal is to make something deeply useful, an everyday object through which you can express and build objects that can allow others to express themselves and build too.

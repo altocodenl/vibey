@@ -648,7 +648,7 @@ var routes = [
       reply (rs, 200, {
          admin: rq.user.email === CONFIG.admin ? true : undefined,
          count: rq.user.count,
-         creator: !! rq.user.creator
+         creator: !! rq.user.creator,
          csrf: rq.user.csrf,
       });
    }],
@@ -1016,15 +1016,6 @@ var routes = [
          await test.cleanup (docker);
          reply (rs, 200, cell.JSToText (error ? {error} : rdata));
       }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis, run);
-   }],
-
-   ['post', '/test/cleanup', async function (rq, rs) {
-
-      if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
-
-      await test.cleanup (docker);
-
-      reply (rs, 200);
    }],
 
    ['get', '/test.js', async function (rq, rs) {
