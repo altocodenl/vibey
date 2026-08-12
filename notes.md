@@ -1,5 +1,56 @@
 # Vibey development notes
 
+## 2026-08-12
+
+For the auth:
+- Make the button below the input say what you need to do, instead of a title on top of it. The input can have "your email" as placeholder. When you enter a valid email, the button turns green and says "send me a link to get in"
+
+For engines:
+- I cannot have pseudo-engines in docker, because I cannot proxy TLS to that. I need a port per engine then. I guess I could still do it on the host's nginx layer, but that's tricky.
+- I think the project containers should bridge to the host. This would be bad security-wise and untenable at scale (imagine everybody fighting for port 8000). But I think it'd be ok if projects fought for port 8000 within the same engine, if they all belong to the same owner, because that'd give you a straight link to the host without having to change the dockerfile and re-running the project and opening ports. I think it's a good simplifying assumption.
+- For setting up an engine: 1) generate the VPS in Hetzner, including a premade SSH key (if we could pass keys on the call, even better, then we can have one per engine, stored in the DB); 2) provision the VPS with nginx and base packages, also set the cron for auto updates; 3) make projects be bound to an engine (the calls would be proxied by ssh then).
+
+Random idea: have an interesting.log file, where all the main system logs print. Actually, it'd be better to have a way to read them all periodically to search for funky things, as a process.
+
+For auth:
+- Bake the engine's key (which can be rotated from the host when needed) into the nginx config of the engine.
+- Make the nginx of the engine forward traffic, saying which domain it comes from, also proxying the cookie sent by the user.
+- Let the vibey host resolve the cookie sent by the user (it'll be an autn but not authz cookie, just identity) and decide to which project it will proxy the traffic.
+- Send commands to the projects from the vibey host directly, pipe the results back to the nginx of the engine.
+- To set the cookie on the domain of an engine, assuming TLS is already set up for that engine, put a login page that's a template of a client that's served by the engine in a project, which will send the requests to the vibey host API for logging in. The vibey host API returns the set-cookie, which is proxied by the engine's nginx and voila, the cookie is set and still managed by vibey.
+- Vibey will not be MITM (as Cloudflare), but it will be a single point of failure. Still, to run a vibey on top of each engine would be nightmarish. I'd rather deal with the nightmare of having all traffic go through vibey. Now that I think of it, vibey is still MITM, because nginx sends the unencrypted traffic as a proxy (well, it encrypts it over TLS on vibey's domain automatically, but to vibey it's transparent).
+
+All that makes this login not be phishing is that vibey would show it differently. But if users log in to vibey through an engine, that engine/domain would now have enough access to full vibey, so this is a surface of attack. But I don't a way around it.
+
+Some notes on Alexander - The process of creating life:
+- "If then, thre is to be a living world of the future, the present process of fabrication must be replaced by other deeper and more sophisticated processes, which, like nature, are context-sensitive from top to bottom, and create unique living structure at every level, so that each part of the world becomes unique."
+- Note: the challenge is life at industrial scale
+- "the apartments must be given their spae, plan, design, only *after they have been placed*, and in response to the unique conditions arising"
+- "each window will be designed only at a moment *late enough in the unfolding*"
+- Note: late binding!
+- "The organic unfolding of a building tells us *when* these various decisions must be made. And the *consequence* of deciding things at the right moment, when correctly done, is that the building and all its parts become unique. The sterile modularity and inappropriate sameness of 20th-century parts came about directly as a result of taking things in the wrong order."
+- "This means that the pieces, in the positions they took, were sized and shaped by subdivision of the whole (...) just as kernels of corn are squashed up against each other in a growing ear of corn."
+- "Years ago, I wrote a computer program which allowed people to create a room layout in this way, by differentiation."
+- "the infinity of configurations that can be created in a differentiating system, is a richer and *larger* infinity than the infinity of gemetrical arragements that can be made by arranging (...) standard components."
+- "But, in addition, the *character* of a whole formed by splitting and differentiation, is more genuinely organic, and more unified, than anything that can be achieved by combined and rearranging fixed parts."
+- "It may be said that any living process, built up from repeated applications of the fundamental process, wor,s, by creating configurations from within this much larger infinity of possible configurations."
+- What emerges from differentiation is not a loose, funky, rounded, kind of organicism. THe buildings which the fundamental process creates, in the sphere of building, are still dominated by rectangles or near rectangles, - because the rectangle is, after all, the main shape of easily built inhabited space that has positive space on both sides of every wall."
+- "Every living process is - at its core - a process which is devoted, through adaptation, to making every part unique."
+- "I told them it was al lin te geometry."
+- "It seems rather astonishing that all this complexity boils down to something as simple as this."
+- "*Just make it nice at every spot.*"
+- "One reason that it is so hard to explain is that each time you do it, it comes out differently."
+- "We could even say: *Life is exactly that property of space in which each spot becomes unique according to its place in the larger scheme of things.*"
+- "if there was a spatial formula which would explain in detail how to make living space, it would fail, because, by virtue of being a formula, it could not succeed in treating each place as unique. But there *is* a formula of living *process*."
+- Note: this is almost showing that p != np and that there's an optimal algorithm, at the same time.
+- "The main thing is that you have to pay attention, work hard, look at each case as unique. That is the most important part."
+- "Everything hinges on the undersatnding that every part must become unique when living processes are working. This is the key."
+- "every repeated entity is different: that we have to look, carefully at every single case as fresh. Making it, designing it, laying it out, is immensely hard work, harder than what we are used to - but it *works*. Indeed, finally we understand that this is the *only* thing which works."
+
+vibey: "vayvuelve"
+
+By having projects running on engines, but being addressed as projects, you can change where they run without changing anything else. The id is an internal handle for every project to which you have access.
+
 ## 2026-08-11
 
 For auth with domain:
