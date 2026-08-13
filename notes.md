@@ -1,5 +1,31 @@
 # Vibey development notes
 
+## 2026-08-13
+
+TODO auth:
+- When verifying, return the user — /auth/verify (server.js:761) returns only {csrf, admin}. The client's verify responder stores csrf and admin but never fetches the full user info (count, creator). Either the verify endpoint should return the user, or the client should call load user after verify.
+- Make sure server auth tests pass with all the changes.
+- Redo auth client: make the button below the input say what you need to do, instead of a title on top of it. The input can have "your email" as placeholder. When you enter a valid email, the button turns green and says "send me a link to get in". When you come back, verify should work and let you in. The opened tab should refresh on being opened again by trying GET /auth/user and then logging you in. If we cannot detect if the tab was opened, simply try every five seconds for the duration of the otp token (5m).
+- Redo auth client tests
+- Redo email for logging in: send the magic link as a button, also copyable
+
+TODO project:
+- Autobackup with tests
+- Shell view
+- Show "request creator" (if in cloud mode and creator !== true) with text box
+
+TODO old vibey:
+- Viewer for sqlite files
+
+I shouldn't worry too much about phishing now, because the magic link, by containing the domain to which the link goes, allows me to only provide vibey-access level cookies only on vibey's domain. If you want users to log in to your domain, you need vibey to send a different email to a different domain, so you cannot capture that. With passwords, this would be much more insecure. The protection is that I will not send vibey sessions with full access with a redirect that is not to vibey's own domain.
+
+I find it funny that when we have engine+own domain, the traffic will be engine nginx -> proxy to vibey's nginx & app server -> call through ssh + docker to the project inside the engine -> relay back twice (first to vibey's server, then the engine's nginx). It's the type of things that haters will hate on, and being partially right about it, yet probably wrong about the whole thing. We'll see. Always remember: death before inconvenience.
+
+??
+three new with upload on the top that subdivides
+can have one domain for multiple projects, disambiguate with paths at the engine level. let the engine resolve
+demos building on top of each other as you go right
+
 ## 2026-08-12
 
 For the auth:

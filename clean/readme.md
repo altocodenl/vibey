@@ -67,6 +67,7 @@ docker compose build --no-cache && cloud=1 docker compose up
 
 ```
 email:<email> <userId>
+loginLink:<link> <userId>
 project created <date>
         id <id>
         last <date>
@@ -75,7 +76,6 @@ project created <date>
 owner:<userId> 1 session:<sessionId>
                2 project:<projectId>
                ...
-otp:<userId> <otp>
 rateLimit:<identifier> <number>
 session:<session> csrf <csrfToken>
                   expires <date>
@@ -138,7 +138,7 @@ redis db <number>
 
 - **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited or email not found. Sends a 6-digit OTP by email.
-- **Verify OTP**: `POST /auth/verify`: expects `{email: <email>, otp: <otp>}`. Returns 403 if rate limited, email not found, or OTP invalid. Returns `{csrf: <token>}` with a session cookie.
+- **Verify login link**: `GET /auth/verify/<loginLink>`: expects `{email: <email>, otp: <otp>}`. Returns 403 if link not found or rate limited. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
 - **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie.
 - **Delete account**: `POST /auth/delete`: deletes the user and all their sessions. Clears the cookie.
@@ -176,12 +176,12 @@ redis db <number>
 ### Client state
 
 ```
-auth admin <0|1>
+user admin <false|true>
+     creator <false|true>
      csrf "<CSRF token>"
-     email "<email entered in the login/signupform>"
+     email "<email entered in the login/signup form>"
+     magicLinkRequested <0|1> // Whether the magic link was already sent
      mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
-     otp "<otp code entered in the login form>"
-     otpRequested <0|1> // Whether the OTP request was sent
 file content "..." // Current file selected
      dialogMode <ai|human|terminal> // Dialog mode
      mode <edit|view> // Whether we're editing the file we're viewing or not

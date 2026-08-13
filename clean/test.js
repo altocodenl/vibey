@@ -57,7 +57,7 @@ if (mode === 'server') {
    module.exports = {};
 
    // We export this so we can use it also after client tests, otherwise we'd just call it after the server tests automatically.
-   module.exports.cleanup = function (docker) {
+   module.exports.cleanup = async function (docker) {
       var keys = await redis ('keys');
       var toDelete = [];
       var emails = dale.fil (keys, undefined, function (key) {
@@ -149,7 +149,7 @@ if (mode === 'server') {
                   ['body', rs.body, CONFIG.cloud ? {error: 'No session'} : {mode: 'local'}, teishi.test.equal],
                ]);
             }],
-            dale.go (['/creator/grant', '/auth/login', '/auth/verify'], function (path) {
+            dale.go (['/creator/grant', '/auth/login'] function (path) {
                if (CONFIG.cloud) return [
                   ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === '/creator/grant' ? adminHeaders : {}],
                   dale.go ([undefined, null, 1, '', '1', 'a@a', 'hello@example', 'this@is.not.really.an.emai.l'], function (email, k) {
@@ -170,20 +170,12 @@ if (mode === 'server') {
                if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, 404, assertBody ({error: 'Not in cloud mode'})];
             }),
             CONFIG.cloud ? [
-               ['Request creator access', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
-               ['Request creator access again', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
-               ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
-               ['Grant creator access for nonexisting account', 'post', '/creator/grant', {email: 'foo@example.com'}, 200, adminHeaders],
-               ['Request invite after account is created', 'post', '/auth/signup/request', {email: 'hello@example.com'}, 409],
-               ['Login with no such email', 'post', '/auth/login', {email: 'foo@example.com'}, 403, assertBody ({error: 'No such email'})],
                ['Login', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
-                  s.otp = rs.body.otp;
+                  s.loginLink = rs.body.loginLink;
                   return true;
                }],
-               ['Verify login (no such email)', 'post', '/auth/verify', {email: 'foo@example.com', otp: '123456'}, 403, assertBody ({error: 'No such email'})],
-               ['Verify login (malformed otp)', 'post', '/auth/verify', {email: 'hello@example.com', otp: 123456}, 400, assertBody ({error: 'otp should have as type string but instead is 123456 with type integer'})],
-               ['Verify login (invalid otp)', 'post', '/auth/verify', {email: 'hello@example.com', otp: '123456'}, 403, assertBody ({error: 'Invalid OTP', otp: '123456'})], // This test fails about once every million times
-               ['Verify login', 'post', 'auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+               ['Verify login (invalid link)', 'get', '/auth/verify/bogus', 403, assertBody ({error: 'Invalid login link', loginLink: 'bogus'})],
+               ['Verify login', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   if (! assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
                      ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="[a-f0-9]{64}"; HttpOnly; SameSite=Lax; Path=\\/; Expires=.+' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10)), teishi.test.match],
@@ -193,12 +185,16 @@ if (mode === 'server') {
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
+               ['Request creator access', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
+               ['Request creator access again', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
+               ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
+               ['Grant creator access for nonexisting account', 'post', '/creator/grant', {email: 'foo@example.com'}, 200, adminHeaders],
                ['Get user', 'get', '/auth/user', 200, function (s, rq, rs) {
                   return assert ([
                      ['body', rs.body, 'object'],
                      ['body.count', rs.body.count, 'integer'],
                      ['body.creator', rs.body.creator, true],
-                     ['body.csrf', rs.body.csrf, s.headers ['x-csrf']}, teishi.test.equal],
+                     ['body.csrf', rs.body.csrf, s.headers ['x-csrf'], teishi.test.equal],
                   ]);
                }],
                ['Logout', 'post', '/auth/logout', {}, 200, function (s, rq, rs) {
