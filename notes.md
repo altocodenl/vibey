@@ -1,5 +1,19 @@
 # Vibey development notes
 
+## 2026-08-14
+
+For the new file view: the modal has the big three (file, chat, app). If you want to upload files, there's already an Upload thing on top of the top-level which, when clicked, splits into two (file or folder).
+
+We can have one domain for multiple projects! Just disambiguate at the engine level. Users can save a lot of money like that, if they have their own domains. What we cannot do is split one domain over multiple engines, unless we put a load balancer in front (which could eventually come). But the requirement that a domain can only point to one project is gone. It is one engine, which maps to what happens at the lower level (IP address, nginx, letsencrypt).
+
+The demos can build on top of each other! One demo for doing travel research, then the next one for X shows that the travel research project is already existing, so you get a feeling of how the space of projects gets populated and even becomes interrelated.
+
+TODO auth:
+- Make sure server auth tests pass with all the changes.
+- Redo auth client: make the button below the input say what you need to do, instead of a title on top of it. The input can have "your email" as placeholder. When you enter a valid email, the button turns green and says "send me a link to get in". When you come back, verify should work and let you in. The opened tab should refresh on being opened again by trying GET /auth/user and then logging you in. If we cannot detect if the tab was opened, simply try every five seconds for the duration of the otp token (5m).
+- Redo auth client tests
+- Redo email for logging in: send the magic link as a button, also copyable
+
 ## 2026-08-13
 
 TODO auth:
@@ -20,11 +34,6 @@ TODO old vibey:
 I shouldn't worry too much about phishing now, because the magic link, by containing the domain to which the link goes, allows me to only provide vibey-access level cookies only on vibey's domain. If you want users to log in to your domain, you need vibey to send a different email to a different domain, so you cannot capture that. With passwords, this would be much more insecure. The protection is that I will not send vibey sessions with full access with a redirect that is not to vibey's own domain.
 
 I find it funny that when we have engine+own domain, the traffic will be engine nginx -> proxy to vibey's nginx & app server -> call through ssh + docker to the project inside the engine -> relay back twice (first to vibey's server, then the engine's nginx). It's the type of things that haters will hate on, and being partially right about it, yet probably wrong about the whole thing. We'll see. Always remember: death before inconvenience.
-
-??
-three new with upload on the top that subdivides
-can have one domain for multiple projects, disambiguate with paths at the engine level. let the engine resolve
-demos building on top of each other as you go right
 
 ## 2026-08-12
 

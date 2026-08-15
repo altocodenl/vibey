@@ -149,7 +149,7 @@ if (mode === 'server') {
                   ['body', rs.body, CONFIG.cloud ? {error: 'No session'} : {mode: 'local'}, teishi.test.equal],
                ]);
             }],
-            dale.go (['/creator/grant', '/auth/login'] function (path) {
+            dale.go (['/creator/grant', '/auth/login'], function (path) {
                if (CONFIG.cloud) return [
                   ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === '/creator/grant' ? adminHeaders : {}],
                   dale.go ([undefined, null, 1, '', '1', 'a@a', 'hello@example', 'this@is.not.really.an.emai.l'], function (email, k) {
