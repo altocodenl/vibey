@@ -1,5 +1,16 @@
 # Vibey development notes
 
+## 2026-08-16
+
+Chat is at the center of the big three. It´s the most central one, above app and file! Communication is at the center. Understanding that AI using tools is chat too, in the same way that a human using a shell, really simplifies things.
+
+In chat: you can reply to a message, also see if a message has been replied to, but no visual nesting, You can have logical nesting by replying to a reply.
+
+"Check if app is up" is port listening; if you configure a health check then it's the health check itself.
+
+- The vision for vibey is to become everyone's OS. The place where you have your files, chats and apps.
+- Many people will start having their servers, and choosing what they host in them. This will bring a strong component of ownership. People will choose what to host, and create/join initiatives for hosting certain media, or even distributed applications. And some people who like gear will try different engines (servers) to see what works best.
+
 ## 2026-08-14
 
 For the new file view: the modal has the big three (file, chat, app). If you want to upload files, there's already an Upload thing on top of the top-level which, when clicked, splits into two (file or folder).
