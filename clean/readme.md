@@ -29,7 +29,7 @@ Available in [cloud version](https://buildwithvibey.com) and local/self-hosted v
 ## How vibey does it?
 
 0. Bring your own AI credentials. Vibey works with openai & anthropic (more to come on request).
-1. Auth: a simple identity layer where you log in through magic links that you get in your inbox.
+1. Auth: a simple identity layer where you log in through login links that you get in your inbox.
 2. Project: a docker container that has your files, chats and apps.
 3. Engine: a virtual server on top of which you run your projects.
 4. File: upload, search and see files of all kinds. Edit text files.
@@ -67,7 +67,8 @@ docker compose build --no-cache && cloud=1 docker compose up
 
 ```
 email:<email> <userId>
-loginLink:<link> <userId>
+loginLink:<link> <email>
+loginLinkR:<email> <loginLink> // reverse login link
 project created <date>
         id <id>
         last <date>
@@ -137,18 +138,11 @@ redis db <number>
 #### Auth
 
 - **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
-- **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited or email not found. Sends a 6-digit OTP by email.
-- **Verify login link**: `GET /auth/verify/<loginLink>`: expects `{email: <email>, otp: <otp>}`. Returns 403 if link not found or rate limited. Returns the same than what `GET /auth/user` does, and sets a session cookie.
+- **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Sends a login link by email.
+- **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found or rate limited. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
 - **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie.
 - **Delete account**: `POST /auth/delete`: deletes the user and all their sessions. Clears the cookie.
-
-#### Admin
-
-- **Grant/revoke creator access**: `POST /creator/grant`: expects `{email: <email>, grant: <boolean>}`. Returns 404 if `grant` is `false` and user does not exist. If `grant` is `true` and user does not exist, the endpoint creates the user.
-- **Run server tests**: `GET /test`. This is a `GET` so that it can be triggered from the browser. Returns the result of running the server test suite.
-- **Get client tests**: `GET /test.js`.
-- **Cleanup after tests**: used to run after the client tests.
 
 #### Project
 
@@ -156,7 +150,14 @@ redis db <number>
 - **Get projects**: `GET /projects`.
 - **Create project**: `POST /project`: expects `{name: <name>}`. Returns 409 if a project with that names exists.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
-- **Delete project**: `DELETE /project:<projectId>`
+- **Delete project**: `DELETE /project/<projectId>`
+
+#### Admin
+
+- **Grant/revoke creator access**: `POST /creator/grant`: expects `{email: <email>, grant: <boolean>}`. Returns 404 if `grant` is `false` and user does not exist. If `grant` is `true` and user does not exist, the endpoint creates the user.
+- **Run server tests**: `GET /test`. This is a `GET` so that it can be triggered from the browser. Returns the result of running the server test suite.
+- **Get client tests**: `GET /test.js`.
+- **Cleanup after tests**: used to run after the client tests.
 
 ### Responders
 
@@ -166,10 +167,10 @@ redis db <number>
 - `snackbar <type> [message]`: shows a notification with type (`ok`, `warning`, `error`). Auto-clears after 4 seconds. `snackbar clear` dismisses it immediately.
 - `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token isavailable. On 403 from a non-auth path, resets auth state and redirects to login. Reports errors to the server.
 - `report error <error>`: posts an error to the server via `POST /error`.
-- `load user`: fetches the user information from `GET /auth/user`. Sets `auth.mode` to `local` or `cloud`. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
-- `signup <email>`: requests a signup invite via `POST /auth/signup/request`. Shows a snackbar with the result.
-- `login <email>`: requests an OTP via `POST /auth/login`. On success, sets `auth.otpRequested`.
-- `verify <email> <otp>`: verifies the OTP via `POST /auth/verify`. On success, stores the CSRF token, loads models/projects/settings, and navigates to projects.
+- `read hash`: if the hash is `verify/<loginLink>`, calls `verify` with the login link.
+- `load user`: fetches the user information from `GET /auth/user`. Sets `auth` to the response body. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
+- `login <email>`: sends a login link via `POST /auth/login`. On success, sets `auth.loginLinkRequested`.
+- `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, stores the user info, loads projects, and navigates to projects. On error, shows a snackbar and navigates to login.
 - `logout`: logs out via `POST /auth/logout`. Resets auth state and navigates to login.
 - `load projects` gets all projects via `GET /projects`.
 
@@ -179,8 +180,8 @@ redis db <number>
 user admin <false|true>
      creator <false|true>
      csrf "<CSRF token>"
-     email "<email entered in the login/signup form>"
-     magicLinkRequested <0|1> // Whether the magic link was already sent
+     email "<email entered in the login form>"
+     loginLinkRequested <0|1> // Whether the login link was already sent
      mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 file content "..." // Current file selected
      dialogMode <ai|human|terminal> // Dialog mode
@@ -219,6 +220,6 @@ settings claude hasKey <0|1>
          show <0|1> // Flips the settings panel open
          testButton <0|1>
 test enabled <0|1> // Whether test mode is enabled
-     otp // OTP for logging in
+     loginLink // Login link for testing
 view "<view name>"
 ```

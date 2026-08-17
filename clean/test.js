@@ -57,16 +57,16 @@ if (mode === 'server') {
    module.exports = {};
 
    // We export this so we can use it also after client tests, otherwise we'd just call it after the server tests automatically.
-   module.exports.cleanup = async function (docker) {
-      var keys = await redis ('keys');
-      var toDelete = [];
+   module.exports.cleanup = async function (docker, redis) {
+      var keys = await redis ('keys', '*');
       var emails = dale.fil (keys, undefined, function (key) {
          // Cleanup is contingent on all test users using `example.com` as their email's domain, and on no real users using this domain.
          // Tests are not designed to run on prod environments.
          if (! key.match (/example\.com$/)) return;
-         toDelete.push (key);
          if (key.match (/^email:/)) return key;
       });
+
+      if (emails.length === 0) return;
 
       var userIds = await redis ('mget', ... emails);
 
@@ -75,15 +75,16 @@ if (mode === 'server') {
       }));
 
       await redis ('del', ... [
-         ... dale.go (emails, (email) => [email, dale.go (['login', 'signup'], (k) => 'rateLimit:' + k + ':' + email.replace ('email:', ''))]).flat (),
-         ... dale.go (userIds, (userId) => ['user:' + userId, 'otp:' + userId]).flat (),
-         ... resources
+         ... dale.go (emails, (email) => [email, ... dale.go (['login', 'verify'], (k) => 'rateLimit:' + k + ':' + email.replace ('email:', '')).flat ()]).flat (),
+         ... dale.go (userIds, (userId) => ['user:' + userId]).flat (),
+         ... resources,
       ]);
 
       var projectIds = dale.fil (resources, undefined, function (resource) {
          if (resource.match (/^project:/)) return resource.replace ('project:', '');
       });
 
+      if (projectIds.length === 0) return;
 
       await run ('docker', 'stop',         ... projectIds, {catch: true});
       await run ('docker', 'rm',           ... projectIds, {catch: true});
@@ -115,7 +116,7 @@ if (mode === 'server') {
 
          suites.public = dale.go ([
             ['get', '/'],
-            ['get', 'favicon.ico'],
+            ['get', '/favicon.ico'],
             ... dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
                return ['get', '/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
             }),
@@ -149,7 +150,7 @@ if (mode === 'server') {
                   ['body', rs.body, CONFIG.cloud ? {error: 'No session'} : {mode: 'local'}, teishi.test.equal],
                ]);
             }],
-            dale.go (['/creator/grant', '/auth/login'], function (path) {
+            dale.go (['/creator/grant', '/auth/login'], function (path, k) {
                if (CONFIG.cloud) return [
                   ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === '/creator/grant' ? adminHeaders : {}],
                   dale.go ([undefined, null, 1, '', '1', 'a@a', 'hello@example', 'this@is.not.really.an.emai.l'], function (email, k) {
@@ -175,32 +176,32 @@ if (mode === 'server') {
                   return true;
                }],
                ['Verify login (invalid link)', 'get', '/auth/verify/bogus', 403, assertBody ({error: 'Invalid login link', loginLink: 'bogus'})],
-               ['Verify login', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
+               ['Verify login again', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   if (! assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="[a-f0-9]{64}"; HttpOnly; SameSite=Lax; Path=\\/; Expires=.+' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10)), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="[a-f0-9]{64}"; Expires=.+ ' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10) + ' .+ HttpOnly; Path=\\/; SameSite=Lax;'), teishi.test.match],
                      ['csrf token', rs.body.csrf, 'string']
                   ])) return false;
                   s.headers.cookie = getCookie (rs.headers);
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
-               ['Request creator access', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
-               ['Request creator access again', 'post', '/creator/request', {email: 'hello@example.com'}, 200],
+               ['Request creator access', 'post', '/creator/request', {}, 200],
+               ['Request creator access again', 'post', '/creator/request', {}, 200],
                ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
-               ['Grant creator access for nonexisting account', 'post', '/creator/grant', {email: 'foo@example.com'}, 200, adminHeaders],
+               ['Grant creator access for nonexisting account', 'post', '/creator/grant', {email: 'foo@example.com', grant: true}, 200, adminHeaders],
                ['Get user', 'get', '/auth/user', 200, function (s, rq, rs) {
                   return assert ([
                      ['body', rs.body, 'object'],
                      ['body.count', rs.body.count, 'integer'],
-                     ['body.creator', rs.body.creator, true],
+                     ['body.creator', rs.body.creator, true, teishi.test.equal],
                      ['body.csrf', rs.body.csrf, s.headers ['x-csrf'], teishi.test.equal],
                   ]);
                }],
                ['Logout', 'post', '/auth/logout', {}, 200, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                   ]);
                }],
                ['Logout again', 'post', '/auth/logout', {}, 403, assertBody ({error: 'Invalid session'})],
@@ -218,43 +219,38 @@ if (mode === 'server') {
                   return ['Login buildup for almost rate limit #' + (v + 1), 'post', '/auth/login', {email: 'hello@example.com'}, 200];
                }),
                ['Login', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
-                  s.otp = rs.body.otp;
+                  s.loginLink = rs.body.loginLink;
                   return true;
                }],
-               ['Verify login', 'post', '/auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+               ['Verify login after almost rate limited', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   s.headers.cookie = getCookie (rs.headers);
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
                ['Login again also OK (rate limit resetted by successful verify)', 'post', '/auth/login', {email: 'hello@example.com'}, 200],
-               dale.go (dale.times (5), function (v) {
-                  return ['Login verify buildup for rate limit #' + (v + 1), 'post', '/auth/verify', {email: 'hello@example.com', otp: 'foo'}, 403, assertBody ({error: 'Invalid OTP', otp: 'foo'})];
-               }),
-               ['Verify login rate limited', 'post', '/auth/verify', {email: 'hello@example.com', otp: 'foo'}, 403, function (s, rq, rs, next) {
-                  if (! assert (['body', rs.body, {error: 'Rate limited'}, teishi.test.equal])) return false;
-                  (async function () {
-                     await redis ('del', 'rateLimit:verify:hello@example.com');
-                     next ();
-                  }) ();
+               ['Verify with already used login link', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 403, function (s, rq, rs) {
+                  return assert ([
+                     ['body.error', rs.body.error, 'Invalid login link', teishi.test.equal],
+                     ['body.loginLink', rs.body.loginLink, s.loginLink, teishi.test.equal],
+                  ]);
                }],
 
-               ['Private route with invalid session', 'post', '/auth/logout', {}, 403, function (s, rq, rs) {
+               ['Private route with invalid session', 'get', '/auth/user', 403, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                      ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
                   ]);
                }, {cookie: CONFIG.cookie.name + '="foo"'}],
-               ['Private route with no session', 'post', '/auth/logout', {}, 403, assertBody ({error: 'No session'}), {cookie: ''}],
+               ['Private route with no session', 'get', '/auth/user', 403, assertBody ({error: 'No session'}), {cookie: ''}],
                ['Public route with invalid session', 'get', '/', 200, {cookie: CONFIG.cookie.name + '="foo"'}],
                ['Private route with invalid csrf token', 'post', '/auth/logout', {}, 403, assertBody ({error: 'Invalid csrf token'}), {'x-csrf': 'foo'}],
                ['Public route with invalid csrf token', 'post', '/error', {hi: 'there'}, 200],
-               ['Accept invite without being admin', 'post', '/auth/signup/accept', {email: 'hello@example.com'}, 403, {'x-test': 0}],
                ['Login again (second session)', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
-                  s.otp = rs.body.otp;
+                  s.loginLink = rs.body.loginLink;
                   return true;
                }],
-               ['Verify second login', 'post', '/auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+               ['Verify second login', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   // Store old and new session
                   s.sessions = [{cookie: s.headers.cookie, csrf: s.headers ['x-csrf']}, {cookie: getCookie (rs.headers), csrf: rs.body.csrf}];
                   // Update csrf token but not cookie so there's a mismatch for the next test
@@ -312,41 +308,33 @@ if (mode === 'server') {
                   return assert ([
                      ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                   ]);
                }],
                ['Delete account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                   ]);
                }],
                ['List sessions after delete', 'get', '/auth/list', 403, assertBody ({error: 'Invalid session'})],
-               ['Login after delete', 'post', '/auth/login', {email: 'hello@example.com'}, 403, assertBody ({error: 'No such email'})],
-               ['Signup request after delete', 'post', '/auth/signup/request', {email: 'hello@example.com'}, 200],
-               ['Cleanup', 'get', '/', 200, function (s, rq, rs, next) {
-                  (async function () {
-                     // Cleanup before auth suite
-                     var testUserId = await redis ('get', 'email:hello@example.com');
-                     await redis ('del', 'invite:hello@example.com', 'email:hello@example.com', 'rateLimit:login:foo@example.com', 'rateLimit:verify:foo@example.com', 'rateLimit:login:hello@example.com', 'rateLimit:verify:hello@example.com', 'user:' + testUserId);
-                     next ();
-                  }) ();
-               }],
-            ] : [
+               ['Get user after delete', 'get', '/auth/user', 403, assertBody ({error: 'Invalid session'})],
+            ] : [],
+            ! CONFIG.cloud ? [
                ['Logout', 'post', '/auth/logout', {}, 404, assertBody ({error: 'Not in cloud mode'})],
-               ['List sessions', 'post', '/auth/list', {}, 404, assertBody ({error: 'Not in cloud mode'})],
-            ],
+               ['List sessions', 'get', '/auth/user', 404, assertBody ({error: 'Not in cloud mode'})],
+               ['List sessions', 'get', '/auth/list', 404, assertBody ({error: 'Not in cloud mode'})],
+            ] : [],
          ];
 
          suites.project = [
             CONFIG.cloud ? [
-               ['Signup request for invite', 'post', '/auth/signup/request', {email: 'hello@example.com'}, 200],
-               ['Accept invite', 'post', '/auth/signup/accept', {email: 'hello@example.com'}, 200, adminHeaders],
+               ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
                ['Login', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
-                  s.otp = rs.body.otp;
+                  s.loginLink = rs.body.loginLink;
                   return true;
                }],
-               ['Verify login', 'post', '/auth/verify', function (s) {return {email: 'hello@example.com', otp: s.otp}}, 200, function (s, rq, rs) {
+               ['Verify login', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   s.headers.cookie = getCookie (rs.headers);
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
@@ -467,7 +455,7 @@ if (mode === 'server') {
 
          hitit.seq ({port: CONFIG.port, headers: {'x-test': '1'}}, suites [suite], function (error, rdata) {
             if (error) {
-               error = {
+               if (error.request) error = {
                   rq: {
                      method: error.request.method,
                      path: error.request.path,
@@ -545,89 +533,56 @@ if (mode === 'client') {
             ['inputs present', c ('input').length, 1, teishi.test.equal],
          ]);
       }],
-      ['Login as hello@example.com', function (next) {
+      ['Login button disabled with invalid email', function (next) {
+         var input = c ('input') [0];
+         input.value = 'not-an-email';
+         c.fire (input, 'input');
+         next (500, 1);
+      }, function () {
+         var button = c ('button') [0];
+         return assert ([
+            ['button disabled', button.disabled, true, teishi.test.equal],
+            ['button text', button.innerHTML, 'Enter your email', teishi.test.equal],
+         ]);
+      }],
+      ['Login button enabled with valid email', function (next) {
          var input = c ('input') [0];
          input.value = 'hello@example.com';
          c.fire (input, 'input');
-
-         find ('button', 'Request code').click ();
+         next (500, 1);
+      }, function () {
+         var button = c ('button') [0];
+         return assert ([
+            ['button enabled', button.disabled, false, teishi.test.equal],
+            ['button text', button.innerHTML, 'Send me a link to get in', teishi.test.equal],
+         ]);
+      }],
+      ['Send login link', function (next) {
+         find ('button', 'Send me a link to get in').click ();
+         next (1000, 1);
+      }, function () {
+         return assert ([
+            ['loginLinkRequested', B.get ('auth', 'loginLinkRequested'), true, teishi.test.equal],
+            ['loginLink', B.get ('test', 'loginLink'), 'string'],
+         ]);
+      }],
+      ['Verify with invalid login link', function (next) {
+         window.location.hash = '#/verify/bogus';
          next (1000, 1);
       }, function () {
          var snackbar = B.get ('snackbar') || {};
          return assert ([
             ['snackbar type', snackbar.type, 'error', teishi.test.equal],
-            ['snackbar message', snackbar.message, 'No such email', teishi.test.equal],
-         ]);
-      }],
-      ['Go to signup page', function (next) {
-         find ('a', 'Need an invite').click ();
-         next (1000, 1);
-      }, function () {
-         return assert ([
-            ['view', B.get ('view'), 'signup', teishi.test.equal],
-            ['inputs present', c ('input').length, 1, teishi.test.equal],
-         ]);
-      }],
-      ['Request invite as hello@example.com', function (next) {
-         var input = c ('input') [0];
-         input.value = 'hello@example.com';
-         c.fire (input, 'input');
-
-         find ('button', 'Request invite').click ();
-         next (1000, 1);
-      }, function () {
-         var snackbar = B.get ('snackbar') || {};
-         return assert ([
-            ['snackbar type', snackbar.type, 'ok', teishi.test.equal],
-            ['snackbar message', snackbar.message, 'Invite requested. Thank you for your interest!', teishi.test.equal],
-         ]);
-      }],
-      ['Go to login page', function (next) {
-         find ('a', 'Already have access? Log in').click ();
-
-         B.call ('post', 'auth/signup/accept', {email: 'hello@example.com'}, function (x, error, rs) {
-            if (error) return B.call (x, 'snackbar', 'error', 'Could not accept invite');
-            next (1000, 1);
-         });
-      }, function () {
-         return assert ([
+            ['snackbar message', snackbar.message, 'Invalid or expired login link', teishi.test.equal],
             ['view', B.get ('view'), 'login', teishi.test.equal],
-            ['inputs present', c ('input').length, 1, teishi.test.equal],
-            ['input still retains email after switching view', (c ('input') [0] || {}).value, 'hello@example.com', teishi.test.equal],
          ]);
       }],
-      ['Login after invite accepted', function (next) {
-         find ('button', 'Request code').click ();
+      ['Verify with valid login link', function (next) {
+         window.location.hash = '#/verify/' + B.get ('test', 'loginLink');
          next (1000, 1);
       }, function () {
          return assert ([
-            ['otp', B.get ('test', 'otp'), 'string'],
-         ]);
-      }],
-      ['Enter wrong OTP and see failed login', function (next) {
-         var input = c ('input') [1];
-         input.value = 'xxxxxx';
-         c.fire (input, 'input');
-
-         find ('button', 'Verify').click ();
-         next (1000, 1);
-      }, function () {
-         var snackbar = B.get ('snackbar') || {};
-         return assert ([
-            ['snackbar type', snackbar.type, 'error', teishi.test.equal],
-            ['snackbar message', snackbar.message, 'Invalid code', teishi.test.equal],
-         ]);
-      }],
-      ['Enter OTP and verify login', function (next) {
-         var input = c ('input') [1];
-         input.value = B.get ('test', 'otp');
-         c.fire (input, 'input');
-
-         find ('button', 'Verify').click ();
-         next (1000, 1);
-      }, function () {
-         return assert ([
-            ['otp', B.get ('auth', 'otp'), 'undefined'],
+            ['csrf', B.get ('auth', 'csrf'), 'string'],
             ['view', B.get ('view'), 'projects', teishi.test.equal],
          ]);
       }],

@@ -1,3 +1,5 @@
+name: vibey
+
 services:
   vibey-host:
     container_name: vibey-host
@@ -24,3 +26,4 @@ services:
 
 volumes:
   vibey-host:
+    name: vibey-host

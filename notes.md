@@ -1,5 +1,31 @@
 # Vibey development notes
 
+## 2026-08-17
+
+The four bets of vibey:
+1. **A unified space to work on**: the only sensible answer to the proliferation of apps, services and intelligence providers. A single start point and endpoint for one's own core flows. The unified workspace can integrate and be integrated with. Vibey is an anti-silo.
+2. **Communication at the center**: the central interface is a chat, where humans, AI and the system prompt can collaborate. These interactions generate decisions that end up generating a great deal of the data of a project.
+3. **The file as the unifying data unit**: in vibey, almost all data is represented as a file. Chats, text files, PDFs, media, databases, even configuration. A flexible viewer/editor can accommodate for working with all of these formats.
+4. **Portability through the web**: the web browser unifies the dataspace of any device it is connected to; and it does so on top of open standards. Vibey offers an explosive combination of convenience and personal control over one own's workspace.
+
+The three bets of altocode:
+1. **Openbound**: combine the power of open source with that of a business with bounded profits. [Revolution from below through markets](https://github.com/altocodenl/openbound).
+2. **Create whole software through Alexandrian means**: use the paradigm and approach outlined in The Nature Of Order to create beautiful and lasting products. The degree of life of the products is what makes them loved, instead of just needed.
+3. **Be an everything digital company**: starting with vibey (the OS), cell (the language), offer digital products of every kind with a high degree of user ownership and degree of life.
+
+```
+docker compose exec vibey-host redis-cli
+```
+
+TODO auth:
+- Client tests
+
+TODO project:
+- Autobackup with tests
+- Shell view
+- Show "request creator" (if in cloud mode and creator !== true) with text box
+- How are local mode projects stored? Should we have a default user?
+
 ## 2026-08-16
 
 Chat is at the center of the big three. It´s the most central one, above app and file! Communication is at the center. Understanding that AI using tools is chat too, in the same way that a human using a shell, really simplifies things.

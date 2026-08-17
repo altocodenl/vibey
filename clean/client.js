@@ -7,6 +7,8 @@ B.internal.timeout = 500;
 
 var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log;
 
+var validEmail = /^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i;
+
 // *** HELPERS ***
 
 var formatError = function (error) {
@@ -23,6 +25,16 @@ window.addEventListener ('hashchange', function () {
 dale.go (['keydown', 'keyup', 'blur'], function (type) {
    window.addEventListener (type, function (ev) {
       B.call (type, '', ev);
+   });
+});
+
+document.addEventListener ('visibilitychange', function () {
+   if (document.hidden || ! B.get ('auth', 'loginLinkRequested')) return;
+   B.call ('get', '/auth/user', function (x, error, rs) {
+      if (error || ! rs.body.csrf) return;
+      B.call (x, 'set', 'auth', rs.body);
+      B.call (x, 'load', 'projects');
+      B.call (x, 'navigate', 'projects');
    });
 });
 
@@ -53,10 +65,12 @@ B.mrespond ([
    ['read', 'hash', function (x) {
       var hash = window.location.hash.slice (2).split ('/');
 
-      var authViews   = ['signup', 'login'];
+      var authViews   = ['login', 'verify'];
       var loggedViews = ['projects', 'project'];
 
       if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
+
+      if (hash [0] === 'verify' && hash [1]) return B.call (x, 'verify', hash [1]);
 
       if (B.get ('auth', 'mode') === 'cloud') {
          if (inc (loggedViews, hash [0]) && ! B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'login');
@@ -135,7 +149,7 @@ B.mrespond ([
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error) clog (error.responseText);
-         if (error && error.status === 403 && x.path [0].indexOf ('auth/') !== 0) {
+         if (error && error.status === 403 && x.path [0].indexOf ('/auth/') !== 0) {
             B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
             B.call (x, 'navigate', 'login');
             return;
@@ -157,18 +171,18 @@ B.mrespond ([
 
    ['load', 'user', function (x) {
 
+      if (window.location.hash.match (/^#\/verify\/[^\\]+/)) return B.call (x, 'read', 'hash');
+
       B.call (x, 'get', '/auth/user', function (x, error, rs) {
 
          if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
-         B.call (x, 'set', ['auth', 'mode'], rs && rs.body.mode === 'local' ? 'local' : 'cloud');
+         if (error && error.status === 403) {
+            B.call (x, 'set', ['auth', 'mode'], 'cloud');
+            return B.call (x, 'navigate', 'login');
+         }
 
-         if (error && error.status === 403) return B.call (x, 'navigate', 'login');
-
-         if (rs.body.mode !== 'local') B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
-
-         if (rs.body.admin) B.call (x, 'set', ['auth', 'admin'], 1);
-
+         B.call (x, 'set', 'auth', rs.body);
          B.call (x, 'read', 'hash');
       });
    }],
@@ -178,25 +192,25 @@ B.mrespond ([
       B.call (x, 'post', '/auth/login', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
          if (error) {
             if (error.responseText) error = (teishi.parse (error.responseText) || {}).error;
-            return B.call (x, 'snackbar', 'error', error || 'Failed to send login code');
+            return B.call (x, 'snackbar', 'error', error || 'Failed to send login link');
          }
-         B.call (x, 'snackbar', 'ok', 'Code sent, please check your inbox');
-         B.call (x, 'set', ['auth', 'otpRequested'], true);
+         B.call (x, 'snackbar', 'ok', 'Login link sent, please check your inbox');
+         B.call (x, 'set', ['auth', 'loginLinkRequested'], true);
 
-         if (B.get ('test')) B.call (x, 'set', ['test', 'otp'], rs.body.otp);
+         if (B.get ('test')) B.call (x, 'set', ['test', 'loginLink'], rs.body.loginLink);
       });
    }],
 
-   ['verify', [], function (x, email, otp) {
-      if (! email || ! otp) return B.call (x, 'snackbar', 'error', 'Please enter your email and code');
-      B.call (x, 'post', '/auth/verify', {email: email.trim ().toLowerCase (), otp: otp}, function (x, error, rs) {
-         if (error) return B.call (x, 'snackbar', 'error', 'Invalid code');
-         B.call (x, 'rem', 'auth', 'email', 'otp');
-         B.call (x, 'set', ['auth', 'csrf'], rs.body.csrf);
-         if (rs.body.admin) B.call (x, 'set', ['auth', 'admin'], 1);
-
+   ['verify', '*', function (x) {
+      B.call (x, 'get', '/auth/verify/' + x.path [0], function (x, error, rs) {
+         if (error) {
+            B.call (x, 'snackbar', 'error', 'Invalid or expired login link');
+            return B.call (x, 'navigate', 'login');
+         }
+         B.call (x, 'set', 'auth', rs.body);
          B.call (x, 'load', 'projects');
          B.call (x, 'navigate', 'projects');
+         B.call (x, 'snackbar', 'ok', 'Welcome back to vibey!');
       });
    }],
 
@@ -663,7 +677,7 @@ views.main = function () {
 
 // *** AUTH ***
 
-views.auth = function (page) {
+views.login = function () {
    return B.view ('auth', function (auth) {
       auth = auth || {};
 
@@ -673,7 +687,7 @@ views.auth = function (page) {
       var card = function (title, subtitle, body, footer) {
          return ['div', {class: 'min-vh-100 flex items-center justify-center pa4 bg-app-bg'}, [
             ['div', {class: 'w-100 mw6 bg-surface text-bright pa4 pa5-ns br3 ba b-border shadow-3'}, [
-               ['h1', {class: 'ma0 mb2 f3 fw6 text-bright'}, 'vibey'],
+               ['h1', {class: 'ma0 mb2 f3 fw6 text-bright'}, 'Enter vibey'],
                ['div', {class: 'light-blue f4 fw5 mb2'}, title],
                ['div', {class: 'text-muted lh-copy mb4'}, subtitle],
                body,
@@ -682,45 +696,25 @@ views.auth = function (page) {
          ]];
       };
 
-      if (page === 'signup') return card ('Request invite', 'Cloud mode uses invite-only signup. Enter your email and request access.', ['div', [
-         ['input', {
-            type: 'email',
-            value: auth.email,
-            placeholder: 'you@example.com',
-            oninput: B.ev ('set', ['auth', 'email']),
-            class: css.input
-         }],
-         ['button', {class: css.buttonWide, onclick: B.ev ('signup', [], auth.email)}, 'Request invite']
-      ]], ['div', {class: linkWrap}, [
-         ['a', {href: '#/login', class: linkClass}, 'Already have access? Log in']
-      ]]);
+      var emailValid = auth.email && auth.email.match (validEmail);
 
-      return card ('Log in', 'Enter your email to receive a one-time code. Then verify it to enter vibey cloud.', ['div', [
+      return card ('', auth.loginLinkRequested ? 'Check your inbox for a login link.' : '', ['div', [
          ['input', {
             type: 'email',
             value: auth.email,
-            placeholder: 'you@example.com',
+            placeholder: 'your email',
             oninput: B.ev ('set', ['auth', 'email']),
             class: css.input
          }],
-         ['button', {class: css.buttonWide + ' mb3', onclick: B.ev ('login', [], auth.email)}, auth.otpRequested ? 'Request another code' : 'Request code'],
-         auth.otpRequested ? ['div', [
-            ['input', {
-               type: 'text',
-               value: auth.otp,
-               placeholder: '6-digit code',
-               oninput: B.ev ('set', ['auth', 'otp']),
-               class: css.input
-            }],
-            ['button', {class: css.buttonWide, onclick: B.ev ('verify', [], auth.email, auth.otp)}, 'Verify']
-         ]] : ''
-      ]], ['div', {class: linkWrap}, [
-         ['a', {href: '#/signup', class: linkClass}, 'Need an invite? Request access']
+         ['button', {
+            class: css.buttonWide,
+            style: style ({'background-color': emailValid ? '#27ae60' : '#555', cursor: emailValid ? 'pointer' : 'default'}),
+            disabled: ! emailValid,
+            onclick: B.ev ('login', [], auth.email),
+         }, emailValid ? (auth.loginLinkRequested ? 'Send another link' : 'Send me a link to get in') : 'Enter your email'],
       ]]);
    });
 }
-
-dale.go (['login', 'signup'], (v) => views [v] = () => views.auth (v));
 
 // *** PROJECTS ***
 
