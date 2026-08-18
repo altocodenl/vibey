@@ -1,10 +1,16 @@
 /* *** SHAPE OF secret.js ***
 
 module.exports = {
+   backup: {
+      accessKeyId:     '...',
+      bucketName:      '...',
+      host:            '...',
+      secretAccessKey: '...'
+   },
    ses: {
       accessKeyId:     '...',
       secretAccessKey: '...'
-   }
+   },
 }
 
 */
@@ -20,8 +26,12 @@ catch (error) {
 
 var CONFIG = {
    admin: 'info@altocode.nl',
-   baseURL: 'http://localhost:5353',
+   baseURL: process.env.baseURL || 'http://localhost:5353',
    cloud: process.env.cloud === '1',
+   backup: {
+      ... (SECRET.backup || {}),
+      enable: process.env.backup === '1',
+   },
    cookie: {
       expires: 7 * 24 * 60 * 60,
       name:    'vibey'
@@ -446,6 +456,8 @@ docker.cleanup = async function () {
 
 docker.backup = async function (id) {
 
+   if (! CONFIG.backup.enable) return;
+
    var [tracked, files, lastCommit] = await dale.async (dale.times (3), function (k) {
       if (k === 1) return docker.run (id, 'git -C /project ls-files -co --exclude-standard');
       if (k === 2) return docker.run (id, "find /project -type f -printf '%T@ %p\\n'");
@@ -654,6 +666,7 @@ var routes = [
          count: parseInt (rq.user.count),
          creator: !! rq.user.creator,
          csrf: rq.user.csrf,
+         email: rq.user.email,
          mode: 'cloud',
       });
    }],
@@ -767,9 +780,10 @@ var routes = [
 
       reply (rs, 200, {
          admin: user.email === CONFIG.admin ? true : undefined,
-         count: user.count,
+         count: parseInt (user.count),
          creator: !! user.creator,
          csrf,
+         email: user.email,
          mode: 'cloud',
       }, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {
          expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10),
@@ -1071,7 +1085,7 @@ var routes = [
 
       await test.cleanup (docker, redis);
       test.run (CONFIG) ('all', async function (error, rdata) {
-         await test.cleanup (docker, redis);
+         if (! error) await test.cleanup (docker, redis);
          reply (rs, 200, cell.JSToText (error ? {error} : rdata));
       }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis, run);
    }],
@@ -1080,6 +1094,15 @@ var routes = [
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
       cicek.file (rq, rs, 'test.js');
+   }],
+
+   ['post', '/test/cleanup', async function (rq, rs) {
+      if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+
+      await test.cleanup (docker, redis);
+
+      reply (rs, 200);
+
    }],
 ];
 

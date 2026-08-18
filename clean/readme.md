@@ -96,9 +96,15 @@ userCount <integer>
 
 ```
 {
+   backup: {
+      accessKeyId:     '...',
+      bucketName:      '...',
+      host:            '...',
+      secretAccessKey: '...'
+   },
    ses: {
-      accessKeyId: '...',
-      secretAccessKey: '...+d9PrIV/Z4Jes',
+      accessKeyId:     '...',
+      secretAccessKey: '...'
    }
 }
 ```
@@ -106,6 +112,8 @@ userCount <integer>
 ### Environment variables
 
 ```
+baseURL <string> // To set the base domain (defaults to `http://localhost:5353`
+backup <"1"|anything else> // To enable backups to a S3-like bucket
 cloud <"1"|anything else> // To enable cloud mode
 email <"1"|anything else> // To enable sending emails
 ```
@@ -114,6 +122,11 @@ email <"1"|anything else> // To enable sending emails
 
 ```
 admin <adminEmail>
+backup accessKey <accessKey>
+       bucketName <bucketName>
+       enable <0|1>
+       host <host>
+       secretAccessKey <secretKey>
 baseUrl <url>
 cloud <0|1>
 cookie expires <expiration in seconds>
@@ -137,12 +150,14 @@ redis db <number>
 
 #### Auth
 
-- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, csrf: <token>}` in cloud mode and `{mode: 'local'}` otherwise.
-- **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Sends a login link by email.
-- **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found or rate limited. Returns the same than what `GET /auth/user` does, and sets a session cookie.
+Except for `GET /auth/user`, all other routes will return a 404 in local mode.
+
+- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, csrf: <token>, email: <email>, mode: 'cloud'}` in cloud mode and `{mode: 'local'}` local mode.
+- **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet. Sends a login link by email.
+- **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
 - **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie.
-- **Delete account**: `POST /auth/delete`: deletes the user and all their sessions. Clears the cookie.
+- **Delete account**: `POST /auth/delete`: deletes the user and all their resources (sessions, projects). Clears the cookie.
 
 #### Project
 
@@ -162,16 +177,16 @@ redis db <number>
 ### Responders
 
 - `navigate <targetPath>`: reads and optionally updates the hash. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
-- `read hash`: checks that the view in the hash exists and should be reachable by the user. If on the `projects` view, sets `project`. If on the `project` view, it sets `file`.
+- `read hash`: if the hash is `verify/<loginLink>`, calls `verify` with the login link. Otherwise, checks that the view in the hash exists and should be reachable by the user. If on the `projects` view, sets `project`. If on the `project` view, it sets `file`.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
 - `snackbar <type> [message]`: shows a notification with type (`ok`, `warning`, `error`). Auto-clears after 4 seconds. `snackbar clear` dismisses it immediately.
-- `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token isavailable. On 403 from a non-auth path, resets auth state and redirects to login. Reports errors to the server.
+- `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token is available. On 403 from a non-auth path, resets user state and redirects to login. Reports errors to the server.
 - `report error <error>`: posts an error to the server via `POST /error`.
-- `read hash`: if the hash is `verify/<loginLink>`, calls `verify` with the login link.
-- `load user`: fetches the user information from `GET /auth/user`. Sets `auth` to the response body. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
-- `login <email>`: sends a login link via `POST /auth/login`. On success, sets `auth.loginLinkRequested`.
+- `visibilitychange`: when the tab regains focus and a login link has been requested, polls `GET /auth/user` to check if the user logged in via the link. On success, sets user state, loads projects and navigates to projects.
+- `load user`: fetches the user information from `GET /auth/user`. Sets `user` to the response body. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
+- `login <email>`: sends a login link via `POST /auth/login`. On success, sets `user.loginLinkRequested`.
 - `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, stores the user info, loads projects, and navigates to projects. On error, shows a snackbar and navigates to login.
-- `logout`: logs out via `POST /auth/logout`. Resets auth state and navigates to login.
+- `logout`: logs out via `POST /auth/logout`. Resets user state and navigates to login.
 - `load projects` gets all projects via `GET /projects`.
 
 ### Client state

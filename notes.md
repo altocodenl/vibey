@@ -1,5 +1,35 @@
 # Vibey development notes
 
+## 2026-08-18
+
+TODO auth [DONE]:
+- Run cleanup only when tests are successful
+- On successful client test, call cleanup and relogin as admin
+- Add remaining client tests
+
+- Consider clean/client.js. There's a new placeholder view there. This is the project selector. I want it to become a new view. Please work within the new view. It should be a spiral. At the beginning, the spiral will be empty of projects, because there are no projects in the state of my current user. The spiral will always have five slots, and follow a Fibonacci pattern. At the center of the spiral, there should be a sixth slot, which will show something we're interacting with. Please start by drawing the spiral and the slots. The spiral should fan out in a clockwise manner. Please put all the css inside the view, so it's isolated for the time being.
+- The spiral should be larger so there's no overlap between slots. The slots should be almost rectangular, slightly rounded.
+
+Empty shell. The center contains a + button? It would work, but what if the shell is full? Then it would make no sense. Let's forget about that for now. You have the + in the middle. No, let's drop it. When hovering over, show a +? That'd work great in a computer, but not in a phone. What if the empty slots have small +s? Then you'd know to click them to add something in that position.
+
+When clicking (or hovering) on top of a filled slot, a modal appears requesting the name, also suggesting a possible name with a regenerate random name (adjective + noun). Then, you're taken to the project.
+
+Other operations: enter, rename, delete, see details.
+
+Once the project is in the slot, do you see its name? Yes. It will appear there. If it doesn't fit, we'll shorten it. The slots shouldn't be round, either, they should be almost rectangular.
+
+But the slots are too small to contain names, particularly in a phone. The center can instead be a status bar, that when a project is clicked, shows the name. If a slot is double clicked, you go into the project. The status bar is still inside the shell, on the left side but still semi-inside. The slots can then show initials and colors.
+
+How do we remove a project? There has to be a remove mode, like we have for files already; when that's on, any click on a slot asks for confirmation.
+
+Rename is done from inside the project (the pencil next to the title).
+
+The details seen can be: name, last modified. 
+
+When we have more than 5 or 7 projects (the lower filament of the shell can be long and can accommodate two more projects, perhaps), where do they go? We still need a list.
+
+TODO: define list: always visible or only when searching; or scroll down? The list should probably be associated with search itself, modally switching between shell and list of projects.
+
 ## 2026-08-17
 
 The four bets of vibey:

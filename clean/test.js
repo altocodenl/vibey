@@ -75,7 +75,7 @@ if (mode === 'server') {
       }));
 
       await redis ('del', ... [
-         ... dale.go (emails, (email) => [email, ... dale.go (['login', 'verify'], (k) => 'rateLimit:' + k + ':' + email.replace ('email:', '')).flat ()]).flat (),
+         ... dale.go (emails, (email) => [email, 'rateLimit:login:' + email.replace ('email:', '')]).flat (),
          ... dale.go (userIds, (userId) => ['user:' + userId]).flat (),
          ... resources,
       ]);
@@ -196,6 +196,7 @@ if (mode === 'server') {
                      ['body.count', rs.body.count, 'integer'],
                      ['body.creator', rs.body.creator, true, teishi.test.equal],
                      ['body.csrf', rs.body.csrf, s.headers ['x-csrf'], teishi.test.equal],
+                     ['body.email', rs.body.email, 'hello@example.com', teishi.test.equal],
                   ]);
                }],
                ['Logout', 'post', '/auth/logout', {}, 200, function (s, rq, rs) {
@@ -501,6 +502,8 @@ if (mode === 'server') {
 
 if (mode === 'client') {
 
+   var adminEmail = B.get ('user', 'email');
+
    var validationError;
 
    var assert = function (assertion) {
@@ -528,7 +531,7 @@ if (mode === 'client') {
          next (1000, 1);
       }, function () {
          return assert ([
-            ['auth.csrf', B.get ('auth', 'csrf'), undefined, teishi.test.equal],
+            ['user.csrf', B.get ('user', 'csrf'), undefined, teishi.test.equal],
             ['view', B.get ('view'), 'login', teishi.test.equal],
             ['inputs present', c ('input').length, 1, teishi.test.equal],
          ]);
@@ -562,8 +565,32 @@ if (mode === 'client') {
          next (1000, 1);
       }, function () {
          return assert ([
-            ['loginLinkRequested', B.get ('auth', 'loginLinkRequested'), true, teishi.test.equal],
+            ['loginLinkRequested', B.get ('user', 'loginLinkRequested'), true, teishi.test.equal],
             ['loginLink', B.get ('test', 'loginLink'), 'string'],
+         ]);
+      }],
+      ['Snackbar after login link sent', function (next) {
+         next (500, 1);
+      }, function () {
+         var snackbar = B.get ('snackbar') || {};
+         return assert ([
+            ['snackbar type', snackbar.type, 'ok', teishi.test.equal],
+            ['snackbar message', snackbar.message, 'Login link sent, please check your inbox', teishi.test.equal],
+         ]);
+      }],
+      ['Button text changes to Send another link', function (next) {
+         next (500, 1);
+      }, function () {
+         var button = c ('button') [0];
+         return assert ([
+            ['button text', button.innerHTML, 'Send another link', teishi.test.equal],
+         ]);
+      }],
+      ['Subtitle shows check inbox message', function (next) {
+         next (500, 1);
+      }, function () {
+         return assert ([
+            ['subtitle', !! find ('div', 'Check your inbox for a login link'), true, teishi.test.equal],
          ]);
       }],
       ['Verify with invalid login link', function (next) {
@@ -581,9 +608,12 @@ if (mode === 'client') {
          window.location.hash = '#/verify/' + B.get ('test', 'loginLink');
          next (1000, 1);
       }, function () {
+         var snackbar = B.get ('snackbar') || {};
          return assert ([
-            ['csrf', B.get ('auth', 'csrf'), 'string'],
+            ['csrf', B.get ('user', 'csrf'), 'string'],
             ['view', B.get ('view'), 'projects', teishi.test.equal],
+            ['snackbar type', snackbar.type, 'ok', teishi.test.equal],
+            ['snackbar message', snackbar.message, 'Welcome back to vibey!', teishi.test.equal],
          ]);
       }],
    ];
@@ -591,18 +621,28 @@ if (mode === 'client') {
    suites.project = [
    ];
 
-   c.test (Object.values (suites).flat (), function (error, time) {
+   c.test (Object.values (suites).flat (), async function (error, time) {
       if (error) {
          error.validationError = validationError;
          console.log ('Test error', error);
-         B.call ('snackbar', 'error', JSON.stringify (error));
+         return B.call ('snackbar', 'error', JSON.stringify (error));
       }
       else {
+         // On successful test, log back in as admin and clean up all data from the tests
+         var wait = (ms) => new Promise ((resolve) => setTimeout (resolve, ms));
+
+         B.call ('logout', []);
+         await wait (20);
+         B.call ('login', [], adminEmail);
+         await wait (20);
+         B.call ('verify', B.get ('test', 'loginLink'));
+         await wait (20);
+
+         B.call ('post', '/test/cleanup');
+         B.call ('rem', [], 'test');
+
          console.log ('All tests OK');
          B.call ('snackbar', 'ok', 'All tests passed in ' + time + 'ms');
       }
-
-      B.call ('post', 'cleanup');
-      B.call ('rem', [], 'test');
    });
 }

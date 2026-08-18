@@ -29,10 +29,10 @@ dale.go (['keydown', 'keyup', 'blur'], function (type) {
 });
 
 document.addEventListener ('visibilitychange', function () {
-   if (document.hidden || ! B.get ('auth', 'loginLinkRequested')) return;
+   if (document.hidden || ! B.get ('user', 'loginLinkRequested')) return;
    B.call ('get', '/auth/user', function (x, error, rs) {
       if (error || ! rs.body.csrf) return;
-      B.call (x, 'set', 'auth', rs.body);
+      B.call (x, 'set', 'user', rs.body);
       B.call (x, 'load', 'projects');
       B.call (x, 'navigate', 'projects');
    });
@@ -51,7 +51,7 @@ B.mrespond ([
 
    ['test', '*', function (x) {
       B.call (x, 'set', 'test', true);
-      if (B.get ('auth', 'admin')) c.loadScript ('test.js');
+      if (B.get ('user', 'admin')) c.loadScript ('test.js');
    }],
 
    // *** NAVIGATION ***
@@ -72,9 +72,9 @@ B.mrespond ([
 
       if (hash [0] === 'verify' && hash [1]) return B.call (x, 'verify', hash [1]);
 
-      if (B.get ('auth', 'mode') === 'cloud') {
-         if (inc (loggedViews, hash [0]) && ! B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'login');
-         if (inc (authViews,   hash [0]) &&   B.get ('auth', 'csrf')) return B.call (x, 'navigate', 'projects');
+      if (B.get ('user', 'mode') === 'cloud') {
+         if (inc (loggedViews, hash [0]) && ! B.get ('user', 'csrf')) return B.call (x, 'navigate', 'login');
+         if (inc (authViews,   hash [0]) &&   B.get ('user', 'csrf')) return B.call (x, 'navigate', 'projects');
       }
       else {
          if (inc (authViews, hash [0])) return B.call (x, 'navigate', 'projects');
@@ -143,14 +143,14 @@ B.mrespond ([
       var body = teishi.inc (['get', 'delete'], x.verb) ? ''   : arg1;
       var cb   = teishi.inc (['get', 'delete'], x.verb) ? arg1 : arg2;
 
-      if (B.get ('auth', 'csrf')) headers ['x-csrf'] = B.get ('auth', 'csrf');
+      if (B.get ('user', 'csrf')) headers ['x-csrf'] = B.get ('user', 'csrf');
 
       if (B.get ('test')) headers ['x-test'] = 1;
 
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error) clog (error.responseText);
          if (error && error.status === 403 && x.path [0].indexOf ('/auth/') !== 0) {
-            B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
+            B.call (x, 'set', [], {user: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
             B.call (x, 'navigate', 'login');
             return;
          }
@@ -178,11 +178,11 @@ B.mrespond ([
          if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
          if (error && error.status === 403) {
-            B.call (x, 'set', ['auth', 'mode'], 'cloud');
+            B.call (x, 'set', ['user', 'mode'], 'cloud');
             return B.call (x, 'navigate', 'login');
          }
 
-         B.call (x, 'set', 'auth', rs.body);
+         B.call (x, 'set', 'user', rs.body);
          B.call (x, 'read', 'hash');
       });
    }],
@@ -195,7 +195,7 @@ B.mrespond ([
             return B.call (x, 'snackbar', 'error', error || 'Failed to send login link');
          }
          B.call (x, 'snackbar', 'ok', 'Login link sent, please check your inbox');
-         B.call (x, 'set', ['auth', 'loginLinkRequested'], true);
+         B.call (x, 'set', ['user', 'loginLinkRequested'], true);
 
          if (B.get ('test')) B.call (x, 'set', ['test', 'loginLink'], rs.body.loginLink);
       });
@@ -207,7 +207,7 @@ B.mrespond ([
             B.call (x, 'snackbar', 'error', 'Invalid or expired login link');
             return B.call (x, 'navigate', 'login');
          }
-         B.call (x, 'set', 'auth', rs.body);
+         B.call (x, 'set', 'user', rs.body);
          B.call (x, 'load', 'projects');
          B.call (x, 'navigate', 'projects');
          B.call (x, 'snackbar', 'ok', 'Welcome back to vibey!');
@@ -216,7 +216,7 @@ B.mrespond ([
 
    ['logout', [], function (x) {
       B.call (x, 'post', '/auth/logout', {}, function (x, error) {
-         B.call (x, 'set', [], {auth: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
+         B.call (x, 'set', [], {user: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
          B.call (x, 'navigate', 'login');
       });
    }],
@@ -321,7 +321,7 @@ B.mrespond ([
          return B.call (x, verb, path, arg);
       }
 
-      if (ev.metaKey && B.get ('auth', 'admin')) {
+      if (ev.metaKey && B.get ('user', 'admin')) {
          if (ev.key === 'l') return call ('test', 'all');
       }
 
@@ -678,8 +678,8 @@ views.main = function () {
 // *** AUTH ***
 
 views.login = function () {
-   return B.view ('auth', function (auth) {
-      auth = auth || {};
+   return B.view ('user', function (user) {
+      user = user || {};
 
       var linkWrap  = 'mt4 tc';
       var linkClass = 'link light-blue hover-white';
@@ -696,27 +696,97 @@ views.login = function () {
          ]];
       };
 
-      var emailValid = auth.email && auth.email.match (validEmail);
+      var emailValid = user.email && user.email.match (validEmail);
 
-      return card ('', auth.loginLinkRequested ? 'Check your inbox for a login link.' : '', ['div', [
+      return card ('', user.loginLinkRequested ? 'Check your inbox for a login link.' : '', ['div', [
          ['input', {
             type: 'email',
-            value: auth.email,
+            value: user.email,
             placeholder: 'your email',
-            oninput: B.ev ('set', ['auth', 'email']),
+            oninput: B.ev ('set', ['user', 'email']),
             class: css.input
          }],
          ['button', {
             class: css.buttonWide,
             style: style ({'background-color': emailValid ? '#27ae60' : '#555', cursor: emailValid ? 'pointer' : 'default'}),
             disabled: ! emailValid,
-            onclick: B.ev ('login', [], auth.email),
-         }, emailValid ? (auth.loginLinkRequested ? 'Send another link' : 'Send me a link to get in') : 'Enter your email'],
+            onclick: B.ev ('login', [], user.email),
+         }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Send me a link to get in') : 'Enter your email'],
       ]]);
    });
 }
 
 // *** PROJECTS ***
+
+views.projects2 = function () {
+   var phi = 1.618033988749895;
+   var spiralA = 38;
+   var slotW = 70, slotH = 44, slotRx = 10;
+   var centerW = 80, centerH = 50, centerRx = 12;
+
+   var spiralD = (function () {
+      var d = '', steps = 400;
+      var t0 = -Math.PI, t1 = 5 * Math.PI / 2 + Math.PI / 12;
+      for (var i = 0; i <= steps; i++) {
+         var t = t0 + (t1 - t0) * i / steps;
+         var r = spiralA * Math.pow (phi, 2 * t / Math.PI);
+         d += (i === 0 ? 'M' : ' L') + (r * Math.cos (t)).toFixed (1) + ',' + (r * Math.sin (t)).toFixed (1);
+      }
+      return d;
+   }) ();
+
+   var slots = [];
+   for (var i = 1; i <= 5; i++) {
+      var t = i * Math.PI / 2;
+      var r = spiralA * Math.pow (phi, 2 * t / Math.PI);
+      slots.push ({x: +(r * Math.cos (t)).toFixed (1), y: +(r * Math.sin (t)).toFixed (1), n: i});
+   }
+
+   var svgContent = (function () {
+      var s = '<svg viewBox="-160 -210 480 680" style="width:100%;height:auto;max-height:85vh;" xmlns="http://www.w3.org/2000/svg">';
+
+      s += '<defs><filter id="spiral-glow"><feGaussianBlur stdDeviation="4" result="b"/>';
+      s += '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+
+      s += '<path d="' + spiralD + '" fill="none" stroke="rgba(148,184,255,0.08)" stroke-width="8" stroke-linecap="round" filter="url(#spiral-glow)"/>';
+      s += '<path d="' + spiralD + '" fill="none" stroke="rgba(148,184,255,0.22)" stroke-width="2" stroke-linecap="round"/>';
+
+      dale.go (slots, function (sl) {
+         s += '<g transform="translate(' + sl.x + ',' + sl.y + ')">';
+         s += '<rect x="' + (-slotW / 2) + '" y="' + (-slotH / 2) + '" width="' + slotW + '" height="' + slotH + '" rx="' + slotRx + '" fill="' + css.colors.surface + '" stroke="rgba(148,184,255,0.28)" stroke-width="1.5" stroke-dasharray="6 4"/>';
+         s += '<text x="0" y="4" text-anchor="middle" fill="' + css.colors.textMuted + '" font-size="11" font-family="-apple-system,BlinkMacSystemFont,sans-serif" opacity="0.4">' + sl.n + '</text>';
+         s += '</g>';
+      });
+
+      var breathR = 49;
+      s += '<circle cx="0" cy="0" r="' + breathR + '" fill="none" stroke="rgba(148,184,255,0.15)" stroke-width="1">';
+      s += '<animate attributeName="r" values="' + (breathR - 1) + ';' + (breathR + 6) + ';' + (breathR - 1) + '" dur="3s" repeatCount="indefinite"/>';
+      s += '<animate attributeName="opacity" values="0.15;0.04;0.15" dur="3s" repeatCount="indefinite"/>';
+      s += '</circle>';
+
+      s += '<rect x="' + (-centerW / 2) + '" y="' + (-centerH / 2) + '" width="' + centerW + '" height="' + centerH + '" rx="' + centerRx + '" fill="' + css.colors.surface + '" stroke="' + css.colors.link + '" stroke-width="2"/>';
+      s += '<text x="0" y="6" text-anchor="middle" fill="' + css.colors.link + '" font-size="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif">&#x2726;</text>';
+
+      s += '</svg>';
+      return s;
+   }) ();
+
+   return B.view ([['projects']], function (projects) {
+      projects = projects || [];
+
+      return ['div', {style: style ({
+         'min-height': '100vh',
+         display: 'flex',
+         'align-items': 'center',
+         'justify-content': 'center',
+         'background-color': css.colors.appBg,
+      })}, [
+         ['div', {style: style ({width: '100%', 'max-width': '700px'}), opaque: true}, [
+            ['LITERAL', svgContent]
+         ]]
+      ]];
+   });
+}
 
 views.projects = function () {
 
