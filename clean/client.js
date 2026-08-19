@@ -720,59 +720,63 @@ views.login = function () {
 
 views.projects2 = function () {
    var phi = 1.618033988749895;
-   var spiralA = 38;
-   var slotW = 70, slotH = 44, slotRx = 10;
-   var centerW = 80, centerH = 50, centerRx = 12;
+   var A = 24, slotW = 80, slotH = 48, slotRx = 12;
+   var r = function (t) { return A * Math.pow (phi, t / (Math.PI / 2)); };
 
-   var spiralD = (function () {
-      var d = '', steps = 400;
-      var t0 = -Math.PI, t1 = 5 * Math.PI / 2 + Math.PI / 12;
-      for (var i = 0; i <= steps; i++) {
-         var t = t0 + (t1 - t0) * i / steps;
-         var r = spiralA * Math.pow (phi, 2 * t / Math.PI);
-         d += (i === 0 ? 'M' : ' L') + (r * Math.cos (t)).toFixed (1) + ',' + (r * Math.sin (t)).toFixed (1);
+   var angles = [Math.PI, Math.PI * 1.6, Math.PI * 2, Math.PI * 2.25];
+   var slots = dale.go (angles, function (t) {
+      var rv = r (t);
+      return {x: rv * Math.cos (t), y: rv * Math.sin (t)};
+   });
+
+   // Slot 5: find angle past slot 4 where x matches slot 2
+   var tx = slots [1].x;
+   for (var t5 = Math.PI * 2.26; t5 < Math.PI * 3; t5 += 0.001) {
+      var rv = r (t5);
+      if (Math.abs (rv * Math.cos (t5) - tx) < 2) {
+         slots.push ({x: rv * Math.cos (t5), y: rv * Math.sin (t5)});
+         angles.push (t5);
+         break;
       }
-      return d;
-   }) ();
-
-   var slots = [];
-   for (var i = 1; i <= 5; i++) {
-      var t = i * Math.PI / 2;
-      var r = spiralA * Math.pow (phi, 2 * t / Math.PI);
-      slots.push ({x: +(r * Math.cos (t)).toFixed (1), y: +(r * Math.sin (t)).toFixed (1), n: i});
    }
 
-   var svgContent = (function () {
-      var s = '<svg viewBox="-160 -210 480 680" style="width:100%;height:auto;max-height:85vh;" xmlns="http://www.w3.org/2000/svg">';
+   var xs = dale.go (slots, function (s) { return s.x });
+   var ys = dale.go (slots, function (s) { return s.y });
+   var ox = -Math.min.apply (null, xs) + slotW / 2 + 20;
+   var oy = -Math.min.apply (null, ys) + slotH / 2 + 20;
+   var cw = Math.max.apply (null, xs) - Math.min.apply (null, xs) + slotW + 40;
+   var ch = Math.max.apply (null, ys) - Math.min.apply (null, ys) + slotH + 40;
 
-      s += '<defs><filter id="spiral-glow"><feGaussianBlur stdDeviation="4" result="b"/>';
-      s += '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+   // Spiral line from slot 1 to slot 5
+   var t0 = angles [0], t1 = angles [angles.length - 1], steps = 300, spiralD = '';
+   for (var i = 0; i <= steps; i++) {
+      var t = t0 + (t1 - t0) * i / steps;
+      var rv = r (t);
+      spiralD += (i === 0 ? 'M' : 'L') + (rv * Math.cos (t) + ox).toFixed (1) + ',' + (rv * Math.sin (t) + oy).toFixed (1);
+   }
 
-      s += '<path d="' + spiralD + '" fill="none" stroke="rgba(148,184,255,0.08)" stroke-width="8" stroke-linecap="round" filter="url(#spiral-glow)"/>';
-      s += '<path d="' + spiralD + '" fill="none" stroke="rgba(148,184,255,0.22)" stroke-width="2" stroke-linecap="round"/>';
-
-      dale.go (slots, function (sl) {
-         s += '<g transform="translate(' + sl.x + ',' + sl.y + ')">';
-         s += '<rect x="' + (-slotW / 2) + '" y="' + (-slotH / 2) + '" width="' + slotW + '" height="' + slotH + '" rx="' + slotRx + '" fill="' + css.colors.surface + '" stroke="rgba(148,184,255,0.28)" stroke-width="1.5" stroke-dasharray="6 4"/>';
-         s += '<text x="0" y="4" text-anchor="middle" fill="' + css.colors.textMuted + '" font-size="11" font-family="-apple-system,BlinkMacSystemFont,sans-serif" opacity="0.4">' + sl.n + '</text>';
-         s += '</g>';
-      });
-
-      var breathR = 49;
-      s += '<circle cx="0" cy="0" r="' + breathR + '" fill="none" stroke="rgba(148,184,255,0.15)" stroke-width="1">';
-      s += '<animate attributeName="r" values="' + (breathR - 1) + ';' + (breathR + 6) + ';' + (breathR - 1) + '" dur="3s" repeatCount="indefinite"/>';
-      s += '<animate attributeName="opacity" values="0.15;0.04;0.15" dur="3s" repeatCount="indefinite"/>';
-      s += '</circle>';
-
-      s += '<rect x="' + (-centerW / 2) + '" y="' + (-centerH / 2) + '" width="' + centerW + '" height="' + centerH + '" rx="' + centerRx + '" fill="' + css.colors.surface + '" stroke="' + css.colors.link + '" stroke-width="2"/>';
-      s += '<text x="0" y="6" text-anchor="middle" fill="' + css.colors.link + '" font-size="16" font-family="-apple-system,BlinkMacSystemFont,sans-serif">&#x2726;</text>';
-
-      s += '</svg>';
-      return s;
-   }) ();
+   // Status bar: left = left of slot 1, same aspect ratio as slots, bottom = bottom of slot 4
+   var barBottom = slots [3].y + oy + slotH / 2;
+   var barH = slotH * 2;
+   var barW = barH * slotW / slotH;
+   var barLeft = slots [0].x + ox - slotW / 2;
 
    return B.view ([['projects']], function (projects) {
       projects = projects || [];
+
+      var slotStyle = {
+         position: 'absolute',
+         width: slotW,
+         height: slotH,
+         'border-radius': slotRx,
+         'background-color': css.colors.surface,
+         border: '1.5px solid rgba(148,184,255,0.35)',
+         display: 'flex',
+         'align-items': 'center',
+         'justify-content': 'center',
+         color: 'rgba(148,184,255,0.5)',
+         'font-size': 13,
+      };
 
       return ['div', {style: style ({
          'min-height': '100vh',
@@ -781,9 +785,46 @@ views.projects2 = function () {
          'justify-content': 'center',
          'background-color': css.colors.appBg,
       })}, [
-         ['div', {style: style ({width: '100%', 'max-width': '700px'}), opaque: true}, [
-            ['LITERAL', svgContent]
-         ]]
+         ['div', {style: style ({position: 'relative', width: cw, height: ch + 48 + 48})}, [
+            ['LITERAL', '<svg width="' + cw + '" height="' + ch + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralD + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>'],
+            dale.go (slots, function (s, i) {
+               return ['div', {style: style (dale.obj ([
+                  ['left',  s.x + ox - slotW / 2],
+                  ['top',   s.y + oy - slotH / 2],
+               ], slotStyle))}, i + 1];
+            }),
+            ['div', {style: style (dale.obj ([
+               ['position', 'absolute'],
+               ['left', barLeft],
+               ['top', barBottom - barH],
+               ['width', barW],
+               ['height', barH],
+               ['border-radius', slotRx],
+               ['background-color', css.colors.surface],
+               ['border', '1.5px solid rgba(148,184,255,0.35)'],
+               ['display', 'flex'],
+               ['align-items', 'center'],
+               ['justify-content', 'center'],
+               ['color', 'rgba(148,184,255,0.5)'],
+               ['font-size', 13],
+            ]))}, 'status'],
+            ['input', {type: 'text', placeholder: '\u{1F50D} Search', style: style ({
+               position: 'absolute',
+               left: 0,
+               top: ch + 32,
+               width: cw,
+               height: 48,
+               'box-sizing': 'border-box',
+               'border-radius': slotRx,
+               'background-color': css.colors.surface,
+               border: '1.5px solid rgba(148,184,255,0.35)',
+               color: 'rgba(148,184,255,0.8)',
+               'font-size': 16,
+               'padding-left': 16,
+               'padding-right': 16,
+               outline: 'none',
+            })}],
+         ]],
       ]];
    });
 }

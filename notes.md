@@ -1,5 +1,147 @@
 # Vibey development notes
 
+## 2026-08-19
+
+Some notes on Alexander - The process of creating life:
+- "By preserving structure one always gets surprising results."
+- "The deel structure of wholeness (...) *is more active than anything, more inventive than a mythical "wild" artistic imagination*."
+- "We have always assumed that the process of creation is a process which somehow inserts entirely new structure into the world (...) Living process teaches us that wholeness ia always formed by a special process in which new structure emerges directly out of existing structure"
+- "*The enigma is that something new (...) arises from the extent to which we are able to attend to what is there (...) and that all this, then, will lead to astonishing surprises*."
+- "it is this requirement for uniqueness which most profoundly shocks the system of architecture, construction, and thought, that we allowed to develop in the 20th century."
+- "I close this space, a tiny bit more firmly. I am clear I want to be able to walk through here."
+- "Gradually then, the work grows under its own laws."\- "In each place, a being slowly emerges from the mist."
+- "My program worked by differentiating space, allowing objects of different size and shape to crystallize out from the space"
+- "In any sane process which is able to make living structure in buildings, giving proper attention to the functional basis of the building (...) is paramount. For a building it is the essence of its worth."
+- "Even the question of what the building does, and how well it does it, can be understood properly only in the context of the geometry. We have now had a sufficient preparation in geometry and structure,to begin a detailed discussion of the functional basis of a building."
+- "This means that all the "functions" which are to be defined for a building need to be expressed as rules for making *centers*. And, above all, the *choice* of these centers is vital"
+- "Thus, the task of defining centers, for a new building, or for a neighborhood, is one of the deepest and most significant kinds of work which can be undertaken"
+- "the centers that are to be injected into a new building project (...) most come in large part from the human *culture* where the project is happening"
+- "About twnty-five years ago, my colleagues and I invented a class of theoretical systems modeled on the generative systems used in traditional society. We called them pattern languages. A pattern language is essentially a way of defining generic centers, and then using them, sequentially, in design projects. The entities we called *patterns* were (...) somewhat similar to the entities I now call *centers*."
+- "We discovered that it is possible to create pattern-language-like systems, artificially."
+- "The artificial language will work well only to the extent tha tit embraces *a whole*"
+- "For *any* new building project it is necessary to construct such a language, merely to provide a clear functional basis for the character and organization of the building."
+- "The pattern both descrives a generic *center*, and describes a generic *relation* among other generic center. (...) the pattern is not so uch like an element in an errector set, but more a rule for making a certain kind of center capable of making an infinite number of particular centers of the same type"
+- Note: a bit confusing to talk about a center creating a center. It's like a function returning a function.
+- "A living process only rarely creates living centers from scratch."
+
+Project spiral:
+- 1 on the left
+- 2 higher, on the center
+- 3 on the right, opposite to 1, at its same height
+- 4 on the right but closer to the center, lower than 3
+- 5 lower and centered, in the same horizontal coordinates as 2
+- The status bar roughly 2x as tall as the slots, with its bottom aligned with the bottom of 4, its right aligned with the right of 2 and 5, its left aligned with the left of 1. The status bar has the same aspect ratio of the slots (5:3)
+- The spiral line starts after 1 and goes all the way to 5.
+
+First successful mockup
+
+```
+<title>Spiral – 3 slots</title>
+<style>
+  body {
+    background: #1a1a2e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+  }
+  .container { position: relative; }
+  .slot, .bar {
+    position: absolute;
+    border-radius: 12px;
+    background: #16213e;
+    border: 1.5px solid rgba(148,184,255,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(148,184,255,0.5);
+    font: 13px sans-serif;
+  }
+</style>
+<div class="container" id="c"></div>
+<script>
+var phi = 1.618033988749895;
+var A = 24, slotW = 80, slotH = 48;
+var r = function (t) { return A * Math.pow(phi, t / (Math.PI / 2)); };
+
+var angles = [Math.PI, Math.PI * 1.6, Math.PI * 2, Math.PI * 2.25];
+var slots = angles.map(function (t) {
+   var rv = r(t);
+   return {x: rv * Math.cos(t), y: rv * Math.sin(t)};
+});
+
+var tx = slots[1].x;
+for (var t5 = Math.PI * 2.26; t5 < Math.PI * 3; t5 += 0.001) {
+   var rv = r(t5);
+   if (Math.abs(rv * Math.cos(t5) - tx) < 2) {
+      slots.push({x: rv * Math.cos(t5), y: rv * Math.sin(t5)});
+      angles.push(t5);
+      break;
+   }
+}
+
+var xs = slots.map(function(s){return s.x}), ys = slots.map(function(s){return s.y});
+var ox = -Math.min.apply(null, xs) + slotW / 2 + 20;
+var oy = -Math.min.apply(null, ys) + slotH / 2 + 20;
+var cw = Math.max.apply(null, xs) - Math.min.apply(null, xs) + slotW + 40;
+var ch = Math.max.apply(null, ys) - Math.min.apply(null, ys) + slotH + 40;
+
+var c = document.getElementById('c');
+c.style.width = cw + 'px';
+c.style.height = ch + 'px';
+
+// Spiral line as background SVG
+var t0 = angles[0], t1 = angles[angles.length - 1], steps = 300, d = '';
+for (var i = 0; i <= steps; i++) {
+   var t = t0 + (t1 - t0) * i / steps;
+   var rv = r(t);
+   d += (i === 0 ? 'M' : 'L') + (rv * Math.cos(t) + ox) + ',' + (rv * Math.sin(t) + oy);
+}
+var svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+svgEl.setAttribute('width', cw);
+svgEl.setAttribute('height', ch);
+svgEl.style.position = 'absolute';
+svgEl.style.left = '0';
+svgEl.style.top = '0';
+var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+path.setAttribute('d', d);
+path.setAttribute('fill', 'none');
+path.setAttribute('stroke', 'rgba(148,184,255,0.35)');
+path.setAttribute('stroke-width', '2');
+path.setAttribute('stroke-linecap', 'round');
+svgEl.appendChild(path);
+c.appendChild(svgEl);
+
+slots.forEach(function (s, i) {
+   var d = document.createElement('div');
+   d.className = 'slot';
+   d.style.width = slotW + 'px';
+   d.style.height = slotH + 'px';
+   d.style.left = (s.x + ox - slotW / 2) + 'px';
+   d.style.top = (s.y + oy - slotH / 2) + 'px';
+   d.textContent = i + 1;
+   c.appendChild(d);
+});
+
+var barBottom = slots[3].y + oy + slotH / 2;
+var barH = slotH * 2;
+var barW = barH * slotW / slotH;
+var barLeft = slots[0].x + ox - slotW / 2;
+var barRight = barLeft + barW;
+var bar = document.createElement('div');
+bar.className = 'bar';
+bar.style.left = barLeft + 'px';
+bar.style.top = (barBottom - barH) + 'px';
+bar.style.width = (barRight - barLeft) + 'px';
+bar.style.height = barH + 'px';
+bar.textContent = 'status';
+c.appendChild(bar);
+</script>
+```
+
+- The search button should not be a button, but a big input at the bottom. When we type on it, the view gets transformed to a list.
+
 ## 2026-08-18
 
 TODO auth [DONE]:
