@@ -26,7 +26,7 @@ if [ "$2" == "sandbox" ] ; then
    ssh $HOST "docker ps -aq --filter ancestor=vibey-sandbox:latest | xargs -r docker rm -f && docker rmi -f vibey-sandbox:latest || true"
 fi
 
-rsync -av --exclude video . $HOST:$FOLDER
+rsync -av --exclude video --exclude clean . $HOST:$FOLDER
 ssh $HOST chown -R root /root/$FOLDER
 
 ssh $HOST "cd $FOLDER && docker build -t vibey-sandbox:latest -f Dockerfile.sandbox ."
