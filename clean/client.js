@@ -35,6 +35,7 @@ document.addEventListener ('visibilitychange', function () {
       B.call (x, 'set', 'user', rs.body);
       B.call (x, 'load', 'projects');
       B.call (x, 'navigate', 'projects');
+      B.call (x, 'snackbar', 'ok', 'Welcome back to vibey!');
    });
 });
 
@@ -718,65 +719,71 @@ views.login = function () {
 
 // *** PROJECTS ***
 
-views.projects2 = function () {
-   var phi = 1.618033988749895;
-   var A = 24, slotW = 80, slotH = 48, slotRx = 12;
-   var r = function (t) { return A * Math.pow (phi, t / (Math.PI / 2)); };
+views.projects = function () {
+   var phi = (1 + Math.sqrt (5)) / 2;
 
-   var angles = [Math.PI, Math.PI * 1.6, Math.PI * 2, Math.PI * 2.25];
-   var slots = dale.go (angles, function (t) {
-      var rv = r (t);
-      return {x: rv * Math.cos (t), y: rv * Math.sin (t)};
+   var scale = 140 / 1400;
+   var px = function (n) {
+      return n * scale + 'vw'
+   };
+   var baseRadius = 24, slotWidth = 80, slotHeight = 48, slotBorderRadius = 12;
+   var angleToRadius = function (t) {return baseRadius * Math.pow (phi, t / (Math.PI / 2))};
+
+   var slotAngles = [Math.PI, Math.PI * 1.6, Math.PI * 2, Math.PI * 2.25];
+   var slotPositions = dale.go (slotAngles, function (t) {
+      var radius = angleToRadius (t);
+      return {x: radius * Math.cos (t), y: radius * Math.sin (t)};
    });
 
    // Slot 5: find angle past slot 4 where x matches slot 2
-   var tx = slots [1].x;
-   for (var t5 = Math.PI * 2.26; t5 < Math.PI * 3; t5 += 0.001) {
-      var rv = r (t5);
-      if (Math.abs (rv * Math.cos (t5) - tx) < 2) {
-         slots.push ({x: rv * Math.cos (t5), y: rv * Math.sin (t5)});
-         angles.push (t5);
+   var alignTargetX = slotPositions [1].x;
+   for (var candidateAngle = Math.PI * 2.26; candidateAngle < Math.PI * 3; candidateAngle += 0.001) {
+      var radius = angleToRadius (candidateAngle);
+      if (Math.abs (radius * Math.cos (candidateAngle) - alignTargetX) < 2) {
+         slotPositions.push ({x: radius * Math.cos (candidateAngle), y: radius * Math.sin (candidateAngle)});
+         slotAngles.push (candidateAngle);
          break;
       }
    }
 
-   var xs = dale.go (slots, function (s) { return s.x });
-   var ys = dale.go (slots, function (s) { return s.y });
-   var ox = -Math.min.apply (null, xs) + slotW / 2 + 20;
-   var oy = -Math.min.apply (null, ys) + slotH / 2 + 20;
-   var cw = Math.max.apply (null, xs) - Math.min.apply (null, xs) + slotW + 40;
-   var ch = Math.max.apply (null, ys) - Math.min.apply (null, ys) + slotH + 40;
+   var slotXs = dale.go (slotPositions, function (s) { return s.x });
+   var slotYs = dale.go (slotPositions, function (s) { return s.y });
+   var offsetX = -Math.min.apply (null, slotXs) + slotWidth / 2 + 20;
+   var offsetY = -Math.min.apply (null, slotYs) + slotHeight / 2 + 20;
+   var containerWidth  = Math.max.apply (null, slotXs) - Math.min.apply (null, slotXs) + slotWidth + 40;
+   var containerHeight = Math.max.apply (null, slotYs) - Math.min.apply (null, slotYs) + slotHeight + 40;
 
    // Spiral line from slot 1 to slot 5
-   var t0 = angles [0], t1 = angles [angles.length - 1], steps = 300, spiralD = '';
-   for (var i = 0; i <= steps; i++) {
-      var t = t0 + (t1 - t0) * i / steps;
-      var rv = r (t);
-      spiralD += (i === 0 ? 'M' : 'L') + (rv * Math.cos (t) + ox).toFixed (1) + ',' + (rv * Math.sin (t) + oy).toFixed (1);
-   }
+   var spiralStart = slotAngles [0], spiralEnd = slotAngles [slotAngles.length - 1], steps = 300, spiralPath = '';
+   dale.go (dale.times (steps, 0), function (i) {
+      var angle = spiralStart + (spiralEnd - spiralStart) * i / steps;
+      var radius = angleToRadius (angle);
+      spiralPath += (i === 0 ? 'M' : 'L') + (radius * Math.cos (angle) + offsetX).toFixed (1) + ',' + (radius * Math.sin (angle) + offsetY).toFixed (1);
+   });
 
    // Status bar: left = left of slot 1, same aspect ratio as slots, bottom = bottom of slot 4
-   var barBottom = slots [3].y + oy + slotH / 2;
-   var barH = slotH * 2;
-   var barW = barH * slotW / slotH;
-   var barLeft = slots [0].x + ox - slotW / 2;
+   var barBottom = slotPositions [3].y + offsetY + slotHeight / 2;
+   var barHeight = slotHeight * 2;
+   var barWidth  = barHeight * slotWidth / slotHeight;
+   var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
 
-   return B.view ([['projects']], function (projects) {
+   var projectColors = [
+      {bg: '#264653', fg: '#f1faee'},
+      {bg: '#2a9d8f', fg: '#f1faee'},
+      {bg: '#3d5a80', fg: '#f1faee'},
+      {bg: '#4a4e69', fg: '#f1faee'},
+      {bg: '#5a189a', fg: '#f1faee'},
+      {bg: '#6d597a', fg: '#f1faee'},
+      {bg: '#7f5539', fg: '#fff8e7'},
+      {bg: '#8d99ae', fg: '#0b132b'},
+      {bg: '#a44a3f', fg: '#fff8e7'},
+      {bg: '#b56576', fg: '#fff8e7'},
+      {bg: '#bc6c25', fg: '#fff8e7'},
+      {bg: '#457b9d', fg: '#f1faee'}
+   ];
+
+   return B.view ('projects', function (projects) {
       projects = projects || [];
-
-      var slotStyle = {
-         position: 'absolute',
-         width: slotW,
-         height: slotH,
-         'border-radius': slotRx,
-         'background-color': css.colors.surface,
-         border: '1.5px solid rgba(148,184,255,0.35)',
-         display: 'flex',
-         'align-items': 'center',
-         'justify-content': 'center',
-         color: 'rgba(148,184,255,0.5)',
-         'font-size': 13,
-      };
 
       return ['div', {style: style ({
          'min-height': '100vh',
@@ -785,51 +792,90 @@ views.projects2 = function () {
          'justify-content': 'center',
          'background-color': css.colors.appBg,
       })}, [
-         ['div', {style: style ({position: 'relative', width: cw, height: ch + 48 + 48})}, [
-            ['LITERAL', '<svg width="' + cw + '" height="' + ch + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralD + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>'],
-            dale.go (slots, function (s, i) {
-               return ['div', {style: style (dale.obj ([
-                  ['left',  s.x + ox - slotW / 2],
-                  ['top',   s.y + oy - slotH / 2],
-               ], slotStyle))}, i + 1];
+         ['div', {style: style ({position: 'relative', width: px (containerWidth), height: px (containerHeight + 48 + 48)})}, [
+            // Spiral
+            ['LITERAL', '<svg width="' + px (containerWidth) + '" height="' + px (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>'],
+
+            // Slots
+            dale.go (slotPositions, function (slot, index) {
+
+               var matchingProject = dale.stopNot (projects, undefined, function (project) {
+                  if (project.slot === index + 1) return project;
+               });
+
+               return ['div', {style: style ({
+                  position: 'absolute',
+                  width: px (slotWidth),
+                  height: px (slotHeight),
+                  'border-radius': px (slotBorderRadius),
+                  'background-color': css.colors.surface,
+                  border: px (1.5) + ' solid rgba(148,184,255,0.35)',
+                  display: 'flex',
+                  'align-items': 'center',
+                  'justify-content': 'center',
+                  color: 'rgba(148,184,255,0.5)',
+                  'font-size': px (13),
+                  left:  px (slot.x + offsetX - slotWidth / 2),
+                  top:   px (slot.y + offsetY - slotHeight / 2),
+               })}, matchingProject ? matchingProject.name : '+'];
             }),
-            ['div', {style: style (dale.obj ([
-               ['position', 'absolute'],
-               ['left', barLeft],
-               ['top', barBottom - barH],
-               ['width', barW],
-               ['height', barH],
-               ['border-radius', slotRx],
-               ['background-color', css.colors.surface],
-               ['border', '1.5px solid rgba(148,184,255,0.35)'],
-               ['display', 'flex'],
-               ['align-items', 'center'],
-               ['justify-content', 'center'],
-               ['color', 'rgba(148,184,255,0.5)'],
-               ['font-size', 13],
-            ]))}, 'status'],
-            ['input', {type: 'text', placeholder: '\u{1F50D} Search', style: style ({
+
+            // Status bar
+            /*
+            ['div', {style: style ({
+               position: 'absolute',
+               left: px (barLeft),
+               top: px (barBottom - barHeight),
+               width: px (barWidth),
+               height: px (barHeight),
+               'border-radius': px (slotBorderRadius),
+               'background-color': css.colors.surface,
+               border: px (1.5) + ' solid rgba(148,184,255,0.35)',
+               display: 'flex',
+               'align-items': 'center',
+               'justify-content': 'center',
+               color: 'rgba(148,184,255,0.5)',
+               'font-size': px (13),
+            })}, 'status'],
+            */
+
+            // Search bar
+            ['div', {style: style ({
                position: 'absolute',
                left: 0,
-               top: ch + 32,
-               width: cw,
-               height: 48,
-               'box-sizing': 'border-box',
-               'border-radius': slotRx,
-               'background-color': css.colors.surface,
-               border: '1.5px solid rgba(148,184,255,0.35)',
-               color: 'rgba(148,184,255,0.8)',
-               'font-size': 16,
-               'padding-left': 16,
-               'padding-right': 16,
-               outline: 'none',
-            })}],
+               top: px (containerHeight + 32),
+               width: px (containerWidth),
+               height: px (48),
+            })}, [
+               ['i', {class: 'bi bi-search', style: style ({
+                  position: 'absolute',
+                  left: px (14),
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'rgba(148,184,255,0.4)',
+                  'font-size': px (16),
+                  'pointer-events': 'none',
+               })}],
+               ['input', {type: 'text', placeholder: 'Search', style: style ({
+                  width: '100%',
+                  height: '100%',
+                  'box-sizing': 'border-box',
+                  'border-radius': px (slotBorderRadius),
+                  'background-color': css.colors.surface,
+                  border: px (1.5) + ' solid rgba(148,184,255,0.35)',
+                  color: 'rgba(148,184,255,0.8)',
+                  'font-size': px (16),
+                  'padding-left': px (40),
+                  'padding-right': px (16),
+                  outline: 'none',
+               })}],
+            ]],
          ]],
       ]];
    });
 }
 
-views.projects = function () {
+views.projects2 = function () {
 
    var projectColors = [
       {bg: '#264653', fg: '#f1faee'},

@@ -1,5 +1,38 @@
 # Vibey development notes
 
+## 2026-08-20
+
+For project:
+- The search bar goes at the bottom, always. Also on the inner view (when you're inside a project).
+- As soon as you touch the search input, you show the list (alphabetical, with the delete button for each on its right, also a little dropdown for the slot it is in). no need for last modified date, at least for now.
+- Store the slots as a hash key inside the project: slot: N
+- ops in this view:
+   - see project name (hover on slot)
+   - go to project (click on slot or row)
+   - create:
+      - modal with input to generate project name or write one
+      - where to click when all the slots are full? also add a create project button, always visible, but where?
+      - don't autoassign slots, only put it in a slot if the user creates the project from the empty slot
+   - delete (from the list)
+   - rename (from inside the project)
+
+because this is a prototype: no mobile version yet! It will come soon. Also probably no good web search still. Maybe not even a claude integration yet. But the core should be usable!
+
+for file view:
+- start with a find command. I'm still mindblown that we can do this with the command API instead of having dedicated endpoint files. Same for uploads! Only that perhaps for folder we need another command still, or rather, a preprocessing of multipart to pass to docker.write. But it is all commands!
+- the find command is for files. If we assume that `/` is the folder separator only, then that gives you a list of files and their folders. expand docs and dialogs by default, but limit to maybe 5 of each, with possible further expansion.
+- the search bar at the bottom. split it in two, one for file names, another one for the current file being seen? the search bar within the file should be thicker, more visible than what you have in a browser or in an editor (even in vi). It should be always visible, at least in non-mobile.
+- allow for tabs. when a file is opened in a tab, you also see it marked with a color (of that tab) on the left, so you see what's open.
+- allow to split the screen either horizontally or vertically, but just once. each split gets its own set of tabs. if there's only one tab open, there's no tab selector, so you gain that space.
+- allow for fullscreening the file, or rather the window with the file.
+- whateveer happens inside the window opening the file depends on the file type. If it's md, you switch between view and edit, but that's inside it. If it's code, you just edit it. If it's a pdf, you just see it. if it's a media file, you can play it. if it's a sqlite, you show the table to see/edit.
+- Generate text files for pdfs, named like the file but with a dot in front and then .text. Hide those files in the find, but leverage them when searching by content.
+- Don't store the open files/window structure in localstorage, because you could have two tabs in different screens with different settings. Storing in the URL would be swell, but we're limited by the URL limit, but perhaps we could make it fit!
+
+```
+docker cp client.js vibey-host:/app/client.js
+```
+
 ## 2026-08-19
 
 Some notes on Alexander - The process of creating life:
