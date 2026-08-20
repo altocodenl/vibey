@@ -28,6 +28,7 @@ for file view:
 - whateveer happens inside the window opening the file depends on the file type. If it's md, you switch between view and edit, but that's inside it. If it's code, you just edit it. If it's a pdf, you just see it. if it's a media file, you can play it. if it's a sqlite, you show the table to see/edit.
 - Generate text files for pdfs, named like the file but with a dot in front and then .text. Hide those files in the find, but leverage them when searching by content.
 - Don't store the open files/window structure in localstorage, because you could have two tabs in different screens with different settings. Storing in the URL would be swell, but we're limited by the URL limit, but perhaps we could make it fit!
+- But still, what's inside the window can (and probably should) influence what's outside of it (think of Alexander).
 
 ```
 docker cp client.js vibey-host:/app/client.js
