@@ -1,5 +1,61 @@
 # Vibey development notes
 
+## 2026-08-23
+
+Web search should be one of the native commands! The fifth one!
+
+== Why/how/what ==
+
+The core idea for the why (draft): a single (unified?) digital space that you can love, own and share
+1. One single digital place
+2. That you can love
+3. That is truly yours
+4. That you can share with others
+
+1. The single place goes beyond fragmentation: multiple devices (1-2 computers, 1-2 mobile devices) and multiple apps (web email, email client, google services, web services, slack, native apps). A single space defragments your own digital mind.
+
+2. A digital space you can love: not just use, or tolerate. Something that you feel genuinely happen to open and use. That doesn't happen often.
+
+3. Truly yours: can you take your data away in an useful form at any time? Can you modify the look and workings of the space by yourself (or ask AI to do it for you?). Can you prevent the space changing on you or losing functionality? Can you take the code and run it somewhere else?
+
+4. That you can share with others: interaction is at the center of this one digital space. And, with or without your own domain, be able to share/publish documents, media and apps.
+
+Oneness is not just about focus. It is about creating something alive. About the power of combining things that were separate before. Unification is access/sharing. So the four are essentially circular.
+
+As four icons:
+1. A "1" surrounded by a square
+2. A heart
+3. A fingerprint
+4. An open hand
+
+The how adds elements:
+
+1. Primitives (auth, project, engine, file, chat, app, access)
+2. Primitives + Alexandrian unfolding (carefully and lovingly)
+3. Primitives + unfolding + openbound
+4. Primitives + unfolding + openbound + web
+
+The what is the primitives, starting with the middle three: one place for files, chats and apps.
+
+==
+
+Use case: dialog with pivs after a party: anyone logging in that you whitelisted can see and add (edit/delete is for owner or who sent the message), you download to your own server with pivs, pivs are also backed up! Others can do the same.
+
+Will add a clipboard within vibey client.
+
+Visually, to add new projects: light green pluses, double crosses one inside the other
+
+Top demo examples, in my mind:
+- Travel plan
+- Party pictures
+- Write & publish a .md
+- App to tell me the weather tomorrow during the time I'm outside
+
+Working on small differentiations, using AI, feels like turn based development a la civ. One move at a time, but you're thinking of the next one too.
+
+TODO:
+- Make the dice random
+
 ## 2026-08-20
 
 For project:

@@ -669,6 +669,7 @@ views.main = function () {
             ['button', {
                class: css.button + ' pa2 ph3 f5',
                style: style ({'background-color': css.colors.purple}),
+               title: B.get ('user', 'email') || '',
                onclick: B.ev ('logout', [])
             }, [['i', {class: 'bi bi-person-walking mr1'}], 'Logout']]
          ]] : ''
@@ -792,6 +793,9 @@ views.projects = function () {
          'justify-content': 'center',
          'background-color': css.colors.appBg,
       })}, [
+         ['div', {style: style ({position: 'fixed', top: 24, left: 24})}, [
+            ['span', {class: 'f2 fw7 text-bright'}, 'Projects']
+         ]],
          ['div', {style: style ({position: 'relative', width: px (containerWidth), height: px (containerHeight + 48 + 48)})}, [
             // Spiral
             ['LITERAL', '<svg width="' + px (containerWidth) + '" height="' + px (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>'],
@@ -809,15 +813,16 @@ views.projects = function () {
                   height: px (slotHeight),
                   'border-radius': px (slotBorderRadius),
                   'background-color': css.colors.surface,
-                  border: px (1.5) + ' solid rgba(148,184,255,0.35)',
+                  border: px (1.5) + ' solid rgba(148,184,255,0.15)',
                   display: 'flex',
                   'align-items': 'center',
                   'justify-content': 'center',
                   color: 'rgba(148,184,255,0.5)',
                   'font-size': px (13),
+                  cursor: 'pointer',
                   left:  px (slot.x + offsetX - slotWidth / 2),
                   top:   px (slot.y + offsetY - slotHeight / 2),
-               })}, matchingProject ? matchingProject.name : '+'];
+               })}, matchingProject ? matchingProject.name : ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.success + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']];
             }),
 
             // Status bar
@@ -862,15 +867,82 @@ views.projects = function () {
                   'box-sizing': 'border-box',
                   'border-radius': px (slotBorderRadius),
                   'background-color': css.colors.surface,
-                  border: px (1.5) + ' solid rgba(148,184,255,0.35)',
+                  border: px (1.5) + ' solid rgba(148,184,255,0.15)',
                   color: 'rgba(148,184,255,0.8)',
                   'font-size': px (16),
                   'padding-left': px (40),
                   'padding-right': px (16),
+                  'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                   outline: 'none',
                })}],
             ]],
          ]],
+
+         // Project creation modal
+         ['div', {style: style ({
+            position: 'fixed',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            display: 'flex',
+            'align-items': 'center',
+            'justify-content': 'center',
+            background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), rgba(4, 231, 98, 0.25)',
+            'z-index': 3000,
+         })}, [
+            ['div', {class: 'modal-card', style: style ({
+               width: '50vw',
+               'min-height': '25vh',
+               padding: '48px 36px',
+            })}, [
+               ['div', {style: style ({position: 'relative', width: '100%', height: px (48)})}, [
+                  ['i', {class: 'bi bi-pencil', style: style ({
+                     position: 'absolute',
+                     left: px (14),
+                     top: '50%',
+                     transform: 'translateY(-50%)',
+                     color: 'rgba(148,184,255,0.4)',
+                     'font-size': px (16),
+                     'pointer-events': 'none',
+                  })}],
+                  ['i', {class: 'bi bi-dice-5 pointer', style: style ({
+                     position: 'absolute',
+                     right: px (14),
+                     top: '50%',
+                     transform: 'translateY(-50%)',
+                     color: 'rgba(148,184,255,0.4)',
+                     'font-size': px (16),
+                  })}],
+                  ['input', {type: 'text', placeholder: 'Name your project', style: style ({
+                     width: '100%',
+                     height: '100%',
+                     'box-sizing': 'border-box',
+                     'border-radius': slotBorderRadius,
+                     'background-color': css.colors.surface,
+                     border: '1.5px solid rgba(148,184,255,0.15)',
+                     color: 'rgba(148,184,255,0.8)',
+                     'font-size': px (16),
+                     'padding-left': px (40),
+                     'padding-right': px (40),
+                     'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                     outline: 'none',
+                  })}],
+               ]],
+               ['button', {class: 'fw7 pointer', style: style ({
+                  width: '100%',
+                  'margin-top': 16,
+                  padding: '16px 0',
+                  'border-radius': slotBorderRadius,
+                  'background-color': css.colors.success,
+                  color: '#000',
+                  border: 'none',
+                  'font-size': px (16),
+                  'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+               })}, 'Boom'],
+            ]],
+         ]],
+
       ]];
    });
 }
