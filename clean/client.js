@@ -274,11 +274,11 @@ B.mrespond ([
    // *** PROJECTS ***
 
    ['create', 'project', function (x) {
-      var name = B.get ('new', 'project').trim ();
+      var name = B.get ('new', 'project', 'name').trim ();
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a project name');
 
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
-      B.call (x, 'post', '/project', {name: name}, function (x, error) {
+      B.call (x, 'post', '/project', {name: name, slot: B.get ('new', 'project', 'slot')}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
 
          B.call (x, 'snackbar', 'clear');
@@ -796,7 +796,10 @@ views.projects = function () {
          ['div', {style: style ({position: 'fixed', top: 24, left: 24})}, [
             ['span', {class: 'f2 fw7 text-bright'}, 'Projects']
          ]],
+
+         // Spiral slots
          ['div', {style: style ({position: 'relative', width: px (containerWidth), height: px (containerHeight + 48 + 48)})}, [
+
             // Spiral
             ['LITERAL', '<svg width="' + px (containerWidth) + '" height="' + px (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>'],
 
@@ -807,22 +810,33 @@ views.projects = function () {
                   if (project.slot === index + 1) return project;
                });
 
-               return ['div', {style: style ({
-                  position: 'absolute',
-                  width: px (slotWidth),
-                  height: px (slotHeight),
-                  'border-radius': px (slotBorderRadius),
-                  'background-color': css.colors.surface,
-                  border: px (1.5) + ' solid rgba(148,184,255,0.15)',
-                  display: 'flex',
-                  'align-items': 'center',
-                  'justify-content': 'center',
-                  color: 'rgba(148,184,255,0.5)',
-                  'font-size': px (13),
-                  cursor: 'pointer',
-                  left:  px (slot.x + offsetX - slotWidth / 2),
-                  top:   px (slot.y + offsetY - slotHeight / 2),
-               })}, matchingProject ? matchingProject.name : ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.success + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']];
+               return ['div', {
+                  style: style ({
+                     position: 'absolute',
+                     width: px (slotWidth),
+                     height: px (slotHeight),
+                     'border-radius': px (slotBorderRadius),
+                     'background-color': css.colors.surface,
+                     border: px (1.5) + ' solid rgba(148,184,255,0.15)',
+                     display: 'flex',
+                     'align-items': 'center',
+                     'justify-content': 'center',
+                     color: 'rgba(148,184,255,0.5)',
+                     'font-size': px (13),
+                     cursor: 'pointer',
+                     left:  px (slot.x + offsetX - slotWidth / 2),
+                     top:   px (slot.y + offsetY - slotHeight / 2),
+                  }),
+                  onclick: matchingProject ? B.ev ('navigate', 'project/' + encodeURIComponent (matchingProject.name)) : undefined,
+               }, matchingProject ?
+                  dale.go (matchingProject.name.split (' '), function (word) {
+                     return word [0].toUpperCase ();
+                  }).slice (0, 2) :
+                  ['span', {
+                     class: 'flex items-center justify-center w-100 h-100',
+                     onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
+                  }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.success + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']],
+               ];
             }),
 
             // Status bar
@@ -879,69 +893,94 @@ views.projects = function () {
          ]],
 
          // Project creation modal
-         ['div', {style: style ({
-            position: 'fixed',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0,
-            display: 'flex',
-            'align-items': 'center',
-            'justify-content': 'center',
-            background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), rgba(4, 231, 98, 0.25)',
-            'z-index': 3000,
-         })}, [
-            ['div', {class: 'modal-card', style: style ({
-               width: '50vw',
-               'min-height': '25vh',
-               padding: '48px 36px',
-            })}, [
-               ['div', {style: style ({position: 'relative', width: '100%', height: px (48)})}, [
-                  ['i', {class: 'bi bi-pencil', style: style ({
-                     position: 'absolute',
-                     left: px (14),
-                     top: '50%',
-                     transform: 'translateY(-50%)',
-                     color: 'rgba(148,184,255,0.4)',
-                     'font-size': px (16),
-                     'pointer-events': 'none',
-                  })}],
-                  ['i', {class: 'bi bi-dice-5 pointer', style: style ({
-                     position: 'absolute',
-                     right: px (14),
-                     top: '50%',
-                     transform: 'translateY(-50%)',
-                     color: 'rgba(148,184,255,0.4)',
-                     'font-size': px (16),
-                  })}],
-                  ['input', {type: 'text', placeholder: 'Name your project', style: style ({
-                     width: '100%',
-                     height: '100%',
-                     'box-sizing': 'border-box',
-                     'border-radius': slotBorderRadius,
-                     'background-color': css.colors.surface,
-                     border: '1.5px solid rgba(148,184,255,0.15)',
-                     color: 'rgba(148,184,255,0.8)',
-                     'font-size': px (16),
-                     'padding-left': px (40),
-                     'padding-right': px (40),
-                     'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                     outline: 'none',
-                  })}],
+         B.view (['new', 'project'], function (newProject) {
+            if (newProject === undefined) return ['div'];
+
+
+            return ['div', {
+               onclick: B.ev ('rem', 'new', 'project'),
+               style: style ({
+                  position: 'fixed',
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  left: 0,
+                  display: 'flex',
+                  'align-items': 'center',
+                  'justify-content': 'center',
+                  background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), rgba(4, 231, 98, 0.25)',
+                  'z-index': 3000,
+               })
+            }, [
+               ['div', {
+                  class: 'modal-card',
+                  style: style ({
+                     width: '50vw',
+                     'min-height': '25vh',
+                     padding: '48px 36px',
+                  }),
+                  onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
+               }, [
+                  ['div', {style: style ({position: 'relative', width: '100%', height: px (48)})}, [
+                     ['i', {class: 'bi bi-pencil', style: style ({
+                        position: 'absolute',
+                        left: px (14),
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: 'rgba(148,184,255,0.4)',
+                        'font-size': px (16),
+                        'pointer-events': 'none',
+                     })}],
+                     ['i', {class: 'bi bi-dice-' + Math.ceil (Math.random () * 5) + ' pointer', style: style ({
+                        position: 'absolute',
+                        right: px (14),
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: 'rgba(148,184,255,0.4)',
+                        'font-size': px (16),
+                     })}],
+                     ['input', {
+                        type: 'text',
+                        class: 'new-project-input',
+                        placeholder: 'Name your project',
+                        value: newProject.name,
+                        onchange: B.ev ('set', ['new', 'project', 'name']),
+                        oninput: B.ev ('set', ['new', 'project', 'name']),
+                        style: style ({
+                           width: '100%',
+                           height: '100%',
+                           'box-sizing': 'border-box',
+                           'border-radius': slotBorderRadius,
+                           'background-color': css.colors.surface,
+                           border: '1.5px solid rgba(148,184,255,0.15)',
+                           color: 'rgba(148,184,255,0.8)',
+                           'font-size': px (16),
+                           'padding-left': px (40),
+                           'padding-right': px (40),
+                           'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                           outline: 'none',
+                        })
+                     }],
+                  ]],
+                  ['button', {
+                     class: 'fw7 pointer',
+                     onclick: B.ev ('create', 'project'),
+                     disabled: ! ((newProject.name || '').trim ()),
+                     style: style ({
+                        width: '100%',
+                        'margin-top': 16,
+                        padding: '16px 0',
+                        'border-radius': slotBorderRadius,
+                        'background-color': css.colors.success,
+                        color: '#000',
+                        border: 'none',
+                        'font-size': px (16),
+                        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    })
+                  }, 'Boom'],
                ]],
-               ['button', {class: 'fw7 pointer', style: style ({
-                  width: '100%',
-                  'margin-top': 16,
-                  padding: '16px 0',
-                  'border-radius': slotBorderRadius,
-                  'background-color': css.colors.success,
-                  color: '#000',
-                  border: 'none',
-                  'font-size': px (16),
-                  'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-               })}, 'Boom'],
-            ]],
-         ]],
+            ]];
+         }),
 
       ]];
    });

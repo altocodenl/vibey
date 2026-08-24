@@ -5,6 +5,7 @@ module.exports = {
       accessKeyId:     '...',
       bucketName:      '...',
       host:            '...',
+      region:          '...',
       secretAccessKey: '...'
    },
    ses: {
@@ -71,6 +72,9 @@ var teishi = require ('teishi');
 var lith   = require ('lith');
 var cicek  = require ('cicek');
 var Redis  = require ('redis').createClient ({db: CONFIG.redis.db});
+
+var aws4  = require ('aws4');
+var hitit = require ('hitit');
 
 var {inc, last, type} = teishi;
 
@@ -454,6 +458,78 @@ docker.cleanup = async function () {
    process.exit (0);
 }
 
+var backup = {};
+
+// Based off https://gist.github.com/adv0r/1dfaf7999d7aac95d473e65b675496b0
+backup.presign = function (method, key, expires) {
+   var region    = CONFIG.backup.host.match (/s3\.([^.]+)\./) [1];
+
+   var now       = new Date ().toISOString ().replace (/[-:]/g, '').replace (/\..+/, '') + 'Z';
+   var shortDate = now.slice (0, 8);
+   var scope     = shortDate + '/' + region + '/s3/aws4_request';
+
+   var query = [
+      'X-Amz-Algorithm=AWS4-HMAC-SHA256',
+      'X-Amz-Credential=' + encodeURIComponent (CONFIG.backup.accessKeyId + '/' + scope),
+      'X-Amz-Date=' + now,
+      'X-Amz-Expires=' + (expires || 300),
+      'X-Amz-SignedHeaders=host'
+   ].join ('&');
+
+   var canonical = [method, '/' + key, query, 'host:' + CONFIG.backup.bucketName + '.' + CONFIG.backup.host, '', 'host', 'UNSIGNED-PAYLOAD'].join ('\n');
+   var toSign    = ['AWS4-HMAC-SHA256', now, scope, crypto.createHash ('sha256').update (canonical).digest ('hex')].join ('\n');
+
+   var hmac = function (key, data) {
+      return crypto.createHmac ('sha256', key).update (data).digest ();
+   }
+   var signingKey = hmac (hmac (hmac (hmac ('AWS4' + CONFIG.backup.secretAccessKey, shortDate), region), 's3'), 'aws4_request');
+   var signature  = crypto.createHmac ('sha256', signingKey).update (toSign).digest ('hex');
+
+   return 'https://' + CONFIG.backup.bucketName + '.' + CONFIG.backup.host + '/' + key + '?' + query + '&X-Amz-Signature=' + signature;
+}
+
+backup.list = async function (prefix) {
+   var objects = [], next;
+
+   while (true) {
+      var path = '/?list-type=2';
+      if (prefix) path += '&prefix=' + encodeURIComponent (prefix);
+      if (next) path += '&continuation-token=' + encodeURIComponent (next);
+
+      var signed = aws4.sign ({
+         host:    CONFIG.backup.bucketName + '.' + CONFIG.backup.host,
+         path:    path,
+         service: 's3',
+         region:  CONFIG.backup.region,
+      }, {
+         accessKeyId:     CONFIG.backup.accessKeyId,
+         secretAccessKey: CONFIG.backup.secretAccessKey,
+      });
+
+      var body = await new Promise (function (resolve, reject) {
+         hitit.one ({}, {
+            https:   true,
+            host:    signed.hostname,
+            path:    signed.path,
+            method:  'get',
+            headers: signed.headers,
+            code:    200,
+         }, function (error, rdata) {
+            if (error) return reject (error);
+            resolve (rdata.body);
+         });
+      });
+
+      body.replace (/<Key>([^<]+)<\/Key>\s*<LastModified>([^<]+)<\/LastModified>\s*<[^>]+>[^<]*<[^>]+>\s*<Size>(\d+)<\/Size>/g, function (_, key, modified, size) {
+         objects.push ({key: key, modified: modified, size: parseInt (size)});
+      });
+
+      var truncated = body.match (/<IsTruncated>true<\/IsTruncated>/);
+      if (! truncated) return objects;
+      next = body.match (/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/) [1];
+   }
+}
+
 docker.backup = async function (id) {
 
    if (! CONFIG.backup.enable) return;
@@ -675,6 +751,7 @@ var routes = [
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
       if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), 'email', 'eachOf', teishi.test.equal],
          ['email', rq.body.email, 'string'],
          function () {
             return ['email', rq.body.email, validEmail, teishi.test.match];
@@ -872,6 +949,7 @@ var routes = [
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
       if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['email', 'grant'], 'eachOf', teishi.test.equal],
          ['email', rq.body.email, 'string'],
          function () {
             return ['email', rq.body.email, validEmail, teishi.test.match];
@@ -909,15 +987,22 @@ var routes = [
    }],
 
    ['get', '/projects', async function (rq, rs) {
-      reply (rs, 200, (await getForUser (rq.user.id, 'project')).sort (function (a, b) {
+      reply (rs, 200, dale.go ((await getForUser (rq.user.id, 'project')).sort (function (a, b) {
          return new Date (b.last) - new Date (a.last);
+      }), function (project) {
+         return {
+            ...project,
+            slot: project.slot ? parseInt (project.slot) : undefined
+         }
       }));
    }],
 
    ['post', '/project', async function (rq, rs) {
 
       if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['name', 'slot'], 'eachOf', teishi.test.equal],
          ['name', rq.body.name, 'string'],
+         ['slot', rq.body.slot, ['integer', 'undefined'], 'oneOf'],
          function () {
             return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
          }
@@ -938,6 +1023,7 @@ var routes = [
          name:    rq.body.name,
          owner:   rq.user.id,
       }
+      if (rq.body.slot) project.slot = rq.body.slot;
 
       await redis ([
          ['hmset', 'project:' + project.id, project],
@@ -958,6 +1044,7 @@ var routes = [
    ['put', '/project', async function (rq, rs) {
 
       if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['id', 'name'], 'eachOf', teishi.test.equal],
          ['id', rq.body.id, 'string'],
          ['name', rq.body.name, 'string'],
          function () {

@@ -74,6 +74,7 @@ project created <date>
         last <date>
         name <name>
         owner <userId>
+        slot <integer|undefined>
 owner:<userId> 1 session:<sessionId>
                2 project:<projectId>
                ...
@@ -100,6 +101,7 @@ userCount <integer>
       accessKeyId:     '...',
       bucketName:      '...',
       host:            '...',
+      region:          '...',
       secretAccessKey: '...'
    },
    ses: {
@@ -192,12 +194,6 @@ Except for `GET /auth/user`, all other routes will return a 404 in local mode.
 ### Client state
 
 ```
-user admin <false|true>
-     creator <false|true>
-     csrf "<CSRF token>"
-     email "<email entered in the login form>"
-     loginLinkRequested <0|1> // Whether the login link was already sent
-     mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 file content "..." // Current file selected
      dialogMode <ai|human|terminal> // Dialog mode
      mode <edit|view> // Whether we're editing the file we're viewing or not
@@ -211,7 +207,8 @@ models anthropic "<model name>" context <size of context window in tokens>
        openai "<model name> context <size of context window in tokens>
               ...
 new file "<file name>" // Name for a new file
-    project "<project name>" // Enables the new project modal
+    project name "<project name>" // Enables the new project modal
+            slot <integer|undefined>
     type "dialog|file" // Whether the new file is a normal file or a dialog
 project "<project slug>" // The current project selected
 projects 1 created <date>
@@ -219,6 +216,8 @@ projects 1 created <date>
            last <date>
            name "..."
            owner <userId>
+           slot <integer|undefined>
+         ...
 oauth code "<pasted callback URL or code>" // Manual OAuth code input
       loading "<provider>" // Provider currently in OAuth flow (openai or claude)
       step flow <paste_code|waiting> // Whether user must paste a code or wait for auto-callback
@@ -236,5 +235,11 @@ settings claude hasKey <0|1>
          testButton <0|1>
 test enabled <0|1> // Whether test mode is enabled
      loginLink // Login link for testing
+user admin <false|true>
+     creator <false|true>
+     csrf "<CSRF token>"
+     email "<email entered in the login form>"
+     loginLinkRequested <0|1> // Whether the login link was already sent
+     mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 view "<view name>"
 ```

@@ -1,5 +1,23 @@
 # Vibey development notes
 
+## 2026-08-24
+
+Some notes on Alexander - The process of creating life:
+- "in most cases, the living process makes use of solutions or partial solutions to previously encountered problems"
+- "A gene is an organism's way of remembering (...) In architecture, traditional pattern languages played the same role."
+- "The good environments in traditional society could be built because people had pictures of what worked; these pictures were agreed upon, and used and re-used"
+- The trouble is (...) that many of these present-day patterns did not lead to creation of living structure, but rather the reversewo- "The key difference between the patterns which arose in the 20th-century profit-oriented system and those which must accompany a living process, is that in a living process the patterns define types of centers which reinforce, support, bring out the life of the whole."
+- Note: unexpected echo of openbound
+- "we seek patterns which are *good*, ptterns which will generate life"
+- "In our modern world (...) people are usually struggling to create for themselves a system of coherent environmental objects and spaces, in which they can live well, be comfortable, and feel at ease."
+- "Through society people are working to create the basic underpinning of what may be a healthy world, capable of being coherent, realized within new building forms"
+- "I shall argue that the process of defining a good pattern language (...) is not merely social but a part of physics."
+- "culture itself, and the wholeness which culture induces in the world, is as physical as the rest of the wholeness."
+- Note: a postmodern POV that all culture is constructed and relative could be then understood, by analogy, to be the equivalent of the idea-based, disjoint architecture.
+- "I mean that, while those people ar ehaving tea in my living room, the living room *itself* has changed. Its *physics* has changed slightly."
+- "The wholeness is, in large part, defined by the culture of that moment. *The proper unfolding of wholeness is both an unfolding of space from the culture which exists, and an unfolding of a new (future) culture from the culture of the present.* And all this is to be defined by the pattern language"
+- "*Where did the patterns come from?*"
+
 ## 2026-08-23
 
 Web search should be one of the native commands! The fifth one!
