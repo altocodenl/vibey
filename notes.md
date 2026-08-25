@@ -1,5 +1,72 @@
 # Vibey development notes
 
+## 2026-08-25
+
+project view:
+- Ago function
+- List of projects triggered by bar, with click to go
+- Delete project from bar
+- Select/unselect slot from bar
+- cleanup: vars to tachyons classes, see repeated patterns
+
+files view:
+- list files with command
+- open text file
+
+Each engine will have its shell of projects!
+
+The file view could show a file contents on hover too! That could be super useful. Why should we have to click on it to see it? It could be shown on top of what you have already open.
+
+If a project is not backed up and suddenly backups are turned on, all it would take would be a single command to back up everything? No, because we read things from the last commit. That won't work. I'm also concerned about having simultaneous uploads. What if we had a backup queue instead, that gets triggered?
+Let's think how it could be if requests were superfast and free:
+- Get two in parallel: 1) list of local files, 2) get list of S3 files
+- Compare and get 1) what to upload to s3; 2) what to delete to s3
+- Upload & delete in parallel
+- When the above is done, then finish the actual command that happened
+
+Problems with the above:
+- Get entire list of s3 files is too expensive/slow
+- Concurrent commands (the client doesn't wait for one command to be processed to then send the next one). This is a problem also for autocommit, because attribution may be wrong.
+
+How to address the problems:
+- Do only one concurrent backup upload. If more things come, mark it as necessary.
+- Make the upload non-blocking.
+- An efficient query on files is not possible in s3/b2. So, we need to keep the list of files locally (the options are db vs the project itself, let's do the latter).
+- If there's drift because of tampering of the list in s3, or any programmatic errors, we can do a full s3 list read one out of ten times randomly.
+- We cannot use the mtime of s3/b2, we need to use that of the file. So we will append the mtime timestamp of the OS to the file when uploading it to s3/b2.
+
+Backup sequence then:
+- A project modification sets the `last` key (change it to last modified in meaning, not last access).
+- The same modification calls the backup function.
+- The backup function reads if there's a backup in progress (`backupStarted`) on the project. If it's there and for less than ten minutes, it doesn't do anything. If it's for more than ten minutes, it reports an error on the previous one and goes ahead anyway.
+- If it goes ahead, it sets `backupStarted` and gets going by getting the list of local files and remote (s3/b2).
+- Scope of local files: all in .git, outside of .git everything that's not gitignored.
+- Except that 1/10 (randomly) or if there's no s3/b2 list, it does a full scan of s3/b2.
+- When both lists are done, we create the comparison and get 1) to upload; 2) to delete (we don't delete .git files that are extraneous but still less than seven days old)
+- Upload and deletion happen in parallel. Deletion is one call, upload is 5 at a time, with the oldest first.
+- Uploads happen from the project through a docker command, but with a presigned url done by the central server.
+- The s3 list is updated with the creations and deletions, but programmatically.
+- When the process is complete, if last > backupStarted, the function calls itself. This takes care of updates that happened during the upload.
+- Why not only upload what changed since the last commit? THe process wants to cover for failures. If one commit failed to be uploaded, the process is still idempotent.
+
+risk is energy
+
+Instead of focusing in a use case, focus on a horizontal. Like chatgpt, like claude code, like openclaw. These are tools that you can use for many things. They are tools that change the how for many whats. This is the way for vibey: a set of capabilities whose combination you cannot find elsewhere.
+
+VI: change everything
+"Give me a place to stand, and I shall move the world." -- Archimedes
+
+Possibilities are more open-ended than features.
+
+My own devtabs right now:
+- clit
+- neovim (itself with tabs)
+- claude
+- docker compose
+- terminal for docker cp or other commands
+
+With constant switch to browser to see the app or the test run
+
 ## 2026-08-24
 
 Some notes on Alexander - The process of creating life:

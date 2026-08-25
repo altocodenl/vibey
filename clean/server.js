@@ -1062,7 +1062,10 @@ var routes = [
       });
       if (conflict && conflict.id !== rq.body.id) return reply (rs, 409, {error: 'There is already a project with that name'});
 
-      await redis ('hset', 'project:' + match.id, 'name', rq.body.name);
+      await redis ('hmset', 'project:' + match.id, {
+         last: now (),
+         name: rq.body.name
+      });
 
       reply (rs, 200);
    }],
@@ -1098,6 +1101,7 @@ var routes = [
          throw error;
       }
 
+      redis ('hset', 'project:' + rq.body.id, last, now ());
       reply (rs, 200, file, {}, rq.body.path);
    }],
 
@@ -1114,6 +1118,7 @@ var routes = [
 
       var result = await docker.write (rq.body.id, rq.body.path, content);
 
+      redis ('hset', 'project:' + rq.body.id, last, now ());
       reply (rs, 200, result);
    }],
 
@@ -1128,6 +1133,7 @@ var routes = [
 
       var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
 
+      redis ('hset', 'project:' + rq.body.id, last, now ());
       return reply (rs, result.error ? 400 : 200, result);
    }],
 
@@ -1140,6 +1146,7 @@ var routes = [
 
       var result = await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
 
+      redis ('hset', 'project:' + rq.body.id, last, now ());
       reply (rs, 200, result);
    }],
 

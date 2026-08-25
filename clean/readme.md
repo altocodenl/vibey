@@ -16,7 +16,7 @@ So that you are able to learn and build at the speed of thought.
 
 So that you love your digital workspace and can't wait to get back to it when you're away.
 
-So that you can finally build, plan or learn what you have been dreaming of for years.
+So that you can finally build, plan or learn what you have been dreaming of for a while now.
 
 So that what you do with a computer can make the world a more meaningful place.
 
@@ -201,6 +201,7 @@ file content "..." // Current file selected
      remove // If set, when clicking on a file we show crosses to remove them.
 files 1 "<filename 1>" // List of files for current project
       ...
+hover project <project> // The project (or free project slot) being hovered on
 key command <0|1> // if set, the command key is pressed
 models anthropic "<model name>" context <size of context window in tokens>
                  ...

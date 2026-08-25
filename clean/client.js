@@ -783,6 +783,13 @@ views.projects = function () {
       {bg: '#457b9d', fg: '#f1faee'}
    ];
 
+   var projectColor = function (text) {
+      var sum = dale.acc (((text || '') + '').split (''), 0, function (a, b) {
+         return a + b.charCodeAt (0);
+      });
+      return projectColors [sum % projectColors.length];
+   }
+
    return B.view ('projects', function (projects) {
       projects = projects || [];
 
@@ -828,10 +835,12 @@ views.projects = function () {
                      top:   px (slot.y + offsetY - slotHeight / 2),
                   }),
                   onclick: matchingProject ? B.ev ('navigate', 'project/' + encodeURIComponent (matchingProject.name)) : undefined,
+                  onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
+                  onmouseleave: B.ev ('rem', [], 'hover'),
                }, matchingProject ?
                   dale.go (matchingProject.name.split (' '), function (word) {
                      return word [0].toUpperCase ();
-                  }).slice (0, 2) :
+                  }).slice (0, 3) :
                   ['span', {
                      class: 'flex items-center justify-center w-100 h-100',
                      onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
@@ -840,23 +849,24 @@ views.projects = function () {
             }),
 
             // Status bar
-            /*
-            ['div', {style: style ({
-               position: 'absolute',
-               left: px (barLeft),
-               top: px (barBottom - barHeight),
-               width: px (barWidth),
-               height: px (barHeight),
-               'border-radius': px (slotBorderRadius),
-               'background-color': css.colors.surface,
-               border: px (1.5) + ' solid rgba(148,184,255,0.35)',
-               display: 'flex',
-               'align-items': 'center',
-               'justify-content': 'center',
-               color: 'rgba(148,184,255,0.5)',
-               'font-size': px (13),
-            })}, 'status'],
-            */
+            B.view (['hover', 'project'], function (project) {
+               if (! project) return ['div'];
+               return ['div', {style: style ({
+                  position: 'absolute',
+                  left: px (barLeft),
+                  top: px (barBottom - barHeight),
+                  width: px (barWidth),
+                  height: px (barHeight),
+                  'border-radius': px (slotBorderRadius),
+                  'background-color': projectColor (project.name).bg,
+                  color: projectColor (project.name).fg,
+                  border: px (1.5) + ' solid rgba(148,184,255,0.35)',
+                  display: 'flex',
+                  'align-items': 'center',
+                  'justify-content': 'center',
+                  'font-size': px (13),
+               })}, project.name];
+            }),
 
             // Search bar
             ['div', {style: style ({
@@ -896,6 +906,15 @@ views.projects = function () {
          B.view (['new', 'project'], function (newProject) {
             if (newProject === undefined) return ['div'];
 
+            var randomName = function () {
+               var verbs = ['be', 'have', 'do', 'say', 'go', 'get', 'make', 'know', 'think', 'take', 'see', 'come', 'want', 'look', 'use', 'find', 'give', 'tell', 'work', 'call', 'try', 'ask', 'need', 'feel', 'become', 'leave', 'put', 'mean', 'keep', 'let'];
+               var nouns = ['time', 'year', 'people', 'way', 'day', 'man', 'woman', 'child', 'world', 'life', 'hand', 'part', 'place', 'case', 'week', 'company', 'system', 'program', 'question', 'work', 'government', 'number', 'night', 'point', 'home', 'water', 'room', 'mother', 'area', 'money'];
+               var random = function (list) {
+                  return list [Math.floor (Math.random () * list.length)];
+               }
+
+               return random (verbs) + ' ' + random (nouns);
+            }
 
             return ['div', {
                onclick: B.ev ('rem', 'new', 'project'),
@@ -931,14 +950,18 @@ views.projects = function () {
                         'font-size': px (16),
                         'pointer-events': 'none',
                      })}],
-                     ['i', {class: 'bi bi-dice-' + Math.ceil (Math.random () * 5) + ' pointer', style: style ({
-                        position: 'absolute',
-                        right: px (14),
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        color: 'rgba(148,184,255,0.4)',
-                        'font-size': px (16),
-                     })}],
+                     ['i', {
+                        class: 'bi bi-dice-' + Math.ceil (Math.random () * 5) + ' pointer',
+                        onclick: B.ev ('set', ['new', 'project', 'name'], randomName ()),
+                        style: style ({
+                           position: 'absolute',
+                           right: px (14),
+                           top: '50%',
+                           transform: 'translateY(-50%)',
+                           color: 'rgba(148,184,255,0.4)',
+                           'font-size': px (16),
+                        })
+                     }],
                      ['input', {
                         type: 'text',
                         class: 'new-project-input',
@@ -971,95 +994,17 @@ views.projects = function () {
                         'margin-top': 16,
                         padding: '16px 0',
                         'border-radius': slotBorderRadius,
-                        'background-color': css.colors.success,
+                        'background-color': (newProject.name || '').trim () ? css.colors.success : '#555',
                         color: '#000',
                         border: 'none',
                         'font-size': px (16),
                         'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                     })
-                  }, 'Boom'],
+                  }, (newProject.name || '').trim () ? 'Boom' : 'Enter a name'],
                ]],
             ]];
          }),
 
-      ]];
-   });
-}
-
-views.projects2 = function () {
-
-   var projectColors = [
-      {bg: '#264653', fg: '#f1faee'},
-      {bg: '#2a9d8f', fg: '#f1faee'},
-      {bg: '#3d5a80', fg: '#f1faee'},
-      {bg: '#4a4e69', fg: '#f1faee'},
-      {bg: '#5a189a', fg: '#f1faee'},
-      {bg: '#6d597a', fg: '#f1faee'},
-      {bg: '#7f5539', fg: '#fff8e7'},
-      {bg: '#8d99ae', fg: '#0b132b'},
-      {bg: '#a44a3f', fg: '#fff8e7'},
-      {bg: '#b56576', fg: '#fff8e7'},
-      {bg: '#bc6c25', fg: '#fff8e7'},
-      {bg: '#457b9d', fg: '#f1faee'}
-   ];
-
-   var projectColor = function (text) {
-      var sum = dale.acc (((text || '') + '').split (''), 0, function (a, b) {
-         return a + b.charCodeAt (0);
-      });
-      return projectColors [sum % projectColors.length];
-   }
-
-   return B.view ([['projects'], ['new', 'project']], function (projects, newProject) {
-      return ['div', {class: 'min-vh-100 flex justify-center pa3 pa4-ns bg-app-bg'}, [
-         ['div', {class: 'w-100', style: style ({'max-width': 880})}, [
-            ['div', {class: 'tc mb4'}, [
-               ['div', {class: 'f2 fw7 text-bright'}, 'Projects']
-            ]],
-            ['div', {class: 'flex justify-center mb4'}, [
-               ['button', {
-                  class: css.buttonWide + ' mw6 ph4 f4 shadow-primary',
-                  onclick: B.ev ('set', ['new', 'project'], '')
-               }, '+ New']
-            ]],
-            (function () {
-               if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
-
-               if (projects.length) return ['div', dale.go (projects || [], function (project) {
-                  var pcolor = projectColor (project.name);
-                  return ['div', {
-                     class: 'flex justify-between items-center pa3 br3 mb3 pointer',
-                     style: style ({'background-color': pcolor.bg, color: pcolor.fg, border: 'none'}) ,
-                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (project.name))
-                  }, [
-                     ['span', {class: 'f4 fw6 lh-copy'}, project.name],
-                     ['span', {
-                        class: 'f2 lh-solid o-70 pointer',
-                        onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['delete', 'project', project])
-                     }, '×']
-                  ]];
-               })];
-
-               return ['div', {class: 'tc f4 text-muted pv3'}, 'No projects yet'];
-            }) (),
-         ]],
-         newProject !== undefined ? ['div', {class: 'modal-backdrop', onclick: B.ev ('rem', 'new', 'project')}, [
-            ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
-               ['div', {class: 'project-modal-kicker'}, 'New project'],
-               ['div', {class: 'project-modal-title'}, 'Name your next world...'],
-               ['input', {
-                  class: css.input + ' mb0 new-project-input',
-                  type: 'text',
-                  placeholder: 'I have this idea',
-                  value: newProject,
-                  oninput: B.ev ('set', ['new', 'project']),
-               }],
-               ['div', {class: 'modal-actions'}, [
-                  ['button', {class: css.button, onclick: B.ev ('rem', 'new', 'project')}, 'Cancel'],
-                  ['button', {class: css.button, onclick: B.ev ('create', 'project'), disabled: ! ((newProject || '').trim ())}, 'Create project']
-               ]]
-            ]]
-         ]] : ''
       ]];
    });
 }
