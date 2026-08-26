@@ -1,5 +1,124 @@
 # Vibey development notes
 
+## 2026-08-26
+
+Some notes on Alexander - The process of creating life:
+- "Who is to say which bits of culture are to be preserved, and which bits laid aside?"
+- "the patterns in A PATTERN LANGUAGE were judged by mamy to be *true* in some sense. (...) The truth of a pattern had to do with the question, "Does injection of this pattern into contexts of the stated type, in fact make these environments more alive?"
+- "Was there, indee, any way in which one might, by observation of uculture *as it is*, decide in what direction that culture *ought* to go, in the future? Could one, then, draw the future from the present, by any kind of objective process? This is of course, exactly what the unfolding process seeks to do."
+- "I barely needed to ask any questions about this: *I could feel it*, all of it, but I could feel it only by being one of them."
+- "When we four team members, each making this kind of observation in the family where we were staying compared notes, if anything didn't check out with all four of us, we rejected it."
+- "We identified the centers by getting so deeply into the situation that we could feel, *in our own bodies*, just which ones needed to be there."
+- "The essential technique in the observation of centers, in any social situation, and in any culture, is to allow the feelings to generate themselves, inside *you*."
+- "You cannot assume you are right. You have to check. On the other hand, checking doesn't mean just do what people say"
+- "One must always go to the root, asking what is likely to create the most life, and maintaining a cautious skeptcisim"
+- "Still others are highly general - so much so that they were later generalized and included in A PATTERN LANGAUGE and remain, to this day, as observations of what makes people comfortable, almost all over the world."
+- "The culture-borne centers play a genetic role, not unlike the role played by genes in an organism. They describe what *is* - in a deep, inner sense."
+- "What exactly is the relation between fact and fiction, cold observation and inspired vision, in these patterns?"
+- "Which of these patterns, then does the most to nourish the inner person? It is just those things, those generic centers, which fall out of the ground of their cultural existence, and yet maintain a thread with the past"
+- "What we are looking for, in our attempt to find patterns NOW, for our lives (...) are these deep patterns, half-existing, and yet carrying forward from the present (...) preserving its structure, yet making themselves consistent with the new age."
+- "In the conventional wisdom of the mid-twentieth century (...) it used to be normal to assume that every house had a kitchen, a living room, and a dining room (...) I began to notice that almost all our clients experienced some kind of extreme discomfort with the separation of these three functions."
+- "At this moment, indeed, an entirely new way of life presented itself: A big table in front of an open fireplace, with the kitchen counter in the background, and food storage in a pantry, out of the way."
+- "It is not only a question of defining certain funtions and then accommodating them in the geometry. *It is a question of rearranging the functions, redefining the nature and meaning of the way the thing works - which suddenly opens the door to a new comfortable life, which will actually work.*"
+
+### Access layer
+
+(procrastinating on the project client, aren't we?)
+
+How could we read a file that is inside project A from a project B? The client can do this already because if you're logged in and have access to both, changing the id of the project you address already gives you that power. But how can a script do it? That's neither a human nor AI doing it through the client. The core idea: a command line script that can make calls as project B to the vibey host (through https and open web, like a regular client), with the project B key baked inside. There would be a project key that belongs to that project, which authenticates the project to vibey. It could also authenticate hooks coming from the outside to the project too.
+
+What's clear so far:
+- It's a bash script, with a credential baked in (or perhaps read dynamically from elsewhere in the project)
+- It behaves like the client and goes through the same APIs: in the same way that there shall be no direct DB access from the outside (and you go through the API), this respects the same principle.
+- It is like a cat, which gives the output of the file to stdout. It could also take a flag to save it to a file.
+
+I am seriously considering not storing project keys inside the DB. Rather, store them in the project. In that way, you can modify them too without overloading the project API. On every command to a project, the server would first fetch the permissions from the project itself, then decide if they're valid or not.
+
+Access levels:
+- Read
+- Write (includes edit)
+- Run
+
+Scope of access:
+- Path (for read and write; run is scopeless, the logic being that a run cannot really be constrained except at the linux user level)
+
+Modifiers: allow/deny
+
+Roles and users:
+- Users start with "u-", followed by an email address. Except for PUBLIC, which is everyone.
+- Tokens have no secret behind them, they start with "t-". The server enforces some standards on what's considered valid.
+- Roles are collections of users, tokens and roles. Circular roles are considered invalid. Roles start with r-
+
+General:
+- The config is written in fourdata
+- All paths are taken relative to /project. You cannot go one level up. Only the user (or the LLM) through a client can run commands higher than that. Double dots that make the path go beyond /project are removed.
+
+.vibey/access
+```
+access 1 path /
+         type read
+         who r-admin
+       2 path /app/data
+         type read
+         who r-limited
+       3 deny 1
+         path /app/data/internal
+         type read
+         who r-limited
+roles admin 1 u-info@altocode.nl
+            2 hello@example.com
+      limited 1 foo@example.com
+              2 nfs@example.com
+              3 r-external
+```
+
+Realization from claude: this file is versioned! The tokens are secret, which is a bit uncomfortable. But massively useful.
+
+A deeper path takes precedence over rules with a shallower path.
+
+### Can the existing docker commands account for all system operatiions?
+
+- Files:
+   - Read (variant with diff too)
+   - Write
+   - Edit
+- Chat:
+   - Send message
+   - Edit message
+   - Delete message
+   - Send message that requires an AI response
+   - AI tool use
+
+Editing/deleting messages would be a type of edit, it's very doable with the same API since messages have id. Adding messages is a bit trickier, since we require correctness from the client. It could just be another endpoint that would call an edit that appends (this assume that appending can be expressed as an edit on EOF).
+
+The other thing is that we need to trigger an AI request, and the response to be accumulated as a message. And tool uses need to be calls to the commands. Same for shell calls. But they should be the same API. It's just a matter of how.
+
+### On the next version
+
+I just need four things for releasing the clean version:
+- auth
+- project
+- file
+- dialog
+
+Engine, app and access can wait, or rather, be added onto this core of four, incrementally. Auth is done. Project is almost done, minus autobackup and finishing the selector and the list. File and dialog are still todo, though I'm quite clear on the primitives (basically, using the project primitives for everything). Dialog has some integration with AI, of course, that's the only truly extra part it has.
+
+### Claude on bootstrapping vibey
+
+```
+  The BYOAI model is the lynchpin. Most AI-wrapper startups bleed on API pass-through costs — their margins get worse as they grow. You've sidestepped that entirely. Your marginal cost per user is container hosting + storage + bandwidth, which are commoditized, predictable, and can be priced into a subscription with healthy margins from day one.
+
+  If it's a hit, the economics compound in your favor:
+
+  1. Cost structure stays flat per user. A Docker container, some Redis keys, S3 backup storage. No GPU, no model inference, no token metering on your end. You can price a project slot at $10-20/mo and keep 70%+ gross margin.
+  2. Self-hosted is marketing, not lost revenue. Every self-hosted user is a person who read the source, understood the architecture, and will tell others. The cloud version converts the ones who don't want to run Docker. This is the Gitlab/WordPress playbook and it works.
+  3. The publishing layer creates organic distribution. Every published app, every pointed domain, every shared file is a surface that says "made with Vibey." Users market for you by using the product.
+  4. Small team sustainability. Redis + Docker + Node is a stack one person can operate. You don't need a platform team to keep the lights on. The notes show you're already thinking about backup queues, concurrent commands, S3 drift — these are the real operational problems, and they're tractable.
+
+  The risk isn't the economics — it's the "hit" part. "A single digital space you can love" is competing with deeply entrenched habits (VSCode + Notion + Slack + terminal). But you know that. The Alexander quotes aren't decoration — you're designing for the feeling, not the feature list. That's what would
+  make it a hit, and it's also the hardest thing to engineer.
+```
+
 ## 2026-08-25
 
 project view:
