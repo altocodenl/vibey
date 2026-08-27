@@ -223,6 +223,7 @@ oauth code "<pasted callback URL or code>" // Manual OAuth code input
       loading "<provider>" // Provider currently in OAuth flow (openai or claude)
       step flow <paste_code|waiting> // Whether user must paste a code or wait for auto-callback
            provider "<provider>" // Current OAuth step
+search project <text|undefined>
 snackbar color <color>
          message <message>
          timeout "<JS timeout to clear the snackbar>"

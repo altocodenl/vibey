@@ -805,102 +805,144 @@ views.projects = function () {
          ]],
 
          // Spiral slots
-         ['div', {style: style ({position: 'relative', width: px (containerWidth), height: px (containerHeight + 48 + 48)})}, [
+         B.view (['search', 'project'], function (search) {
+            return ['div', {style: style ({position: 'relative', width: px (containerWidth), height: px (containerHeight + 48 + 48)})}, [
 
-            // Spiral
-            ['LITERAL', '<svg width="' + px (containerWidth) + '" height="' + px (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>'],
+               search === undefined ? ['div', [
+                  // Spiral
+                  ['div', {opaque: true}, ['LITERAL', '<svg width="' + px (containerWidth) + '" height="' + px (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>']],
 
-            // Slots
-            dale.go (slotPositions, function (slot, index) {
+                  // Slots
+                  dale.go (slotPositions, function (slot, index) {
 
-               var matchingProject = dale.stopNot (projects, undefined, function (project) {
-                  if (project.slot === index + 1) return project;
-               });
+                     var matchingProject = dale.stopNot (projects, undefined, function (project) {
+                        if (project.slot === index + 1) return project;
+                     });
 
-               return ['div', {
-                  style: style ({
+                     return ['div', {
+                        style: style ({
+                           position: 'absolute',
+                           width: px (slotWidth),
+                           height: px (slotHeight),
+                           'border-radius': px (slotBorderRadius),
+                           'background-color': css.colors.surface,
+                           border: px (1.5) + ' solid rgba(148,184,255,0.15)',
+                           display: 'flex',
+                           'align-items': 'center',
+                           'justify-content': 'center',
+                           color: 'rgba(148,184,255,0.5)',
+                           'font-size': px (13),
+                           cursor: 'pointer',
+                           left:  px (slot.x + offsetX - slotWidth / 2),
+                           top:   px (slot.y + offsetY - slotHeight / 2),
+                        }),
+                        onclick: matchingProject ? B.ev ('navigate', 'project/' + encodeURIComponent (matchingProject.name)) : undefined,
+                        onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
+                        onmouseleave: B.ev ('rem', [], 'hover'),
+                     }, matchingProject ?
+                        dale.go (matchingProject.name.split (' '), function (word) {
+                           return word [0].toUpperCase ();
+                        }).slice (0, 3) :
+                        ['span', {
+                           opaque: true,
+                           class: 'flex items-center justify-center w-100 h-100',
+                           onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
+                        }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.success + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']],
+                     ];
+                  }),
+
+                  // Status bar
+                  B.view (['hover', 'project'], function (project) {
+                     if (! project) return ['div'];
+                     return ['div', {style: style ({
+                        position: 'absolute',
+                        left: px (barLeft),
+                        top: px (barBottom - barHeight),
+                        width: px (barWidth),
+                        height: px (barHeight),
+                        'border-radius': px (slotBorderRadius),
+                        'background-color': projectColor (project.name).bg,
+                        color: projectColor (project.name).fg,
+                        border: px (1.5) + ' solid rgba(148,184,255,0.35)',
+                        display: 'flex',
+                        'align-items': 'center',
+                        'justify-content': 'center',
+                        'font-size': px (13),
+                     })}, project.name];
+                  }),
+               ]] : dale.go (projects, function (proj) {
+                  var color = projectColor (proj.name);
+                  return ['div', {
+                     style: style ({
+                        width: '70vw',
+                        height: '10vh',
+                        'min-height': 48,
+                        'margin-bottom': '1vh',
+                        'border-radius': 12,
+                        'background-color': color.bg,
+                        color: color.fg,
+                        display: 'flex',
+                        'align-items': 'center',
+                        'justify-content': 'space-between',
+                        padding: '0 24px',
+                        cursor: 'pointer',
+                        'box-sizing': 'border-box',
+                     }),
+                     onclick: B.ev ('navigate', 'project/' + encodeURIComponent (proj.name)),
+                  }, [
+                     ['span', {class: 'fw6 f4'}, proj.name],
+                     ['div', {
+                        class: 'flex items-center',
+                        style: style ({gap: 16}),
+                        onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
+                     }, [
+                        ['span', {class: 'pointer', title: 'Rename'}, ['i', {class: 'bi bi-pencil'}]],
+                        ['span', {class: 'pointer', title: 'Delete'}, ['i', {class: 'bi bi-trash'}]],
+                        ['span', {class: 'pointer', title: 'Slot'}, ['i', {class: 'bi bi-grid-3x3-gap'}]],
+                     ]],
+                  ]];
+               }),
+
+               // Search bar
+               ['div', {style: style ({
+                  position: 'absolute',
+                  left: 0,
+                  top: px (containerHeight + 32),
+                  width: px (containerWidth),
+                  height: px (48),
+                  onclick: B.ev ('set', ['search', 'project'], ''),
+               })}, [
+                  ['i', {class: 'bi bi-search', style: style ({
                      position: 'absolute',
-                     width: px (slotWidth),
-                     height: px (slotHeight),
+                     left: px (14),
+                     top: '50%',
+                     transform: 'translateY(-50%)',
+                     color: 'rgba(148,184,255,0.4)',
+                     'font-size': px (16),
+                     'pointer-events': 'none',
+                  })}],
+                  ['input', {
+                     onfocus: B.ev ('set', ['search', 'project'], ''),
+                     onblur: B.ev ('rem', 'search', 'project'),
+                     oninput: B.ev ('set', ['search', 'project']),
+                     value: search,
+                     type: 'text', placeholder: 'Search', style: style ({
+                     width: '100%',
+                     height: '100%',
+                     'box-sizing': 'border-box',
                      'border-radius': px (slotBorderRadius),
                      'background-color': css.colors.surface,
                      border: px (1.5) + ' solid rgba(148,184,255,0.15)',
-                     display: 'flex',
-                     'align-items': 'center',
-                     'justify-content': 'center',
-                     color: 'rgba(148,184,255,0.5)',
-                     'font-size': px (13),
-                     cursor: 'pointer',
-                     left:  px (slot.x + offsetX - slotWidth / 2),
-                     top:   px (slot.y + offsetY - slotHeight / 2),
-                  }),
-                  onclick: matchingProject ? B.ev ('navigate', 'project/' + encodeURIComponent (matchingProject.name)) : undefined,
-                  onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
-                  onmouseleave: B.ev ('rem', [], 'hover'),
-               }, matchingProject ?
-                  dale.go (matchingProject.name.split (' '), function (word) {
-                     return word [0].toUpperCase ();
-                  }).slice (0, 3) :
-                  ['span', {
-                     class: 'flex items-center justify-center w-100 h-100',
-                     onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
-                  }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.success + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']],
-               ];
-            }),
-
-            // Status bar
-            B.view (['hover', 'project'], function (project) {
-               if (! project) return ['div'];
-               return ['div', {style: style ({
-                  position: 'absolute',
-                  left: px (barLeft),
-                  top: px (barBottom - barHeight),
-                  width: px (barWidth),
-                  height: px (barHeight),
-                  'border-radius': px (slotBorderRadius),
-                  'background-color': projectColor (project.name).bg,
-                  color: projectColor (project.name).fg,
-                  border: px (1.5) + ' solid rgba(148,184,255,0.35)',
-                  display: 'flex',
-                  'align-items': 'center',
-                  'justify-content': 'center',
-                  'font-size': px (13),
-               })}, project.name];
-            }),
-
-            // Search bar
-            ['div', {style: style ({
-               position: 'absolute',
-               left: 0,
-               top: px (containerHeight + 32),
-               width: px (containerWidth),
-               height: px (48),
-            })}, [
-               ['i', {class: 'bi bi-search', style: style ({
-                  position: 'absolute',
-                  left: px (14),
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'rgba(148,184,255,0.4)',
-                  'font-size': px (16),
-                  'pointer-events': 'none',
-               })}],
-               ['input', {type: 'text', placeholder: 'Search', style: style ({
-                  width: '100%',
-                  height: '100%',
-                  'box-sizing': 'border-box',
-                  'border-radius': px (slotBorderRadius),
-                  'background-color': css.colors.surface,
-                  border: px (1.5) + ' solid rgba(148,184,255,0.15)',
-                  color: 'rgba(148,184,255,0.8)',
-                  'font-size': px (16),
-                  'padding-left': px (40),
-                  'padding-right': px (16),
-                  'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                  outline: 'none',
-               })}],
-            ]],
-         ]],
+                     color: 'rgba(148,184,255,0.8)',
+                     'font-size': px (16),
+                     'padding-left': px (40),
+                     'padding-right': px (16),
+                     'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                     outline: 'none',
+                  })}],
+               ]],
+            ]];
+         }),
 
          // Project creation modal
          B.view (['new', 'project'], function (newProject) {

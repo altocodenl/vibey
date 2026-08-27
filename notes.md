@@ -1,5 +1,17 @@
 # Vibey development notes
 
+## 2026-08-27
+
+What I need to build now for the list of projects:
+- Triggers when selecting the search input
+- Completely removes the shell, but clicking outside (to make the input lose restores the shell.
+- Shows all the projects in a list of rectangles.
+- The rectangles are about 70% viewport size, centered. And about 10% viewport height each.
+- Each has a background and foreground color (reuse the selector based on name).
+- It shows the name of the project on the left of the rectangle.
+- They are clickable to go to the project.
+- On the right, three buttons that are only icons: edit, delete and a slot selector (with none an option on the mini dropdown that gets triggered if you click on the slot selector).
+
 ## 2026-08-26
 
 Some notes on Alexander - The process of creating life:
@@ -121,14 +133,14 @@ Engine, app and access can wait, or rather, be added onto this core of four, inc
 
 ## 2026-08-25
 
-project view:
+TODO project view:
 - Ago function
 - List of projects triggered by bar, with click to go
 - Delete project from bar
 - Select/unselect slot from bar
-- cleanup: vars to tachyons classes, see repeated patterns
+- cleanup: vars to tachyons classes, see repeated patterns, move CSS closer to where it is used
 
-files view:
+TODO files view:
 - list files with command
 - open text file
 
@@ -867,7 +879,6 @@ Some notes on Meier - Memoir!
 - "I couldn't convince our testers that it made sense for them to lose a three-to-one battle roughly one-fourth of the time."
 - Note: I think the problem behind this is that you either win or lose the entire unit in civ, which is unrealistic. Most of the time, the unit can run away, particularly when attacking.
 - "Around the Firaxis office, we have a similar saying: feedback is fact."
-
 
 ## 2026-07-27
 
