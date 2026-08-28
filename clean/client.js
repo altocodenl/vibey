@@ -158,7 +158,13 @@ B.mrespond ([
 
          if (error && x.path [0] !== '/auth/user') B.call (x, 'report', 'error', {type: 'ajax', method: x.verb, path: x.path [0], status: error.status, response: error.responseText});
 
-         if (cb) cb (x, error, rs);
+         if (cb) {
+            if (error) {
+               error.body = error.responseText;
+               if (teishi.parse (error.body)) error.body = teishi.parse (body);
+            }
+            cb (x, error, rs);
+         }
       });
    }],
 
@@ -222,56 +228,14 @@ B.mrespond ([
       });
    }],
 
-   // *** OAUTH ***
-
-   ['login', 'oauth', function (x, provider) {
-      B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', '/settings/login/' + provider, {}, function (x, error, rs) {
-         if (error) {
-            B.call (x, 'rem', 'oauth', 'loading');
-            return B.call (x, 'snackbar', 'error', 'Failed to start login');
-         }
-         window.open (rs.body.url, '_blank');
-         if (rs.body.flow === 'paste_code') {
-            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code'});
-            B.call (x, 'rem', 'oauth', 'loading');
-         }
-         else {
-            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting'});
-            B.call (x, 'complete', 'oauth', provider);
-         }
-      });
-   }],
-
-   ['complete', 'oauth', function (x, provider, code) {
-      B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', '/settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
-         B.call (x, 'rem', [], 'oauth');
-         if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
-         B.call (x, 'load', 'settings');
-      });
-   }],
-
-   ['logout', 'oauth', function (x, provider) {
-      if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
-      B.call (x, 'post', '/settings/logout/' + provider, {}, function (x, error) {
-         if (error) return B.call (x, 'snackbar', 'error', 'Failed to logout');
-         B.call (x, 'load', 'settings');
-      });
-   }],
-
-   // *** LOAD DATA ***
-
-   ...dale.go (['models', 'projects', 'settings'], function (entity) {
-      return ['load', entity, function (x) {
-         B.call (x, 'get', '/' + entity, function (x, error, rs) {
-            if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + entity);
-            B.call (x, 'set', entity, rs.body);
-         });
-      }];
-   }),
-
    // *** PROJECTS ***
+
+   ['load', 'projects', function (x) {
+      B.call (x, 'get', '/projects', function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + projects);
+         B.call (x, 'set', 'projects', rs.body);
+      });
+   }],
 
    ['create', 'project', function (x) {
       var name = B.get ('new', 'project', 'name').trim ();
@@ -279,6 +243,7 @@ B.mrespond ([
 
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
       B.call (x, 'post', '/project', {name: name, slot: B.get ('new', 'project', 'slot')}, function (x, error) {
+         if (error) clog (error.body);
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
 
          B.call (x, 'snackbar', 'clear');
@@ -298,6 +263,10 @@ B.mrespond ([
          B.call (x, 'load', 'projects');
          B.call (x, 'snackbar', 'ok', 'Project deleted');
       });
+   }],
+
+   ['change', ['new', 'project'], {priority: -1000}, function (x) {
+      if (B.get ('new', 'project') !== undefined) c ('.new-project-input') [0].focus ();
    }],
 
    // *** PROJECTS & FILES ***
@@ -358,10 +327,6 @@ B.mrespond ([
    [/^(keyup|blur)$/, '*', function (x, ev) {
       if (x.verb === 'keyup' && ev.key === 'Meta') B.call (x, 'rem', 'key', 'command');
       if (x.verb === 'blur') B.call (x, 'rem', 'key', 'command');
-   }],
-
-   ['change', ['new', 'project'], {priority: -1000}, function (x) {
-      if (B.get ('new', 'project') !== undefined) c ('.new-project-input') [0].focus ();
    }],
 
    ['change', ['new', 'file'], {priority: -1000}, function (x) {
@@ -463,6 +428,7 @@ var css = {
 }
 
 css.style = [
+
    ['body', {
       'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       margin: 0,
@@ -471,6 +437,9 @@ css.style = [
       color: css.colors.text,
       height: '100vh'
    }],
+
+   // *** COLORS ***
+
    ['.bg-app-bg', {'background-color': css.colors.appBg}],
    ['.bg-surface', {'background-color': css.colors.surface}],
    ['.bg-input', {'background-color': css.colors.inputBg}],
@@ -491,6 +460,8 @@ css.style = [
    ['.shadow-primary', {'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'}],
    ['.outline-0:focus', {outline: 'none'}],
    ['.placeholder-text-muted::placeholder', {color: css.colors.textMuted, opacity: '1'}],
+
+   // *** SPINNY ***
 
    ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
 
@@ -870,7 +841,46 @@ views.projects = function () {
                         'font-size': px (13),
                      })}, project.name];
                   }),
-               ]] : dale.go (projects, function (proj) {
+               ]] : ['div', {style: style ({display: 'flex', 'flex-direction': 'column', 'align-items': 'center', position: 'relative', left: '50%', transform: 'translateX(-50%)', 'padding-top': '2vh'})}, [['div', {
+                     style: style ({
+                        width: '70vw',
+                        height: '10vh',
+                        'min-height': 48,
+                        'margin-bottom': '2vh',
+                        display: 'flex',
+                        gap: 12,
+                        'box-sizing': 'border-box',
+                     }),
+                  }, [
+                     ['div', {
+                        style: style ({
+                           flex: 1,
+                           'border-radius': 12,
+                           'background-color': 'transparent',
+                           color: css.colors.link,
+                           border: '1.5px solid ' + css.colors.border,
+                           display: 'flex',
+                           'align-items': 'center',
+                           'justify-content': 'center',
+                           cursor: 'pointer',
+                        }),
+                        onclick: B.ev ('rem', 'search', 'project'),
+                     }, ['span', {class: 'fw6 f4'}, '‹ Back to shell']],
+                     ['div', {
+                        style: style ({
+                           flex: 1,
+                           'border-radius': 12,
+                           'background-color': 'transparent',
+                           color: css.colors.success,
+                           border: '1.5px solid ' + css.colors.border,
+                           display: 'flex',
+                           'align-items': 'center',
+                           'justify-content': 'center',
+                           cursor: 'pointer',
+                        }),
+                        onclick: B.ev ('set', ['new', 'project'], {slot: undefined}),
+                     }, ['span', {class: 'fw6 f4'}, '+ New project']],
+                  ]]].concat (dale.go (projects, function (proj) {
                   var color = projectColor (proj.name);
                   return ['div', {
                      style: style ({
@@ -901,7 +911,7 @@ views.projects = function () {
                         ['span', {class: 'pointer', title: 'Slot'}, ['i', {class: 'bi bi-grid-3x3-gap'}]],
                      ]],
                   ]];
-               }),
+               }))],
 
                // Search bar
                ['div', {style: style ({
@@ -922,9 +932,10 @@ views.projects = function () {
                      'pointer-events': 'none',
                   })}],
                   ['input', {
+                     class: 'search-project',
                      onfocus: B.ev ('set', ['search', 'project'], ''),
-                     onblur: B.ev ('rem', 'search', 'project'),
                      oninput: B.ev ('set', ['search', 'project']),
+                     onchange: B.ev ('set', ['search', 'project']),
                      value: search,
                      type: 'text', placeholder: 'Search', style: style ({
                      width: '100%',
@@ -957,6 +968,15 @@ views.projects = function () {
 
                return random (verbs) + ' ' + random (nouns);
             }
+
+            var allowCreation = (function () {
+               var name = (newProject.name || '').trim ();
+               if (name.length === 0) return 'empty';
+               var conflict = dale.stop (projects, true, function (project) {
+                  return project.name === name;
+               });
+               return conflict ? 'conflict' : true;
+            }) ();
 
             return ['div', {
                onclick: B.ev ('rem', 'new', 'project'),
@@ -1030,19 +1050,23 @@ views.projects = function () {
                   ['button', {
                      class: 'fw7 pointer',
                      onclick: B.ev ('create', 'project'),
-                     disabled: ! ((newProject.name || '').trim ()),
+                     disabled: allowCreation === true,
                      style: style ({
                         width: '100%',
                         'margin-top': 16,
                         padding: '16px 0',
                         'border-radius': slotBorderRadius,
-                        'background-color': (newProject.name || '').trim () ? css.colors.success : '#555',
+                        'background-color': allowCreation === true ? css.colors.success : '#555',
                         color: '#000',
                         border: 'none',
                         'font-size': px (16),
                         'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                     })
-                  }, (newProject.name || '').trim () ? 'Boom' : 'Enter a name'],
+                  }, {
+                     true: 'Boom',
+                     empty: 'Enter a name',
+                     conflict: 'That name\'s taken'
+                  } [allowCreation]]
                ]],
             ]];
          }),
@@ -1325,3 +1349,45 @@ views.project = function () {
 
 B.call ('load', 'user');
 B.mount ('body', views.main);
+
+
+/* To be recycled later, perhaps
+   // *** OAUTH ***
+
+   ['login', 'oauth', function (x, provider) {
+      B.call (x, 'set', ['oauth', 'loading'], provider);
+      B.call (x, 'post', '/settings/login/' + provider, {}, function (x, error, rs) {
+         if (error) {
+            B.call (x, 'rem', 'oauth', 'loading');
+            return B.call (x, 'snackbar', 'error', 'Failed to start login');
+         }
+         window.open (rs.body.url, '_blank');
+         if (rs.body.flow === 'paste_code') {
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code'});
+            B.call (x, 'rem', 'oauth', 'loading');
+         }
+         else {
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting'});
+            B.call (x, 'complete', 'oauth', provider);
+         }
+      });
+   }],
+
+   ['complete', 'oauth', function (x, provider, code) {
+      B.call (x, 'set', ['oauth', 'loading'], provider);
+      B.call (x, 'post', '/settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
+         B.call (x, 'rem', [], 'oauth');
+         if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
+         B.call (x, 'load', 'settings');
+      });
+   }],
+
+   ['logout', 'oauth', function (x, provider) {
+      if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
+      B.call (x, 'post', '/settings/logout/' + provider, {}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to logout');
+         B.call (x, 'load', 'settings');
+      });
+   }],
+
+*/
