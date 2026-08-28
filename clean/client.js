@@ -402,29 +402,29 @@ B.mrespond ([
 
 var css = {
    colors: {
-      appBg:        '#1a1a2e',
-      surface:      '#16213e',
-      inputBg:      '#0f1530',
-      primary:      '#4a69bd',
-      primaryHover: '#1e3799',
-      text:         '#eee',
-      textBright:   '#f5f7ff',
-      textMuted:    '#9aa4bf',
-      textSoft:     '#bac4e2',
-      link:         '#94b8ff',
-      white:        '#fff',
-      border:       'rgba(148, 184, 255, 0.22)',
-      success:      '#04E762',
-      error:        '#D33E43',
-      warning:      '#ffff00',
-      dark:         '#333',
-      purple:       '#5a189a',
-      violet:       '#b07aff',
-      activeHighlight: 'rgba(74, 105, 189, 0.25)'
+      vmidnight:      '#1a1a2e',
+      vnavy:          '#16213e',
+      vdeepnavy:      '#0f1530',
+      vblue:          '#4a69bd',
+      vdarkblue:      '#1e3799',
+      vlightgray:     '#eee',
+      vnearwhite:     '#f5f7ff',
+      // Refactor from here down
+      vgray:          '#9aa4bf',
+      vlightblue:     '#94b8ff',
+      vwhite:         '#fff',
+      vborderblue:    'rgba(148, 184, 255, 0.22)',
+      vgreen:         '#04E762',
+      vred:           '#D33E43',
+      vyellow:        '#ffff00',
+      vdarkgray:      '#333',
+      vpurple:        '#5a189a',
+      vviolet:        '#b07aff',
+      vhighlightblue: 'rgba(74, 105, 189, 0.25)'
    },
-   input:      'db w-100 pa3 mb3 br2 ba b-border bg-input text-bright outline-0 placeholder-text-muted',
-   button:     'pa3 br2 bn bg-primary hover-bg-primary-hover white fw6 pointer',
-   buttonWide: 'db w-100 pa3 br2 bn bg-primary hover-bg-primary-hover white fw6 pointer',
+   input:      'b-border ba bg-deepnavy br2 db mb3 outline-0 pa3 placeholder-text-muted vnearwhite w-100',
+   button:     'bg-vblue bg-vdarkblue-hover bn br2 fw6 pa3 pointer white',
+   buttonWide: 'bg-vblue bg-vdarkblue-hover bn br2 db fw6 pa3 pointer w-100 white',
 }
 
 css.style = [
@@ -433,31 +433,22 @@ css.style = [
       'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       margin: 0,
       padding: 0,
-      'background-color': css.colors.appBg,
-      color: css.colors.text,
+      'background-color': css.colors.vmidnight,
+      color: css.colors.vlightgray,
       height: '100vh'
    }],
 
    // *** COLORS ***
 
-   ['.bg-app-bg', {'background-color': css.colors.appBg}],
-   ['.bg-surface', {'background-color': css.colors.surface}],
-   ['.bg-input', {'background-color': css.colors.inputBg}],
-   ['.bg-primary', {'background-color': css.colors.primary}],
-   ['.hover-bg-primary-hover:hover', {'background-color': css.colors.primaryHover}],
-   ['.near-text', {color: css.colors.text}],
-   ['.text-bright', {color: css.colors.textBright}],
-   ['.text-muted', {color: css.colors.textMuted}],
-   ['.text-soft', {color: css.colors.textSoft}],
-   ['.light-blue', {color: css.colors.link}],
-   ['.hover-white:hover', {color: css.colors.white}],
-   ['.b-border', {'border-color': css.colors.border}],
-   ['.text-success', {color: css.colors.success}],
-   ['.bg-success', {'background-color': css.colors.success}],
-   ['.bg-error', {'background-color': css.colors.error}],
-   ['.bg-warning', {'background-color': css.colors.warning}],
-   ['.bg-dark', {'background-color': css.colors.dark}],
+   dale.go (css.colors, function (color, name) {
+      return [
+         ['.bg-' + name, {'background-color': color}],
+         ['.' + name, {'color': color}],
+      ];
+   }),
+   ['bg-vdarkblue-hover:hover', {'background-color': css.colors.vdarkblue}],
    ['.shadow-primary', {'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'}],
+
    ['.outline-0:focus', {outline: 'none'}],
    ['.placeholder-text-muted::placeholder', {color: css.colors.textMuted, opacity: '1'}],
 
@@ -469,7 +460,7 @@ css.style = [
       display: 'inline-block',
       width: '2ch',
       'text-align': 'center',
-      color: css.colors.primary,
+      color: css.colors.vblue,
       'font-family': 'monospace',
       'font-size': '2.5rem',
       'font-weight': '700',
@@ -500,7 +491,7 @@ css.style = [
       padding: 28,
       'border-radius': 18,
       border: '1px solid ' + css.colors.border,
-      'background-color': css.colors.surface,
+      'background-color': css.colors.vnavy,
       'box-shadow': '0 28px 80px rgba(0, 0, 0, 0.38)'
    }],
    ['.project-modal-kicker', {
@@ -514,7 +505,7 @@ css.style = [
    ['.project-modal-title', {
       'font-size': '1.9rem',
       'font-weight': '700',
-      color: css.colors.textBright,
+      color: css.colors.nearwhite,
       'margin-bottom': 8
    }],
    ['.modal-actions', {
@@ -544,7 +535,7 @@ css.style = [
       padding: 24,
       'border-radius': 18,
       border: '1px solid ' + css.colors.border,
-      'background-color': css.colors.surface,
+      'background-color': css.colors.vnavy,
       'box-shadow': '0 20px 60px rgba(0, 0, 0, 0.22)',
       'box-sizing': 'border-box',
       'min-height': 0
@@ -588,7 +579,7 @@ css.style = [
       top: -28,
       left: '10px',
       transform: 'translateX(-50%)',
-      'background-color': css.colors.primary,
+      'background-color': css.colors.vblue,
       color: '#fff',
       'font-size': '0.72rem',
       'font-weight': '700',
@@ -658,9 +649,9 @@ views.login = function () {
       var linkClass = 'link light-blue hover-white';
 
       var card = function (title, subtitle, body, footer) {
-         return ['div', {class: 'min-vh-100 flex items-center justify-center pa4 bg-app-bg'}, [
-            ['div', {class: 'w-100 mw6 bg-surface text-bright pa4 pa5-ns br3 ba b-border shadow-3'}, [
-               ['h1', {class: 'ma0 mb2 f3 fw6 text-bright'}, 'Enter vibey'],
+         return ['div', {class: 'min-vh-100 flex items-center justify-center pa4 bg-vmidnight'}, [
+            ['div', {class: 'w-100 mw6 bg-vnavy vnearwhite pa4 pa5-ns br3 ba b-border shadow-3'}, [
+               ['h1', {class: 'ma0 mb2 f3 fw6 vnearwhite'}, 'Enter vibey'],
                ['div', {class: 'light-blue f4 fw5 mb2'}, title],
                ['div', {class: 'text-muted lh-copy mb4'}, subtitle],
                body,
@@ -764,15 +755,14 @@ views.projects = function () {
    return B.view ('projects', function (projects) {
       projects = projects || [];
 
-      return ['div', {style: style ({
+      return ['div', {class: 'bg-vmidnight', style: style ({
          'min-height': '100vh',
          display: 'flex',
          'align-items': 'center',
          'justify-content': 'center',
-         'background-color': css.colors.appBg,
       })}, [
          ['div', {style: style ({position: 'fixed', top: 24, left: 24})}, [
-            ['span', {class: 'f2 fw7 text-bright'}, 'Projects']
+            ['span', {class: 'f2 fw7 vnearwhite'}, 'Projects']
          ]],
 
          // Spiral slots
@@ -791,12 +781,12 @@ views.projects = function () {
                      });
 
                      return ['div', {
+                        class: 'bg-vnavy',
                         style: style ({
                            position: 'absolute',
                            width: px (slotWidth),
                            height: px (slotHeight),
                            'border-radius': px (slotBorderRadius),
-                           'background-color': css.colors.surface,
                            border: px (1.5) + ' solid rgba(148,184,255,0.15)',
                            display: 'flex',
                            'align-items': 'center',
@@ -932,7 +922,7 @@ views.projects = function () {
                      'pointer-events': 'none',
                   })}],
                   ['input', {
-                     class: 'search-project',
+                     class: 'search-project bg-vnavy',
                      onfocus: B.ev ('set', ['search', 'project'], ''),
                      oninput: B.ev ('set', ['search', 'project']),
                      onchange: B.ev ('set', ['search', 'project']),
@@ -942,7 +932,6 @@ views.projects = function () {
                      height: '100%',
                      'box-sizing': 'border-box',
                      'border-radius': px (slotBorderRadius),
-                     'background-color': css.colors.surface,
                      border: px (1.5) + ' solid rgba(148,184,255,0.15)',
                      color: 'rgba(148,184,255,0.8)',
                      'font-size': px (16),
@@ -1026,7 +1015,7 @@ views.projects = function () {
                      }],
                      ['input', {
                         type: 'text',
-                        class: 'new-project-input',
+                        class: 'new-project-input bg-vnavy',
                         placeholder: 'Name your project',
                         value: newProject.name,
                         onchange: B.ev ('set', ['new', 'project', 'name']),
@@ -1036,7 +1025,6 @@ views.projects = function () {
                            height: '100%',
                            'box-sizing': 'border-box',
                            'border-radius': slotBorderRadius,
-                           'background-color': css.colors.surface,
                            border: '1.5px solid rgba(148,184,255,0.15)',
                            color: 'rgba(148,184,255,0.8)',
                            'font-size': px (16),
@@ -1086,7 +1074,7 @@ views.project = function () {
    return B.view ([['projects'], ['project']], function (projects, project) {
       if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
 
-      return ['div', {class: 'project-shell bg-app-bg'}, [
+      return ['div', {class: 'project-shell bg-vmidnight'}, [
          ['div', {class: 'flex items-center'}, [
             B.view (['key', 'command'], function (command) {
                return ['span', {
@@ -1098,7 +1086,7 @@ views.project = function () {
                   '‹'
                ]];
             }),
-            ['span', {class: 'f2 fw7 text-bright'}, project]
+            ['span', {class: 'f2 fw7 vnearwhite'}, project]
          ]],
          ['div', {class: 'project-main'}, [
             B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'delete'], ['key', 'command'], ['new', 'type'], ['settings', 'show']], function (files, name, newFileName, Delete, command, newType, showSettings) {
@@ -1122,7 +1110,7 @@ views.project = function () {
                               class: 'flex justify-between items-center'
                            }, [
                               ['div', {
-                                 class: (active ? 'text-bright fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'text-bright') + ' fw5 lh-copy pointer relative',
+                                 class: (active ? 'vnearwhite fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'vnearwhite') + ' fw5 lh-copy pointer relative',
                                  onclick: B.ev ('navigate', 'project/' + B.get ('project') + '/' + file)
                               }, [
                                  (function () {
@@ -1213,7 +1201,7 @@ views.project = function () {
                ]],
                ['div', {class: 'flip-card-back project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {class: 'flex items-center justify-between mb3'}, [
-                     ['span', {class: 'f4 fw6 text-bright'}, 'Settings'],
+                     ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
                      ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
                   ]],
                   ['div', {class: 'text-muted lh-copy tc', style: style ({flex: 1, display: 'flex', 'align-items': 'center', 'justify-content': 'center'})}, [
@@ -1232,12 +1220,12 @@ views.project = function () {
                   B.view ([['new', 'file'], ['key', 'command']], function (newFile, command) {
                      var showTooltip = command && newFile === undefined;
                      return ['div', {class: 'flex items-center mb3'}, [
-                        ['span', {class: 'fw6 text-bright mr3'}, iconAndName (fileName)],
+                        ['span', {class: 'fw6 vnearwhite mr3'}, iconAndName (fileName)],
                         (function () {
                            if (fileName.match (/^dialog\//)) return ['div', 'hallo']; // TODO: add ai/human/terminal mode
                            return [
                               ['span', {
-                                 class: 'pointer fw6 mr3 relative text-bright',
+                                 class: 'pointer fw6 mr3 relative vnearwhite',
                                  style: style ({'background-color': mode !== 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
                                  onclick: B.ev ('set', ['file', 'mode'], 'view')
                               }, [
@@ -1245,7 +1233,7 @@ views.project = function () {
                                  ['i', {class: 'bi bi-eye mr1'}], 'View'
                               ]],
                               ['span', {
-                                 class: 'pointer fw6 relative text-bright',
+                                 class: 'pointer fw6 relative vnearwhite',
                                  style: style ({'background-color': mode === 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
                                  onclick: B.ev ('set', ['file', 'mode'], 'edit')
                               }, [
@@ -1259,8 +1247,8 @@ views.project = function () {
                   (function () {
                      var isDialog = fileName.match (/^dialog\//);
                      if (mode === 'edit' && ! isDialog) return ['textarea', {
-                        class: 'db w-100 bn outline-0 text-bright lh-copy f5',
-                        style: style ({'background-color': css.colors.surface, color: css.colors.textBright, flex: 1, resize: 'none', 'font-family': 'monospace'}),
+                        class: 'db w-100 bn outline-0 vnearwhite lh-copy f5 bg-vnavy',
+                        style: style ({color: css.colors.nearwhite, flex: 1, resize: 'none', 'font-family': 'monospace'}),
                         oninput:  B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
                         onchange: B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
                         value: content,
@@ -1279,7 +1267,7 @@ views.project = function () {
                ]],
                ['div', {class: 'flip-card-back project-pane project-right-pane', style: style ({overflow: 'auto'})}, [
                   ['div', {class: 'flex items-center justify-between mb3'}, [
-                     ['span', {class: 'f4 fw6 text-bright'}, 'Settings'],
+                     ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
                      ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
                   ]],
                   B.view ([['settings'], ['oauth']], function (settingsData, oauth) {
@@ -1295,7 +1283,7 @@ views.project = function () {
                      return ['div', [
                         ['div', {class: 'f6 text-muted mb3 lh-copy'}, 'Use your existing ChatGPT subscription. Logs in via OAuth — no API key needed.'],
 
-                        ['div', {style: style ({'background-color': css.colors.surface, 'border-radius': 8, padding: '1rem', 'margin-bottom': '1rem', border: '1px solid ' + css.colors.border})}, [
+                        ['div', {class: 'bg-vnavy', style: style ({'border-radius': 8, padding: '1rem', 'margin-bottom': '1rem', border: '1px solid ' + css.colors.border})}, [
                            ['div', {class: 'flex items-center justify-between mb2'}, [
                               ['span', {class: 'fw6 light-blue'}, 'ChatGPT Plus/Pro'],
                               openaiOAuth.loggedIn
@@ -1318,11 +1306,12 @@ views.project = function () {
                               ['div', {class: 'f6 mb2 lh-copy', style: style ({color: '#f0ad4e'})}, 'A browser tab opened. After OpenAI redirects to localhost:1455, copy the full URL and paste it below.'],
                               ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
                                  ['input', {
+                                    class: 'bg-vmidnight',
                                     type: 'text',
                                     value: oauthCode || '',
                                     placeholder: 'Paste callback URL here...',
                                     oninput: B.ev ('set', ['oauth', 'code'], {raw: 'this.value'}),
-                                    style: style ({flex: 1, padding: '0.5rem', 'border-radius': 6, border: 'none', 'background-color': css.colors.appBg, color: css.colors.textBright, 'font-family': 'monospace', 'font-size': '12px'})
+                                    style: style ({flex: 1, padding: '0.5rem', 'border-radius': 6, border: 'none', color: css.colors.nearwhite, 'font-family': 'monospace', 'font-size': '12px'})
                                  }],
                                  ['button', {class: css.button + ' f6', onclick: B.ev ('complete', 'oauth', 'openai', oauthCode || ''), disabled: ! oauthCode || ! oauthCode.trim ()}, 'Submit'],
                                  ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.border}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']

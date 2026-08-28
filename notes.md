@@ -1,5 +1,122 @@
 # Vibey development notes
 
+## 2026-08-28
+
+The short alexandrian AI loop:
+- See the wholeness.
+- One small prompt.
+- If necessary, adjust the change by hand.
+- See if the change works in the app, if not redo it.
+- If the change works in the app, see the code changes, correct if it looks off.
+- Verify both app and code improved.
+
+pi falls behind (for me) because it doesn't have an in-built web search, and web search is tremendously useful (it's the ultimate RAG). vibey must provide this somehow.
+
+poor human's pi:
+claude --dangerously-skip-permissions --model claude-opus-4-6
+codex --model gpt-5.4 -c 'model_reasoning_effort="high"' --dangerously-bypass-approvals-and-sandbox
+
+nginx has a default config of 2mb on upload body. Upped it to 2gb.
+
+> Please review the project endpoints vs the readme that covers them and the server tests in test.js (all in clean) and see if you detect inconsistencies or loose ends. The only thing that I know is missing is docker.backup
+
+```
+ Bugs in server.js
+
+  1. last variable collision (lines 1104, 1121, 1137, 1149)
+  All four project operation handlers do:
+  redis ('hset', 'project:' + rq.body.id, last, now ());
+  But last is the function imported from teishi (var {inc, last, type} = teishi), not the string 'last'. The Redis field key ends up being the function's
+  toString. Should be 'last'.
+
+  2. CONFIG.email.address is undefined (lines 600, 937)
+  sendmail uses CONFIG.email.address as replyTo, and POST /creator/request uses it as the to address. But CONFIG only has CONFIG.email.from.address. Creator
+  access requests are emailed to undefined.
+
+  3. /project/read — sha path crashes (lines 1094–1096)
+  if (! rq.body.sha) var file = await docker.read (rq.body.id, rq.body.path);
+  file = file.stdout;
+  If sha is provided, file is never assigned, so file.stdout throws. The sha param is validated but never implemented.
+
+  4. secret.js SES key mismatch (lines 47–48)
+  Code reads SECRET.ses?.access and SECRET.ses?.secret, but the shape comment at the top of server.js and the readme both document the keys as accessKeyId and
+  secretAccessKey.
+
+  ---
+
+  README vs server gaps
+
+  5. Four project endpoints undocumented: POST /project/read, /project/write, /project/edit, /project/run — the core file and command operations are missing
+  from the API section.
+
+  6. slot parameter undocumented: POST /project accepts optional slot but the readme only shows {name: <name>}.
+
+  7. POST /test/cleanup — readme mentions it but doesn't give the explicit path.
+
+  ---
+
+  Test issues
+
+  8. Missing leading / (line 379): 'project/run' should be '/project/run' — every other test path has it.
+
+  9. Wrong local-mode test for /auth/user (line 327): Expects 404 with {error: 'Not in cloud mode'}, but the server returns 200 with {mode: 'local'}. Labeled
+  "List sessions" but hits /auth/user — likely a copy-paste error.
+
+  10. SINTER instead of SUNION in cleanup (line 73): When multiple test users exist (hello@example.com + foo@example.com), SINTER returns only resources owned
+  by ALL users simultaneously (likely empty), so cleanup misses projects. Should be SUNION.
+
+  11. Cleanup doesn't delete owner: keys: The owner:<userId> sets are never removed, leaving orphan keys in Redis.
+```
+
+> Let's do some slow, methodical cleanup of clean/client.js, the part of the views themselves. I want 1) all colors to be in the relevant CSS section; 2) use tachyons classes as much as possible; 3) put the CSS closer to where it is used, if it's used only in one view; 4) respect natural indentations as much as possible. 5) sort alphabetically objects, and classes. I'll tell you where to start.
+> Let's define our own colors as v-colors: v-purple, v-red, v-light-green, etc. Then, if we need to reference the color somewhere, we make a class for it (bg or fg), on the colors section, but we'll do it dynamically. First start by seeing which of the vibey defined colors we actually use.
+
+
+```
+  │     Old key     │    New key     │           Value           │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ appBg           │ vmidnight      │ #1a1a2e                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ surface         │ vnavy          │ #16213e                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ inputBg         │ vdeepnavy      │ #0f1530                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ primary         │ vblue          │ #4a69bd                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ primaryHover    │ vdarkblue      │ #1e3799                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ text            │ vlightgray     │ #eee                      │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ textBright      │ vnearwhite     │ #f5f7ff                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ textMuted       │ vgray          │ #9aa4bf                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ link            │ vlightblue     │ #94b8ff                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ white           │ vwhite         │ #fff                      │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ border          │ vborderblue    │ rgba(148, 184, 255, 0.22) │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ success         │ vgreen         │ #04E762                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ error           │ vred           │ #D33E43                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ warning         │ vyellow        │ #ffff00                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ dark            │ vdarkgray      │ #333                      │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ purple          │ vpurple        │ #5a189a                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ violet          │ vviolet        │ #b07aff                   │
+  ├─────────────────┼────────────────┼───────────────────────────┤
+  │ activeHighlight │ vhighlightblue │ rgba(74, 105, 189, 0.25)  │
+```
+
+> In clean/client.js we're doing the following refactor of colors (see above table). Your instructions are to go through the old colors and 1) reference the new color name; 2) immediately after, if that color is inside a style block and applies to color or background color, use the class instead and remove those entries on style. Do one color at a time and then confirm with me.
+
+Struggling with the finer details of the project view. Let's do a round of cleanup first:
+-
+
 ## 2026-08-27
 
 What I need to build now for the list of projects:
