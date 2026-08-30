@@ -401,41 +401,40 @@ B.mrespond ([
 // *** VIEWS ***
 
 var css = {
+   button: 'bg-vblue bg-vdarkblue-hover bn br2 fw6 pa3 pointer white',
    colors: {
-      vmidnight:      '#1a1a2e',
-      vnavy:          '#16213e',
-      vdeepnavy:      '#0f1530',
-      vblue:          '#4a69bd',
-      vdarkblue:      '#1e3799',
-      vlightgray:     '#eee',
-      vnearwhite:     '#f5f7ff',
-      // Refactor from here down
-      vgray:          '#9aa4bf',
-      vlightblue:     '#94b8ff',
-      vwhite:         '#fff',
-      vborderblue:    'rgba(148, 184, 255, 0.22)',
-      vgreen:         '#04E762',
-      vred:           '#D33E43',
-      vyellow:        '#ffff00',
-      vdarkgray:      '#333',
-      vpurple:        '#5a189a',
-      vviolet:        '#b07aff',
-      vhighlightblue: 'rgba(74, 105, 189, 0.25)'
+      vblue:           '#4a69bd',
+      vborderblue:     'rgba(148, 184, 255, 0.22)',
+      vdarkblue:       '#1e3799',
+      vdarkblueshadow: '0 12px 30px rgba(30, 55, 153, 0.35)',
+      vdeepnavy:       '#0f1530',
+      vgray:           '#9aa4bf',
+      vgreen:          '#27ae60',
+      vhighlightblue:  'rgba(74, 105, 189, 0.25)',
+      vlightblue:      '#94b8ff',
+      vlightgray:      '#eeeeee',
+      vmidnight:       '#1a1a2e',
+      vnavy:           '#16213e',
+      vnearwhite:      '#f5f7ff',
+      vpurple:         '#5a189a',
+      vred:            '#d33e43',
+      vviolet:         '#b07aff'
    },
-   input:      'b-border ba bg-deepnavy br2 db mb3 outline-0 pa3 placeholder-text-muted vnearwhite w-100',
-   button:     'bg-vblue bg-vdarkblue-hover bn br2 fw6 pa3 pointer white',
-   buttonWide: 'bg-vblue bg-vdarkblue-hover bn br2 db fw6 pa3 pointer w-100 white',
+   input: 'b-border ba bg-deepnavy br2 db mb3 outline-0 pa3 placeholder-text-muted vnearwhite w-100',
+   join: function () {
+      return dale.go (arguments, function (v) {return v}).join (' ');
+   },
 }
 
 css.style = [
 
    ['body', {
-      'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      margin: 0,
-      padding: 0,
       'background-color': css.colors.vmidnight,
       color: css.colors.vlightgray,
-      height: '100vh'
+      'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      height: '100vh',
+      margin: 0,
+      padding: 0,
    }],
 
    // *** COLORS ***
@@ -446,16 +445,18 @@ css.style = [
          ['.' + name, {'color': color}],
       ];
    }),
-   ['bg-vdarkblue-hover:hover', {'background-color': css.colors.vdarkblue}],
-   ['.shadow-primary', {'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'}],
+
+   ['.bg-vdarkblue-hover:hover', {'background-color': css.colors.vdarkblue}],
+   ['.vdarkblue-shadow', {'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'}],
 
    ['.outline-0:focus', {outline: 'none'}],
-   ['.placeholder-text-muted::placeholder', {color: css.colors.textMuted, opacity: '1'}],
+   ['.placeholder-text-muted::placeholder', {color: css.colors.vgray, opacity: '1'}],
 
    // *** SPINNY ***
 
    ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
 
+   // TODO: Refactor from here below
    ['.spinny', {
       display: 'inline-block',
       width: '2ch',
@@ -490,7 +491,7 @@ css.style = [
       'max-width': 560,
       padding: 28,
       'border-radius': 18,
-      border: '1px solid ' + css.colors.border,
+      border: '1px solid ' + css.colors.vborderblue,
       'background-color': css.colors.vnavy,
       'box-shadow': '0 28px 80px rgba(0, 0, 0, 0.38)'
    }],
@@ -499,7 +500,7 @@ css.style = [
       'font-weight': '700',
       'letter-spacing': '0.12em',
       'text-transform': 'uppercase',
-      color: css.colors.link,
+      color: css.colors.vlightblue,
       'margin-bottom': 10
    }],
    ['.project-modal-title', {
@@ -534,7 +535,7 @@ css.style = [
    ['.project-pane', {
       padding: 24,
       'border-radius': 18,
-      border: '1px solid ' + css.colors.border,
+      border: '1px solid ' + css.colors.vborderblue,
       'background-color': css.colors.vnavy,
       'box-shadow': '0 20px 60px rgba(0, 0, 0, 0.22)',
       'box-sizing': 'border-box',
@@ -604,7 +605,7 @@ views.main = function () {
          }) (),
 
          (function () {
-            var snackbarClass = snackbar && snackbar.type === 'ok' ? 'bg-success black' : snackbar && snackbar.type === 'warning' ? 'bg-warning black' : snackbar && snackbar.type === 'error' ? 'bg-error white' : 'bg-dark white';
+            var snackbarClass = snackbar && snackbar.type === 'ok' ? 'bg-vgreen black' : snackbar && snackbar.type === 'warning' ? 'bg-yellow black' : snackbar && snackbar.type === 'error' ? 'bg-vred white' : 'bg-dark-gray white';
 
             if (snackbar) return ['div', {class: 'fixed left-0 right-0 bottom-0 pa3 pa4-ns', style: style ({'z-index': 2000})}, [
                ['div', {
@@ -629,8 +630,7 @@ views.main = function () {
                ]];
             }),
             ['button', {
-               class: css.button + ' pa2 ph3 f5',
-               style: style ({'background-color': css.colors.purple}),
+               class: css.button + ' pa2 ph3 f5 bg-vpurple',
                title: B.get ('user', 'email') || '',
                onclick: B.ev ('logout', [])
             }, [['i', {class: 'bi bi-person-walking mr1'}], 'Logout']]
@@ -671,7 +671,7 @@ views.login = function () {
             class: css.input
          }],
          ['button', {
-            class: css.buttonWide,
+            class: css.join (css.button, 'db w-100'),
             style: style ({'background-color': emailValid ? '#27ae60' : '#555', cursor: emailValid ? 'pointer' : 'default'}),
             disabled: ! emailValid,
             onclick: B.ev ('login', [], user.email),
@@ -808,7 +808,7 @@ views.projects = function () {
                            opaque: true,
                            class: 'flex items-center justify-center w-100 h-100',
                            onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
-                        }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.success + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']],
+                        }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.vgreen + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']],
                      ];
                   }),
 
@@ -843,12 +843,12 @@ views.projects = function () {
                      }),
                   }, [
                      ['div', {
+                        class: 'vlightblue',
                         style: style ({
                            flex: 1,
                            'border-radius': 12,
                            'background-color': 'transparent',
-                           color: css.colors.link,
-                           border: '1.5px solid ' + css.colors.border,
+                           border: '1.5px solid ' + css.colors.vborderblue,
                            display: 'flex',
                            'align-items': 'center',
                            'justify-content': 'center',
@@ -857,12 +857,12 @@ views.projects = function () {
                         onclick: B.ev ('rem', 'search', 'project'),
                      }, ['span', {class: 'fw6 f4'}, '‹ Back to shell']],
                      ['div', {
+                        class: 'vgreen',
                         style: style ({
                            flex: 1,
                            'border-radius': 12,
                            'background-color': 'transparent',
-                           color: css.colors.success,
-                           border: '1.5px solid ' + css.colors.border,
+                           border: '1.5px solid ' + css.colors.vborderblue,
                            display: 'flex',
                            'align-items': 'center',
                            'justify-content': 'center',
@@ -1044,7 +1044,7 @@ views.projects = function () {
                         'margin-top': 16,
                         padding: '16px 0',
                         'border-radius': slotBorderRadius,
-                        'background-color': allowCreation === true ? css.colors.success : '#555',
+                        'background-color': allowCreation === true ? css.colors.vgreen : '#555',
                         color: '#000',
                         border: 'none',
                         'font-size': px (16),
@@ -1066,8 +1066,8 @@ views.projects = function () {
 views.project = function () {
 
    var iconAndName = function (name) {
-      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1', style: style ({color: css.colors.link})}], name];
-      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1', style: style ({color: css.colors.violet})}], name];
+      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], name];
+      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1 vviolet'}], name];
       return name;
    }
 
@@ -1099,9 +1099,9 @@ views.project = function () {
                         return ['div', {
                            class: 'mb2 pb2',
                            style: style ({
-                              'border-bottom': '1px solid ' + css.colors.border,
-                              'background-color': active ? css.colors.activeHighlight : undefined,
-                              'border-left': active ? '3px solid ' + css.colors.link : '3px solid transparent',
+                              'border-bottom': '1px solid ' + css.colors.vborderblue,
+                              'background-color': active ? css.colors.vhighlightblue : undefined,
+                              'border-left': active ? '3px solid ' + css.colors.vblue : '3px solid transparent',
                               padding: '8px 10px',
                               'border-radius': 4,
                            })
@@ -1125,8 +1125,7 @@ views.project = function () {
                                  iconAndName (file)
                               ]],
                               Delete && file !== 'doc/main.md' ? ['span', {
-                                 class: 'f4 lh-solid pointer relative',
-                                 style: style ({color: css.colors.purple}),
+                                 class: 'f4 lh-solid pointer relative vpurple',
                                  onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['delete', 'file', file])
                               }, [
                                  file === name ? ['span', {class: 'cmd-tooltip', style: style ({left: 'auto', right: 0, transform: 'none'})}, 'V'] : [],
@@ -1146,8 +1145,7 @@ views.project = function () {
                         '+ Add'
                      ]],
                      ['button', {
-                        class: css.button + ' f6 ph3 pv2 relative',
-                        style: style ({'background-color': css.colors.purple}),
+                        class: css.button + ' f6 ph3 pv2 relative bg-purple',
                         onclick: B.ev ('set', ['file', 'delete'], ! Delete)
                      }, [
                         command ? ['span', {class: 'cmd-tooltip'}, 'X'] : '',
@@ -1161,16 +1159,16 @@ views.project = function () {
                         ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
                            ['div', {class: 'flex mb3', style: style ({gap: '0.5rem'})}, [
                               ['button', {
-                                 class: css.button + ' f6 ph3 pv2 relative' + (! isDialog ? ' shadow-primary' : ''),
-                                 style: ! isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.border, color: css.colors.textMuted}),
+                                 class: css.button + ' f6 ph3 pv2 relative vgray ' + (! isDialog ? ' shadow-primary' : ''),
+                                 style: ! isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.vborderblue}),
                                  onclick: B.ev ('set', ['new', 'type'], 'doc')
                               }, [
                                  command ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
                                  ['i', {class: 'bi bi-file-text mr1'}], 'Doc'
                               ]],
                               ['button', {
-                                 class: css.button + ' f6 ph3 pv2 relative' + (isDialog ? ' shadow-primary' : ''),
-                                 style: isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.border, color: css.colors.textMuted}),
+                                 class: css.button + ' f6 ph3 pv2 relative vgray ' + (isDialog ? ' shadow-primary' : ''),
+                                 style: isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.vborderblue}),
                                  onclick: B.ev ('set', ['new', 'type'], 'dialog')
                               }, [
                                  command ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
@@ -1226,7 +1224,7 @@ views.project = function () {
                            return [
                               ['span', {
                                  class: 'pointer fw6 mr3 relative vnearwhite',
-                                 style: style ({'background-color': mode !== 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
+                                 style: style ({'background-color': mode !== 'edit' ? css.colors.vhighlightblue : undefined, 'border-radius': 6, padding: '6px 16px'}),
                                  onclick: B.ev ('set', ['file', 'mode'], 'view')
                               }, [
                                  showTooltip && mode && mode !== 'view' ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
@@ -1234,7 +1232,7 @@ views.project = function () {
                               ]],
                               ['span', {
                                  class: 'pointer fw6 relative vnearwhite',
-                                 style: style ({'background-color': mode === 'edit' ? css.colors.activeHighlight : undefined, 'border-radius': 6, padding: '6px 16px'}),
+                                 style: style ({'background-color': mode === 'edit' ? css.colors.vhighlightblue : undefined, 'border-radius': 6, padding: '6px 16px'}),
                                  onclick: B.ev ('set', ['file', 'mode'], 'edit')
                               }, [
                                  showTooltip && mode !== 'edit' ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
@@ -1283,12 +1281,12 @@ views.project = function () {
                      return ['div', [
                         ['div', {class: 'f6 text-muted mb3 lh-copy'}, 'Use your existing ChatGPT subscription. Logs in via OAuth — no API key needed.'],
 
-                        ['div', {class: 'bg-vnavy', style: style ({'border-radius': 8, padding: '1rem', 'margin-bottom': '1rem', border: '1px solid ' + css.colors.border})}, [
+                        ['div', {class: 'bg-vnavy', style: style ({'border-radius': 8, padding: '1rem', 'margin-bottom': '1rem', border: '1px solid ' + css.colors.vborderblue})}, [
                            ['div', {class: 'flex items-center justify-between mb2'}, [
                               ['span', {class: 'fw6 light-blue'}, 'ChatGPT Plus/Pro'],
                               openaiOAuth.loggedIn
-                                 ? ['span', {class: 'f6', style: style ({color: openaiOAuth.expired ? '#f0ad4e' : css.colors.success})}, openaiOAuth.expired ? '⚠ Expired' : '✓ Connected']
-                                 : ['span', {class: 'f6', style: style ({color: css.colors.purple})}, '✗ Not connected']
+                                 ? ['span', {class: 'f6', style: style ({color: openaiOAuth.expired ? '#f0ad4e' : css.colors.vgreen})}, openaiOAuth.expired ? '⚠ Expired' : '✓ Connected']
+                                 : ['span', {class: 'f6 vpurple'}, '✗ Not connected']
                            ]],
 
                            openaiOAuth.loggedIn && ! isPaste && ! isWaiting ? ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
@@ -1314,14 +1312,14 @@ views.project = function () {
                                     style: style ({flex: 1, padding: '0.5rem', 'border-radius': 6, border: 'none', color: css.colors.nearwhite, 'font-family': 'monospace', 'font-size': '12px'})
                                  }],
                                  ['button', {class: css.button + ' f6', onclick: B.ev ('complete', 'oauth', 'openai', oauthCode || ''), disabled: ! oauthCode || ! oauthCode.trim ()}, 'Submit'],
-                                 ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.border}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
+                                 ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.vborderblue}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
                               ]]
                            ]] : [],
 
                            isWaiting ? ['div', {class: 'mt2'}, [
                               ['div', {class: 'f6 mb2 lh-copy', style: style ({color: '#f0ad4e'})}, oauthLoading === 'openai' ? '⏳ Waiting for browser authentication...' : '✓ Authentication complete!'],
                               ['div', {class: 'f6 text-muted mb2 lh-copy'}, 'Complete the login in the browser tab. This page will update automatically.'],
-                              ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.border}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
+                              ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.vborderblue}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
                            ]] : []
                         ]]
                      ]];

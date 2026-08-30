@@ -1,5 +1,20 @@
 # Vibey development notes
 
+## 2026-08-30
+
+For vibey, the two variables on which I work: 1) a perfect product, all the way down, in how it works and how it is coded; 2) find people that can get use of it and get them in front of vibey. Those are the two variables to work on.
+
+I will offer a few free accounts for vibey, just for 14 days, to people that have reached out with interest on testing, clarifying that after the period the account, if on creator mode, has to be a paid one.
+
+It's going to be easier (and faster) to work on vibey if it's near perfect than if it is a middling piece of software.
+
+TODO cleanup
+- all colors to be in the relevant CSS section [DONE]
+- use tachyons classes as much as possible
+- put all css close to where it is used unless it is general
+- respect indentations properly, especially on styles
+- sort alphabetically objects and classes
+
 ## 2026-08-28
 
 The short alexandrian AI loop:
