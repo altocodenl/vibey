@@ -1,5 +1,104 @@
 # Vibey development notes
 
+## 2026-08-31
+
+TODO client cleanup:
+- all colors to be in the relevant CSS section
+- use tachyons classes as much as possible instead of style declarations
+- put all css close to where it is used unless it is general
+- respect indentations properly, especially on styles
+- sort alphabetically objects and classes
+- use relative, not absolute sizes (no px, just rem or vh)
+- no object with multiple properties in one line
+
+TODO project
+- autobackup
+- client
+   - search filters projects
+   - new project modal works
+   - rename, delete, assign slot from button
+- server tests
+   - POST /project — non-creator access (403 at line 1012, untested)
+   - Cross-user access — no test hits the ownership check (line 1080) with a different user's project id (would need a second user in cloud mode)
+
+There's a docker path, and an nginx path (proxy). the nginx path can be done for apps. That will be much faster.
+
+What does an app need?
+- engine to run things
+- domain with tls/https
+- auth
+- updates/restarts to the engine
+- backup of file
+- being up: run/keep up/notify if down
+- logs
+- config & secrets
+
+Idea for zero-knowledge secret file within a vibey service: a master key opens the entire vault, by virtue of having every key encrypted with it. when the master key provides access to another key to n secrets, we simply add n entries to the db with the same value, one per secret.
+
+possibility for the future: use nsenter for faster docker exec. It loses a bunch of features, but we might not need them in vibey.
+
+```claude
+
+Using nsenter instead could cut that per-operation overhead dramatically. Your docker.run function at line 388 would change from:
+
+run('docker', 'exec', '-i', id, 'sh', '-c', command)
+
+to something like:
+
+run('nsenter', '-t', pid, '-m', '-u', '-i', '-n', '-p', '--', 'sh', '-c', command)
+
+You'd need to look up the container PID once (at container start or lazily on first command, then cache it), but after that every file read, write, edit, and command would skip the Docker daemon roundtrip entirely.
+
+The main considerations for vibey specifically:
+
+- Security: Your containers already run arbitrary user commands (rq.body.command at line 1147), so the isolation story doesn't change much — the container's namespaces still provide the boundary, nsenter enters the same namespaces docker exec does.
+- Container restarts: Your restart logic at line 400-403 checks Docker error messages. With nsenter, a stopped container means the PID is gone, so you'd need to detect that differently and still use docker start + re-lookup the PID.
+- PID caching: Call docker inspect --format '{{.State.Pid}}' once per container lifecycle and cache it. Invalidate on restart.
+
+For a workspace where every keystroke-level edit goes through this path, shaving 40-50ms per operation could make it feel noticeably snappier.
+
+Looking at vibey's code more carefully, the thing I'd worry most about that I glossed over is environment variables.
+
+docker exec inherits the container's environment (PATH, HOME, anything set via ENV in the Dockerfile). nsenter inherits the host's environment. Your commands all need PATH to find git, cat, find, awk, mkdir — and user commands (rq.body.command at line 1147) could need anything.
+
+If PATH on the host doesn't match PATH inside the container, commands silently fail or find the wrong binary.
+
+The fix is straightforward — explicitly set the environment:
+
+run('nsenter', '-t', pid, '-m', '-u', '-i', '-n', '-p', '--',
+    'env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/root',
+    'sh', '-c', command)
+
+But you'd need to know what the container's environment looks like, and keep it in sync if the Dockerfile changes.
+
+The other things I listed before (cgroups, seccomp, logging) genuinely don't matter for vibey — your containers are per-user project sandboxes, not multi-tenant isolation boundaries.
+
+So really: environment variables are the one real gotcha. Everything else is either irrelevant to your use case or trivially handled.
+```
+
+### Understanding vibey
+
+Vibey is about unifying the digital workspace into one place you fully own. But concretely, what does that mean?
+
+The greatest gulf is between communication and files. Think of the main digital communication channels we have for collaboration with others: 1) AI chats; 2) person-to-person chats; 3) emails. All three are far away from our files (documents, images, code). Getting files out of these chats is difficult. All three are far from each other.
+
+Now imagine that in vibey, the chat is the centerpiece. Communication with AI and other humans happens in that place, as a chain of messages, where everyone involved can read what happened before.
+
+Now, to its left, the chat has other chats and other files. These files can be a small document outlining next steps, or a folder with photos. The collaboration that happens in the chat has immediate access to edit and read other files that are not chat. Chat and files coexist. Chats are files too, so they can be read as normal files.
+
+Taking a step out, around the chats and files there is a project. A project is a sandbox that can only be accessed by those who are authorized. The project is automatically backed up, so there is minimal risk of data loss and no need to do backups by hand. And the project is a *server*, which means that you can create apps for yourself and your team within the project too. The apps are available within the project and can also be publicly available.
+
+### Even shorter
+
+The concept is the following: collaboration and files are very far away from each other. Vibey unifies them: the centerpiece is a chat where you can interact with AI and other humans in the same place. Alongside chats, there are files (as in normal files, such as text, PDF, images, spreadsheets) that the team and AI can read and edit. Basically, then, collaboration and production live in the same place.
+
+Around the chats and files there is a project, which is a sandbox where only you and your team have access. The project is automatically backed up on every change, so there's near zero risk of losing data. And the project is really a server, so you can also create and run websites & apps there (for yourself, your team or even the broader world).
+
+Vibey runs on the cloud and works from every browser. You bring your own AI credentials to use it.
+
+https://federicopereiro.com/apps-are-social/
+claude: "this essay is the intellectual backbone."
+
 ## 2026-08-30
 
 For vibey, the two variables on which I work: 1) a perfect product, all the way down, in how it works and how it is coded; 2) find people that can get use of it and get them in front of vibey. Those are the two variables to work on.
@@ -129,8 +228,7 @@ nginx has a default config of 2mb on upload body. Upped it to 2gb.
 
 > In clean/client.js we're doing the following refactor of colors (see above table). Your instructions are to go through the old colors and 1) reference the new color name; 2) immediately after, if that color is inside a style block and applies to color or background color, use the class instead and remove those entries on style. Do one color at a time and then confirm with me.
 
-Struggling with the finer details of the project view. Let's do a round of cleanup first:
--
+Struggling with the finer details of the project view. Let's do a round of cleanup first.
 
 ## 2026-08-27
 

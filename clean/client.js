@@ -7,15 +7,6 @@ B.internal.timeout = 500;
 
 var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log;
 
-var validEmail = /^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i;
-
-// *** HELPERS ***
-
-var formatError = function (error) {
-   if (! (error instanceof Error)) return error;
-   return {error: error.name, message: error.message, stack: error.stack.split ('\n')};
-}
-
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -41,7 +32,11 @@ document.addEventListener ('visibilitychange', function () {
 
 window.onerror = async function (message, source, lineno, colno, error) {
    if (type (message) === 'string' && message.indexOf ('ResizeObserver') !== -1) return;
-   B.call ('report', 'error', {message, source, lineno, colno, error: formatError (error)});
+
+   B.call ('report', 'error', {message, source, lineno, colno, error: (function () {
+      if (! (error instanceof Error)) return error;
+      return {error: error.name, message: error.message, stack: error.stack.split ('\n')};
+   }) ()});
 }
 
 // *** RESPONDERS ***
@@ -194,7 +189,8 @@ B.mrespond ([
       });
    }],
 
-   ['login', [], function (x, email) {
+   ['login', '*', function (x) {
+      var email = x.path [0];
       if (! email) return B.call (x, 'snackbar', 'error', 'Please enter your email');
       B.call (x, 'post', '/auth/login', {email: email.trim ().toLowerCase ()}, function (x, error, rs) {
          if (error) {
@@ -232,7 +228,7 @@ B.mrespond ([
 
    ['load', 'projects', function (x) {
       B.call (x, 'get', '/projects', function (x, error, rs) {
-         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading ' + projects);
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading projects');
          B.call (x, 'set', 'projects', rs.body);
       });
    }],
@@ -255,6 +251,10 @@ B.mrespond ([
       });
    }],
 
+   ['change', ['new', 'project'], {priority: -1000}, function (x) {
+      if (B.get ('new', 'project') !== undefined) c ('.new-project-input') [0].focus ();
+   }],
+
    ['delete', 'project', function (x, project) {
       if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
 
@@ -263,10 +263,6 @@ B.mrespond ([
          B.call (x, 'load', 'projects');
          B.call (x, 'snackbar', 'ok', 'Project deleted');
       });
-   }],
-
-   ['change', ['new', 'project'], {priority: -1000}, function (x) {
-      if (B.get ('new', 'project') !== undefined) c ('.new-project-input') [0].focus ();
    }],
 
    // *** PROJECTS & FILES ***
@@ -401,12 +397,10 @@ B.mrespond ([
 // *** VIEWS ***
 
 var css = {
-   button: 'bg-vblue bg-vdarkblue-hover bn br2 fw6 pa3 pointer white',
+   button: 'bg-vblue bn br2 fw6 pa3 pointer white',
    colors: {
       vblue:           '#4a69bd',
       vborderblue:     'rgba(148, 184, 255, 0.22)',
-      vdarkblue:       '#1e3799',
-      vdarkblueshadow: '0 12px 30px rgba(30, 55, 153, 0.35)',
       vdeepnavy:       '#0f1530',
       vgray:           '#9aa4bf',
       vgreen:          '#27ae60',
@@ -420,13 +414,15 @@ var css = {
       vred:            '#d33e43',
       vviolet:         '#b07aff'
    },
-   input: 'b-border ba bg-deepnavy br2 db mb3 outline-0 pa3 placeholder-text-muted vnearwhite w-100',
+   input: 'ba bg-vdeepnavy br2 db mb3 outline-0 pa3 placeholder-vgray vborderblue-border vnearwhite w-100',
    join: function () {
       return dale.go (arguments, function (v) {return v}).join (' ');
    },
 }
 
 css.style = [
+
+   // *** BODY ***
 
    ['body', {
       'background-color': css.colors.vmidnight,
@@ -446,195 +442,97 @@ css.style = [
       ];
    }),
 
-   ['.bg-vdarkblue-hover:hover', {'background-color': css.colors.vdarkblue}],
-   ['.vdarkblue-shadow', {'box-shadow': '0 12px 30px rgba(30, 55, 153, 0.35)'}],
-
+   ['.vborderblue-border', {'border-color': css.colors.vborderblue}],
    ['.outline-0:focus', {outline: 'none'}],
-   ['.placeholder-text-muted::placeholder', {color: css.colors.vgray, opacity: '1'}],
+   ['.placeholder-vgray::placeholder', {color: css.colors.vgray, opacity: '1'}],
 
-   // *** SPINNY ***
-
-   ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
-
-   // TODO: Refactor from here below
-   ['.spinny', {
-      display: 'inline-block',
-      width: '2ch',
-      'text-align': 'center',
-      color: css.colors.vblue,
-      'font-family': 'monospace',
-      'font-size': '2.5rem',
-      'font-weight': '700',
-      'line-height': 1
-   }],
-
-   ['.spinny:before', {
-      content: '"|"',
-      animation: 'spinny 0.8s steps(1) infinite'
-   }],
-
-   ['.modal-backdrop', {
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      left: 0,
-      display: 'flex',
-      'align-items': 'center',
-      'justify-content': 'center',
-      padding: 24,
-      'background-color': 'rgba(8, 12, 28, 0.74)',
-      'z-index': 3000
-   }],
-   ['.modal-card', {
-      width: 1,
-      'max-width': 560,
-      padding: 28,
-      'border-radius': 18,
-      border: '1px solid ' + css.colors.vborderblue,
-      'background-color': css.colors.vnavy,
-      'box-shadow': '0 28px 80px rgba(0, 0, 0, 0.38)'
-   }],
-   ['.project-modal-kicker', {
-      'font-size': '0.78rem',
-      'font-weight': '700',
-      'letter-spacing': '0.12em',
-      'text-transform': 'uppercase',
-      color: css.colors.vlightblue,
-      'margin-bottom': 10
-   }],
-   ['.project-modal-title', {
-      'font-size': '1.9rem',
-      'font-weight': '700',
-      color: css.colors.nearwhite,
-      'margin-bottom': 8
-   }],
-   ['.modal-actions', {
-      display: 'flex',
-      gap: 12,
-      'justify-content': 'flex-end',
-      'margin-top': 20
-   }],
-   ['.project-shell', {
-      display: 'flex',
-      'flex-direction': 'column',
-      gap: 24,
-      padding: 24,
-      'min-height': '100vh',
-      'box-sizing': 'border-box'
-   }],
-   ['.project-main', {
-      display: 'grid',
-      'grid-template-columns': '23.6fr 76.4fr',
-      gap: 24,
-      flex: 1,
-      width: 1,
-      'min-height': 0,
-      'box-sizing': 'border-box'
-   }],
-   ['.project-pane', {
-      padding: 24,
-      'border-radius': 18,
-      border: '1px solid ' + css.colors.vborderblue,
-      'background-color': css.colors.vnavy,
-      'box-shadow': '0 20px 60px rgba(0, 0, 0, 0.22)',
-      'box-sizing': 'border-box',
-      'min-height': 0
-   }],
-   ['.project-left-pane', {
-      'min-width': 0
-   }],
-   ['.project-right-pane', {
-      'min-width': 0,
-      display: 'flex',
-      'flex-direction': 'column'
-   }],
-   ['.flip-card', {
-      perspective: 1200,
-   }],
-   ['.flip-card-inner', {
-      position: 'relative',
-      width: 1,
-      height: 1,
-      transition: 'transform 0.6s ease',
-      'transform-style': 'preserve-3d',
-      'transform-origin': 'center center',
-   }],
-   ['.flip-card-inner.flipped', {
-      transform: 'rotateY(180deg)',
-   }],
-   ['.flip-card-front, .flip-card-back', {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: 1,
-      height: 1,
-      'backface-visibility': 'hidden',
-      '-webkit-backface-visibility': 'hidden',
-   }],
-   ['.flip-card-back', {
-      transform: 'rotateY(180deg)',
-   }],
-   ['.cmd-tooltip', {
-      position: 'absolute',
-      top: -28,
-      left: '10px',
-      transform: 'translateX(-50%)',
-      'background-color': css.colors.vblue,
-      color: '#fff',
-      'font-size': '0.72rem',
-      'font-weight': '700',
-      padding: '2px 8px',
-      'border-radius': 5,
-      'white-space': 'nowrap',
-      'pointer-events': 'none',
-      'z-index': 10
-   }],
 ]
 
 var views = {};
 
+views.tooltip = function (tooltip) {
+   return B.view (['key', 'command'], function (command) {
+      if (! command) return ['span'];
+      return ['span', {
+         class: 'absolute bg-vblue fw7 nowrap white',
+         style: style ({
+            'border-radius': 5,
+            'font-size': '0.72rem',
+            left: '0.625rem',
+            padding: '0.125rem 0.5rem',
+            'pointer-events': 'none',
+            top: '-1.75rem',
+            transform: 'translateX(-50%)',
+            'z-index': 10
+         }),
+      }, tooltip];
+   });
+}
+
 views.main = function () {
    return B.view ([['view'], ['snackbar']], function (view, snackbar) {
-      return ['div', {class: 'relative min-vh-100'}, [
+      return ['div', {class: 'min-vh-100 relative'}, [
          ['style', css.style],
 
+         // Header
          (function () {
-            var current = views [view];
-            return current ? ['div', {class: 'min-vh-100'}, [current ()]] : ['div'];
-         }) (),
+            if (view === 'login') return;
+            return ['div', {
+               class: 'absolute flex right-0 top-0',
+               style: style ({
+                  gap: '1.5rem',
+                  margin: '1.5rem 1.5rem 0 0',
+               })
+            }, [
 
-         (function () {
-            var snackbarClass = snackbar && snackbar.type === 'ok' ? 'bg-vgreen black' : snackbar && snackbar.type === 'warning' ? 'bg-yellow black' : snackbar && snackbar.type === 'error' ? 'bg-vred white' : 'bg-dark-gray white';
+               // Settings
+               B.view ([['settings', 'show'], ['view']], function (showSettings, view) {
+                  if (view !== 'project') return ['span'];
+                  return ['button', {
+                     class: css.button + ' bg-mid-gray f5 pa2 ph3 relative',
+                     onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
+                  }, [
+                     views.tooltip ('O'),
+                     ['i', {class: 'bi mr1 ' + (showSettings ? 'bi-check-lg' : 'bi-wrench-adjustable mr1')}],
+                     showSettings ? 'Done with this' : 'Settings'
+                  ]];
+               }),
 
-            if (snackbar) return ['div', {class: 'fixed left-0 right-0 bottom-0 pa3 pa4-ns', style: style ({'z-index': 2000})}, [
-               ['div', {
-                  class: 'center mw7 br3 shadow-4 pa3 ph4-ns fw5 lh-copy tc ' + snackbarClass
-               }, snackbar.message || '']
-            ]];
-         }) (),
-
-         ! inc (['login', 'signup'], view) ? ['div', {
-            class: 'absolute top-0 right-0 flex',
-            style: style ({'z-index': 1000, margin: '24px 24px 0 0', gap: 24})
-         }, [
-            B.view ([['settings', 'show'], ['key', 'command'], ['view']], function (settings, command, view) {
-               if (view !== 'project') return ['span'];
-               return ['button', {
-                  class: css.button + ' pa2 ph3 f5 relative',
-                  style: style ({'background-color': '#555'}),
-                  onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
+               // Logout
+               ['button', {
+                  class: css.button + ' bg-vpurple f5 pa2 ph3',
+                  onclick: B.ev ('logout', []),
+                  title: B.get ('user', 'email') || ''
                }, [
-                  command ? ['span', {class: 'cmd-tooltip'}, 'O'] : '',
-                  ['i', {class: 'bi mr1 ' + (settings ? 'bi-check-lg' : 'bi-wrench-adjustable mr1')}], settings ? 'Done with this' : 'Settings'
-               ]];
-            }),
-            ['button', {
-               class: css.button + ' pa2 ph3 f5 bg-vpurple',
-               title: B.get ('user', 'email') || '',
-               onclick: B.ev ('logout', [])
-            }, [['i', {class: 'bi bi-person-walking mr1'}], 'Logout']]
-         ]] : ''
+                  ['i', {class: 'bi bi-person-walking mr1'}],
+                  'Logout'
+               ]]
+            ]];
+
+         }) (),
+
+         // Dynamic view
+         (function () {
+            if (! views [view]) return ['div'];
+            return ['div', {class: 'min-vh-100'}, views [view] ()];
+         }) (),
+
+         // Snackbar
+         (function () {
+            if (! snackbar) return;
+
+            var snackbarClass = {
+               error: 'bg-vred white',
+               ok: 'bg-vgreen black',
+               warning: 'bg-yellow black',
+            } [snackbar.type] || 'bg-dark-gray white';
+
+            if (snackbar) return ['div', {
+               class: 'bottom-0 fixed left-0 pa3 pa4-ns right-0 z-999',
+               onclick: B.ev ('snackbar', 'clear'),
+            }, ['div', {class: 'br3 center fw5 lh-copy mw7 pa3 ph4-ns shadow-4 tc ' + snackbarClass}, snackbar.message || '']];
+         }) (),
+
       ]];
    });
 }
@@ -645,38 +543,29 @@ views.login = function () {
    return B.view ('user', function (user) {
       user = user || {};
 
-      var linkWrap  = 'mt4 tc';
-      var linkClass = 'link light-blue hover-white';
+      var emailValid = user.email && user.email.match (/^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i);
 
-      var card = function (title, subtitle, body, footer) {
-         return ['div', {class: 'min-vh-100 flex items-center justify-center pa4 bg-vmidnight'}, [
-            ['div', {class: 'w-100 mw6 bg-vnavy vnearwhite pa4 pa5-ns br3 ba b-border shadow-3'}, [
-               ['h1', {class: 'ma0 mb2 f3 fw6 vnearwhite'}, 'Enter vibey'],
-               ['div', {class: 'light-blue f4 fw5 mb2'}, title],
-               ['div', {class: 'text-muted lh-copy mb4'}, subtitle],
-               body,
-               footer || ''
+      return ['div', {class: 'bg-vmidnight flex items-center justify-center min-vh-100 pa4'}, [
+         ['div', {class: 'ba bg-vnavy br3 mw6 pa4 pa5-ns shadow-3 vborderblue-border vnearwhite w-100'}, [
+            ['h1', {class: 'f3 fw6 ma0 mb2 vnearwhite'}, 'Enter vibey'],
+            ['div', {class: 'f4 fw5 light-blue mb2'}],
+            ['div', {class: 'lh-copy mb4 vgray'}, user.loginLinkRequested ? 'Check your inbox for a login link.' : ''],
+            ['div', [
+               ['input', {
+                  class: css.input,
+                  oninput: B.ev ('set', ['user', 'email']),
+                  placeholder: 'your email',
+                  type: 'email',
+                  value: user.email
+               }],
+               ['button', {
+                  class: css.join (emailValid ? 'bg-vgreen' : 'bg-mid-gray', css.button, 'db w-100').replace ('bg-vblue', ''),
+                  disabled: ! emailValid,
+                  onclick: B.ev ('login', user.email),
+               }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Send me a link to get in') : 'Enter your email'],
             ]]
-         ]];
-      };
-
-      var emailValid = user.email && user.email.match (validEmail);
-
-      return card ('', user.loginLinkRequested ? 'Check your inbox for a login link.' : '', ['div', [
-         ['input', {
-            type: 'email',
-            value: user.email,
-            placeholder: 'your email',
-            oninput: B.ev ('set', ['user', 'email']),
-            class: css.input
-         }],
-         ['button', {
-            class: css.join (css.button, 'db w-100'),
-            style: style ({'background-color': emailValid ? '#27ae60' : '#555', cursor: emailValid ? 'pointer' : 'default'}),
-            disabled: ! emailValid,
-            onclick: B.ev ('login', [], user.email),
-         }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Send me a link to get in') : 'Enter your email'],
-      ]]);
+         ]]
+      ]];
    });
 }
 
@@ -684,7 +573,6 @@ views.login = function () {
 
 views.projects = function () {
    var phi = (1 + Math.sqrt (5)) / 2;
-
    var scale = 140 / 1400;
    var px = function (n) {
       return n * scale + 'vw'
@@ -1051,9 +939,9 @@ views.projects = function () {
                         'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                     })
                   }, {
-                     true: 'Boom',
+                     conflict: 'That name\'s taken',
                      empty: 'Enter a name',
-                     conflict: 'That name\'s taken'
+                     true: 'Boom',
                   } [allowCreation]]
                ]],
             ]];
@@ -1061,6 +949,22 @@ views.projects = function () {
 
       ]];
    });
+}
+
+views.spinny = function () {
+   return [
+      ['style', [
+         ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
+         ['.spinny:before', {
+            content: '"|"',
+            animation: 'spinny 0.8s steps(1) infinite'
+         }],
+      ]],
+      ['span', {
+         class: 'b code dib f2 lh-solid spinny tc vblue',
+         style: style ({width: '2ch'}),
+      }]
+   ];
 }
 
 views.project = function () {
@@ -1072,7 +976,7 @@ views.project = function () {
    }
 
    return B.view ([['projects'], ['project']], function (projects, project) {
-      if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => ['span', {class: 'spinny'}])];
+      if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => views.spinny ())];
 
       return ['div', {class: 'project-shell bg-vmidnight'}, [
          ['div', {class: 'flex items-center'}, [
@@ -1094,7 +998,7 @@ views.project = function () {
                   ['div', {class: 'flip-card-front project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
-                     ! files ? ['div', {class: 'text-muted lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'text-muted lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file, index) {
+                     ! files ? ['div', {class: 'vgray lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'vgray lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file, index) {
                         var active = file === name;
                         return ['div', {
                            class: 'mb2 pb2',
@@ -1202,7 +1106,7 @@ views.project = function () {
                      ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
                      ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
                   ]],
-                  ['div', {class: 'text-muted lh-copy tc', style: style ({flex: 1, display: 'flex', 'align-items': 'center', 'justify-content': 'center'})}, [
+                  ['div', {class: 'vgray lh-copy tc', style: style ({flex: 1, display: 'flex', 'align-items': 'center', 'justify-content': 'center'})}, [
                      ['div', [
                         ['i', {class: 'bi bi-gear db f1 mb3 light-blue'}],
                         'Settings will appear here'
@@ -1258,9 +1162,9 @@ views.project = function () {
                         if (B.get ('settings', k, 'hasKey')) return true;
                      });
 
-                     if (isDialog && ! hasActiveAIKey) return ['div', {class: 'flex items-center justify-center tc text-muted f5 lh-copy', style: style ({flex: 1})}, ['div', {class: 'pa4'}, [['i', {class: 'bi bi-plug db f2 mb3'}], 'No active AI connection yet.', ['br'], ['button', {class: css.button + ' mt3', onclick: B.ev ('set', ['settings', 'show'], true)}, 'Add one now']]]];
+                     if (isDialog && ! hasActiveAIKey) return ['div', {class: 'flex items-center justify-center tc vgray f5 lh-copy', style: style ({flex: 1})}, ['div', {class: 'pa4'}, [['i', {class: 'bi bi-plug db f2 mb3'}], 'No active AI connection yet.', ['br'], ['button', {class: css.button + ' mt3', onclick: B.ev ('set', ['settings', 'show'], true)}, 'Add one now']]]];
 
-                     return ['div', {class: 'text-muted lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
+                     return ['div', {class: 'vgray lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
                   }) (),
                ]],
                ['div', {class: 'flip-card-back project-pane project-right-pane', style: style ({overflow: 'auto'})}, [
@@ -1279,7 +1183,7 @@ views.project = function () {
                      var isWaiting = oauthStep && oauthStep.provider === 'openai' && oauthStep.flow === 'waiting';
 
                      return ['div', [
-                        ['div', {class: 'f6 text-muted mb3 lh-copy'}, 'Use your existing ChatGPT subscription. Logs in via OAuth — no API key needed.'],
+                        ['div', {class: 'f6 vgray mb3 lh-copy'}, 'Use your existing ChatGPT subscription. Logs in via OAuth — no API key needed.'],
 
                         ['div', {class: 'bg-vnavy', style: style ({'border-radius': 8, padding: '1rem', 'margin-bottom': '1rem', border: '1px solid ' + css.colors.vborderblue})}, [
                            ['div', {class: 'flex items-center justify-between mb2'}, [
@@ -1318,7 +1222,7 @@ views.project = function () {
 
                            isWaiting ? ['div', {class: 'mt2'}, [
                               ['div', {class: 'f6 mb2 lh-copy', style: style ({color: '#f0ad4e'})}, oauthLoading === 'openai' ? '⏳ Waiting for browser authentication...' : '✓ Authentication complete!'],
-                              ['div', {class: 'f6 text-muted mb2 lh-copy'}, 'Complete the login in the browser tab. This page will update automatically.'],
+                              ['div', {class: 'f6 vgray mb2 lh-copy'}, 'Complete the login in the browser tab. This page will update automatically.'],
                               ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.vborderblue}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
                            ]] : []
                         ]]
@@ -1339,6 +1243,10 @@ B.mount ('body', views.main);
 
 
 /* To be recycled later, perhaps
+ *
+ *
+ *
+
    // *** OAUTH ***
 
    ['login', 'oauth', function (x, provider) {
@@ -1376,5 +1284,113 @@ B.mount ('body', views.main);
          B.call (x, 'load', 'settings');
       });
    }],
+
+
+   // TODO: refactor from here below
+   ['.modal-backdrop', {
+      position: 'fixed',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'center',
+      padding: 24,
+      'background-color': 'rgba(8, 12, 28, 0.74)',
+      'z-index': 3000
+   }],
+   ['.modal-card', {
+      width: 1,
+      'max-width': 560,
+      padding: 28,
+      'border-radius': 18,
+      border: '1px solid ' + css.colors.vborderblue,
+      'background-color': css.colors.vnavy,
+      'box-shadow': '0 28px 80px rgba(0, 0, 0, 0.38)'
+   }],
+   ['.project-modal-kicker', {
+      'font-size': '0.78rem',
+      'font-weight': '700',
+      'letter-spacing': '0.12em',
+      'text-transform': 'uppercase',
+      color: css.colors.vlightblue,
+      'margin-bottom': 10
+   }],
+   ['.project-modal-title', {
+      'font-size': '1.9rem',
+      'font-weight': '700',
+      color: css.colors.nearwhite,
+      'margin-bottom': 8
+   }],
+   ['.modal-actions', {
+      display: 'flex',
+      gap: 12,
+      'justify-content': 'flex-end',
+      'margin-top': 20
+   }],
+   ['.project-shell', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: 24,
+      padding: 24,
+      'min-height': '100vh',
+      'box-sizing': 'border-box'
+   }],
+   ['.project-main', {
+      display: 'grid',
+      'grid-template-columns': '23.6fr 76.4fr',
+      gap: 24,
+      flex: 1,
+      width: 1,
+      'min-height': 0,
+      'box-sizing': 'border-box'
+   }],
+   ['.project-pane', {
+      padding: 24,
+      'border-radius': 18,
+      border: '1px solid ' + css.colors.vborderblue,
+      'background-color': css.colors.vnavy,
+      'box-shadow': '0 20px 60px rgba(0, 0, 0, 0.22)',
+      'box-sizing': 'border-box',
+      'min-height': 0
+   }],
+   ['.project-left-pane', {
+      'min-width': 0
+   }],
+   ['.project-right-pane', {
+      'min-width': 0,
+      display: 'flex',
+      'flex-direction': 'column'
+   }],
+   ['.flip-card', {
+      perspective: 1200,
+   }],
+   ['.flip-card-inner', {
+      position: 'relative',
+      width: 1,
+      height: 1,
+      transition: 'transform 0.6s ease',
+      'transform-style': 'preserve-3d',
+      'transform-origin': 'center center',
+   }],
+   ['.flip-card-inner.flipped', {
+      transform: 'rotateY(180deg)',
+   }],
+   ['.flip-card-front, .flip-card-back', {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: 1,
+      height: 1,
+      'backface-visibility': 'hidden',
+      '-webkit-backface-visibility': 'hidden',
+   }],
+   ['.flip-card-back', {
+      transform: 'rotateY(180deg)',
+   }],
+
+
+
 
 */

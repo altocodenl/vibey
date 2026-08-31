@@ -33,7 +33,7 @@ Available in [cloud version](https://buildwithvibey.com) and local/self-hosted v
 2. Project: a docker container that has your files, chats and apps.
 3. Engine: a virtual server on top of which you run your projects.
 4. File: upload, search and see files of all kinds. Edit text files.
-5. Chat: conversate with AI, interact with humans and send commands to your project, all in the same place. AI makes tool calls also in the chat.
+5. Chat: talk to AI, interact with humans and send commands to your project, all in the same place. AI makes tool calls also in the chat.
 6. App: create and host apps that run in your project.
 7. Publish: provide public access to files (text or media) and apps. Point a domain to a project.
 
@@ -152,7 +152,7 @@ redis db <number>
 
 #### Auth
 
-Except for `GET /auth/user`, all other routes will return a 404 in local mode.
+Except for `GET /auth/user`, all other auth routes will return a 404 in local mode.
 
 - **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, csrf: <token>, email: <email>, mode: 'cloud'}` in cloud mode and `{mode: 'local'}` local mode.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet. Sends a login link by email.
@@ -163,33 +163,55 @@ Except for `GET /auth/user`, all other routes will return a 404 in local mode.
 
 #### Project
 
-- **Request creator access**: `POST /creator/request`: expects `{}`.
+- **Request creator access**: `POST /creator/request`: expects `{}`. In local mode, this route returns a 404.
 - **Get projects**: `GET /projects`.
-- **Create project**: `POST /project`: expects `{name: <name>}`. Returns 409 if a project with that names exists.
+- **Create project**: `POST /project`: expects `{name: <name>, slot: <positiveInteger|undefined>}`. Returns 409 if a project with that names exists.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
+- **Read file**: `POST /project/read`: expects `{id: <projectId>, path: <path>, sha: <string|undefined>}`. Returns the file contents. Returns 404 if file not found.
+- **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing.
+- **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. Returns 400 if the edit fails.
+- **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>}`. Runs the command inside the project's container.
 - **Delete project**: `DELETE /project/<projectId>`
 
 #### Admin
 
-- **Grant/revoke creator access**: `POST /creator/grant`: expects `{email: <email>, grant: <boolean>}`. Returns 404 if `grant` is `false` and user does not exist. If `grant` is `true` and user does not exist, the endpoint creates the user.
+- **Grant/revoke creator access**: `POST /creator/grant`: expects `{email: <email>, grant: <boolean>}`. Returns 404 if `grant` is `false` and user does not exist. If `grant` is `true` and user does not exist, the endpoint creates the user. In local mode, this route returns a 404.
 - **Run server tests**: `GET /test`. This is a `GET` so that it can be triggered from the browser. Returns the result of running the server test suite.
 - **Get client tests**: `GET /test.js`.
-- **Cleanup after tests**: used to run after the client tests.
+- **Cleanup after tests**: `POST /test/cleanup`. Used to run after the client tests.
 
 ### Responders
 
+#### Native
+
+- `hashchange`: calls `read hash` whenever the URL hash changes.
+- `keydown`, `keyup`, `blur`: forwarded to `B.call` so responders can react to keyboard state (e.g. detecting the Command key).
+- `visibilitychange`: when the tab regains focus and a login link has been requested, polls `GET /auth/user` to check if the user logged in via the link. On success, sets user state, loads projects and navigates to projects.
+- `window.onerror`: reports client errors to the server via `report error`. Ignores ResizeObserver errors.
+
+#### General
+
+- `test *`: start the client side test suite. Only if the logged in user is admin.
 - `navigate <targetPath>`: reads and optionally updates the hash. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
 - `read hash`: if the hash is `verify/<loginLink>`, calls `verify` with the login link. Otherwise, checks that the view in the hash exists and should be reachable by the user. If on the `projects` view, sets `project`. If on the `project` view, it sets `file`.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
 - `snackbar <type> [message]`: shows a notification with type (`ok`, `warning`, `error`). Auto-clears after 4 seconds. `snackbar clear` dismisses it immediately.
 - `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token is available. On 403 from a non-auth path, resets user state and redirects to login. Reports errors to the server.
+
+#### Auth
+
 - `report error <error>`: posts an error to the server via `POST /error`.
-- `visibilitychange`: when the tab regains focus and a login link has been requested, polls `GET /auth/user` to check if the user logged in via the link. On success, sets user state, loads projects and navigates to projects.
 - `load user`: fetches the user information from `GET /auth/user`. Sets `user` to the response body. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
 - `login <email>`: sends a login link via `POST /auth/login`. On success, sets `user.loginLinkRequested`.
 - `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, stores the user info, loads projects, and navigates to projects. On error, shows a snackbar and navigates to login.
 - `logout`: logs out via `POST /auth/logout`. Resets user state and navigates to login.
-- `load projects` gets all projects via `GET /projects`.
+
+#### Projects
+
+- `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
+- `create project`: creates a new project using the name at `new.project.name` via `POST /project`.
+- `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
+- `delete project <project>`: asks for confirmation, then deletes the project via `DELETE /project/<id>`. On success, reloads projects and shows a snackbar.
 
 ### Client state
 

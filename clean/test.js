@@ -70,13 +70,13 @@ if (mode === 'server') {
 
       var userIds = await redis ('mget', ... emails);
 
-      var resources = await redis ('sinter', ... dale.go (userIds, function (userId) {
+      var resources = await redis ('sunion', ... dale.go (userIds, function (userId) {
          return 'owner:' + userId;
       }));
 
       await redis ('del', ... [
          ... dale.go (emails, (email) => [email, 'rateLimit:login:' + email.replace ('email:', '')]).flat (),
-         ... dale.go (userIds, (userId) => ['user:' + userId]).flat (),
+         ... dale.go (userIds, (userId) => ['user:' + userId, 'owner:' + userId]).flat (),
          ... resources,
       ]);
 
@@ -152,7 +152,7 @@ if (mode === 'server') {
             }],
             dale.go (['/creator/grant', '/auth/login'], function (path, k) {
                if (CONFIG.cloud) return [
-                  ['Call auth path without email', 'post', path, {user: 'whatever'}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === '/creator/grant' ? adminHeaders : {}],
+                  ['Call auth path without email', 'post', path, {}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === '/creator/grant' ? adminHeaders : {}],
                   dale.go ([undefined, null, 1, '', '1', 'a@a', 'hello@example', 'this@is.not.really.an.emai.l'], function (email, k) {
                      return ['Call auth path with invalid email: #' + (k + 1), 'post', path, {email: email}, 400, function (s, rq, rs) {
                         return assert ([
@@ -323,7 +323,7 @@ if (mode === 'server') {
             ] : [],
             ! CONFIG.cloud ? [
                ['Logout', 'post', '/auth/logout', {}, 404, assertBody ({error: 'Not in cloud mode'})],
-               ['List sessions', 'get', '/auth/user', 404, assertBody ({error: 'Not in cloud mode'})],
+               ['Get user in local mode', 'get', '/auth/user', 200, assertBody ({mode: 'local'})],
                ['List sessions', 'get', '/auth/list', 404, assertBody ({error: 'Not in cloud mode'})],
             ] : [],
          ];
@@ -343,6 +343,7 @@ if (mode === 'server') {
             ] : [],
             ['List projects before creation', 'get', '/projects', 200, assertBody ([])],
             ['Create project without a name', 'post', '/project', {}, 400, assertBody ({error: 'name should have as type string but instead is undefined with type undefined'})],
+            ['Create project with a short name', 'post', '/project', {name: 'a'}, 400, assertBody ({error: 'length of name should be in range {"min":2} but instead is 1'})],
             ['Create project', 'post', '/project', {name: 'el norte'}, 200],
             ['List projects after creation', 'get', '/projects', 200, function (s, rq, rs) {
                if (! assert (['length', rs.body.length, 1, teishi.test.equal])) return false;
@@ -350,33 +351,57 @@ if (mode === 'server') {
                return true;
             }],
             ['Create a second project with the same name', 'post', '/project', {name: 'el norte'}, 409, assertBody ({error: 'There is already a project with that name'})],
-            ['Create a second project with another name', 'post', '/project', {name: 'second'}, 200],
+            ['Create a second project with another name and a slot', 'post', '/project', {name: 'second', slot: 3}, 200],
             ['List projects after second project creation', 'get', '/projects', 200, function (s, rq, rs) {
                if (! assert (['length', rs.body.length, 2, teishi.test.equal])) return false;
                if (new Date (rs.body [0].last) < new Date (rs.body [1].last)) {
                   validationError = 'Last project should come first';
                   return false;
                }
+               if (! assert ([
+                  ['second project slot', rs.body [0].slot, 3, teishi.test.equal],
+                  ['first project slot', rs.body [1].slot, undefined, teishi.test.equal],
+               ])) return false;
                s.secondProjectId = rs.body [0].id;
                return true;
             }],
+            ['Rename project', 'put', '/project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
+            ['Rename nonexistent project', 'put', '/project', {id: 'nonexistent', name: 'whatever'}, 404],
+            ['Rename project (noop)', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
+            ['Rename project to existing name', 'put', '/project', function (s) {return {id: s.projectId, name: 'second'}}, 409, assertBody ({error: 'There is already a project with that name'})],
+            ['Rename project and set slot', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!', slot: 4}}, 200],
+            ['List projects after setting slot', 'get', '/projects', 200, function (s, rq, rs) {
+               return assert ([
+                  ['length', rs.body.length, 2, teishi.test.equal],
+                  function () {return [
+                     ['project id', rs.body [0].id, s.projectId, teishi.test.equal],
+                     ['project name', rs.body [0].name, 'el norte!', teishi.test.equal],
+                     ['project slot', rs.body [0].slot, 4, teishi.test.equal],
+                  ]}
+               ]);
+            }],
+            ['Rename project and remove slot', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],
+            ['List projects after removing slot', 'get', '/projects', 200, function (s, rq, rs) {
+               return assert ([
+                  ['length', rs.body.length, 2, teishi.test.equal],
+                  function () {return [
+                     ['project id', rs.body [0].id, s.projectId, teishi.test.equal],
+                     ['project name', rs.body [0].name, 'el norte!', teishi.test.equal],
+                     ['project slot', rs.body [0].slot, undefined, teishi.test.equal],
+                  ]}
+               ]);
+            }],
+            ['Delete nonexistent project', 'delete', '/project/nonexistent', 404],
             ['Delete project', 'delete', function (s) {return '/project/' + s.secondProjectId}, 200],
             ['List projects after second project deletion', 'get', '/projects', 200, function (s, rq, rs) {
                return assert (['length', rs.body.length, 1, teishi.test.equal]);
             }],
-            ['Rename project', 'put', '/project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
-            ['Rename project (noop)', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
-            ['Rename project', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],
-            ['List projects after rename', 'get', '/projects', 200, function (s, rq, rs) {
-               return assert ([
-                  ['length', rs.body.length, 1, teishi.test.equal],
-                  function () {return [
-                     ['project id', rs.body [0].id, s.projectId, teishi.test.equal],
-                     ['project name', rs.body [0].name, 'el norte!', teishi.test.equal],
-                  ]}
-               ]);
+            ['List files', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
+            ['Run command without id', 'post', '/project/run', {command: 'ls'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
+            ['Run command without command', 'post', '/project/run', function (s) {return {id: s.projectId}}, 400, assertBody ({error: 'command should have as type string but instead is undefined with type undefined'})],
+            ['Run command that fails', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'exit 1'}}, 200, function (s, rq, rs) {
+               return assert (['body.code', rs.body.code, 1, teishi.test.equal]);
             }],
-            ['List files', 'post', 'project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
             ['List commits when there is only the initial commit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                s.assertCommit = function (stdout, length, name) {
                   return assert ([
@@ -386,8 +411,15 @@ if (mode === 'server') {
                }
                return s.assertCommit (rs.body.stdout, 1, "Write 'doc/main.md'");
             }],
+            ['Read file without id', 'post', '/project/read', {path: 'doc/main.md'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
+            ['Read file without path', 'post', '/project/read', function (s) {return {id: s.projectId}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
             ['Get file that is not there', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
             ['Get main file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
+            ['Edit file without path', 'post', '/project/edit', function (s) {return {id: s.projectId, oldText: 'a', newText: 'b'}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
+            ['Edit file without oldText', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
+            ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
+               return assert (['body.error', rs.body.error, /Old text found .+ times/, teishi.test.match]);
+            }],
             ['Edit main file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, function (s, rq, rs) {
                return assert ([
                   ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
@@ -401,6 +433,9 @@ if (mode === 'server') {
                return s.assertCommit (rs.body.stdout, 2, "Edit 'doc/main.md'");
             }],
             ['Get main file after edit', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# El Norte!')],
+            ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
+               return assert (['body.error', rs.body.error, /Old text not found/, teishi.test.match]);
+            }],
             ['Edit main file (noop)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
             ['List commits after noop edit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 2, "Edit 'doc/main.md'");
@@ -421,6 +456,13 @@ if (mode === 'server') {
             ['List commits after noop write', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 3, "Write 'doc/main.md'");
             }],
+            ['Write file with base64', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.txt', content: Buffer.from ('hello base64').toString ('base64'), base64: true}}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['sha', rs.body.sha, 'string'],
+                  function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
+               ]);
+            }],
+            ['Read back base64-written file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/binary.txt'}}, 200, assertBody ('hello base64')],
             ['Run a command with pipe', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs, next) {
                if (! assert ([
@@ -438,9 +480,9 @@ if (mode === 'server') {
                }) ();
             }],
             ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 4, "Run 'echo foo > doc/another.md && cat doc/another.md'");
+               return s.assertCommit (rs.body.stdout, 5, "Run 'echo foo > doc/another.md && cat doc/another.md'");
             }],
-            ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nmain.md\n'})],
+            ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nbinary.txt\nmain.md\n'})],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {

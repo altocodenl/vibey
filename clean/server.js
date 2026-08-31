@@ -44,9 +44,9 @@ var CONFIG = {
          name: 'A friend from Vibey',
       },
       ses: {
-         accessKeyId:     SECRET.ses?.access,
+         accessKeyId:     SECRET.ses?.accessKeyId,
          region:          'eu-west-1',
-         secretAccessKey: SECRET.ses?.secret
+         secretAccessKey: SECRET.ses?.secretAccessKey
       },
    },
    port: 5353,
@@ -598,7 +598,7 @@ var sendmail = function (options) {
       mailer.sendMail ({
          from:    CONFIG.email.from.name + ' <' + CONFIG.email.from.address + '>',
          to:      options.to,
-         replyTo: CONFIG.email.address,
+         replyTo: CONFIG.email.from.address,
          subject: options.subject,
          html:    lith.g (options.message)
       }, function (error) {
@@ -618,6 +618,7 @@ var routes = [
 
       if (! CONFIG.cloud) {
          clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, ip: rs.log.origin});
+         rq.user = {id: 'local', creator: true};
          return rs.next ();
       }
 
@@ -1004,7 +1005,7 @@ var routes = [
          ['name', rq.body.name, 'string'],
          ['slot', rq.body.slot, ['integer', 'undefined'], 'oneOf'],
          function () {
-            return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
+            return ['length of name', rq.body.name.length, {min: 2}, teishi.test.range];
          }
       ])) return;
 
@@ -1044,9 +1045,10 @@ var routes = [
    ['put', '/project', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'name'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['id', 'name', 'slot'], 'eachOf', teishi.test.equal],
          ['id', rq.body.id, 'string'],
          ['name', rq.body.name, 'string'],
+         ['slot', rq.body.slot, ['integer', 'undefined'], 'oneOf'],
          function () {
             return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
          }
@@ -1062,10 +1064,14 @@ var routes = [
       });
       if (conflict && conflict.id !== rq.body.id) return reply (rs, 409, {error: 'There is already a project with that name'});
 
-      await redis ('hmset', 'project:' + match.id, {
+      var ops = [['hmset', 'project:' + match.id, {
          last: now (),
          name: rq.body.name
-      });
+      }]];
+
+      if (rq.body.slot !== undefined || match.slot !== undefined) ops.push (rq.body.slot === undefined ? ['hdel', 'project:' + match.id, 'slot'] : ['hset', 'project:' + match.id, 'slot', rq.body.slot]);
+
+      await redis (ops);
 
       reply (rs, 200);
    }],
@@ -1092,7 +1098,8 @@ var routes = [
       ])) return;
 
       try {
-         if (! rq.body.sha) var file = await docker.read (rq.body.id, rq.body.path);
+         if (rq.body.sha) return reply (rs, 409, {error: 'Not implemented yet'});
+         var file = await docker.read (rq.body.id, rq.body.path);
          file = file.stdout;
       }
       catch (error) {
@@ -1101,7 +1108,6 @@ var routes = [
          throw error;
       }
 
-      redis ('hset', 'project:' + rq.body.id, last, now ());
       reply (rs, 200, file, {}, rq.body.path);
    }],
 
@@ -1118,7 +1124,7 @@ var routes = [
 
       var result = await docker.write (rq.body.id, rq.body.path, content);
 
-      redis ('hset', 'project:' + rq.body.id, last, now ());
+      redis ('hset', 'project:' + rq.body.id, 'last', now ());
       reply (rs, 200, result);
    }],
 
@@ -1133,7 +1139,7 @@ var routes = [
 
       var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
 
-      redis ('hset', 'project:' + rq.body.id, last, now ());
+      redis ('hset', 'project:' + rq.body.id, 'last', now ());
       return reply (rs, result.error ? 400 : 200, result);
    }],
 
@@ -1146,7 +1152,7 @@ var routes = [
 
       var result = await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
 
-      redis ('hset', 'project:' + rq.body.id, last, now ());
+      redis ('hset', 'project:' + rq.body.id, 'last', now ());
       reply (rs, 200, result);
    }],
 
