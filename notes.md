@@ -1,5 +1,15 @@
 # Vibey development notes
 
+## 2026-09-01
+
+Idea for demo: teach me linux (both you and AI sending commands)
+
+TODO:
+- Refactor from project modal creation to below
+- Rename views: projects is fine, the inner one is files. Later, inside files there will be dialog, just to see the dialog as a content. So we remove the confusion between "projects" and "project", which is too small a difference for something as big.
+- Make the search bar of projects float in absolute rather than at relative, so it floats over the scrollable list?
+- The TODO of yesterday
+
 ## 2026-08-31
 
 TODO client cleanup:
