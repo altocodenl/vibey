@@ -62,7 +62,7 @@ B.mrespond ([
       var hash = window.location.hash.slice (2).split ('/');
 
       var authViews   = ['login', 'verify'];
-      var loggedViews = ['projects', 'project'];
+      var loggedViews = ['projects', 'files'];
 
       if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
 
@@ -76,9 +76,9 @@ B.mrespond ([
          if (inc (authViews, hash [0])) return B.call (x, 'navigate', 'projects');
       }
 
-      if (hash.length > 1 && hash [0] !== 'project') return B.call (x, 'navigate', 'projects');
+      if (hash.length > 1 && hash [0] !== 'files') return B.call (x, 'navigate', 'projects');
 
-      if (hash [0] === 'project') {
+      if (hash [0] === 'files') {
 
          if (hash.length === 1) return B.call (x, 'navigate', 'projects');
 
@@ -89,18 +89,18 @@ B.mrespond ([
 
          B.call (x, 'set', 'project', decodeURIComponent (hash [1]));
 
-         if (! hash [2]) return B.call (x, 'navigate', 'project/' + hash [1] + '/doc/main.md');
+         if (! hash [2]) return B.call (x, 'navigate', 'files/' + hash [1] + '/doc/main.md');
 
          var file = decodeURIComponent (hash.slice (2).join ('/'));
 
          var files = B.get ('files');
-         if (files && ! inc (files, file)) return B.call (x, 'navigate', 'project/' + hash [1] + '/doc/main.md');
+         if (files && ! inc (files, file)) return B.call (x, 'navigate', 'files/' + hash [1] + '/doc/main.md');
 
          B.call (x, 'set', ['file', 'name'], file);
 
          B.call (x, 'load', 'files');
       }
-      if (hash [0] !== 'project') B.call (x, 'rem', [], 'file');
+      if (hash [0] !== 'files') B.call (x, 'rem', [], 'file');
 
       B.call (x, 'set', 'view', hash [0]);
 
@@ -246,7 +246,7 @@ B.mrespond ([
 
          B.call (x, 'rem', 'new', 'project');
          B.call (x, 'add', 'projects', {name: name});
-         B.call (x, 'navigate', 'project/' + name + '/doc/main.md');
+         B.call (x, 'navigate', 'files/' + name + '/doc/main.md');
          B.call (x, 'load', 'projects');
       });
    }],
@@ -292,7 +292,7 @@ B.mrespond ([
       }
 
       // Shortcuts for inner view
-      if (ev.metaKey && B.get ('view') === 'project') {
+      if (ev.metaKey && B.get ('view') === 'files') {
          if (ev.key === 'b') return call ('navigate', 'projects');
          if (ev.key === 'o') return call ('set', ['settings', 'show'], ! B.get ('settings', 'show'));
          if (B.get ('new', 'file') === undefined) {
@@ -308,7 +308,7 @@ B.mrespond ([
                var next = ev.key === 'j' ? index + 1 : index - 1;
                if (next < 0) next = files.length - 1;
                if (next === files.length) next = 0;
-               return call ('navigate', 'project/' + B.get ('project') + '/' + files [next]);
+               return call ('navigate', 'files/' + B.get ('project') + '/' + files [next]);
             }
          }
          if (B.get ('new', 'file') !== undefined) {
@@ -350,7 +350,7 @@ B.mrespond ([
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
 
          if (! New) B.call (x, 'mset', ['file', 'content'], value);
-         else       B.call (x, 'navigate', 'project/' + B.get ('project') + '/' + name);
+         else       B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + name);
       });
    }],
 
@@ -374,7 +374,7 @@ B.mrespond ([
       B.call (x, 'delete', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'load', 'files');
-         if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'project/' + B.get ('project') + '/doc/main.md');
+         if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project') + '/doc/main.md');
       });
    }],
 
@@ -386,13 +386,11 @@ B.mrespond ([
 
          B.call (x, 'madd', 'files', rs.body.filename);
          B.call (x, 'rem', 'new', 'file');
-         B.call (x, 'navigate', 'project/' + B.get ('project') + '/' + rs.body.filename);
+         B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + rs.body.filename);
          B.call (x, 'load', 'files');
       });
 
    }],
-
-
 ]);
 
 // *** VIEWS ***
@@ -401,14 +399,11 @@ var css = {
    button: 'bg-vblue bn br2 fw6 pa3 pointer white',
    colors: {
       vblue:           '#4a69bd',
-      vborderblue:     'rgba(148, 184, 255, 0.22)',
       vdeepnavy:       '#0f1530',
       vgray:           '#9aa4bf',
       vgreen:          '#27ae60',
-      vhighlightblue:  'rgba(74, 105, 189, 0.25)',
       vlightblue:      '#94b8ff',
       vlightgray:      '#eeeeee',
-      vmidblue:        'rgba(148, 184, 255, 0.4)',
       vmidnight:       '#1a1a2e',
       vnavy:           '#16213e',
       vnearwhite:      '#f5f7ff',
@@ -421,7 +416,20 @@ var css = {
    join: function () {
       return dale.go (arguments, function (v) {return v}).join (' ');
    },
+   rgba: function (color, transparency) {
+      var r = parseInt (color.slice (1, 3), 16);
+      var g = parseInt (color.slice (3, 5), 16);
+      var b = parseInt (color.slice (5, 7), 16);
+      return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + transparency + ')';
+   }
 }
+
+css.colors = {
+   ...css.colors,
+   vborderblue:    css.rgba (css.colors.vlightblue, 0.22),
+   vhighlightblue: css.rgba (css.colors.vblue, 0.25),
+   vmidblue:       css.rgba (css.colors.vlightblue, 0.4),
+};
 
 css.style = [
 
@@ -490,7 +498,7 @@ views.main = function () {
 
                // Settings
                B.view ([['settings', 'show'], ['view']], function (showSettings, view) {
-                  if (view !== 'project') return ['span'];
+                  if (view !== 'files') return ['span'];
                   return ['button', {
                      class: css.button + ' bg-mid-gray f5 pa2 ph3 relative',
                      onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
@@ -535,7 +543,6 @@ views.main = function () {
                onclick: B.ev ('snackbar', 'clear'),
             }, ['div', {class: 'br3 center fw5 lh-copy mw7 pa3 ph4-ns shadow-4 tc ' + snackbarClass}, snackbar.message || '']];
          }) (),
-
       ]];
    });
 }
@@ -573,6 +580,29 @@ views.login = function () {
 }
 
 // *** PROJECTS ***
+
+views.modal = function (attributes, contents) {
+   return ['div', {
+      ... (attributes || {}),
+      class: 'bottom-0 fixed flex items-center justify-center left-0 right-0 top-0',
+      style: style ({
+         background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), ' + css.rgba (css.colors.vgreen, 0.25),
+      })
+   }, [
+      ['div', {
+         class: 'bg-vnavy',
+         onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
+         style: style ({
+            border: '0.0625rem solid ' + css.colors.vborderblue,
+            'border-radius': '1.125rem',
+            'box-shadow': '0 1.75rem 5rem rgba(0, 0, 0, 0.38)',
+            'min-height': '25vh',
+            padding: '3rem 2.25rem',
+            width: '50vw',
+         }),
+      }, contents]
+   ]];
+}
 
 views.projects = function () {
    var phi = (1 + Math.sqrt (5)) / 2;
@@ -656,8 +686,8 @@ views.projects = function () {
          // Spiral slots or project list
          B.view (['search', 'project'], function (search) {
             return ['div', {class: 'relative', style: style ({
-               height: vw (containerHeight + 48 + 48),
-               width: vw (containerWidth),
+               height: search === undefined ? vw (containerHeight + 48 + 48) : 'auto',
+               width: search === undefined ? vw (containerWidth) : '100vw',
             })}, [
 
                (function () {
@@ -666,7 +696,7 @@ views.projects = function () {
                   if (search === undefined) return ['div', [
 
                      // Spiral drawing
-                     ['div', {opaque: true}, ['LITERAL', '<svg width="' + vw (containerWidth) + '" height="' + vw (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="rgba(148,184,255,0.35)" stroke-width="2" stroke-linecap="round"/></svg>']],
+                     ['div', {opaque: true}, ['LITERAL', '<svg width="' + vw (containerWidth) + '" height="' + vw (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="' + css.rgba (css.colors.vlightblue, 0.35) + '" stroke-width="2" stroke-linecap="round"/></svg>']],
 
                      // Spiral slots
                      dale.go (slotPositions, function (slot, index) {
@@ -677,7 +707,7 @@ views.projects = function () {
 
                         return ['div', {
                            class: 'absolute bg-vnavy flex items-center justify-center pointer',
-                           onclick: matchingProject ? B.ev ('navigate', 'project/' + encodeURIComponent (matchingProject.name)) : undefined,
+                           onclick: matchingProject ? B.ev ('navigate', 'files/' + encodeURIComponent (matchingProject.name)) : undefined,
                            onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
                            onmouseleave: B.ev ('rem', [], 'hover'),
                            style: style ({
@@ -722,15 +752,13 @@ views.projects = function () {
 
                   // List of projects
                   if (search !== undefined) return ['div', {
-                     class: 'flex flex-column items-center relative',
+                     class: 'flex flex-column relative w-100',
                      style: style ({
-                        left: '50%',
                         'padding-top': '2vh',
-                        transform: 'translateX(-50%)',
                      }),
                   }, [
                      ['div', {
-                        class: 'border-box flex',
+                        class: 'border-box center flex',
                         style: style ({
                            gap: '0.75rem',
                            height: '10vh',
@@ -758,42 +786,52 @@ views.projects = function () {
                            }),
                         }, ['span', {class: 'fw6 f4'}, '+ New project']],
                      ]],
-                     dale.go (projects, function (proj) {
-                        return ['div', {
-                           class: 'border-box flex items-center justify-between pointer ' + projectColor (proj.name),
-                           onclick: B.ev ('navigate', 'project/' + encodeURIComponent (proj.name)),
-                           style: style ({
-                              'border-radius': '0.75rem',
-                              height: '10vh',
-                              'margin-bottom': '1vh',
-                              'min-height': '3rem',
-                              padding: '0 1.5rem',
-                              width: '70vw',
-                           }),
-                        }, [
-                           ['span', {class: 'f4 fw6'}, proj.name],
-                           ['div', {
-                              class: 'flex items-center',
-                              onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
-                              style: style ({gap: '1rem'}),
+                     (function () {
+                        var cardWidth = 70 / phi;
+                        var cycle = 8;
+                        return dale.go (projects, function (proj, index) {
+                           var offset = 15 + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
+                           return ['div', {
+                              class: 'border-box flex items-center justify-between pointer ' + projectColor (proj.name),
+                              onclick: B.ev ('navigate', 'files/' + encodeURIComponent (proj.name)),
+                              style: style ({
+                                 'border-radius': '0.75rem',
+                                 height: '10vh',
+                                 'margin-bottom': '1vh',
+                                 'margin-left': offset + 'vw',
+                                 'min-height': '3rem',
+                                 padding: '0 1.5rem',
+                                 width: cardWidth + 'vw',
+                              }),
                            }, [
-                              ['span', {class: 'pointer', title: 'Rename'}, ['i', {class: 'bi bi-pencil'}]],
-                              ['span', {class: 'pointer', title: 'Delete'}, ['i', {class: 'bi bi-trash'}]],
-                              ['span', {class: 'pointer', title: 'Slot'},   ['i', {class: 'bi bi-grid-3x3-gap'}]],
-                           ]],
-                        ]];
-                     })
+                              ['span', {class: 'f4 fw6'}, proj.name],
+                              ['div', {
+                                 class: 'flex items-center',
+                                 onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
+                                 style: style ({
+                                    gap: '1rem',
+                                 }),
+                              }, [
+                                 ['span', {class: 'pointer', title: 'Delete'}, ['i', {class: 'bi bi-trash'}]],
+                                 ['span', {class: 'pointer', title: 'Rename'}, ['i', {class: 'bi bi-pencil'}]],
+                                 ['span', {class: 'pointer', title: 'Slot'},   ['i', {class: 'bi bi-grid-3x3-gap'}]],
+                              ]],
+                           ]];
+                        });
+                     }) ()
                   ]];
                }) (),
 
                // Search bar
                ['div', {
-                  class: 'absolute',
+                  class: search === undefined ? 'absolute' : 'fixed',
                   onclick: B.ev ('set', ['search', 'project'], ''),
                   style: style ({
+                     bottom: search === undefined ? undefined : '2vh',
                      height: vw (48),
-                     left: 0,
-                     top: vw (containerHeight + 32),
+                     left: search === undefined ? 0 : '50%',
+                     top: search === undefined ? vw (containerHeight + 32) : undefined,
+                     transform: search === undefined ? undefined : 'translateX(-50%)',
                      width: vw (containerWidth),
                   }),
                }, [
@@ -853,96 +891,68 @@ views.projects = function () {
                return conflict ? 'conflict' : true;
             }) ();
 
-            return ['div', {
-               onclick: B.ev ('rem', 'new', 'project'),
-               style: style ({
-                  position: 'fixed',
-                  top: 0,
-                  right: 0,
-                  bottom: 0,
-                  left: 0,
-                  display: 'flex',
-                  'align-items': 'center',
-                  'justify-content': 'center',
-                  background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0px, rgba(0,0,0,0.3) 2px, transparent 2px, transparent 6px), rgba(4, 231, 98, 0.25)',
-                  'z-index': 3000,
-               })
-            }, [
+            return views.modal ({onclick: B.ev ('rem', 'new', 'project')}, [
                ['div', {
-                  class: 'modal-card',
-                  style: style ({
-                     width: '50vw',
-                     'min-height': '25vh',
-                     padding: '48px 36px',
-                  }),
-                  onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
+                  class: 'relative w-100',
+                  style: style ({height: vw (48)}),
                }, [
-                  ['div', {style: style ({position: 'relative', width: '100%', height: vw (48)})}, [
-                     ['i', {class: 'bi bi-pencil', style: style ({
-                        position: 'absolute',
+                  ['i', {
+                     class: 'absolute bi bi-pencil',
+                     style: style ({
+                        color: css.colors.vmidblue,
+                        'font-size': vw (16),
                         left: vw (14),
+                        'pointer-events': 'none',
                         top: '50%',
                         transform: 'translateY(-50%)',
-                        color: 'rgba(148,184,255,0.4)',
-                        'font-size': vw (16),
-                        'pointer-events': 'none',
-                     })}],
-                     ['i', {
-                        class: 'bi bi-dice-' + Math.ceil (Math.random () * 5) + ' pointer',
-                        onclick: B.ev ('set', ['new', 'project', 'name'], randomName ()),
-                        style: style ({
-                           position: 'absolute',
-                           right: vw (14),
-                           top: '50%',
-                           transform: 'translateY(-50%)',
-                           color: 'rgba(148,184,255,0.4)',
-                           'font-size': vw (16),
-                        })
-                     }],
-                     ['input', {
-                        type: 'text',
-                        class: 'new-project-input bg-vnavy',
-                        placeholder: 'Name your project',
-                        value: newProject.name,
-                        onchange: B.ev ('set', ['new', 'project', 'name']),
-                        oninput: B.ev ('set', ['new', 'project', 'name']),
-                        style: style ({
-                           width: '100%',
-                           height: '100%',
-                           'box-sizing': 'border-box',
-                           'border-radius': slotBorderRadius,
-                           border: '1.5px solid rgba(148,184,255,0.15)',
-                           color: 'rgba(148,184,255,0.8)',
-                           'font-size': vw (16),
-                           'padding-left': vw (40),
-                           'padding-right': vw (40),
-                           'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                           outline: 'none',
-                        })
-                     }],
-                  ]],
-                  ['button', {
-                     class: 'fw7 pointer',
-                     onclick: B.ev ('create', 'project'),
-                     disabled: allowCreation !== true,
+                     })
+                  }],
+                  ['i', {
+                     class: 'absolute bi bi-dice-' + Math.ceil (Math.random () * 5) + ' pointer',
+                     onclick: B.ev ('set', ['new', 'project', 'name'], randomName ()),
                      style: style ({
-                        width: '100%',
-                        'margin-top': 16,
-                        padding: '16px 0',
-                        'border-radius': slotBorderRadius,
-                        'background-color': allowCreation === true ? css.colors.vgreen : '#555',
-                        color: '#000',
-                        border: 'none',
+                        color: css.colors.vmidblue,
                         'font-size': vw (16),
-                        'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                    })
-                  }, {
-                     conflict: 'That name\'s taken',
-                     empty: 'Enter a name',
-                     true: 'Boom',
-                  } [allowCreation]]
+                        right: vw (14),
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                     })
+                  }],
+                  ['input', {
+                     class: 'bg-vnavy border-box h-100 new-project-input outline-0 w-100',
+                     onchange: B.ev ('set', ['new', 'project', 'name']),
+                     oninput: B.ev ('set', ['new', 'project', 'name']),
+                     placeholder: 'Name your project',
+                     style: style ({
+                        border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
+                        'border-radius': slotBorderRadius,
+                        color: css.rgba (css.colors.vlightblue, 0.8),
+                        'font-size': vw (16),
+                        'padding-left': vw (40),
+                        'padding-right': vw (40),
+                     }),
+                     type: 'text',
+                     value: newProject.name,
+                  }],
                ]],
-            ]];
+               ['button', {
+                  class: 'bn fw7 pointer w-100',
+                  disabled: allowCreation !== true,
+                  onclick: B.ev ('create', 'project'),
+                  style: style ({
+                     'background-color': allowCreation === true ? css.colors.vgreen : '#555',
+                     'border-radius': slotBorderRadius,
+                     color: '#000',
+                     'font-size': vw (16),
+                     'margin-top': '1rem',
+                     padding: '1rem 0',
+                  })
+               }, {
+                  conflict: 'That name\'s taken',
+                  empty: 'Enter a name',
+                  true: 'Boom',
+               } [allowCreation]]
+            ]);
          }),
 
       ]];
@@ -965,7 +975,9 @@ views.spinny = function () {
    ];
 }
 
-views.project = function () {
+// *** FILES ***
+
+views.files = function () {
 
    var iconAndName = function (name) {
       if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], name];
@@ -1240,7 +1252,7 @@ B.call ('load', 'user');
 B.mount ('body', views.main);
 
 
-/* To be recycled later, perhaps
+/* TODO: To be recycled later, perhaps
  *
  *
  *
@@ -1285,42 +1297,6 @@ B.mount ('body', views.main);
 
 
    // TODO: refactor from here below
-   ['.modal-backdrop', {
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      left: 0,
-      display: 'flex',
-      'align-items': 'center',
-      'justify-content': 'center',
-      padding: 24,
-      'background-color': 'rgba(8, 12, 28, 0.74)',
-      'z-index': 3000
-   }],
-   ['.modal-card', {
-      width: 1,
-      'max-width': 560,
-      padding: 28,
-      'border-radius': 18,
-      border: '1px solid ' + css.colors.vborderblue,
-      'background-color': css.colors.vnavy,
-      'box-shadow': '0 28px 80px rgba(0, 0, 0, 0.38)'
-   }],
-   ['.project-modal-kicker', {
-      'font-size': '0.78rem',
-      'font-weight': '700',
-      'letter-spacing': '0.12em',
-      'text-transform': 'uppercase',
-      color: css.colors.vlightblue,
-      'margin-bottom': 10
-   }],
-   ['.project-modal-title', {
-      'font-size': '1.9rem',
-      'font-weight': '700',
-      color: css.colors.nearwhite,
-      'margin-bottom': 8
-   }],
    ['.modal-actions', {
       display: 'flex',
       gap: 12,

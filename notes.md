@@ -1,5 +1,49 @@
 # Vibey development notes
 
+## 2026-09-02
+
+What's inside of what, from the user's perspective?
+- auth contains engines
+- engines contain projects
+- projects contain files
+- files contain three things: 1) chats; 2) apps; 3) access
+
+Right now, for alpha, it's just auth > projects > files > chats.
+
+DNA shape for the project list!
+
+TODO project
+- clean up [DONE]
+- DNA projects [DONE]
+- autobackup
+- client
+   - search filters projects
+   - new project modal works
+   - rename, delete, assign slot from button
+- server tests
+   - POST /project — non-creator access (403 at line 1012, untested)
+   - Cross-user access — no test hits the ownership check (line 1080) with a different user's project id (would need a second user in cloud mode)
+
+Some notes on Alexander - The process of creating life:
+- "we asked ourselves, collectively, "What next thing can we do that will positively affect the life of this household?", and pursued this difficult question to its end"
+- "A living process works only to the extent that it is based on patterns which go to essentials"
+- "A picture of wholeness will be a true picture only to the extent that it describes essentials."
+- "it is the essence which is contained in the centers that define the life."
+- "the centers they use are more concentrated, more spare, and go more to the heart of the matter"
+- "It is the choice of a strong center that might be called FLOWERBED AT EYE-LEVEL ALONG THE TOP OF THE WALL, which is the crucial thing."
+- "In each of the examples, the "design" is less important than the *choice* of just *this* center."
+- "it is not enough that individual patterns or generic centers solve essential problems and work well (...) it is necessary that the system of centers works *as a whole*, emanates *as a whole* from the situation, and has the capacity to create a holistic and ordered system which is *coherent and complete*."
+- "even when making the first attempt at defining a list of centers we need to see the system as a whole. When it is written in such a form we can test it. Does it form a coherent whole in our mind? Can we envisage it?"
+
+Looking back on vibey from the future, where I cannot go back to the way of doing things before?
+- Spin up containers from a browser.
+- Have project files be automatically versioned and backed up.
+- List the files from the browser.
+- Have a chat that serves for AI, human interaction and making command line calls.
+- Exposing files through the web with minimal config.
+- Spin up VPS with good defaults from a browser.
+- Have those VPSes automatically updated and managed.
+
 ## 2026-09-01
 
 Idea for demo: teach me linux (both you and AI sending commands)
@@ -9,6 +53,9 @@ TODO:
 - Rename views: projects is fine, the inner one is files. Later, inside files there will be dialog, just to see the dialog as a content. So we remove the confusion between "projects" and "project", which is too small a difference for something as big.
 - Make the search bar of projects float in absolute rather than at relative, so it floats over the scrollable list?
 - The TODO of yesterday
+
+I think claude gets it:
+"The spiral is the thing that makes this app memorable. Most project tools give you a list or a grid — vibey gives you a golden-ratio spiral with slots you hover over and a status bar that lights up with the project's color. That's a statement about what kind of tool this is: it's not trying to be Notion or Linear, it's trying to make the act of picking a project feel like something."
 
 ## 2026-08-31
 
