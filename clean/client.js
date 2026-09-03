@@ -7,6 +7,20 @@ B.internal.timeout = 500;
 
 var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log;
 
+// *** TIME ***
+
+var ago = function (date) {
+   ms = teishi.time () - new Date (date).getTime ();
+   if (ms < 0) return '';
+   if (ms < 1000) return 'now';
+   if (ms < 60 * 1000) return Math.floor (ms / 1000) + 's ago';
+   if (ms < 60 * 60 * 1000) return Math.floor (ms / (60 * 1000)) + 'm ago';
+   if (ms < 24 * 60 * 60 * 1000) return Math.floor (ms / (60 * 60 * 1000)) + 'h ago';
+   if (ms < 30 * 24 * 60 * 60 * 1000) return Math.floor (ms / (24 * 60 * 60 * 1000)) + 'd ago';
+   if (ms < 12 * 30 * 24 * 60 * 60 * 1000) return Math.floor (ms / (30 * 24 * 60 * 60 * 1000)) + 'mo ago';
+   return Math.floor (ms / (365 * 24 * 60 * 60 * 1000)) + 'y ago';
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -94,11 +108,13 @@ B.mrespond ([
          var file = decodeURIComponent (hash.slice (2).join ('/'));
 
          var files = B.get ('files');
-         if (files && ! inc (files, file)) return B.call (x, 'navigate', 'files/' + hash [1] + '/doc/main.md');
+         if (files && ! dale.stop (files, true, function (f) {
+            return f.name === file;
+         })) return B.call (x, 'navigate', 'files/' + hash [1] + '/doc/main.md');
 
          B.call (x, 'set', ['file', 'name'], file);
 
-         B.call (x, 'load', 'files');
+         B.call (x, 'list', 'files');
       }
       if (hash [0] !== 'files') B.call (x, 'rem', [], 'file');
 
@@ -255,6 +271,19 @@ B.mrespond ([
       if (B.get ('new', 'project') !== undefined) c ('.new-project-input') [0].focus ();
    }],
 
+   ['edit', 'project', function (x) {
+      var edit = B.get ('edit', 'project');
+      var name = edit.name.trim ();
+      if (! name) return;
+
+      B.call (x, 'put', '/project', {id: edit.id, name: name, slot: edit.slot ? parseInt (edit.slot) : undefined}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to rename project');
+         B.call (x, 'rem', 'edit', 'project');
+         B.call (x, 'load', 'projects');
+         B.call (x, 'snackbar', 'ok', 'Project renamed');
+      });
+   }],
+
    ['delete', 'project', function (x, project) {
       if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
 
@@ -331,17 +360,40 @@ B.mrespond ([
 
    // *** FILES ***
 
-   ['load', 'files', function (x) {
-      B.call (x, 'get', '/project/' + encodeURIComponent (B.get ('project')) + '/files', function (x, error, rs) {
+   ['list', 'files', function (x) {
+      // If no projects loaded yet, retry in 10ms.
+      if (! B.get ('projects')) return setTimeout (function () {
+         B.call (x, 'list', 'files');
+      }, 10);
+
+      var project = dale.stopNot (B.get ('projects'), undefined, function (p) {
+         if (p.name === B.get ('project')) return p;
+      });
+      if (! project) return B.call (x, 'navigate', 'projects');
+
+      B.call (x, 'post', '/project/run', {id: project.id, command: "find /project -type f -not -path '/project/.git/*' -printf '%s %p\\n' | sort -t/ -k3"}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
-         B.call (x, 'set', 'files', rs.body);
+         var files = dale.fil ((rs.body.stdout || '').split ('\n'), undefined, function (line) {
+            if (! line) return;
+            var space = line.indexOf (' ');
+            return {
+               name: line.slice (space + 1).replace ('/project/', ''),
+               size: parseInt (line.slice (0, space)),
+            };
+         });
+         B.call (x, 'set', 'files', files);
       });
    }],
 
    ['change', ['file', 'name'], function (x) {
-      B.call (x, 'get', '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + B.get ('file', 'name'), function (x, error, rs) {
+      var project = dale.stopNot (B.get ('projects'), undefined, function (p) {
+         if (p.name === B.get ('project')) return p;
+      });
+      if (! project) return;
+
+      B.call (x, 'post', '/project/read', {id: project.id, path: B.get ('file', 'name')}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
-         B.call (x, 'set', ['file', 'content'], rs.body.content);
+         B.call (x, 'set', ['file', 'content'], rs.body);
       });
    }],
 
@@ -365,7 +417,7 @@ B.mrespond ([
       B.call (x, 'madd', 'files', name);
       B.call (x, 'save', 'file', name, '', 'new');
       B.call (x, 'rem', 'new', 'file');
-      B.call (x, 'load', 'files');
+      B.call (x, 'list', 'files');
    }],
 
    ['delete', 'file', function (x, name) {
@@ -373,7 +425,7 @@ B.mrespond ([
 
       B.call (x, 'delete', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
-         B.call (x, 'load', 'files');
+         B.call (x, 'list', 'files');
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project') + '/doc/main.md');
       });
    }],
@@ -387,7 +439,7 @@ B.mrespond ([
          B.call (x, 'madd', 'files', rs.body.filename);
          B.call (x, 'rem', 'new', 'file');
          B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + rs.body.filename);
-         B.call (x, 'load', 'files');
+         B.call (x, 'list', 'files');
       });
 
    }],
@@ -457,7 +509,16 @@ css.style = [
    ['.outline-0:focus', {outline: 'none'}],
    ['.placeholder-vgray::placeholder', {color: css.colors.vgray, opacity: '1'}],
 
+   // *** SPINNY ***
+
+   ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
+   ['.spinny:before', {
+      content: '"|"',
+      animation: 'spinny 0.8s steps(1) infinite'
+   }],
 ]
+
+// *** UTILITY VIEWS ***
 
 var views = {};
 
@@ -479,6 +540,15 @@ views.tooltip = function (tooltip) {
       }, tooltip];
    });
 }
+
+views.spinny = function () {
+   return ['span', {
+      class: 'b code dib f2 lh-solid spinny tc vblue',
+      style: style ({width: '2ch'}),
+   }];
+}
+
+// *** MAIN ***
 
 views.main = function () {
    return B.view ([['view'], ['snackbar']], function (view, snackbar) {
@@ -586,7 +656,7 @@ views.modal = function (attributes, contents) {
       ... (attributes || {}),
       class: 'bottom-0 fixed flex items-center justify-center left-0 right-0 top-0',
       style: style ({
-         background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), ' + css.rgba (css.colors.vgreen, 0.25),
+         background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), ' + css.rgba (css.colors.vgreen, 0.5),
       })
    }, [
       ['div', {
@@ -651,6 +721,14 @@ views.projects = function () {
    var barWidth  = barHeight * slotWidth / slotHeight;
    var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
 
+   var slotColors = [
+      css.colors.vblue,
+      css.colors.vgreen,
+      css.colors.vorange,
+      css.colors.vpurple,
+      css.colors.vviolet,
+   ];
+
    var projectColor = function (text) {
 
       var projectColors = [
@@ -667,14 +745,19 @@ views.projects = function () {
       var sum = dale.acc (((text || '') + '').split (''), 0, function (a, b) {
          return a + b.charCodeAt (0);
       });
-      colors = projectColors [sum % projectColors.length];
+      var colors = projectColors [sum % projectColors.length];
       return colors.bg + ' ' + colors.fg;
    }
 
    return B.view ('projects', function (projects) {
-      projects = projects || [];
 
-      return ['div', {class: 'bg-vmidnight min-vh-100 flex items-center justify-center'}, [
+      if (! projects) return ['div', {
+         class: 'bg-vmidnight flex flex-wrap items-center justify-center min-vh-100',
+         style: style ({gap: '2rem'}),
+      }, dale.go (dale.times (80), () => views.spinny ())];
+
+
+      return ['div', {class: 'bg-vmidnight flex items-center justify-center min-vh-100'}, [
 
          // Title
          ['div', {style: style ({
@@ -685,7 +768,7 @@ views.projects = function () {
 
          // Spiral slots or project list
          B.view (['search', 'project'], function (search) {
-            return ['div', {class: 'relative', style: style ({
+            return ['div', {class: 'relative' + (search !== undefined ? ' self-start' : ''), style: style ({
                height: search === undefined ? vw (containerHeight + 48 + 48) : 'auto',
                width: search === undefined ? vw (containerWidth) : '100vw',
             })}, [
@@ -706,23 +789,23 @@ views.projects = function () {
                         });
 
                         return ['div', {
-                           class: 'absolute bg-vnavy flex items-center justify-center pointer',
+                           class: 'absolute flex items-center justify-center pointer' + (matchingProject ? ' ' + projectColor (matchingProject.name) : ''),
                            onclick: matchingProject ? B.ev ('navigate', 'files/' + encodeURIComponent (matchingProject.name)) : undefined,
                            onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
                            onmouseleave: B.ev ('rem', [], 'hover'),
                            style: style ({
+                              'background-color': matchingProject ? undefined : css.rgba (slotColors [index], 0.15),
                               border: vw (1.5) + ' solid ' + css.colors.vborderblue,
                               'border-radius': vw (slotBorderRadius),
-                              color: css.colors.vlightblue,
                               height: vw (slotHeight),
                               left: vw (slot.x + offsetX - slotWidth / 2),
                               top: vw (slot.y + offsetY - slotHeight / 2),
                               width: vw (slotWidth),
                            }),
                         }, (function () {
-                           if (matchingProject) return dale.go (matchingProject.name.split (' '), function (word) {
-                              return word [0].toUpperCase ();
-                           }).slice (0, 3).join (' ');
+                           if (matchingProject) return ['span', {class: 'f3 fw7'}, dale.go (matchingProject.name.split (' '), function (word) {
+                              return word [0];
+                           }).slice (0, 3).join (' ')];
 
                            if (! matchingProject) return ['span', {
                               opaque: true,
@@ -736,7 +819,7 @@ views.projects = function () {
                      B.view (['hover', 'project'], function (project) {
                         if (! project) return ['div'];
                         return ['div', {
-                           class: 'absolute flex items-center justify-center ' + projectColor (project.name),
+                           class: 'absolute flex flex-column items-center justify-center ' + projectColor (project.name),
                            style: style ({
                               border: vw (1.5) + ' solid ' + css.colors.vborderblue,
                               'border-radius': vw (slotBorderRadius),
@@ -746,7 +829,19 @@ views.projects = function () {
                               top: vw (barBottom - barHeight),
                               width: vw (barWidth),
                            }),
-                        }, project.name];
+                        }, [
+                           ['span', {
+                              class: 'fw6',
+                              style: style ({'font-size': '120%'}),
+                           }, project.name],
+                           ['br'],
+                           ['span', {
+                              style: style ({
+                                 'font-size': '70%',
+                                 opacity: '0.7',
+                              }),
+                           }, project.last ? ago (project.last) : ''],
+                        ]];
                      }),
                   ]];
 
@@ -754,17 +849,18 @@ views.projects = function () {
                   if (search !== undefined) return ['div', {
                      class: 'flex flex-column relative w-100',
                      style: style ({
-                        'padding-top': '2vh',
+                        'padding-top': '14vh',
                      }),
                   }, [
                      ['div', {
-                        class: 'border-box center flex',
+                        class: 'bg-vmidnight border-box center fixed flex left-0 right-0 w-100',
                         style: style ({
                            gap: '0.75rem',
-                           height: '10vh',
-                           'margin-bottom': '2vh',
+                           height: '14vh',
                            'min-height': '3rem',
-                           width: '70vw',
+                           padding: '2vh 15vw',
+                           top: 0,
+                           'z-index': 1,
                         }),
                      }, [
                         ['div', {
@@ -789,32 +885,65 @@ views.projects = function () {
                      (function () {
                         var cardWidth = 70 / phi;
                         var cycle = 8;
-                        return dale.go (projects, function (proj, index) {
-                           var offset = 15 + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
+                        var index = 0;
+                        return dale.fil (projects, undefined, function (project) {
+                           if (! project.name.match (search)) return;
+                           var offset = 15 + (Math.sin (index++ * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
                            return ['div', {
-                              class: 'border-box flex items-center justify-between pointer ' + projectColor (proj.name),
-                              onclick: B.ev ('navigate', 'files/' + encodeURIComponent (proj.name)),
+                              class: 'border-box flex items-center justify-between pointer ' + projectColor (project.name),
+                              onclick: B.ev ('navigate', 'files/' + encodeURIComponent (project.name)),
                               style: style ({
                                  'border-radius': '0.75rem',
                                  height: '10vh',
-                                 'margin-bottom': '1vh',
+                                 'margin-bottom': '4vh',
                                  'margin-left': offset + 'vw',
                                  'min-height': '3rem',
                                  padding: '0 1.5rem',
                                  width: cardWidth + 'vw',
                               }),
                            }, [
-                              ['span', {class: 'f4 fw6'}, proj.name],
+                              ['span', {class: 'flex flex-column justify-center'}, [
+                                 ['span', {class: 'f4 fw6'}, project.name],
+                                 ['span', {
+                                    style: style ({
+                                       'font-size': '70%',
+                                       opacity: '0.7',
+                                    }),
+                                 }, project.last ? ago (project.last) : ''],
+                              ]],
                               ['div', {
                                  class: 'flex items-center',
                                  onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
                                  style: style ({
-                                    gap: '1rem',
+                                    gap: '0.5rem',
                                  }),
                               }, [
-                                 ['span', {class: 'pointer', title: 'Delete'}, ['i', {class: 'bi bi-trash'}]],
-                                 ['span', {class: 'pointer', title: 'Rename'}, ['i', {class: 'bi bi-pencil'}]],
-                                 ['span', {class: 'pointer', title: 'Slot'},   ['i', {class: 'bi bi-grid-3x3-gap'}]],
+                                 ['span', {
+                                    class: 'flex items-center justify-center pointer',
+                                    onclick: B.ev ('set', ['edit', 'project'], {
+                                       id: project.id,
+                                       name: project.name,
+                                       slot: project.slot,
+                                    }),
+                                    style: style ({
+                                       'border-radius': '0.5rem',
+                                       'font-size': '1.25rem',
+                                       height: '2.5rem',
+                                       width: '2.5rem',
+                                    }),
+                                    title: 'Rename',
+                                 }, ['i', {class: 'bi bi-pencil'}]],
+                                 ['span', {
+                                    class: 'flex items-center justify-center pointer',
+                                    onclick: B.ev ('delete', 'project', project),
+                                    style: style ({
+                                       'border-radius': '0.5rem',
+                                       'font-size': '1.25rem',
+                                       height: '2.5rem',
+                                       width: '2.5rem',
+                                    }),
+                                    title: 'Delete',
+                                 }, ['i', {class: 'bi bi-trash'}]],
                               ]],
                            ]];
                         });
@@ -955,24 +1084,99 @@ views.projects = function () {
             ]);
          }),
 
+         // Edit project modal
+         B.view (['edit', 'project'], function (editProject) {
+            if (! editProject) return ['div'];
+
+            var allowEdit = (function () {
+               var name = (editProject.name || '').trim ();
+               if (name.length === 0) return 'empty';
+               var conflict = dale.stop (projects, true, function (project) {
+                  return project.id !== editProject.id && project.name === name;
+               });
+               return conflict ? 'conflict' : true;
+            }) ();
+
+            return views.modal ({onclick: B.ev ('rem', 'edit', 'project')}, [
+               ['div', {
+                  class: 'flex w-100',
+                  style: style ({
+                     gap: '0.5rem',
+                     height: vw (48),
+                  }),
+               }, [
+                  ['div', {
+                     class: 'relative',
+                     style: style ({flex: '1'}),
+                  }, [
+                     ['i', {
+                        class: 'absolute bi bi-pencil',
+                        style: style ({
+                           color: css.colors.vmidblue,
+                           'font-size': vw (16),
+                           left: vw (14),
+                           'pointer-events': 'none',
+                           top: '50%',
+                           transform: 'translateY(-50%)',
+                        })
+                     }],
+                     ['input', {
+                        class: 'bg-vnavy border-box h-100 edit-project-input outline-0 w-100',
+                        onchange: B.ev ('set', ['edit', 'project', 'name']),
+                        oninput: B.ev ('set', ['edit', 'project', 'name']),
+                        placeholder: 'Rename your project',
+                        style: style ({
+                           border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
+                           'border-radius': slotBorderRadius,
+                           color: css.rgba (css.colors.vlightblue, 0.8),
+                           'font-size': vw (16),
+                           'padding-left': vw (40),
+                        }),
+                        type: 'text',
+                        value: editProject.name,
+                     }],
+                  ]],
+                  ['select', {
+                     class: 'bg-vnavy pointer',
+                     onchange: B.ev ('set', ['edit', 'project', 'slot']),
+                     style: style ({
+                        border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
+                        'border-radius': slotBorderRadius,
+                        color: css.rgba (css.colors.vlightblue, 0.8),
+                        'font-size': vw (12),
+                        padding: '0 0.5rem',
+                     }),
+                  }, [
+                     ['option', {
+                        selected: ! editProject.slot,
+                        value: '',
+                     }, 'None'],
+                     dale.go (dale.times (5, 1), function (n) {
+                        return ['option', {value: n, selected: editProject.slot === n}, 'Slot ' + n];
+                     }),
+                  ]],
+               ]],
+               ['button', {
+                  class: 'bn fw7 pointer w-100',
+                  disabled: allowEdit !== true,
+                  onclick: B.ev ('edit', 'project'),
+                  style: style ({
+                     'background-color': allowEdit === true ? css.colors.vgreen : '#555',
+                     'border-radius': slotBorderRadius,
+                     color: '#000',
+                     'font-size': vw (16),
+                     'margin-top': '1rem',
+                     padding: '1rem 0',
+                  })
+               }, {
+                  conflict: 'That name\'s taken',
+                  empty: 'Enter a name',
+                  true: 'Rename',
+               } [allowEdit]]
+            ]);
+         }),
       ]];
    });
-}
-
-views.spinny = function () {
-   return [
-      ['style', [
-         ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
-         ['.spinny:before', {
-            content: '"|"',
-            animation: 'spinny 0.8s steps(1) infinite'
-         }],
-      ]],
-      ['span', {
-         class: 'b code dib f2 lh-solid spinny tc vblue',
-         style: style ({width: '2ch'}),
-      }]
-   ];
 }
 
 // *** FILES ***
@@ -985,26 +1189,138 @@ views.files = function () {
       return name;
    }
 
+   var paneStyle = style ({
+      border: '0.0625rem solid ' + css.colors.vborderblue,
+      'border-radius': '1.125rem',
+      'box-shadow': '0 1.25rem 3.75rem ' + css.rgba (css.colors.vdeepnavy, 0.22),
+      padding: '1.5rem',
+   });
+
+   return B.view ([['projects'], ['project']], function (projects, project) {
+      if (! projects) return ['div', {
+         class: 'bg-vmidnight flex flex-wrap items-center justify-center min-vh-100',
+         style: style ({gap: '2rem'}),
+      }, dale.go (dale.times (80), () => views.spinny ())];
+
+      return ['div', {
+         class: 'bg-vmidnight border-box flex flex-column min-vh-100',
+         style: style ({
+            gap: '1.5rem',
+            padding: '1.5rem',
+         }),
+      }, [
+         ['div', {class: 'flex items-center'}, [
+            ['span', {
+               class: 'f1 fw7 lh-solid light-blue mr3 pointer',
+               onclick: B.ev ('navigate', 'projects'),
+            }, '‹'],
+            ['span', {class: 'f2 fw7 vnearwhite'}, project],
+         ]],
+         ['div', {
+            style: style ({
+               display: 'grid',
+               flex: 1,
+               gap: '1.5rem',
+               'grid-template-columns': '23.6fr 76.4fr',
+            }),
+         }, [
+            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, [
+               ['button', {
+                  class: 'bg-vgreen bn br2 fw6 pointer vnearwhite w-100',
+                  onclick: B.ev ('set', ['new', 'file'], ''),
+                  style: style ({padding: '0.75rem'}),
+               }, '+ New file'],
+               B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
+                  if (! files) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'Loading...'];
+                  if (! files.length) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'No files yet.'];
+                  return ['div', {class: 'flex-auto overflow-y-auto pt3'}, dale.fil (files, undefined, function (file) {
+                     if (search && ! file.name.match (search)) return;
+                     var active = file.name === current;
+                     return ['div', {
+                        class: css.join ('br1 fw5 lh-copy pointer', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
+                        onclick: B.ev ('navigate', 'files/' + B.get ('project') + '/' + file.name),
+                        style: style ({
+                           'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
+                           padding: '0.5rem 0.625rem',
+                        }),
+                     }, iconAndName (file.name)];
+                  })];
+               }),
+               ['div', {class: 'relative w-100'}, [
+                  ['i', {
+                     class: 'absolute bi bi-search',
+                     style: style ({
+                        color: css.colors.vmidblue,
+                        left: '0.875rem',
+                        'pointer-events': 'none',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                     }),
+                  }],
+                  ['input', {
+                     class: 'bg-vnavy border-box fw6 outline-0 w-100',
+                     oninput: B.ev ('set', ['search', 'file']),
+                     placeholder: 'Search',
+                     style: style ({
+                        border: '0.125rem solid ' + css.colors.vmidblue,
+                        'border-radius': '0.75rem',
+                        color: css.colors.vlightblue,
+                        'font-size': '1rem',
+                        height: '3rem',
+                        'padding-left': '2.5rem',
+                        'padding-right': '1rem',
+                     }),
+                     type: 'text',
+                  }],
+               ]],
+            ]],
+            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}],
+         ]],
+      ]];
+   });
+}
+
+views.files_old = function () {
+
+   var iconAndName = function (name) {
+      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], name];
+      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1 vviolet'}], name];
+      return name;
+   }
+
    return B.view ([['projects'], ['project']], function (projects, project) {
       if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => views.spinny ())];
 
-      return ['div', {class: 'project-shell bg-vmidnight'}, [
+      return ['div', {
+         class: 'bg-vmidnight border-box flex flex-column min-vh-100',
+         style: style ({
+            gap: '1.5rem',
+            padding: '1.5rem',
+         }),
+      }, [
          ['div', {class: 'flex items-center'}, [
-            B.view (['key', 'command'], function (command) {
-               return ['span', {
-                  class: 'f1 fw7 light-blue pointer mr3 relative',
-                  style: style ({'line-height': 1}),
-                  onclick: B.ev ('navigate', 'projects')
-               }, [
-                  command ? ['span', {class: 'cmd-tooltip'}, 'B'] : '',
-                  '‹'
-               ]];
-            }),
+            ['span', {
+               class: 'f1 fw7 lh-solid light-blue mr3 pointer relative',
+               onclick: B.ev ('navigate', 'projects'),
+            }, [
+               views.tooltip ('B'),
+               '‹'
+            ]],
             ['span', {class: 'f2 fw7 vnearwhite'}, project]
          ]],
-         ['div', {class: 'project-main'}, [
+         ['div', {
+            class: 'border-box w-100',
+            style: style ({
+               display: 'grid',
+               flex: 1,
+               gap: '1.5rem',
+               'grid-template-columns': '23.6fr 76.4fr',
+               'min-height': 0,
+            }),
+         }, [
             B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'delete'], ['key', 'command'], ['new', 'type'], ['settings', 'show']], function (files, name, newFileName, Delete, command, newType, showSettings) {
-               return ['div', {class: 'flip-card'}, [['div', {class: 'flip-card-inner' + (showSettings ? ' flipped' : '')}, [
+
+               return ['div', {class: 'flip-card'}, ['div', {class: 'flip-card-inner' + (showSettings ? ' flipped' : '')}, [
                   ['div', {class: 'flip-card-front project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
@@ -1123,7 +1439,7 @@ views.files = function () {
                      ]]
                   ]]
                   ]]
-               ]]]];
+               ]]];
             }),
             B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name'], ['settings', 'show']], function (content, mode, fileName, showSettings) {
                if (fileName === undefined) fileName = '';

@@ -165,8 +165,8 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 - **Request creator access**: `POST /creator/request`: expects `{}`. In local mode, this route returns a 404.
 - **Get projects**: `GET /projects`.
-- **Create project**: `POST /project`: expects `{name: <name>, slot: <positiveInteger|undefined>}`. Returns 409 if a project with that names exists.
-- **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
+- **Create project**: `POST /project`: expects `{name: <name>, slot: <positiveInteger|undefined>}`. Returns 403 if the user is not a creator, 409 if a project with that name exists.
+- **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <positiveInteger|undefined>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
 - **Read file**: `POST /project/read`: expects `{id: <projectId>, path: <path>, sha: <string|undefined>}`. Returns the file contents. Returns 404 if file not found.
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. Returns 400 if the edit fails.
@@ -211,17 +211,22 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
 - `create project`: creates a new project using the name at `new.project.name` via `POST /project`.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
+- `edit project`: renames and/or changes the slot of a project using the values at `edit.project` via `PUT /project`. On success, reloads projects and shows a snackbar.
 - `delete project <project>`: asks for confirmation, then deletes the project via `DELETE /project/<id>`. On success, reloads projects and shows a snackbar.
 
 ### Client state
 
 ```
+edit project id <id>
+             name "<project name>"
+             slot <integer|undefined>
 file content "..." // Current file selected
      dialogMode <ai|human|terminal> // Dialog mode
      mode <edit|view> // Whether we're editing the file we're viewing or not
      name "..."
      remove // If set, when clicking on a file we show crosses to remove them.
-files 1 "<filename 1>" // List of files for current project
+files 1 name "<filename>"
+        size <integer> // File size in bytes
       ...
 hover project <project> // The project (or free project slot) being hovered on
 key command <0|1> // if set, the command key is pressed
@@ -233,7 +238,7 @@ new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>
     type "dialog|file" // Whether the new file is a normal file or a dialog
-project "<project slug>" // The current project selected
+project <projectId|undefined>" // The current project selected
 projects 1 created <date>
            id <id>
            last <date>
@@ -245,7 +250,8 @@ oauth code "<pasted callback URL or code>" // Manual OAuth code input
       loading "<provider>" // Provider currently in OAuth flow (openai or claude)
       step flow <paste_code|waiting> // Whether user must paste a code or wait for auto-callback
            provider "<provider>" // Current OAuth step
-search project <text|undefined>
+search file <text|undefined>
+       project <text|undefined>
 snackbar color <color>
          message <message>
          timeout "<JS timeout to clear the snackbar>"

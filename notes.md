@@ -1,5 +1,38 @@
 # Vibey development notes
 
+## 2026-09-03
+
+Looking back on vibey from the future, where I cannot go back to the way of doing things before? (redux)
+- Spin up containers from a browser.
+- Have project files be automatically versioned and backed up.
+- List the files from the browser.
+- Have a chat that serves for AI, human interaction and making command line calls.
+- Exposing files through the web with minimal config.
+- Spin up VPS with good defaults from a browser.
+- Have those VPSes automatically updated and managed.
+- Have auto-keepalive on apps & uptime notifications in-built
+- Be able to ask AI to make custom dashboards that can read app data directly and just host it on the project
+
+TODO project
+- autobackup
+- client tests [MUST TEST THE TESTS]
+- (later) skip docker.exec to have a slash command time by 10x
+
+TODO files
+- list files with command [DONE]
+- search files
+- add files (modal with file only, with upload on top right)
+- make sure tooltips with shortcuts work
+- open text file
+- (later) stream large files
+- edit text file
+- (later) edit text file through diffs rather than whole file write (faster)
+- open media file
+
+Interesting that we don't need settings until we configure AI.
+
+I cannot overemphasize how strong and juicy need to be the boundaries between messages in the chat. It's unbelievable how small the boundaries are in slack.
+
 ## 2026-09-02
 
 What's inside of what, from the user's perspective?

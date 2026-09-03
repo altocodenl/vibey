@@ -397,9 +397,12 @@ docker.run = async function (id, command, options) {
    }
 
    var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, options || {});
-   if (result.code === 1 && result.stderr && result.stderr.match (/^Error response from daemon: container .+ is not running/)) {
-      var restart = await run ('docker', 'start', id);
-      if (restart.code === 1) return result;
+   if (result.code === 1 && result.stderr && result.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
+      var recreate = await run ('docker', 'run', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
+      if (recreate.code) {
+         var restart = await run ('docker', 'start', id, {catch: true});
+         if (restart.code) return result;
+      }
       return docker.run (id.replace ('vibey-project-', ''), originalCommand || command, options);
    }
    if (commit && result.stdout) {
@@ -1026,10 +1029,17 @@ var routes = [
       }
       if (rq.body.slot) project.slot = rq.body.slot;
 
-      await redis ([
+      var slotConflict = ! rq.body.slot ? undefined : dale.stopNot (projects, undefined, function (project) {
+         if (parseInt (project.slot) === rq.body.slot) return project;
+      });
+
+      var ops = [
          ['hmset', 'project:' + project.id, project],
          ['sadd',  'owner:' + rq.user.id, 'project:' + project.id]
-      ]);
+      ];
+      if (slotConflict) ops.push (['hdel', 'project:' + slotConflict.id, 'slot']);
+
+      await redis (ops);
 
       var containerId = 'vibey-project-' + project.id;
 
@@ -1060,9 +1070,15 @@ var routes = [
       });
       if (! match) return reply (rs, 404);
       var conflict = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === rq.body.id) return;
          if (project.name === rq.body.name) return project;
       });
-      if (conflict && conflict.id !== rq.body.id) return reply (rs, 409, {error: 'There is already a project with that name'});
+      if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
+
+      var slotConflict = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === rq.body.id) return;
+         if (parseInt (project.slot) === rq.body.slot) return project;
+      });
 
       var ops = [['hmset', 'project:' + match.id, {
          last: now (),
@@ -1070,6 +1086,8 @@ var routes = [
       }]];
 
       if (rq.body.slot !== undefined || match.slot !== undefined) ops.push (rq.body.slot === undefined ? ['hdel', 'project:' + match.id, 'slot'] : ['hset', 'project:' + match.id, 'slot', rq.body.slot]);
+
+      if (slotConflict) ops.push (['hdel', 'project:' + slotConflict.id, 'slot']);
 
       await redis (ops);
 

@@ -391,6 +391,15 @@ if (mode === 'server') {
                   ]}
                ]);
             }],
+            ['Set slot to same value as another project', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!', slot: 3}}, 200],
+            ['List projects after slot conflict', 'get', '/projects', 200, function (s, rq, rs) {
+               var first = dale.stopNot (rs.body, undefined, function (p) { if (p.id === s.projectId) return p });
+               var second = dale.stopNot (rs.body, undefined, function (p) { if (p.id === s.secondProjectId) return p });
+               return assert ([
+                  ['first project slot', first.slot, 3, teishi.test.equal],
+                  ['second project slot', second.slot, undefined, teishi.test.equal],
+               ]);
+            }],
             ['Delete nonexistent project', 'delete', '/project/nonexistent', 404],
             ['Delete project', 'delete', function (s) {return '/project/' + s.secondProjectId}, 200],
             ['List projects after second project deletion', 'get', '/projects', 200, function (s, rq, rs) {
@@ -414,7 +423,12 @@ if (mode === 'server') {
             ['Read file without id', 'post', '/project/read', {path: 'doc/main.md'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Read file without path', 'post', '/project/read', function (s) {return {id: s.projectId}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
             ['Get file that is not there', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
-            ['Get main file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
+            ['Get main file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['body', rs.body, '# el norte', teishi.test.equal],
+                  ['content-type', rs.headers ['content-type'], /text\/markdown/, teishi.test.match],
+               ]);
+            }],
             ['Edit file without path', 'post', '/project/edit', function (s) {return {id: s.projectId, oldText: 'a', newText: 'b'}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
             ['Edit file without oldText', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
             ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
@@ -482,7 +496,15 @@ if (mode === 'server') {
             ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 5, "Run 'echo foo > doc/another.md && cat doc/another.md'");
             }],
-            ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nbinary.txt\nmain.md\n'})],
+            ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
+               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.txt\nmain.md\n', teishi.test.equal])) return false;
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.projectId);
+                  await run ('docker', 'rm', 'vibey-project-' + s.projectId);
+                  next ();
+               }) ();
+            }],
+            ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nbinary.txt\nmain.md\n'})],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {
@@ -491,6 +513,30 @@ if (mode === 'server') {
                }) ();
             }],
             ['Delete project with a stopped container', 'delete', function (s) {return '/project/' + s.thirdProjectId}, 200],
+            CONFIG.cloud ? [
+               ['Login as non-creator', 'post', '/auth/login', {email: 'user2@example.com'}, 200, function (s, rq, rs) {
+                  s.user1Headers = {cookie: s.headers.cookie, 'x-csrf': s.headers ['x-csrf']};
+                  s.loginLink = rs.body.loginLink;
+                  return true;
+               }],
+               ['Verify non-creator login', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
+                  s.headers.cookie = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  return true;
+               }],
+               ['Create project as non-creator', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Please request creator access'})],
+               ['Update another user\'s project', 'put', '/project', function (s) {return {id: s.projectId, name: 'hacked'}}, 404],
+               ['Read file from another user\'s project', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 404],
+               ['Write file to another user\'s project', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/hack.md', content: 'hacked'}}, 404],
+               ['Edit file in another user\'s project', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el', newText: 'EL'}}, 404],
+               ['Run command on another user\'s project', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls'}}, 404],
+               ['Delete another user\'s project', 'delete', function (s) {return '/project/' + s.projectId}, 404],
+               ['Delete non-creator account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
+                  s.headers.cookie = s.user1Headers.cookie;
+                  s.headers ['x-csrf'] = s.user1Headers ['x-csrf'];
+                  return true;
+               }],
+            ] : [],
             CONFIG.cloud ? ['Delete account', 'post', '/auth/delete', {}, 200] : [],
          ];
 
@@ -661,6 +707,95 @@ if (mode === 'client') {
    ];
 
    suites.project = [
+      ['Login as admin', function (next) {
+         B.call ('logout', []);
+         setTimeout (function () { B.call ('login', adminEmail) }, 200);
+         next (2000, 1);
+      }, function () {
+         return assert ([['loginLink', B.get ('test', 'loginLink'), 'string']]);
+      }],
+      ['Verify admin and grant creator', function (next) {
+         B.call ('verify', B.get ('test', 'loginLink'));
+         next (1000, 1);
+      }, function () {
+         B.call ('post', '/creator/grant', {email: 'projects@example.com', grant: true});
+         return assert ([['view', B.get ('view'), 'projects', teishi.test.equal]]);
+      }],
+      ['Login test user', function (next) {
+         B.call ('login', 'projects@example.com');
+         next (1500, 1);
+      }, function () {
+         return assert ([['loginLink', B.get ('test', 'loginLink'), 'string']]);
+      }],
+      ['Verify test user', function (next) {
+         B.call ('verify', B.get ('test', 'loginLink'));
+         next (1000, 1);
+      }, function () {
+         return assert ([
+            ['view', B.get ('view'), 'projects', teishi.test.equal],
+            ['empty', B.get ('projects').length, 0, teishi.test.equal],
+         ]);
+      }],
+      ['Create project', function (next) {
+         B.call ('set', ['new', 'project'], {name: 'test project'});
+         setTimeout (function () { find ('button', 'Boom').click () }, 300);
+         next (3000, 1);
+      }, function () {
+         return assert ([
+            ['view', B.get ('view'), 'files', teishi.test.equal],
+            ['project', B.get ('project'), 'test project', teishi.test.equal],
+         ]);
+      }],
+      ['Back to projects', function (next) {
+         window.location.hash = '#/projects';
+         next (1000, 1);
+      }, function () {
+         return assert ([['count', B.get ('projects').length, 1, teishi.test.equal]]);
+      }],
+      ['Duplicate name blocked', function (next) {
+         B.call ('set', ['new', 'project'], {name: 'test project'});
+         next (500, 1);
+      }, function () {
+         var result = assert ([['disabled', find ('button', "That name's taken").disabled, true, teishi.test.equal]]);
+         B.call ('rem', 'new', 'project');
+         return result;
+      }],
+      ['Search filters', function (next) {
+         B.call ('set', ['search', 'project'], 'zzz');
+         next (500, 1);
+      }, function () {
+         return assert ([['hidden', ! find ('span', 'test project'), true, teishi.test.equal]]);
+      }],
+      ['Search finds', function (next) {
+         B.call ('set', ['search', 'project'], '');
+         next (500, 1);
+      }, function () {
+         return assert ([['found', !! find ('span', 'test project'), true, teishi.test.equal]]);
+      }],
+      ['Rename project', function (next) {
+         c ('[title="Rename"]') [0].click ();
+         setTimeout (function () {
+            var input = c ('.edit-project-input') [0];
+            input.value = 'renamed';
+            c.fire (input, 'input');
+         }, 300);
+         setTimeout (function () { find ('button', 'Rename').click () }, 600);
+         next (2000, 1);
+      }, function () {
+         return assert ([['snackbar', (B.get ('snackbar') || {}).message, 'Project renamed', teishi.test.equal]]);
+      }],
+      ['Delete project', function (next) {
+         var orig = window.confirm;
+         window.confirm = function () { return true };
+         c ('[title="Delete"]') [0].click ();
+         window.confirm = orig;
+         next (1000, 1);
+      }, function () {
+         return assert ([
+            ['snackbar', (B.get ('snackbar') || {}).message, 'Project deleted', teishi.test.equal],
+            ['count', B.get ('projects').length, 0, teishi.test.equal],
+         ]);
+      }],
    ];
 
    c.test (Object.values (suites).flat (), async function (error, time) {
@@ -675,7 +810,7 @@ if (mode === 'client') {
 
          B.call ('logout', []);
          await wait (20);
-         B.call ('login', [], adminEmail);
+         B.call ('login', adminEmail);
          await wait (20);
          B.call ('verify', B.get ('test', 'loginLink'));
          await wait (20);
