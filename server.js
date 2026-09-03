@@ -764,7 +764,7 @@ var execA = function (command, options) {
    log.docker.start (id, project, command);
    var t = Date.now ();
    return new Promise (function (resolve, reject) {
-      exec (command, options || {encoding: 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+      exec (command, options || {encoding: 'utf8', maxBuffer: 100 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) {
             error.stdout = stdout;
             error.stderr = stderr;
@@ -787,7 +787,7 @@ var execABuf = function (command, options) {
    log.docker.start (id, project, command);
    var t = Date.now ();
    return new Promise (function (resolve, reject) {
-      exec (command, options || {encoding: 'buffer', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+      exec (command, options || {encoding: 'buffer', maxBuffer: 100 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) {
             error.stdout = stdout;
             error.stderr = stderr;
@@ -810,7 +810,7 @@ var execAWithInput = function (command, input, encoding) {
    log.docker.start (id, project, command);
    var t = Date.now ();
    return new Promise (function (resolve, reject) {
-      var child = exec (command, {encoding: encoding || 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+      var child = exec (command, {encoding: encoding || 'utf8', maxBuffer: 100 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) {
             error.stdout = stdout;
             error.stderr = stderr;
@@ -1213,7 +1213,7 @@ var gitExecAsync = function (projectName, command) {
    var name = containerName (projectName);
    var cmd = 'docker exec ' + name + ' sh -lc ' + shQuote (command);
    return new Promise (function (resolve, reject) {
-      exec (cmd, {encoding: 'utf8', maxBuffer: 5 * 1024 * 1024}, function (error, stdout, stderr) {
+      exec (cmd, {encoding: 'utf8', maxBuffer: 100 * 1024 * 1024}, function (error, stdout, stderr) {
          if (error) reject (error);
          else resolve ((stdout || '').trim ());
       });
