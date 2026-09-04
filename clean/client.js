@@ -7,7 +7,7 @@ B.internal.timeout = 500;
 
 var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log;
 
-// *** TIME ***
+// *** HELPERS ***
 
 var ago = function (date) {
    ms = teishi.time () - new Date (date).getTime ();
@@ -19,6 +19,12 @@ var ago = function (date) {
    if (ms < 30 * 24 * 60 * 60 * 1000) return Math.floor (ms / (24 * 60 * 60 * 1000)) + 'd ago';
    if (ms < 12 * 30 * 24 * 60 * 60 * 1000) return Math.floor (ms / (30 * 24 * 60 * 60 * 1000)) + 'mo ago';
    return Math.floor (ms / (365 * 24 * 60 * 60 * 1000)) + 'y ago';
+}
+
+var shortcut = function (key, ev, x, verb, path, arg) {
+   if (! ev.metaKey || ev.key !== key) return;
+   ev.preventDefault ();
+   return B.call (x, verb, path, arg);
 }
 
 // *** NATIVE RESPONDERS ***
@@ -97,11 +103,11 @@ B.mrespond ([
          if (hash.length === 1) return B.call (x, 'navigate', 'projects');
 
          var projects = B.get ('projects');
-         if (projects && ! dale.stop (projects, true, function (Project) {
-            return Project.name === decodeURIComponent (hash [1]);
+         if (projects && ! dale.stop (projects, true, function (project) {
+            return project.id === hash [1];
          })) return B.call (x, 'navigate', 'projects');
 
-         B.call (x, 'set', 'project', decodeURIComponent (hash [1]));
+         B.call (x, 'set', 'project', hash [1]);
 
          if (! hash [2]) return B.call (x, 'navigate', 'files/' + hash [1] + '/doc/main.md');
 
@@ -123,6 +129,11 @@ B.mrespond ([
       if (inc (loggedViews, hash [0])) {
          B.call (x, 'load', 'projects');
       }
+   }],
+
+   // To validate if the project or file exists after we load the list of projects or the list of files
+   ['change', /^(projects|files)$/, function (x) {
+      B.call (x, 'read', 'hash');
    }],
 
    ['stop', 'propagation', function (x, ev) {
@@ -183,6 +194,19 @@ B.mrespond ([
 
    ['report', 'error', function (x, error) {
       c.ajax ('post', '/error', {}, {priority: 'important', ...error});
+   }],
+
+   // *** KEYBOARD SHORTCUTS ***
+
+   ['keydown', '*', function (x, ev) {
+      if (ev.key === 'Meta') return B.call ('set', ['key', 'command'], true);
+
+      if (B.get ('user', 'admin')) shortcut ('L', ev, x, 'test', 'all');
+   }],
+
+   [/^(keyup|blur)$/, '*', function (x, ev) {
+      if (x.verb === 'keyup' && ev.key === 'Meta') B.call (x, 'rem', 'key', 'command');
+      if (x.verb === 'blur') B.call (x, 'rem', 'key', 'command');
    }],
 
    // *** AUTH ***
@@ -254,15 +278,17 @@ B.mrespond ([
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a project name');
 
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
-      B.call (x, 'post', '/project', {name: name, slot: B.get ('new', 'project', 'slot')}, function (x, error) {
-         if (error) clog (error.body);
+
+      B.call (x, 'post', '/project', {name: name, slot: B.get ('new', 'project', 'slot')}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
 
          B.call (x, 'snackbar', 'clear');
 
          B.call (x, 'rem', 'new', 'project');
-         B.call (x, 'add', 'projects', {name: name});
-         B.call (x, 'navigate', 'files/' + name + '/doc/main.md');
+         B.call (x, 'rem', 'search', 'project');
+
+         B.call (x, 'add', 'projects', {id: rs.body.id, name: name}); // Put the project in projects temporarily until the list of projects is refreshed, so we can navigate to it.
+         B.call (x, 'navigate', 'files/' + rs.body.id + '/doc/main.md');
          B.call (x, 'load', 'projects');
       });
    }],
@@ -294,64 +320,76 @@ B.mrespond ([
       });
    }],
 
-   // *** PROJECTS & FILES ***
+   ['keydown', '*', function (x, ev) {
 
-   ['change', /^(projects|files)$/, function (x) {
-      // To validate if the project or file exists after we load the list of projects or the list of files
-      B.call (x, 'read', 'hash');
+      if (B.get ('view') !== 'projects') return;
+
+      var projects = B.get ('projects');
+      if (projects) dale.go ([1, 2, 3, 4, 5], function (slot) {
+         var project = dale.stopNot (projects, undefined, function (project) {
+            if (project.slot === slot) return project;
+         });
+         if (project) shortcut (slot + '', ev, x, 'navigate', 'files/' + project.id);
+      });
+
+      if (ev.metaKey && ev.key === 's') {
+         shortcut ('s', ev, x, 'set', ['search', 'project'], '');
+         c ('#search-project').focus ();
+      }
+
+      if (ev.key === 'Enter' && c ('#create-project') && ! c ('#create-project').disabled) return B.call (x, 'create', 'project');
+
+      if (B.get ('search', 'project') !== undefined && B.get ('new', 'project') === undefined) {
+         shortcut ('b', ev, x, 'rem', 'search', 'project');
+         shortcut ('e', ev, x, 'set', ['new', 'project'], {slot: undefined});
+      }
+
+      if (B.get ('new', 'project') !== undefined) {
+         if (! c ('#create-project').disabled) shortcut ('e', ev, x, 'create', 'project');
+         if (ev.metaKey && ev.key === 'd') {
+            ev.preventDefault ();
+            c ('#dice-project').click ();
+         }
+      }
+
    }],
+
+   // *** FILES ***
 
    ['keydown', '*', function (x, ev) {
 
-      // Create new project or new file
-      if (ev.key === 'Enter') {
-         if (B.get ('new', 'project') !== undefined) return B.call (x, 'create', 'project');
-         if (B.get ('new', 'file') !== undefined)    return B.call (x, 'create', 'file');
-      }
+      if (B.get ('view') !== 'files') return;
 
-      if (ev.key === 'Meta') return B.call ('set', ['key', 'command'], true);
+      if (ev.key === 'Enter' && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
 
-      var call = function (verb, path, arg) {
-         ev.preventDefault ();
-         return B.call (x, verb, path, arg);
-      }
+      shortcut ('b', ev, x, 'navigate', 'projects');
+      shortcut ('o', ev, x, 'set', ['settings', 'show'], ! B.get ('settings', 'show'));
 
-      if (ev.metaKey && B.get ('user', 'admin')) {
-         if (ev.key === 'l') return call ('test', 'all');
-      }
+      if (B.get ('new', 'file') === undefined) {
+         shortcut ('e', ev, x, 'set', ['file', 'mode'], 'edit');
+         shortcut ('i', ev, x, 'set', ['file', 'mode'], 'view');
+         shortcut ('d', ev, x, 'set', ['new', 'file'], '');
+         shortcut ('x', ev, x, 'set', ['file', 'delete'], ! B.get ('file', 'delete'));
+         if (B.get ('file', 'delete')) shortcut ('v', ev, x, 'delete', 'file', B.get ('file', 'name'));
 
-      // Shortcuts for inner view
-      if (ev.metaKey && B.get ('view') === 'files') {
-         if (ev.key === 'b') return call ('navigate', 'projects');
-         if (ev.key === 'o') return call ('set', ['settings', 'show'], ! B.get ('settings', 'show'));
-         if (B.get ('new', 'file') === undefined) {
-            if (ev.key === 'e') return call ('set', ['file', 'mode'], 'edit');
-            if (ev.key === 'i') return call ('set', ['file', 'mode'], 'view');
-            if (ev.key === 'd') return call ('set', ['new', 'file'], '');
-            if (ev.key === 'x') return call ('set', ['file', 'delete'], ! B.get ('file', 'delete'));
-            if (ev.key === 'v' && B.get ('file', 'delete')) return call ('delete', 'file', B.get ('file', 'name'));
-            if (ev.key === 'j' || ev.key === 'k') {
-               var files = B.get ('files'), current = B.get ('file', 'name');
-               if (! files || ! files.length) return;
-               var index = files.indexOf (current);
-               var next = ev.key === 'j' ? index + 1 : index - 1;
-               if (next < 0) next = files.length - 1;
-               if (next === files.length) next = 0;
-               return call ('navigate', 'files/' + B.get ('project') + '/' + files [next]);
-            }
-         }
-         if (B.get ('new', 'file') !== undefined) {
-            if (ev.key === 'e') return call ('set', ['new', 'type'], 'doc');
-            if (ev.key === 'i') return call ('set', ['new', 'type'], 'dialog');
-            if (ev.key === 'x') return call ('rem', 'new', 'file');
-            if (ev.key === 'd') return call ('create', 'file');
+         if (ev.metaKey && (ev.key === 'j' || ev.key === 'k')) {
+            var files = B.get ('files'), current = B.get ('file', 'name');
+            if (! files || ! files.length) return;
+            ev.preventDefault ();
+            var index = files.indexOf (current);
+            var next = ev.key === 'j' ? index + 1 : index - 1;
+            if (next < 0) next = files.length - 1;
+            if (next === files.length) next = 0;
+            return B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + files [next]);
          }
       }
-   }],
 
-   [/^(keyup|blur)$/, '*', function (x, ev) {
-      if (x.verb === 'keyup' && ev.key === 'Meta') B.call (x, 'rem', 'key', 'command');
-      if (x.verb === 'blur') B.call (x, 'rem', 'key', 'command');
+      if (B.get ('new', 'file') !== undefined) {
+         shortcut ('e', ev, x, 'set', ['new', 'type'], 'doc');
+         shortcut ('i', ev, x, 'set', ['new', 'type'], 'dialog');
+         shortcut ('x', ev, x, 'rem', 'new', 'file');
+         shortcut ('d', ev, x, 'create', 'file');
+      }
    }],
 
    ['change', ['new', 'file'], {priority: -1000}, function (x) {
@@ -366,8 +404,8 @@ B.mrespond ([
          B.call (x, 'list', 'files');
       }, 10);
 
-      var project = dale.stopNot (B.get ('projects'), undefined, function (p) {
-         if (p.name === B.get ('project')) return p;
+      var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
+         if (project.id === B.get ('project')) return project;
       });
       if (! project) return B.call (x, 'navigate', 'projects');
 
@@ -386,8 +424,8 @@ B.mrespond ([
    }],
 
    ['change', ['file', 'name'], function (x) {
-      var project = dale.stopNot (B.get ('projects'), undefined, function (p) {
-         if (p.name === B.get ('project')) return p;
+      var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
+         if (project.id === B.get ('project')) return project;
       });
       if (! project) return;
 
@@ -398,7 +436,7 @@ B.mrespond ([
    }],
 
    ['save', 'file', function (x, name, value, New) {
-      B.call (x, 'post', '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, {content: value}, function (x, error, rs) {
+      B.call (x, 'post', '/project/' + B.get ('project') + '/file/' + name, {content: value}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
 
          if (! New) B.call (x, 'mset', ['file', 'content'], value);
@@ -423,7 +461,7 @@ B.mrespond ([
    ['delete', 'file', function (x, name) {
       if (! confirm ('Delete file "' + name + '"? This cannot be undone.')) return;
 
-      B.call (x, 'delete', 'project/' + encodeURIComponent (B.get ('project')) + '/file/' + name, function (x, error, rs) {
+      B.call (x, 'delete', 'project/' + B.get ('project') + '/file/' + name, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'list', 'files');
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project') + '/doc/main.md');
@@ -432,7 +470,7 @@ B.mrespond ([
 
    ['create', 'dialog', function (x, name) {
 
-      B.call (x, 'post', '/project/' + encodeURIComponent (B.get ('project')) + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
+      B.call (x, 'post', '/project/' + B.get ('project') + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
 
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem creating the dialog');
 
@@ -441,8 +479,8 @@ B.mrespond ([
          B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + rs.body.filename);
          B.call (x, 'list', 'files');
       });
-
    }],
+
 ]);
 
 // *** VIEWS ***
@@ -674,6 +712,26 @@ views.modal = function (attributes, contents) {
    ]];
 }
 
+views.projectColor = function (text) {
+
+   var projectColors = [
+      {bg: 'bg-vblue',        fg: 'vnearwhite'},
+      {bg: 'bg-vpurple',      fg: 'vnearwhite'},
+      {bg: 'bg-light-purple', fg: 'vnearwhite'},
+      {bg: 'bg-vgray',        fg: 'vdeepnavy'},
+      {bg: 'bg-dark-green',   fg: 'vnearwhite'},
+      {bg: 'bg-gold',         fg: 'vdeepnavy'},
+      {bg: 'bg-dark-pink',    fg: 'vnearwhite'},
+      {bg: 'bg-vorange',      fg: 'vdeepnavy'},
+   ];
+
+   var sum = dale.acc (((text || '') + '').split (''), 0, function (a, b) {
+      return a + b.charCodeAt (0);
+   });
+   var colors = projectColors [sum % projectColors.length];
+   return colors.bg + ' ' + colors.fg;
+}
+
 views.projects = function () {
    var phi = (1 + Math.sqrt (5)) / 2;
    var scale = 140 / 1400;
@@ -729,26 +787,6 @@ views.projects = function () {
       css.colors.vviolet,
    ];
 
-   var projectColor = function (text) {
-
-      var projectColors = [
-         {bg: 'bg-vblue',        fg: 'vnearwhite'},
-         {bg: 'bg-vpurple',      fg: 'vnearwhite'},
-         {bg: 'bg-light-purple', fg: 'vnearwhite'},
-         {bg: 'bg-vgray',        fg: 'vdeepnavy'},
-         {bg: 'bg-dark-green',   fg: 'vnearwhite'},
-         {bg: 'bg-gold',         fg: 'vdeepnavy'},
-         {bg: 'bg-dark-pink',    fg: 'vnearwhite'},
-         {bg: 'bg-vorange',      fg: 'vdeepnavy'},
-      ];
-
-      var sum = dale.acc (((text || '') + '').split (''), 0, function (a, b) {
-         return a + b.charCodeAt (0);
-      });
-      var colors = projectColors [sum % projectColors.length];
-      return colors.bg + ' ' + colors.fg;
-   }
-
    return B.view ('projects', function (projects) {
 
       if (! projects) return ['div', {
@@ -789,8 +827,8 @@ views.projects = function () {
                         });
 
                         return ['div', {
-                           class: 'absolute flex items-center justify-center pointer' + (matchingProject ? ' ' + projectColor (matchingProject.name) : ''),
-                           onclick: matchingProject ? B.ev ('navigate', 'files/' + encodeURIComponent (matchingProject.name)) : undefined,
+                           class: 'absolute flex items-center justify-center pointer' + (matchingProject ? ' ' + views.projectColor (matchingProject.name) : ''),
+                           onclick: matchingProject ? B.ev ('navigate', 'files/' + matchingProject.id) : undefined,
                            onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
                            onmouseleave: B.ev ('rem', [], 'hover'),
                            style: style ({
@@ -803,9 +841,9 @@ views.projects = function () {
                               width: vw (slotWidth),
                            }),
                         }, (function () {
-                           if (matchingProject) return ['span', {class: 'f3 fw7'}, dale.go (matchingProject.name.split (' '), function (word) {
+                           if (matchingProject) return [['span', {class: 'f3 fw7'}, dale.go (matchingProject.name.split (' '), function (word) {
                               return word [0];
-                           }).slice (0, 3).join (' ')];
+                           }).slice (0, 3).join (' ')], views.tooltip (index + 1)];
 
                            if (! matchingProject) return ['span', {
                               opaque: true,
@@ -819,7 +857,7 @@ views.projects = function () {
                      B.view (['hover', 'project'], function (project) {
                         if (! project) return ['div'];
                         return ['div', {
-                           class: 'absolute flex flex-column items-center justify-center ' + projectColor (project.name),
+                           class: 'absolute flex flex-column items-center justify-center ' + views.projectColor (project.name),
                            style: style ({
                               border: vw (1.5) + ' solid ' + css.colors.vborderblue,
                               'border-radius': vw (slotBorderRadius),
@@ -849,7 +887,7 @@ views.projects = function () {
                   if (search !== undefined) return ['div', {
                      class: 'flex flex-column relative w-100',
                      style: style ({
-                        'padding-top': '14vh',
+                        'padding-top': '16vh',
                      }),
                   }, [
                      ['div', {
@@ -859,28 +897,28 @@ views.projects = function () {
                            height: '14vh',
                            'min-height': '3rem',
                            padding: '2vh 15vw',
-                           top: 0,
+                           top: '2vh',
                            'z-index': 1,
                         }),
                      }, [
                         ['div', {
-                           class: 'bg-transparent flex items-center justify-center pointer vlightblue',
+                           class: 'bg-transparent flex items-center justify-center pointer relative vlightblue',
                            onclick: B.ev ('rem', 'search', 'project'),
                            style: style ({
                               border: '0.09375rem solid ' + css.colors.vborderblue,
                               'border-radius': '0.75rem',
                               flex: 1,
                            }),
-                        }, ['span', {class: 'fw6 f4'}, '‹ Back to shell']],
+                        }, [views.tooltip ('B'), ['span', {class: 'fw6 f4'}, '‹ Back to shell']]],
                         ['div', {
-                           class: 'bg-transparent flex items-center justify-center pointer vgreen',
+                           class: 'bg-transparent flex items-center justify-center pointer relative vgreen',
                            onclick: B.ev ('set', ['new', 'project'], {slot: undefined}),
                            style: style ({
                               border: '0.09375rem solid ' + css.colors.vborderblue,
                               'border-radius': '0.75rem',
                               flex: 1,
                            }),
-                        }, ['span', {class: 'fw6 f4'}, '+ New project']],
+                        }, [views.tooltip ('E'), ['span', {class: 'fw6 f4'}, '+ New project']]],
                      ]],
                      (function () {
                         var cardWidth = 70 / phi;
@@ -890,8 +928,8 @@ views.projects = function () {
                            if (! project.name.match (search)) return;
                            var offset = 15 + (Math.sin (index++ * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
                            return ['div', {
-                              class: 'border-box flex items-center justify-between pointer ' + projectColor (project.name),
-                              onclick: B.ev ('navigate', 'files/' + encodeURIComponent (project.name)),
+                              class: 'border-box flex items-center justify-between pointer ' + views.projectColor (project.name),
+                              onclick: B.ev ('navigate', 'files/' + project.id),
                               style: style ({
                                  'border-radius': '0.75rem',
                                  height: '10vh',
@@ -964,6 +1002,7 @@ views.projects = function () {
                      width: vw (containerWidth),
                   }),
                }, [
+                  views.tooltip ('S'),
                   ['i', {
                      class: 'absolute bi bi-search',
                      style: style ({
@@ -976,8 +1015,8 @@ views.projects = function () {
                      }),
                   }],
                   ['input', {
-                     class: 'bg-vnavy border-box outline-0 search-project w-100',
-                     onchange: B.ev ('set', ['search', 'project']),
+                     class: 'bg-vnavy border-box outline-0 w-100',
+                     id: 'search-project',
                      onfocus: B.ev ('set', ['search', 'project'], ''),
                      oninput: B.ev ('set', ['search', 'project']),
                      placeholder: 'Search',
@@ -1036,20 +1075,27 @@ views.projects = function () {
                         transform: 'translateY(-50%)',
                      })
                   }],
-                  ['i', {
-                     class: 'absolute bi bi-dice-' + Math.ceil (Math.random () * 5) + ' pointer',
+                  ['span', {
+                     class: 'absolute pointer',
+                     id: 'dice-project',
                      onclick: B.ev ('set', ['new', 'project', 'name'], randomName ()),
                      style: style ({
-                        color: css.colors.vmidblue,
-                        'font-size': vw (16),
                         right: vw (14),
                         top: '50%',
                         transform: 'translateY(-50%)',
                      })
-                  }],
+                  }, [
+                     ['i', {
+                        class: 'bi bi-dice-' + Math.ceil (Math.random () * 5),
+                        style: style ({
+                           color: css.colors.vmidblue,
+                           'font-size': vw (16),
+                        })
+                     }],
+                     views.tooltip ('D'),
+                  ]],
                   ['input', {
                      class: 'bg-vnavy border-box h-100 new-project-input outline-0 w-100',
-                     onchange: B.ev ('set', ['new', 'project', 'name']),
                      oninput: B.ev ('set', ['new', 'project', 'name']),
                      placeholder: 'Name your project',
                      style: style ({
@@ -1065,8 +1111,9 @@ views.projects = function () {
                   }],
                ]],
                ['button', {
-                  class: 'bn fw7 pointer w-100',
+                  class: 'bn fw7 pointer relative w-100',
                   disabled: allowCreation !== true,
+                  id: 'create-project',
                   onclick: B.ev ('create', 'project'),
                   style: style ({
                      'background-color': allowCreation === true ? css.colors.vgreen : '#555',
@@ -1076,11 +1123,11 @@ views.projects = function () {
                      'margin-top': '1rem',
                      padding: '1rem 0',
                   })
-               }, {
+               }, [allowCreation === true ? views.tooltip ('E') : '', {
                   conflict: 'That name\'s taken',
                   empty: 'Enter a name',
                   true: 'Boom',
-               } [allowCreation]]
+               } [allowCreation]]]
             ]);
          }),
 
@@ -1122,7 +1169,6 @@ views.projects = function () {
                      }],
                      ['input', {
                         class: 'bg-vnavy border-box h-100 edit-project-input outline-0 w-100',
-                        onchange: B.ev ('set', ['edit', 'project', 'name']),
                         oninput: B.ev ('set', ['edit', 'project', 'name']),
                         placeholder: 'Rename your project',
                         style: style ({
@@ -1196,14 +1242,18 @@ views.files = function () {
       padding: '1.5rem',
    });
 
-   return B.view ([['projects'], ['project']], function (projects, project) {
+   return B.view ([['projects'], ['project']], function (projects, projectId) {
       if (! projects) return ['div', {
          class: 'bg-vmidnight flex flex-wrap items-center justify-center min-vh-100',
          style: style ({gap: '2rem'}),
       }, dale.go (dale.times (80), () => views.spinny ())];
 
+      var project = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === projectId) return project;
+      });
+
       return ['div', {
-         class: 'bg-vmidnight border-box flex flex-column min-vh-100',
+         class: views.projectColor (project.name) + ' border-box flex flex-column min-vh-100',
          style: style ({
             gap: '1.5rem',
             padding: '1.5rem',
@@ -1211,10 +1261,10 @@ views.files = function () {
       }, [
          ['div', {class: 'flex items-center'}, [
             ['span', {
-               class: 'f1 fw7 lh-solid light-blue mr3 pointer',
+               class: 'f1 fw7 lh-solid mr3 pointer relative',
                onclick: B.ev ('navigate', 'projects'),
-            }, '‹'],
-            ['span', {class: 'f2 fw7 vnearwhite'}, project],
+            }, ['‹', views.tooltip ('B')]],
+            ['span', {class: 'f2 fw7'}, project.name],
          ]],
          ['div', {
             style: style ({

@@ -1,5 +1,23 @@
 # Vibey development notes
 
+## 2026-09-04
+
+Let your users do your distribution.
+
+The harness is the gateway to being the OS. From collaboration come the files and apps. The harness is essentially communication, chat, between human, AI and deterministic software.
+
+The system itself should be "done and gets things smart": incredibly fast (done) and helps you organize things in a way your way of working becomes smarter.
+
+https://www.bell-labs.com/usr/dmr/www/hist.pdf
+"What we wanted to preserve was not just a good environment in which to do programming, but a system around which a fellowship could form. We knew from experience that the essence of communal computing, as supplied by remote-access, time-shared machines, is not just to type programs into a terminal instead of a keypunch, but to encourage close communication."
+
+That is it. With communication at the center, with the possibility of files and computation, this is what vibey is like.
+
+No matter how much I want, I can't rush this. The shortcuts add so much life to it.
+
+TODO:
+- fix back to shell shortcut
+
 ## 2026-09-03
 
 Looking back on vibey from the future, where I cannot go back to the way of doing things before? (redux)
