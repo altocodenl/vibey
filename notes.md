@@ -1,5 +1,23 @@
 # Vibey development notes
 
+## 2026-09-05
+
+TODO files
+- navigate between files with the keyboard
+- upload files
+- switch to main.md (remove doc/)
+- open text file
+- edit text file
+- open media file
+- (later) open sqlite files
+- (later) stream large files
+- (later) edit text file through diffs rather than whole file write (faster)
+
+A painful problem: git contention in concurrent commands which generate concurrent commits. What's one to do?
+- We won't make commands sequential. A single long command would block the project. We live in a post-multiprogramming world.
+- We still need to make commits, even if they're best effort in they over/undercatching.
+- This calls for a hack: retry the commit every 1ms in the command directly (awk?) until it goes through. May history judge.
+
 ## 2026-09-04
 
 Let your users do your distribution.
@@ -15,8 +33,8 @@ That is it. With communication at the center, with the possibility of files and 
 
 No matter how much I want, I can't rush this. The shortcuts add so much life to it.
 
-TODO:
-- fix back to shell shortcut
+gpt5.5:
+"The immediate product focus I’d suggest is the “irreversible demo”"
 
 ## 2026-09-03
 

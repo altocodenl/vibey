@@ -390,13 +390,14 @@ docker.run = async function (id, command, options) {
    if (type (command) === 'array') command = command.join (' ');
 
    var commit = options && options.commit, originalCommand;
+   // Retry commit up to 50x at ~1ms to handle concurrent git lock contention
    if (commit) {
       originalCommand = command;
-      command += ' && if [ -n "$(git status --porcelain)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && git rev-parse HEAD; else echo; fi';
+      command += ' && n=0; s=0; while [ $n -lt 50 ]; do if [ -n "$(git status --porcelain 2>/dev/null)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && git rev-parse HEAD && s=1 && break; fi; sleep 0.001; n=$((n+1)); done; [ $s = 0 ] && echo || true';
       delete options.commit;
    }
 
-   var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, options || {});
+   var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, {... options, 'catch': true});
    if (result.code === 1 && result.stderr && result.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
       var recreate = await run ('docker', 'run', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
       if (recreate.code) {
@@ -405,6 +406,7 @@ docker.run = async function (id, command, options) {
       }
       return docker.run (id.replace ('vibey-project-', ''), originalCommand || command, options);
    }
+   if (result.code && ! (options && options.catch)) throw result;
    if (commit && result.stdout) {
       result.sha = last (result.stdout.split ('\n'), 2) || undefined;
       result.stdout = result.stdout.replace (/[^\n]{0,}\n$/, '');
@@ -415,7 +417,7 @@ docker.run = async function (id, command, options) {
 }
 
 docker.read = function (id, path) {
-   return docker.run (id, ['cat', path]);
+   return docker.run (id, 'cat ' + Path.quote (path));
 }
 
 docker.write = function (id, path, content) {

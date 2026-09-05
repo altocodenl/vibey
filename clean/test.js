@@ -477,6 +477,10 @@ if (mode === 'server') {
                ]);
             }],
             ['Read back base64-written file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/binary.txt'}}, 200, assertBody ('hello base64')],
+            ['Write file with spaces in name', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/come back.md', content: 'hello spaces'}}, 200, function (s, rq, rs) {
+               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
+            }],
+            ['Read file with spaces in name', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/come back.md'}}, 200, assertBody ('hello spaces')],
             ['Run a command with pipe', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs, next) {
                if (! assert ([
@@ -494,17 +498,24 @@ if (mode === 'server') {
                }) ();
             }],
             ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 5, "Run 'echo foo > doc/another.md && cat doc/another.md'");
+               return s.assertCommit (rs.body.stdout, 6, "Run 'echo foo > doc/another.md && cat doc/another.md'");
             }],
             ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
-               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.txt\nmain.md\n', teishi.test.equal])) return false;
+               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.txt\ncome back.md\nmain.md\n', teishi.test.equal])) return false;
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.projectId);
+                  next ();
+               }) ();
+            }],
+            ['Read file after container has been turned off', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
+            ['Stop and remove container for next test', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'true'}}, 200, function (s, rq, rs, next) {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   await run ('docker', 'rm', 'vibey-project-' + s.projectId);
                   next ();
                }) ();
             }],
-            ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nbinary.txt\nmain.md\n'})],
+            ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nbinary.txt\ncome back.md\nmain.md\n'})],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {

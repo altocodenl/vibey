@@ -5,12 +5,12 @@ var B = window.B;
 B.prod = true;
 B.internal.timeout = 500;
 
-var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log;
+var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log, s = B.store;
 
 // *** HELPERS ***
 
 var ago = function (date) {
-   ms = teishi.time () - new Date (date).getTime ();
+   var ms = teishi.time () - new Date (date).getTime ();
    if (ms < 0) return '';
    if (ms < 1000) return 'now';
    if (ms < 60 * 1000) return Math.floor (ms / 1000) + 's ago';
@@ -19,6 +19,15 @@ var ago = function (date) {
    if (ms < 30 * 24 * 60 * 60 * 1000) return Math.floor (ms / (24 * 60 * 60 * 1000)) + 'd ago';
    if (ms < 12 * 30 * 24 * 60 * 60 * 1000) return Math.floor (ms / (30 * 24 * 60 * 60 * 1000)) + 'mo ago';
    return Math.floor (ms / (365 * 24 * 60 * 60 * 1000)) + 'y ago';
+}
+
+var size = function (bytes) {
+   if (bytes < 1000) return bytes + 'B';
+   if (bytes < 1000 * 1000) return Math.floor (bytes / 1000) + 'K';
+   if (bytes < 10 * 1000 * 1000) return (bytes / (1000 * 1000)).toFixed (1) + 'M';
+   if (bytes < 1000 * 1000 * 1000) return Math.floor (bytes / (1000 * 1000)) + 'M';
+   if (bytes < 10 * 1000 * 1000 * 1000) return (bytes / (1000 * 1000 * 1000)).toFixed (1) + 'G';
+   return Math.floor (bytes / (1000 * 1000 * 1000)) + 'G';
 }
 
 var shortcut = function (key, ev, x, verb, path, arg) {
@@ -183,7 +192,7 @@ B.mrespond ([
          if (cb) {
             if (error) {
                error.body = error.responseText;
-               if (teishi.parse (error.body)) error.body = teishi.parse (body);
+               if (teishi.parse (error.body)) error.body = teishi.parse (error.body);
             }
             cb (x, error, rs);
          }
@@ -340,11 +349,15 @@ B.mrespond ([
       if (ev.key === 'Enter' && c ('#create-project') && ! c ('#create-project').disabled) return B.call (x, 'create', 'project');
 
       if (B.get ('search', 'project') !== undefined && B.get ('new', 'project') === undefined) {
-         shortcut ('b', ev, x, 'rem', 'search', 'project');
+         if (ev.metaKey && ev.key === 'b') {
+            c ('#search-project').blur ();
+            shortcut ('b', ev, x, 'rem', 'search', 'project');
+         }
          shortcut ('e', ev, x, 'set', ['new', 'project'], {slot: undefined});
       }
 
       if (B.get ('new', 'project') !== undefined) {
+         if (ev.key === 'Escape') return B.call (x, 'rem', 'new', 'project');
          if (! c ('#create-project').disabled) shortcut ('e', ev, x, 'create', 'project');
          if (ev.metaKey && ev.key === 'd') {
             ev.preventDefault ();
@@ -360,15 +373,22 @@ B.mrespond ([
 
       if (B.get ('view') !== 'files') return;
 
-      if (ev.key === 'Enter' && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
+      if (ev.key === 'Enter' && c ('#create-file') && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
 
       shortcut ('b', ev, x, 'navigate', 'projects');
       shortcut ('o', ev, x, 'set', ['settings', 'show'], ! B.get ('settings', 'show'));
 
       if (B.get ('new', 'file') === undefined) {
-         shortcut ('e', ev, x, 'set', ['file', 'mode'], 'edit');
-         shortcut ('i', ev, x, 'set', ['file', 'mode'], 'view');
-         shortcut ('d', ev, x, 'set', ['new', 'file'], '');
+         if (ev.metaKey && ev.key === 's') {
+            ev.preventDefault ();
+            c ('#search-file').focus ();
+         }
+         shortcut ('y', ev, x, 'set', ['file', 'mode'], B.get ('file', 'mode') === 'edit' ? 'view' : 'edit');
+         if (ev.metaKey && ev.key === 'e') {
+            ev.preventDefault ();
+            B.call (x, 'set', ['new', 'file'], '');
+            B.call (x, 'set', ['new', 'type'], 'file');
+         }
          shortcut ('x', ev, x, 'set', ['file', 'delete'], ! B.get ('file', 'delete'));
          if (B.get ('file', 'delete')) shortcut ('v', ev, x, 'delete', 'file', B.get ('file', 'name'));
 
@@ -385,10 +405,11 @@ B.mrespond ([
       }
 
       if (B.get ('new', 'file') !== undefined) {
-         shortcut ('e', ev, x, 'set', ['new', 'type'], 'doc');
+         if (ev.key === 'Escape') return B.call (x, 'rem', 'new', 'file');
+         if (c ('#create-file') && ! c ('#create-file').disabled) shortcut ('e', ev, x, 'create', 'file');
+         shortcut ('f', ev, x, 'set', ['new', 'type'], 'file');
          shortcut ('i', ev, x, 'set', ['new', 'type'], 'dialog');
          shortcut ('x', ev, x, 'rem', 'new', 'file');
-         shortcut ('d', ev, x, 'create', 'file');
       }
    }],
 
@@ -409,14 +430,16 @@ B.mrespond ([
       });
       if (! project) return B.call (x, 'navigate', 'projects');
 
-      B.call (x, 'post', '/project/run', {id: project.id, command: "find /project -type f -not -path '/project/.git/*' -printf '%s %p\\n' | sort -t/ -k3"}, function (x, error, rs) {
+      B.call (x, 'post', '/project/run', {id: project.id, command: "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %p\\n' | sort -t/ -k3"}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          var files = dale.fil ((rs.body.stdout || '').split ('\n'), undefined, function (line) {
             if (! line) return;
-            var space = line.indexOf (' ');
+            var first = line.indexOf (' ');
+            var second = line.indexOf (' ', first + 1);
             return {
-               name: line.slice (space + 1).replace ('/project/', ''),
-               size: parseInt (line.slice (0, space)),
+               mtime: Math.round (parseFloat (line.slice (first + 1, second)) * 1000),
+               name: line.slice (second + 1).replace ('/project/', ''),
+               size: parseInt (line.slice (0, first)),
             };
          });
          B.call (x, 'set', 'files', files);
@@ -435,25 +458,21 @@ B.mrespond ([
       });
    }],
 
-   ['save', 'file', function (x, name, value, New) {
-      B.call (x, 'post', '/project/' + B.get ('project') + '/file/' + name, {content: value}, function (x, error, rs) {
+   ['write', 'file', function (x, name, content, New) {
+      B.call (x, 'post', '/project/write', {id: B.get ('project'), path: name, content: content}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
 
-         if (! New) B.call (x, 'mset', ['file', 'content'], value);
+         if (! New) B.call (x, 'mset', ['file', 'content'], content);
          else       B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + name);
       });
    }],
 
    ['create', 'file', function (x) {
       var name = B.get ('new', 'file').trim ();
-      if (B.get ('new', 'type') === 'dialog') return B.call (x, 'create', 'dialog', name);
 
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a name');
 
-      name = 'doc/' + name + '.md';
-
-      B.call (x, 'madd', 'files', name);
-      B.call (x, 'save', 'file', name, '', 'new');
+      B.call (x, 'write', 'file', name, '', 'new');
       B.call (x, 'rem', 'new', 'file');
       B.call (x, 'list', 'files');
    }],
@@ -461,10 +480,15 @@ B.mrespond ([
    ['delete', 'file', function (x, name) {
       if (! confirm ('Delete file "' + name + '"? This cannot be undone.')) return;
 
-      B.call (x, 'delete', 'project/' + B.get ('project') + '/file/' + name, function (x, error, rs) {
+      var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
+         if (project.id === B.get ('project')) return project;
+      });
+      if (! project) return;
+
+      B.call (x, 'post', '/project/run', {id: project.id, command: 'rm -f /project/' + name}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'list', 'files');
-         if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project') + '/doc/main.md');
+         if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project'));
       });
    }],
 
@@ -1230,9 +1254,15 @@ views.projects = function () {
 views.files = function () {
 
    var iconAndName = function (name) {
-      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], name];
-      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1 vviolet'}], name];
-      return name;
+      var parts = name.split ('/');
+      var styled = [];
+      dale.go (parts, function (part, index) {
+         if (index > 0) styled.push (['span', {class: 'vgray'}, ' / ']);
+         styled.push (part);
+      });
+      if (name.match ('^chat/')) return [['i', {class: 'bi bi-chat-left-dots mr1 vviolet'}], styled];
+      if (name.match (/\.md$/)) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], styled];
+      return styled;
    }
 
    var paneStyle = style ({
@@ -1276,10 +1306,10 @@ views.files = function () {
          }, [
             ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, [
                ['button', {
-                  class: 'bg-vgreen bn br2 fw6 pointer vnearwhite w-100',
-                  onclick: B.ev ('set', ['new', 'file'], ''),
+                  class: 'bg-vgreen bn br2 fw6 pointer relative vnearwhite w-100',
+                  onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file']),
                   style: style ({padding: '0.75rem'}),
-               }, '+ New file'],
+               }, [views.tooltip ('E'), '+ New']],
                B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
                   if (! files) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'Loading...'];
                   if (! files.length) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'No files yet.'];
@@ -1293,10 +1323,14 @@ views.files = function () {
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
                            padding: '0.5rem 0.625rem',
                         }),
-                     }, iconAndName (file.name)];
+                     }, [
+                        ['div', iconAndName (file.name)],
+                        ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
+                     ]];
                   })];
                }),
                ['div', {class: 'relative w-100'}, [
+                  views.tooltip ('S'),
                   ['i', {
                      class: 'absolute bi bi-search',
                      style: style ({
@@ -1309,6 +1343,7 @@ views.files = function () {
                   }],
                   ['input', {
                      class: 'bg-vnavy border-box fw6 outline-0 w-100',
+                     id: 'search-file',
                      oninput: B.ev ('set', ['search', 'file']),
                      placeholder: 'Search',
                      style: style ({
@@ -1326,6 +1361,137 @@ views.files = function () {
             ]],
             ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}],
          ]],
+
+         // File creation modal
+         B.view ([['new', 'file'], ['new', 'type'], ['files']], function (newFile, newType, files) {
+            if (newFile === undefined) return ['div'];
+
+            var allowCreation = (function () {
+               var name = (newFile || '').trim ();
+               if (name.length === 0) return 'empty';
+               var conflict = dale.stop (files || [], true, function (file) {
+                  return file.name === name;
+               });
+               return conflict ? 'conflict' : true;
+            }) ();
+
+            return views.modal ({onclick: B.ev (['rem', 'new', 'file'], ['rem', 'new', 'type'])}, [
+               ['div', {
+                  class: 'flex items-center justify-between mb3',
+               }, [
+                  ['div', {
+                     class: 'flex',
+                     style: style ({gap: '0.5rem'}),
+                  }, [
+                  ['button', {
+                     class: 'bn br2 f6 fw6 ph3 pointer pv2 relative ' + (newType === 'file' ? 'bg-vgreen' : 'bg-transparent vgray'),
+                     onclick: B.ev ('set', ['new', 'type'], 'file'),
+                     style: newType === 'file' ? undefined : style ({
+                        border: '0.0625rem solid ' + css.colors.vborderblue,
+                     }),
+                  }, [
+                     newType === 'file' ? '' : views.tooltip ('F'),
+                     ['i', {class: 'bi bi-file-text mr1'}],
+                     'File',
+                  ]],
+                  ['button', {
+                     class: 'bg-transparent bn br2 f6 fw6 o-40 ph3 pv2 vgray',
+                     disabled: true,
+                     style: style ({
+                        border: '0.0625rem solid ' + css.colors.vborderblue,
+                        cursor: 'not-allowed',
+                     }),
+                  }, [
+                     ['i', {class: 'bi bi-chat-dots mr1'}],
+                     'Chat',
+                  ]],
+                  ['button', {
+                     class: 'bg-transparent bn br2 f6 fw6 o-40 ph3 pv2 vgray',
+                     disabled: true,
+                     style: style ({
+                        border: '0.0625rem solid ' + css.colors.vborderblue,
+                        cursor: 'not-allowed',
+                     }),
+                  }, [
+                     ['i', {class: 'bi bi-code-square mr1'}],
+                     'App',
+                  ]],
+                  ]],
+                  ['div', {
+                     class: 'flex items-center',
+                     style: style ({gap: '0.5rem'}),
+                  }, [
+                     ['span', {class: 'f6 fw6 vmidblue'}, 'Upload'],
+                     ['button', {
+                        class: 'bg-transparent bn br2 f6 fw6 ph3 pointer pv2 relative vgray',
+                        onclick: B.ev ('upload', 'file'),
+                        style: style ({
+                           border: '0.0625rem solid ' + css.colors.vborderblue,
+                        }),
+                     }, [
+                        views.tooltip ('U'),
+                        ['i', {class: 'bi bi-file-text mr1'}],
+                        'File',
+                     ]],
+                     ['button', {
+                        class: 'bg-transparent bn br2 f6 fw6 ph3 pointer pv2 relative vgray',
+                        onclick: B.ev ('upload', 'folder'),
+                        style: style ({
+                           border: '0.0625rem solid ' + css.colors.vborderblue,
+                        }),
+                     }, [
+                        views.tooltip ('R'),
+                        ['i', {class: 'bi bi-folder mr1'}],
+                        'Folder',
+                     ]],
+                  ]],
+               ]],
+               ['div', {class: 'relative w-100'}, [
+                  ['i', {
+                     class: 'absolute bi bi-pencil vmidblue',
+                     style: style ({
+                        left: '0.875rem',
+                        'pointer-events': 'none',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                     }),
+                  }],
+                  ['input', {
+                     class: 'bg-vnavy border-box new-file-input outline-0 w-100',
+                     oninput: B.ev ('set', ['new', 'file']),
+                     placeholder: 'Name your file',
+                     style: style ({
+                        border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
+                        'border-radius': '0.75rem',
+                        color: css.rgba (css.colors.vlightblue, 0.8),
+                        'font-size': '1rem',
+                        height: '3rem',
+                        'padding-left': '2.5rem',
+                        'padding-right': '1rem',
+                     }),
+                     type: 'text',
+                     value: newFile,
+                  }],
+               ]],
+               ['button', {
+                  class: 'bn br2 f5 fw7 mt3 pointer pv3 relative w-100',
+                  disabled: allowCreation !== true,
+                  id: 'create-file',
+                  onclick: B.ev ('create', newType),
+                  style: style ({
+                     'background-color': allowCreation === true ? css.colors.vgreen : css.colors.vgray,
+                     color: '#000',
+                  }),
+               }, [
+                  allowCreation === true ? views.tooltip ('E') : '',
+                  {
+                     conflict: 'That name\'s taken',
+                     empty: 'Enter a name',
+                     true: 'Boom',
+                  } [allowCreation],
+               ]],
+            ]);
+         }),
       ]];
    });
 }
@@ -1419,7 +1585,7 @@ views.files_old = function () {
                   ['div', {class: 'flex mt3', style: style ({gap: '0.5rem'})}, [
                      ['button', {
                         class: css.button + ' f6 ph3 pv2 shadow-primary relative',
-                        onclick: B.ev ('set', ['new', 'file'], '')
+                        onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file'])
                      }, [
                         command ? ['span', {class: 'cmd-tooltip'}, 'D'] : '',
                         '+ Add'
@@ -1527,8 +1693,8 @@ views.files_old = function () {
                      if (mode === 'edit' && ! isDialog) return ['textarea', {
                         class: 'db w-100 bn outline-0 vnearwhite lh-copy f5 bg-vnavy',
                         style: style ({color: css.colors.nearwhite, flex: 1, resize: 'none', 'font-family': 'monospace'}),
-                        oninput:  B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
-                        onchange: B.ev ('save', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
+                        oninput:  B.ev ('write', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
+                        onchange: B.ev ('write', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
                         value: content,
                         autofocus: true
                      }, content || ''];
