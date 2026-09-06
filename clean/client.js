@@ -145,6 +145,10 @@ B.mrespond ([
       B.call (x, 'read', 'hash');
    }],
 
+   ['change', ['file', 'name'], function (x) {
+      B.call (x, 'read', 'file');
+   }],
+
    ['stop', 'propagation', function (x, ev) {
       ev.stopPropagation ();
    }],
@@ -443,10 +447,12 @@ B.mrespond ([
             };
          });
          B.call (x, 'set', 'files', files);
+
+         B.call (x, 'read', 'file');
       });
    }],
 
-   ['change', ['file', 'name'], function (x) {
+   ['read', 'file', function (x) {
       var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
          if (project.id === B.get ('project')) return project;
       });
@@ -657,7 +663,7 @@ views.main = function () {
          // Dynamic view
          (function () {
             if (! views [view]) return ['div'];
-            return ['div', {class: 'min-vh-100'}, views [view] ()];
+            return ['div', {class: 'vh-100'}, views [view] ()];
          }) (),
 
          // Snackbar
@@ -1283,13 +1289,12 @@ views.files = function () {
       });
 
       return ['div', {
-         class: views.projectColor (project.name) + ' border-box flex flex-column min-vh-100',
+         class: views.projectColor (project.name) + ' border-box flex flex-column vh-100',
          style: style ({
-            gap: '1.5rem',
-            padding: '1.5rem',
+            padding: '1.5rem 1.5rem 0 1.5rem',
          }),
       }, [
-         ['div', {class: 'flex items-center'}, [
+         ['div', {class: 'flex items-center mb3'}, [
             ['span', {
                class: 'f1 fw7 lh-solid mr3 pointer relative',
                onclick: B.ev ('navigate', 'projects'),
@@ -1304,6 +1309,7 @@ views.files = function () {
                'grid-template-columns': '23.6fr 76.4fr',
             }),
          }, [
+            // Left pane
             ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, [
                ['button', {
                   class: 'bg-vgreen bn br2 fw6 pointer relative vnearwhite w-100',
@@ -1311,7 +1317,7 @@ views.files = function () {
                   style: style ({padding: '0.75rem'}),
                }, [views.tooltip ('E'), '+ New']],
                B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
-                  if (! files) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'Loading...'];
+                  if (! files) return ['div', {class: 'flex-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
                   if (! files.length) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'No files yet.'];
                   return ['div', {class: 'flex-auto overflow-y-auto pt3'}, dale.fil (files, undefined, function (file) {
                      if (search && ! file.name.match (search)) return;
@@ -1359,7 +1365,15 @@ views.files = function () {
                   }],
                ]],
             ]],
-            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}],
+            // Right pane
+            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, B.view ('file', function (file) {
+               if (! file) return ['div'];
+               if (! file.name.match (/\.md$/)) return ['pre', content];
+               return ['div', {
+                  class: 'lh-copy flex-auto overflow-auto vgray',
+                  opaque: true
+               }, ['LITERAL', marked.parse (file.content || '')]];
+            })],
          ]],
 
          // File creation modal
@@ -1540,7 +1554,7 @@ views.files_old = function () {
                   ['div', {class: 'flip-card-front project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
                   ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
                      ['br'], ['br'],
-                     ! files ? ['div', {class: 'vgray lh-copy'}, 'Loading files...'] : ! files.length ? ['div', {class: 'vgray lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file, index) {
+                     ! files ? ['div', {class: 'vgray lh-copy'}, views.spinny ()] : ! files.length ? ['div', {class: 'vgray lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file, index) {
                         var active = file === name;
                         return ['div', {
                            class: 'mb2 pb2',

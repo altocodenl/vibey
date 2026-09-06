@@ -1,5 +1,23 @@
 # Vibey development notes
 
+## 2026-09-06
+
+It is remarkable that we might not need any dedicated file endpoints at all. Well, never mind, perhaps for uploading a folder. In any case, it will be minimal.
+
+Vibey needs *extensions*. In the server, they are bordering on trivial: you can already run commands, and config will be a file. In the client, it should be the ability to run any code on top of the client, even to replace it completely. This bodes remarkable security challenges, but vibey needs to be like emacs: if anything, extensible. Whatever vanilla vibey I offer is the gateway to start using it. Some people will use the vanilla, many others will heavily use extensions.
+
+The app distribution can start by being code in a project that 1) is published on a public list; 2) vetted for security. Payments to creators/maintainers can be added later. If vibey is an OS, you need to be able to run someone else's apps, not just your own.
+
+TODO files:
+- edit text file
+- navigate between files with the keyboard
+- upload files
+- switch to main.md (remove doc/)
+- open media file
+- (later) open sqlite files
+- (later) stream large files
+- (later) edit text file through diffs rather than whole file write (faster)
+
 ## 2026-09-05
 
 TODO files

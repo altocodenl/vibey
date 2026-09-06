@@ -515,7 +515,15 @@ if (mode === 'server') {
                   next ();
                }) ();
             }],
-            ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, assertBody ({stdout: 'another.md\nbinary.txt\ncome back.md\nmain.md\n'})],
+            ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
+               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.txt\ncome back.md\nmain.md\n', teishi.test.equal])) return false;
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.projectId);
+                  await run ('docker', 'rm', 'vibey-project-' + s.projectId);
+                  next ();
+               }) ();
+            }],
+            ['Read file after container has been removed', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {

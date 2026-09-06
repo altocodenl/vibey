@@ -651,12 +651,8 @@ var routes = [
 
       var publicPath = dale.stop ([
          ['get', '/'],
-         ... dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
-            return ['get', '/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
-         }),
-         ... dale.go (['client', 'gotoB', 'marked'], function (v) {
-            return ['get', '/' + v + '.js'];
-         }),
+         ['get', /^\/assets\/.+/],
+         ['get', '/client.js'],
          ['get', '/favicon.ico'],
          ['post', '/error'],
          ['post', '/auth/login'],
@@ -702,28 +698,25 @@ var routes = [
             ['meta', {charset: 'utf-8'}],
             CONFIG.domain && CONFIG.domain.match (/\/app\/?$/) ? ['base', {href: '/app/'}] : '',
             ['title', 'vibey'],
-            ['link', {rel: 'stylesheet', href: 'normalize.css'}],
-            ['link', {rel: 'stylesheet', href: 'tachyons.css'}],
-            ['link', {rel: 'stylesheet', href: 'bootstrap-icons.css'}],
+            ['link', {rel: 'stylesheet', href: 'assets/bootstrap-icons/font/bootstrap-icons.min.css'}],
+            ['link', {rel: 'stylesheet', href: 'assets/codemirror/lib/codemirror.css'}],
+            ['link', {rel: 'stylesheet', href: 'assets/normalize.css/normalize.css'}],
+            ['link', {rel: 'stylesheet', href: 'assets/tachyons/css/tachyons.min.css'}],
          ]],
          ['body', [
-            ['script', {src: 'gotoB.js'}],
-            ['script', {src: 'marked.js'}],
+            ['script', {src: 'assets/codemirror/lib/codemirror.js'}],
+            ['script', {src: 'assets/codemirror/mode/markdown/markdown.js'}],
+            ['script', {src: 'assets/codemirror/mode/javascript/javascript.js'}],
+            ['script', {src: 'assets/gotob/gotoB.min.js'}],
+            ['script', {src: 'assets/marked/lib/marked.umd.js'}],
             ['script', {src: 'client.js'}],
          ]]
       ]]
    ])],
-   ... dale.go ([
-      ['normalize.css', 'normalize.css/normalize.css'],
-      ['tachyons.css', 'tachyons/css/tachyons.min.css'],
-      ['bootstrap-icons.css', 'bootstrap-icons/font/bootstrap-icons.min.css'],
-      ['fonts/bootstrap-icons.woff2', 'bootstrap-icons/font/fonts/bootstrap-icons.woff2'],
-      ['fonts/bootstrap-icons.woff',  'bootstrap-icons/font/fonts/bootstrap-icons.woff'],
-      ['gotoB.js', 'gotob/gotoB.min.js'],
-      ['marked.js', 'marked/lib/marked.umd.js'],
-   ], function (route) {
-      return ['get', route [0], cicek.file, 'node_modules/' + route [1]];
-   }),
+
+   ['get', '/assets/*', function (rq, rs) {
+      cicek.file (rq, rs, rq.url.replace ('assets/', ''), ['node_modules']);
+   }],
    ['get', '/client.js', cicek.file],
    ['get', '/favicon.ico', function (rq, rs) {
       rs.writeHead (200, {'content-type': 'image/x-icon'});
