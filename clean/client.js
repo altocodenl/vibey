@@ -140,15 +140,6 @@ B.mrespond ([
       }
    }],
 
-   // To validate if the project or file exists after we load the list of projects or the list of files
-   ['change', /^(projects|files)$/, function (x) {
-      B.call (x, 'read', 'hash');
-   }],
-
-   ['change', ['file', 'name'], function (x) {
-      B.call (x, 'read', 'file');
-   }],
-
    ['stop', 'propagation', function (x, ev) {
       ev.stopPropagation ();
    }],
@@ -279,6 +270,10 @@ B.mrespond ([
 
    // *** PROJECTS ***
 
+   ['change', 'projects', function (x) {
+      B.call (x, 'read', 'hash');
+   }],
+
    ['load', 'projects', function (x) {
       B.call (x, 'get', '/projects', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading projects');
@@ -373,6 +368,14 @@ B.mrespond ([
 
    // *** FILES ***
 
+   ['change', 'files', function (x) {
+      B.call (x, 'read', 'hash');
+   }],
+
+   ['change', ['file', 'name'], function (x) {
+      B.call (x, 'read', 'file');
+   }],
+
    ['keydown', '*', function (x, ev) {
 
       if (B.get ('view') !== 'files') return;
@@ -400,11 +403,14 @@ B.mrespond ([
             var files = B.get ('files'), current = B.get ('file', 'name');
             if (! files || ! files.length) return;
             ev.preventDefault ();
-            var index = files.indexOf (current);
+            var index = dale.stopNot (files, undefined, function (f, k) {
+               if (f.name === current) return k;
+            });
+            if (index === undefined) index = 0;
             var next = ev.key === 'j' ? index + 1 : index - 1;
             if (next < 0) next = files.length - 1;
-            if (next === files.length) next = 0;
-            return B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + files [next]);
+            if (next >= files.length) next = 0;
+            return B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + files [next].name);
          }
       }
 
@@ -420,8 +426,6 @@ B.mrespond ([
    ['change', ['new', 'file'], {priority: -1000}, function (x) {
       if (B.get ('new', 'file') !== undefined) c ('.new-file-input') [0].focus ();
    }],
-
-   // *** FILES ***
 
    ['list', 'files', function (x) {
       // If no projects loaded yet, retry in 10ms.
@@ -452,16 +456,30 @@ B.mrespond ([
       });
    }],
 
-   ['read', 'file', function (x) {
+   ['read', 'file', async function (x) {
       var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
          if (project.id === B.get ('project')) return project;
       });
       if (! project) return;
 
-      B.call (x, 'post', '/project/read', {id: project.id, path: B.get ('file', 'name')}, function (x, error, rs) {
-         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
-         B.call (x, 'set', ['file', 'content'], rs.body);
-      });
+      try {
+         // TODO: replace with c.ajax when cocholate supports responseType
+         var headers = {'content-type': 'application/json'};
+         if (B.get ('user', 'csrf')) headers ['x-csrf'] = B.get ('user', 'csrf');
+         var rs = await fetch ('/project/read', {
+            body: JSON.stringify ({id: project.id, path: B.get ('file', 'name')}),
+            headers: headers,
+            method: 'POST',
+         });
+         if (! rs.ok) throw rs;
+         var contentType = rs.headers.get ('content-type') || '';
+         var binary = ! contentType.match (/^text\/|^application\/json|^application\/javascript/);
+         var content = binary ? new Uint8Array (await rs.arrayBuffer ()) : await rs.text ();
+         B.call (x, 'set', ['file', 'content'], content);
+      }
+      catch (error) {
+         B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
+      }
    }],
 
    ['write', 'file', function (x, name, content, New) {
@@ -497,6 +515,72 @@ B.mrespond ([
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project'));
       });
    }],
+
+   ['upload', '*', function (x, files) {
+      if (! files || ! files.length) return;
+      var projectId = B.get ('project');
+      var done = 0, total = files.length;
+      dale.go (files, function (file) {
+         var reader = new FileReader ();
+         reader.onload = function () {
+            var binary = new Uint8Array (reader.result).slice (0, 512).indexOf (0) !== -1;
+            var name = file.webkitRelativePath || file.name;
+            var body = {
+               id: projectId,
+               path: name,
+            };
+            if (binary) {
+               body.base64 = true;
+               body.content = btoa (String.fromCharCode.apply (null, new Uint8Array (reader.result)));
+            }
+            else {
+               body.content = new TextDecoder ().decode (reader.result);
+            }
+            B.call (x, 'post', '/project/write', body, function (x, error) {
+               if (error) return B.call (x, 'snackbar', 'error', 'Failed to upload ' + name);
+               if (++done === total) {
+                  B.call (x, 'snackbar', 'ok', 'Uploaded ' + total + ' file' + (total > 1 ? 's' : ''));
+                  B.call (x, 'list', 'files');
+                  if (total === 1) B.call (x, 'navigate', 'files/' + projectId + '/' + name);
+               }
+            });
+         };
+         reader.readAsArrayBuffer (file);
+      });
+   }],
+
+   ['change', ['file', '*'], {priority: -1000}, function (x) {
+      var content = B.get ('file', 'content');
+      var name = B.get ('file', 'name') || '';
+      var edit = B.get ('file', 'mode') === 'edit';
+      var el = document.getElementById (edit ? 'cm-editor' : 'cm-reader');
+
+      if (! el || content instanceof Uint8Array) {
+         views.cm = undefined;
+         return;
+      }
+
+      if (views.cm && views.cm.getOption ('readOnly') === ! edit) {
+         if (views.cm.getValue () !== content) views.cm.setValue (content || '');
+         return;
+      }
+
+      views.cm = CodeMirror (el, {
+         lineWrapping: true,
+         mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.md$/) ? 'markdown' : null,
+         readOnly: ! edit,
+         value: content || '',
+      });
+
+      if (edit) {
+         views.cm.focus ();
+         views.cm.on ('change', function (cm) {
+            B.call (x, 'write', 'file', B.get ('file', 'name'), cm.getValue ());
+         });
+      }
+   }],
+
+   // *** CHATS ***
 
    ['create', 'dialog', function (x, name) {
 
@@ -1272,9 +1356,14 @@ views.files = function () {
    }
 
    var paneStyle = style ({
-      border: '0.0625rem solid ' + css.colors.vborderblue,
+      border: 'none',
       'border-radius': '1.125rem',
-      'box-shadow': '0 1.25rem 3.75rem ' + css.rgba (css.colors.vdeepnavy, 0.22),
+      'box-shadow': [
+         '0.75rem 0.75rem 2.25rem rgba(0, 0, 0, 0.45)',
+         '-0.75rem -0.75rem 2.25rem rgba(255, 255, 255, 0.1)',
+         '0.1875rem 0.1875rem 0.5625rem rgba(0, 0, 0, 0.3)',
+         '-0.1875rem -0.1875rem 0.5625rem rgba(255, 255, 255, 0.07)',
+      ].join (', '),
       padding: '1.5rem',
    });
 
@@ -1294,6 +1383,36 @@ views.files = function () {
             padding: '1.5rem 1.5rem 0 1.5rem',
          }),
       }, [
+         ['style', [
+            ['.CodeMirror', {
+               'background-color': css.colors.vnavy,
+               color: css.colors.vnearwhite,
+               'font-family': 'Consolas, monaco, monospace',
+               height: '100%',
+            }],
+            ['.CodeMirror-cursor', {
+               'border-left-color': css.colors.vnearwhite,
+            }],
+            ['.CodeMirror-gutters', {
+               'background-color': css.colors.vnavy,
+               'border-right': '0.0625rem solid ' + css.colors.vborderblue,
+            }],
+            ['.CodeMirror-selected', {
+               'background-color': css.colors.vhighlightblue,
+            }],
+            ['.cm-comment', {
+               color: css.colors.vgray,
+            }],
+            ['.cm-header', {
+               color: css.colors.vlightblue,
+            }],
+            ['.cm-link', {
+               color: css.colors.vviolet,
+            }],
+            ['.cm-string', {
+               color: css.colors.vgreen,
+            }],
+         ]],
          ['div', {class: 'flex items-center mb3'}, [
             ['span', {
                class: 'f1 fw7 lh-solid mr3 pointer relative',
@@ -1319,17 +1438,24 @@ views.files = function () {
                B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
                   if (! files) return ['div', {class: 'flex-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
                   if (! files.length) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'No files yet.'];
-                  return ['div', {class: 'flex-auto overflow-y-auto pt3'}, dale.fil (files, undefined, function (file) {
+                  var currentIndex = dale.stopNot (files, undefined, function (f, k) {
+                     if (f.name === current) return k;
+                  });
+                  var prevIndex = currentIndex !== undefined ? (currentIndex === 0 ? files.length - 1 : currentIndex - 1) : undefined;
+                  var nextIndex = currentIndex !== undefined ? (currentIndex >= files.length - 1 ? 0 : currentIndex + 1) : undefined;
+                  return ['div', {class: 'flex-auto overflow-y-auto pt3'}, dale.fil (files, undefined, function (file, index) {
                      if (search && ! file.name.match (search)) return;
                      var active = file.name === current;
+                     var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
                      return ['div', {
-                        class: css.join ('br1 fw5 lh-copy pointer', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
+                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
                         onclick: B.ev ('navigate', 'files/' + B.get ('project') + '/' + file.name),
                         style: style ({
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
                            padding: '0.5rem 0.625rem',
                         }),
                      }, [
+                        tooltip ? views.tooltip (tooltip) : '',
                         ['div', iconAndName (file.name)],
                         ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
                      ]];
@@ -1366,13 +1492,52 @@ views.files = function () {
                ]],
             ]],
             // Right pane
-            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, B.view ('file', function (file) {
+            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, B.view ([['file'], ['file', 'mode']], function (file, mode) {
                if (! file) return ['div'];
-               if (! file.name.match (/\.md$/)) return ['pre', content];
-               return ['div', {
-                  class: 'lh-copy flex-auto overflow-auto vgray',
-                  opaque: true
-               }, ['LITERAL', marked.parse (file.content || '')]];
+               if (file.content instanceof Uint8Array) return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
+                  ['div', {class: 'tc'}, [
+                     ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],
+                     ['div', {class: 'f5'}, file.name],
+                     ['div', {class: 'f6 mt2'}, Math.round (file.content.length / 1024) + ' KB'],
+                  ]],
+               ]];
+               return ['div', {class: 'flex flex-auto flex-column'}, [
+                  ['div', {class: 'flex items-center justify-between mb2'}, [
+                     ['span', {class: 'fw6 vnearwhite'}, iconAndName (file.name)],
+                     ['div', {class: 'flex'}, [
+                        ['span', {
+                           class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
+                           onclick: B.ev ('set', ['file', 'mode'], 'read'),
+                           style: style ({
+                              padding: '0.25rem 0.75rem',
+                           }),
+                        }, [mode === 'edit' ? views.tooltip ('Y') : '', ['i', {class: 'bi bi-eye mr1'}], 'Read']],
+                        ['span', {
+                           class: 'br2 f6 fw6 pointer relative ' + (mode === 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
+                           onclick: B.ev ('set', ['file', 'mode'], 'edit'),
+                           style: style ({
+                              padding: '0.25rem 0.75rem',
+                           }),
+                        }, [mode !== 'edit' ? views.tooltip ('Y') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
+                     ]],
+                  ]],
+                  mode === 'edit'
+                     ? ['div', {
+                        class: 'flex-auto overflow-hidden',
+                        id: 'cm-editor',
+                        opaque: true,
+                     }]
+                     : file.name.match (/\.md$/)
+                        ? ['div', {
+                           class: 'flex-auto lh-copy overflow-auto vgray',
+                           opaque: true,
+                        }, ['LITERAL', marked.parse (file.content || '')]]
+                        : ['div', {
+                           class: 'flex-auto overflow-hidden',
+                           id: 'cm-reader',
+                           opaque: true,
+                        }],
+               ]];
             })],
          ]],
 
@@ -1436,9 +1601,23 @@ views.files = function () {
                      style: style ({gap: '0.5rem'}),
                   }, [
                      ['span', {class: 'f6 fw6 vmidblue'}, 'Upload'],
+                     ['input', {
+                        hidden: true,
+                        id: 'upload-file',
+                        onchange: B.ev ('upload', 'file', {raw: 'this.files'}),
+                        type: 'file',
+                     }],
+                     ['input', {
+                        hidden: true,
+                        id: 'upload-folder',
+                        multiple: true,
+                        onchange: B.ev ('upload', 'folder', {raw: 'this.files'}),
+                        type: 'file',
+                        webkitdirectory: true,
+                     }],
                      ['button', {
                         class: 'bg-transparent bn br2 f6 fw6 ph3 pointer pv2 relative vgray',
-                        onclick: B.ev ('upload', 'file'),
+                        onclick: "c ('#upload-file').click ()",
                         style: style ({
                            border: '0.0625rem solid ' + css.colors.vborderblue,
                         }),
@@ -1449,7 +1628,7 @@ views.files = function () {
                      ]],
                      ['button', {
                         class: 'bg-transparent bn br2 f6 fw6 ph3 pointer pv2 relative vgray',
-                        onclick: B.ev ('upload', 'folder'),
+                        onclick: "c ('#upload-folder').click ()",
                         style: style ({
                            border: '0.0625rem solid ' + css.colors.vborderblue,
                         }),

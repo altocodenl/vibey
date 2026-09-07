@@ -348,8 +348,9 @@ var run = async function (... args) {
 
       var done = function () {
          if (--wait > 0) return;
+         if (type (output.stdout) === 'array') output.stdout = Buffer.concat (output.stdout);
          var logOutput = dale.obj (output, function (v, k) {
-            if (k === 'stdout' && v.length) return [k, '(' + v.length + ' characters)'];
+            if (k === 'stdout' && v.length) return [k, '(' + v.length + ' ' + output.raw ? 'bytes' : 'characters' + ')'];
             return [k, v];
          });
          var ms = Date.now () - t;
@@ -360,8 +361,9 @@ var run = async function (... args) {
 
       dale.go (['stdout', 'stderr'], function (k) {
          proc [k].on ('data', function (chunk) {
-            if (output [k] === undefined) output [k] = '';
-            output [k] += chunk;
+            var raw = k === 'stdout' && options.raw;
+            if (output [k] === undefined) output [k] = raw ? [] : '';
+            raw ? output [k].push (chunk) : output [k] += chunk;
          });
          proc [k].on ('end', done);
       });
@@ -417,7 +419,7 @@ docker.run = async function (id, command, options) {
 }
 
 docker.read = function (id, path) {
-   return docker.run (id, 'cat ' + Path.quote (path));
+   return docker.run (id, 'cat ' + Path.quote (path), {raw: true});
 }
 
 docker.write = function (id, path, content) {
@@ -1042,7 +1044,7 @@ var routes = [
 
       await docker.run (project.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local', {catch: true});
 
-      await docker.write (project.id, 'doc/main.md', '# ' + rq.body.name);
+      await docker.write (project.id, 'main.md', '# ' + rq.body.name);
 
       reply (rs, 200, {id: project.id});
    }],
@@ -1113,7 +1115,6 @@ var routes = [
       try {
          if (rq.body.sha) return reply (rs, 409, {error: 'Not implemented yet'});
          var file = await docker.read (rq.body.id, rq.body.path);
-         file = file.stdout;
       }
       catch (error) {
          clog (error);
@@ -1121,7 +1122,9 @@ var routes = [
          throw error;
       }
 
-      reply (rs, 200, file, {}, rq.body.path);
+      var stdout = file.stdout || Buffer.alloc (0);
+      var binary = stdout.slice (0, 512).indexOf (0) !== -1;
+      reply (rs, 200, binary ? stdout : stdout.toString ('utf8'), {}, rq.body.path);
    }],
 
    ['post', '/project/write', async function (rq, rs) {

@@ -117,10 +117,10 @@ if (mode === 'server') {
          suites.public = dale.go ([
             ['get', '/'],
             ['get', '/favicon.ico'],
-            ... dale.go (['normalize', 'tachyons', 'bootstrap-icons', 'fonts/bootstrap-icons.woff2', 'fonts/bootstrap-icons.woff'], function (v) {
-               return ['get', '/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
+            ... dale.go (['normalize.css/normalize', 'tachyons/css/tachyons.min', 'bootstrap-icons/font/bootstrap-icons.min'], function (v) {
+               return ['get', '/assets/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
             }),
-            ... dale.go (['client', 'gotoB', 'marked'], function (v) {
+            ... dale.go (['client', 'assets/gotob/gotoB.min', 'assets/marked/lib/marked.umd'], function (v) {
                return ['get', '/' + v + '.js'];
             }),
             ['post', '/error'],
@@ -405,7 +405,7 @@ if (mode === 'server') {
             ['List projects after second project deletion', 'get', '/projects', 200, function (s, rq, rs) {
                return assert (['length', rs.body.length, 1, teishi.test.equal]);
             }],
-            ['List files', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './doc/main.md\n'})],
+            ['List files', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './main.md\n'})],
             ['Run command without id', 'post', '/project/run', {command: 'ls'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Run command without command', 'post', '/project/run', function (s) {return {id: s.projectId}}, 400, assertBody ({error: 'command should have as type string but instead is undefined with type undefined'})],
             ['Run command that fails', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'exit 1'}}, 200, function (s, rq, rs) {
@@ -418,23 +418,23 @@ if (mode === 'server') {
                      ['last commit name', stdout.split ('\n').slice (0, 5).join ('\n'), new RegExp (name), teishi.test.match]
                   ]);
                }
-               return s.assertCommit (rs.body.stdout, 1, "Write 'doc/main.md'");
+               return s.assertCommit (rs.body.stdout, 1, "Write 'main.md'");
             }],
-            ['Read file without id', 'post', '/project/read', {path: 'doc/main.md'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
+            ['Read file without id', 'post', '/project/read', {path: 'main.md'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Read file without path', 'post', '/project/read', function (s) {return {id: s.projectId}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
             ['Get file that is not there', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
-            ['Get main file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, function (s, rq, rs) {
+            ['Get main file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, function (s, rq, rs) {
                return assert ([
                   ['body', rs.body, '# el norte', teishi.test.equal],
                   ['content-type', rs.headers ['content-type'], /text\/markdown/, teishi.test.match],
                ]);
             }],
             ['Edit file without path', 'post', '/project/edit', function (s) {return {id: s.projectId, oldText: 'a', newText: 'b'}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
-            ['Edit file without oldText', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
-            ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
+            ['Edit file without oldText', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
+            ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text found .+ times/, teishi.test.match]);
             }],
-            ['Edit main file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, function (s, rq, rs) {
+            ['Edit main file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, function (s, rq, rs) {
                return assert ([
                   ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
                   ['sha', rs.body.sha, 'string'],
@@ -444,17 +444,17 @@ if (mode === 'server') {
                ]);
             }],
             ['List commits after edit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 2, "Edit 'doc/main.md'");
+               return s.assertCommit (rs.body.stdout, 2, "Edit 'main.md'");
             }],
-            ['Get main file after edit', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# El Norte!')],
-            ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
+            ['Get main file after edit', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# El Norte!')],
+            ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text not found/, teishi.test.match]);
             }],
-            ['Edit main file (noop)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
+            ['Edit main file (noop)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
             ['List commits after noop edit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 2, "Edit 'doc/main.md'");
+               return s.assertCommit (rs.body.stdout, 2, "Edit 'main.md'");
             }],
-            ['Overwrite file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/main.md', content: '# el norte'}}, 200, function (s, rq, rs) {
+            ['Overwrite file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte'}}, 200, function (s, rq, rs) {
                return assert ([
                   ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
                   ['sha', rs.body.sha, 'string'],
@@ -464,12 +464,19 @@ if (mode === 'server') {
                ]);
             }],
             ['List commits after write', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 3, "Write 'doc/main.md'");
+               return s.assertCommit (rs.body.stdout, 3, "Write 'main.md'");
             }],
-            ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/main.md', content: '# el norte'}}, 200, assertBody ({})],
+            ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte'}}, 200, assertBody ({})],
             ['List commits after noop write', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 3, "Write 'doc/main.md'");
+               return s.assertCommit (rs.body.stdout, 3, "Write 'main.md'");
             }],
+            ['Write empty file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/empty.md', content: ''}}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['sha', rs.body.sha, 'string'],
+                  function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
+               ]);
+            }],
+            ['Read back empty file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/empty.md'}}, 200, assertBody ('')],
             ['Write file with base64', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.txt', content: Buffer.from ('hello base64').toString ('base64'), base64: true}}, 200, function (s, rq, rs) {
                return assert ([
                   ['sha', rs.body.sha, 'string'],
@@ -477,11 +484,24 @@ if (mode === 'server') {
                ]);
             }],
             ['Read back base64-written file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/binary.txt'}}, 200, assertBody ('hello base64')],
+            ['Write binary file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.bin', content: Buffer.from ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]).toString ('base64'), base64: true}}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['sha', rs.body.sha, 'string'],
+                  function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
+               ]);
+            }],
+            ['Read back binary file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/binary.bin'}}, 200, function (s, rq, rs) {
+               var body = type (rs.body) === 'string' ? JSON.parse (rs.body) : rs.body;
+               return assert ([
+                  ['body.type', body.type, 'Buffer', teishi.test.equal],
+                  ['body.data', JSON.stringify (body.data), JSON.stringify ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]), teishi.test.equal],
+               ]);
+            }],
             ['Write file with spaces in name', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/come back.md', content: 'hello spaces'}}, 200, function (s, rq, rs) {
                return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
             }],
             ['Read file with spaces in name', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/come back.md'}}, 200, assertBody ('hello spaces')],
-            ['Run a command with pipe', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'cat doc/main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
+            ['Run a command with pipe', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs, next) {
                if (! assert ([
                   ['keys', dale.keys (rs.body), ['stdout', 'sha'], 'eachOf', teishi.test.equal],
@@ -498,16 +518,16 @@ if (mode === 'server') {
                }) ();
             }],
             ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 6, "Run 'echo foo > doc/another.md && cat doc/another.md'");
+               return s.assertCommit (rs.body.stdout, 8, "Run 'echo foo > doc/another.md && cat doc/another.md'");
             }],
             ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
-               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.txt\ncome back.md\nmain.md\n', teishi.test.equal])) return false;
+               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\n', teishi.test.equal])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   next ();
                }) ();
             }],
-            ['Read file after container has been turned off', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
+            ['Read file after container has been turned off', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# el norte')],
             ['Stop and remove container for next test', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'true'}}, 200, function (s, rq, rs, next) {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
@@ -516,14 +536,14 @@ if (mode === 'server') {
                }) ();
             }],
             ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
-               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.txt\ncome back.md\nmain.md\n', teishi.test.equal])) return false;
+               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\n', teishi.test.equal])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   await run ('docker', 'rm', 'vibey-project-' + s.projectId);
                   next ();
                }) ();
             }],
-            ['Read file after container has been removed', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 200, assertBody ('# el norte')],
+            ['Read file after container has been removed', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# el norte')],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {
@@ -545,9 +565,9 @@ if (mode === 'server') {
                }],
                ['Create project as non-creator', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Please request creator access'})],
                ['Update another user\'s project', 'put', '/project', function (s) {return {id: s.projectId, name: 'hacked'}}, 404],
-               ['Read file from another user\'s project', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/main.md'}}, 404],
+               ['Read file from another user\'s project', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 404],
                ['Write file to another user\'s project', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/hack.md', content: 'hacked'}}, 404],
-               ['Edit file in another user\'s project', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/main.md', oldText: 'el', newText: 'EL'}}, 404],
+               ['Edit file in another user\'s project', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'el', newText: 'EL'}}, 404],
                ['Run command on another user\'s project', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls'}}, 404],
                ['Delete another user\'s project', 'delete', function (s) {return '/project/' + s.projectId}, 404],
                ['Delete non-creator account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
