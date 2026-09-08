@@ -490,13 +490,23 @@ if (mode === 'server') {
                   function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
                ]);
             }],
-            ['Read back binary file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/binary.bin'}}, 200, function (s, rq, rs) {
-               var body = type (rs.body) === 'string' ? JSON.parse (rs.body) : rs.body;
-               return assert ([
-                  ['body.type', body.type, 'Buffer', teishi.test.equal],
-                  ['body.data', JSON.stringify (body.data), JSON.stringify ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]), teishi.test.equal],
-               ]);
-            }],
+            {
+               tag: 'Read back binary file',
+               method: 'post',
+               path: '/project/read',
+               body: function (s) {return {id: s.projectId, path: 'doc/binary.bin'}},
+               code: 200,
+               raw: true,
+               apres: function (s, rq, rs) {
+                  var expected = Buffer.from ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]);
+                  return assert ([
+                     ['x-binary header', rs.headers ['x-binary'], '1', teishi.test.equal],
+                     ['content-type', rs.headers ['content-type'], /application\/octet-stream/, teishi.test.match],
+                     ['body length', rs.body.length, expected.length, teishi.test.equal],
+                     ['body bytes', rs.body.equals (expected), true, teishi.test.equal],
+                  ]);
+               },
+            },
             ['Write file with spaces in name', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/come back.md', content: 'hello spaces'}}, 200, function (s, rq, rs) {
                return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
             }],

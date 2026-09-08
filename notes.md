@@ -1,5 +1,55 @@
 # Vibey development notes
 
+## 2026-09-08
+
+Some notes on Alexander - The process of creating life:
+- "Finally when reading the list of centers, does it shed some light on the project itself? Do we understand better what are the problems felt by the people who initiated the project, the deep reasons for its existence?"
+- "In this example these centers, *the list alone*, creates an almost magical atmosphere. As soon as we name them, *just from naming them*, we begin to feel the aura of the place."
+- "Out entire approach during the pattern language stage of work on a living process, is to get a glimpse of the centeres that will make the building which is to be designed, come to life *as a whole*."
+- "The essence of the point, is to find - or create - a set of centers which, together, will generate a complete and coherent object of the type we are looking for. (...) We then use intuition and feeling to judge the deficiencies in the whole which is created, to make us aware of *more* centers that still need to be created."
+- "In waht sense is the second list more essential than the first? *It is more essential, because it deals with feeling, and at a much deeper level.* The second system of centers is more deely connected to human feelings *as they really are*."
+- "The centers of rain on your face and centers of unprotected pahts were latent in the actual existence of the people and the place, *as it all was*."
+- "What, then, defines essential centers and distinguishes them from trivial centers? The answer, briefly put, is this. The essential centers are those whose presence is already latent i n the field - which go the heart of the living structure that is already there - which summarize, or encapsulate, the essence of the real life which is going on."
+- "the crux of all life is, nevertheless, the difference between recognizing the essential thing and separating it from the trivial thing."
+- "A pattern language is a created thing. It is a work of poetry, a work of art. It is potentially as profound in its way as a building can be."
+- "the intensive character of questioning people, to find their deep wishes and deep needs, might, mistakenly, be thought to be some kind of market research, or opinion survey. But the power (...) hinges on something very different (...): A geometrically constructive aspect of their emotion and their content."
+- "If it is any good, it also has, within it, a driving force which will make geometrical wholeness easily visible and more easily attainable."
+- "So a pattern language, if it has been well-constructed, sublimtaes the inner desires and necessities which have connection to our feelings and dreams, transforms them into geometry, expresses them in a deep enough way to make art of them, casts them in such a way that they have the power to become living flesh in buildings."
+
+Login view with just one input
+Buttons that only turn on when you're ready
+A snail shell containing your top projects
+A search that lists all you have (projects, files)
+No empty boxes (empty folders)
+The right pane showing any type of file
+Chats as files
+Chats as a three way between human, AI and computer
+Thick and gorgeous boundaries around each message
+Stream AI responses as they happen
+Show a placeholder for human responses as they are typed (without revealing them)
+A few tools to do it all (read, write, edit, run, search the web)
+
+TODO files:
+- download
+- upload file/folder
+- open media file
+- update responders doc
+- (later) open sqlite files
+- (later) stream large files
+- (later) edit text file through diffs rather than whole file write (faster)
+
+### Agent SDK integration design
+
+Run vibey chats through two parallel agent runtimes: **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`) for Anthropic models, **Codex SDK** (`@openai/codex-sdk`) for OpenAI models. Both SDKs have the same shape: create a session/thread, run turns, stream events, accumulate stats.
+
+- **Auth**: API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) or personal subscription login (Claude Code OAuth / Codex device-code). Authenticate once, credentials persist and auto-refresh. All projects share them, the vibey host distributes the credentials on demand.
+- **Sandbox**: the agent runtime (Claude Code or Codex) runs inside each project's Docker container, not the host. Blast radius stays contained to the project.
+- **Tools**: the agent uses vibey's own tools (run_command, write_file, edit_file, launch_agent) registered as custom tools — not the runtime's built-in file/bash tools. The only built-in tool we keep is **web search**, which both runtimes offer natively; it runs on its own and reports results back as a message.
+- **Streaming**: Claude SDK's `query()` and Codex SDK's `runStreamed()` both return async iterables/generators. Vibey bridges these to the client while making sure that the finished messages are stored in the chat.
+- **Messages**: first turn sends the chat history as structured text in the prompt, creating a session (Claude: `sessionId`, Codex: `Thread`). Subsequent turns resume by ID and send just the new message.
+- **Caching**: both APIs cache on prefix match. Appending turns preserves the prefix byte-identical, so the cache hits. Claude offers a 1-hour TTL (`promptCacheTtl`); OpenAI caches automatically for prefixes over 1024 tokens.
+- **Stats**: both SDKs return per-turn token usage (input, output, cached) and cost estimates. Divide input tokens by the model's context window for % used. Accumulate across turns yourself.
+
 ## 2026-09-07
 
 Apps (pivs, email, messaging, spreadsheets) can live inside vibey as apps. They are smaller launches and extend/unfold the core product/platform that is vibey.
@@ -156,7 +206,7 @@ Idea for demo: teach me linux (both you and AI sending commands)
 
 TODO:
 - Refactor from project modal creation to below
-- Rename views: projects is fine, the inner one is files. Later, inside files there will be dialog, just to see the dialog as a content. So we remove the confusion between "projects" and "project", which is too small a difference for something as big.
+- Rename views: projects is fine, the inner one is files. Later, inside files there will be chat, just to see the chat as a content. So we remove the confusion between "projects" and "project", which is too small a difference for something as big.
 - Make the search bar of projects float in absolute rather than at relative, so it floats over the scrollable list?
 - The TODO of yesterday
 
@@ -504,9 +554,9 @@ I just need four things for releasing the clean version:
 - auth
 - project
 - file
-- dialog
+- chat
 
-Engine, app and access can wait, or rather, be added onto this core of four, incrementally. Auth is done. Project is almost done, minus autobackup and finishing the selector and the list. File and dialog are still todo, though I'm quite clear on the primitives (basically, using the project primitives for everything). Dialog has some integration with AI, of course, that's the only truly extra part it has.
+Engine, app and access can wait, or rather, be added onto this core of four, incrementally. Auth is done. Project is almost done, minus autobackup and finishing the selector and the list. File and chat are still todo, though I'm quite clear on the primitives (basically, using the project primitives for everything). Chat has some integration with AI, of course, that's the only truly extra part it has.
 
 ### Claude on bootstrapping vibey
 
@@ -648,7 +698,7 @@ The what is the primitives, starting with the middle three: one place for files,
 
 ==
 
-Use case: dialog with pivs after a party: anyone logging in that you whitelisted can see and add (edit/delete is for owner or who sent the message), you download to your own server with pivs, pivs are also backed up! Others can do the same.
+Use case: chat with pivs after a party: anyone logging in that you whitelisted can see and add (edit/delete is for owner or who sent the message), you download to your own server with pivs, pivs are also backed up! Others can do the same.
 
 Will add a clipboard within vibey client.
 
@@ -685,7 +735,7 @@ because this is a prototype: no mobile version yet! It will come soon. Also prob
 
 for file view:
 - start with a find command. I'm still mindblown that we can do this with the command API instead of having dedicated endpoint files. Same for uploads! Only that perhaps for folder we need another command still, or rather, a preprocessing of multipart to pass to docker.write. But it is all commands!
-- the find command is for files. If we assume that `/` is the folder separator only, then that gives you a list of files and their folders. expand docs and dialogs by default, but limit to maybe 5 of each, with possible further expansion.
+- the find command is for files. If we assume that `/` is the folder separator only, then that gives you a list of files and their folders. expand docs and chats by default, but limit to maybe 5 of each, with possible further expansion.
 - the search bar at the bottom. split it in two, one for file names, another one for the current file being seen? the search bar within the file should be thicker, more visible than what you have in a browser or in an editor (even in vi). It should be always visible, at least in non-mobile.
 - allow for tabs. when a file is opened in a tab, you also see it marked with a color (of that tab) on the left, so you see what's open.
 - allow to split the screen either horizontally or vertically, but just once. each split gets its own set of tabs. if there's only one tab open, there's no tab selector, so you gain that space.

@@ -74,6 +74,7 @@ var cicek  = require ('cicek');
 var Redis  = require ('redis').createClient ({db: CONFIG.redis.db});
 
 var aws4  = require ('aws4');
+var mime  = require ('mime');
 var hitit = require ('hitit');
 
 var {inc, last, type} = teishi;
@@ -1124,7 +1125,14 @@ var routes = [
 
       var stdout = file.stdout || Buffer.alloc (0);
       var binary = stdout.slice (0, 512).indexOf (0) !== -1;
-      reply (rs, 200, binary ? stdout : stdout.toString ('utf8'), {}, rq.body.path);
+      if (binary) {
+         rs.log.code = 200;
+         rs.log.responseBody = '[BINARY]';
+         rs.writeHead (200, {'content-type': mime.lookup (rq.body.path) || 'application/octet-stream', 'x-binary': '1'});
+         rs.end (stdout);
+         return cicek.apres (rs);
+      }
+      reply (rs, 200, stdout.toString ('utf8'), {}, rq.body.path);
    }],
 
    ['post', '/project/write', async function (rq, rs) {

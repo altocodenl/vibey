@@ -318,7 +318,7 @@ B.mrespond ([
       });
    }],
 
-   ['delete', 'project', function (x, project) {
+   ['remove', 'project', function (x, project) {
       if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
 
       B.call (x, 'delete', 'project/' + project.id, function (x, error) {
@@ -396,8 +396,11 @@ B.mrespond ([
             B.call (x, 'set', ['new', 'file'], '');
             B.call (x, 'set', ['new', 'type'], 'file');
          }
-         shortcut ('x', ev, x, 'set', ['file', 'delete'], ! B.get ('file', 'delete'));
-         if (B.get ('file', 'delete')) shortcut ('v', ev, x, 'delete', 'file', B.get ('file', 'name'));
+         shortcut ('v', ev, x, 'remove', 'file', B.get ('file', 'name'));
+         if (B.get ('file', 'name') && ! B.get ('edit', 'file')) shortcut ('i', ev, x, 'set', ['edit', 'file'], {
+            newName: B.get ('file', 'name'),
+            oldName: B.get ('file', 'name'),
+         });
 
          if (ev.metaKey && (ev.key === 'j' || ev.key === 'k')) {
             var files = B.get ('files'), current = B.get ('file', 'name');
@@ -472,8 +475,7 @@ B.mrespond ([
             method: 'POST',
          });
          if (! rs.ok) throw rs;
-         var contentType = rs.headers.get ('content-type') || '';
-         var binary = ! contentType.match (/^text\/|^application\/json|^application\/javascript/);
+         var binary = rs.headers.get ('x-binary');
          var content = binary ? new Uint8Array (await rs.arrayBuffer ()) : await rs.text ();
          B.call (x, 'set', ['file', 'content'], content);
       }
@@ -488,6 +490,9 @@ B.mrespond ([
 
          if (! New) B.call (x, 'mset', ['file', 'content'], content);
          else       B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + name);
+         dale.go (B.get ('files') || [], function (file, index) {
+            if (file.name === name) B.call (x, 'set', ['files', index, 'mtime'], Date.now ());
+         });
       });
    }],
 
@@ -501,7 +506,7 @@ B.mrespond ([
       B.call (x, 'list', 'files');
    }],
 
-   ['delete', 'file', function (x, name) {
+   ['remove', 'file', function (x, name) {
       if (! confirm ('Delete file "' + name + '"? This cannot be undone.')) return;
 
       var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
@@ -513,6 +518,37 @@ B.mrespond ([
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'list', 'files');
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project'));
+      });
+   }],
+
+   ['rename', 'file', function (x, oldName, newName) {
+
+      if (dale.stop (newName.split ('/'), true, function (part) {
+         return part === '..' || part === '.' || part === '.git' || part === '';
+      })) return B.call (x, 'snackbar', 'error', 'Please enter a valid relative file path');
+
+      var projectId = B.get ('project');
+      var quote = function (value) {
+         return "'" + value.replace (/'/g, "'\\''") + "'";
+      }
+      var source = quote ('/project/' + oldName);
+      var target = quote ('/project/' + newName);
+      var oldFolder = oldName.split ('/').slice (0, -1).join ('/');
+      var newFolder = quote ('/project/' + newName.split ('/').slice (0, -1).join ('/'));
+
+      var command = '{ mkdir -p -- ' + newFolder + ' && mv -nT -- ' + source + ' ' + target + ' && test ! -e ' + source + ' && test ! -L ' + source + '; } || exit 1';
+      if (oldFolder) command += '; rmdir -- ' + quote ('/project/' + oldFolder) + ' 2>/dev/null || true';
+
+      B.call (x, 'post', '/project/run', {
+         command: command,
+         id: projectId,
+      }, function (x, error, rs) {
+         if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to rename file: check if there is a file in the way of the path you are setting');
+         if (B.get ('project') !== projectId) return;
+         B.call (x, 'rem', 'edit', 'file');
+         B.call (x, 'add', 'files', {name: newName}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
+         B.call (x, 'list', 'files');
+         if (B.get ('file', 'name') === oldName) B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (newName));
       });
    }],
 
@@ -551,6 +587,10 @@ B.mrespond ([
 
    ['change', ['file', '*'], {priority: -1000}, function (x) {
       var content = B.get ('file', 'content');
+      if (views.image && views.image.content !== content) {
+         URL.revokeObjectURL (views.image.url);
+         views.image = undefined;
+      }
       var name = B.get ('file', 'name') || '';
       var edit = B.get ('file', 'mode') === 'edit';
       var el = document.getElementById (edit ? 'cm-editor' : 'cm-reader');
@@ -575,7 +615,8 @@ B.mrespond ([
       if (edit) {
          views.cm.focus ();
          views.cm.on ('change', function (cm) {
-            B.call (x, 'write', 'file', B.get ('file', 'name'), cm.getValue ());
+            var content = cm.getValue ();
+            if (B.get ('file', 'content') !== content) B.call (x, 'write', 'file', B.get ('file', 'name'), content);
          });
       }
    }],
@@ -1087,7 +1128,7 @@ views.projects = function () {
                                  }, ['i', {class: 'bi bi-pencil'}]],
                                  ['span', {
                                     class: 'flex items-center justify-center pointer',
-                                    onclick: B.ev ('delete', 'project', project),
+                                    onclick: B.ev ('remove', 'project', project),
                                     style: style ({
                                        'border-radius': '0.5rem',
                                        'font-size': '1.25rem',
@@ -1430,11 +1471,26 @@ views.files = function () {
          }, [
             // Left pane
             ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, [
-               ['button', {
-                  class: 'bg-vgreen bn br2 fw6 pointer relative vnearwhite w-100',
-                  onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file']),
-                  style: style ({padding: '0.75rem'}),
-               }, [views.tooltip ('E'), '+ New']],
+               ['div', {class: 'flex'}, [
+                  ['button', {
+                     class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vnearwhite',
+                     onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file']),
+                     style: style ({padding: '0.75rem'}),
+                  }, [views.tooltip ('E'), '+ New']],
+                  B.view (['file', 'name'], function (name) {
+                     return ['button', {
+                        'aria-label': 'Delete current file',
+                        class: 'bg-vred bn br2 fw6 ' + (name ? 'ph3 pointer' : 'o-50 ph3') + ' relative vnearwhite',
+                        disabled: ! name,
+                        onclick: name ? B.ev ('remove', 'file', name) : undefined,
+                        style: style ({
+                           'padding-bottom': '0.75rem',
+                           'padding-top': '0.75rem',
+                        }),
+                        title: 'Delete current file',
+                     }, [views.tooltip ('V'), '×']];
+                  }),
+               ]],
                B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
                   if (! files) return ['div', {class: 'flex-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
                   if (! files.length) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'No files yet.'];
@@ -1494,6 +1550,27 @@ views.files = function () {
             // Right pane
             ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, B.view ([['file'], ['file', 'mode']], function (file, mode) {
                if (! file) return ['div'];
+               var imageType = (file.name || '').match (/\.(avif|bmp|gif|jpe?g|png|webp)$/i);
+               if (imageType && file.content instanceof Uint8Array) {
+                  if (! views.image || views.image.content !== file.content) {
+                     if (views.image) URL.revokeObjectURL (views.image.url);
+                     views.image = {
+                        content: file.content,
+                        url: URL.createObjectURL (new Blob ([file.content], {type: 'image/' + imageType [1].toLowerCase ().replace ('jpg', 'jpeg')})),
+                     };
+                  }
+                  return ['div', {class: 'flex flex-auto flex-column'}, [
+                     ['div', {class: 'fw6 mb3 vnearwhite'}, iconAndName (file.name)],
+                     ['div', {class: 'flex-auto relative'}, [
+                        ['img', {
+                           alt: file.name,
+                           class: 'absolute h-100 left-0 top-0 w-100',
+                           src: views.image.url,
+                           style: style ({'object-fit': 'contain'}),
+                        }],
+                     ]],
+                  ]];
+               }
                if (file.content instanceof Uint8Array) return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
                   ['div', {class: 'tc'}, [
                      ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],
@@ -1503,15 +1580,36 @@ views.files = function () {
                ]];
                return ['div', {class: 'flex flex-auto flex-column'}, [
                   ['div', {class: 'flex items-center justify-between mb2'}, [
-                     ['span', {class: 'fw6 vnearwhite'}, iconAndName (file.name)],
-                     ['div', {class: 'flex'}, [
-                        ['span', {
-                           class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
-                           onclick: B.ev ('set', ['file', 'mode'], 'read'),
+                     ['div', {class: 'flex items-center'}, [
+                        ['span', {class: 'fw6 vnearwhite'}, iconAndName (file.name)],
+                        ['button', {
+                           'aria-label': 'Rename file',
+                           class: 'bg-vhighlightblue bn br2 f6 fw6 ml4 pointer relative vnearwhite',
+                           onclick: B.ev ('set', ['edit', 'file'], {
+                              newName: file.name,
+                              oldName: file.name,
+                           }),
                            style: style ({
                               padding: '0.25rem 0.75rem',
                            }),
-                        }, [mode === 'edit' ? views.tooltip ('Y') : '', ['i', {class: 'bi bi-eye mr1'}], 'Read']],
+                           title: 'Rename file',
+                        }, [views.tooltip ('I'), ['i', {class: 'bi bi-pencil mr1'}], 'Rename']],
+                        ['button', {
+                           class: 'bg-vhighlightblue bn br2 f6 fw6 ml2 pointer vnearwhite',
+                           style: style ({
+                              padding: '0.25rem 0.75rem',
+                           }),
+                           title: 'Download file',
+                        }, [['i', {class: 'bi bi-download mr1'}], 'Download']],
+                     ]],
+                     ['div', {class: 'flex'}, [
+                        ['span', {
+                           class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
+                           onclick: B.ev ('set', ['file', 'mode'], 'view'),
+                           style: style ({
+                              padding: '0.25rem 0.75rem',
+                           }),
+                        }, [mode === 'edit' ? views.tooltip ('Y') : '', ['i', {class: 'bi bi-eye mr1'}], 'View']],
                         ['span', {
                            class: 'br2 f6 fw6 pointer relative ' + (mode === 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
                            onclick: B.ev ('set', ['file', 'mode'], 'edit'),
@@ -1685,6 +1783,60 @@ views.files = function () {
                ]],
             ]);
          }),
+
+         // File rename modal
+         B.view ([['edit', 'file'], ['files']], function (editFile, files) {
+            if (! editFile) return ['div'];
+            var name = (editFile.newName || '').trim ();
+            var allowEdit = (function () {
+               if (! name) return 'empty';
+               if (name === editFile.oldName) return 'unchanged';
+               if (dale.stop (files || [], true, function (file) {
+                  return file.name === name;
+               })) return 'conflict';
+               return true;
+            }) ();
+
+            return views.modal ({onclick: B.ev ('rem', 'edit', 'file')}, [
+               ['div', {class: 'relative w-100'}, [
+                  ['i', {
+                     class: 'absolute bi bi-pencil vmidblue',
+                     style: style ({
+                        left: '0.875rem',
+                        'pointer-events': 'none',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                     }),
+                  }],
+                  ['input', {
+                     class: 'bg-vnavy border-box outline-0 pr3 w-100',
+                     oninput: B.ev ('set', ['edit', 'file', 'newName']),
+                     placeholder: 'Rename your file',
+                     style: style ({
+                        border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
+                        'border-radius': '0.75rem',
+                        color: css.rgba (css.colors.vlightblue, 0.8),
+                        'font-size': '1rem',
+                        height: '3rem',
+                        'padding-left': '2.5rem',
+                     }),
+                     type: 'text',
+                     value: editFile.newName,
+                  }],
+               ]],
+               ['button', {
+                  class: (allowEdit === true ? 'bg-vgreen' : 'bg-vgray') + ' black bn br2 f5 fw7 mt3 pointer pv3 w-100',
+                  disabled: allowEdit !== true,
+                  onclick: B.ev ('rename', 'file', editFile.oldName, name),
+               }, {
+                  conflict: 'That name\'s taken',
+                  empty: 'Enter a name',
+                  true: 'Rename',
+                  unchanged: 'Enter a new name',
+               } [allowEdit]],
+            ]);
+         }),
+
       ]];
    });
 }
@@ -1765,7 +1917,7 @@ views.files_old = function () {
                               ]],
                               Delete && file !== 'doc/main.md' ? ['span', {
                                  class: 'f4 lh-solid pointer relative vpurple',
-                                 onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['delete', 'file', file])
+                                 onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'file', file])
                               }, [
                                  file === name ? ['span', {class: 'cmd-tooltip', style: style ({left: 'auto', right: 0, transform: 'none'})}, 'V'] : [],
                                  '×'

@@ -171,7 +171,7 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. Returns 400 if the edit fails.
 - **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>}`. Runs the command inside the project's container.
-- **Delete project**: `DELETE /project/<projectId>`
+- **Remove project**: `DELETE /project/<projectId>`
 
 #### Admin
 
@@ -217,14 +217,15 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 ### Client state
 
 ```
-edit project id <id>
+edit file newName "<new name>"
+          oldName "<original name>"
+     project id <id>
              name "<project name>"
              slot <integer|undefined>
 file content "..." // Current file selected
-     dialogMode <ai|human|terminal> // Dialog mode
-     mode <edit|view> // Whether we're editing the file we're viewing or not
+     delete <0|1>
+     mode <edit|view>
      name "..."
-     remove // If set, when clicking on a file we show crosses to remove them.
 files 1 name "<filename>"
         size <integer> // File size in bytes
       ...
