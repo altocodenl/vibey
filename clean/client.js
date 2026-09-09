@@ -13,7 +13,7 @@ var ago = function (date) {
    var ms = teishi.time () - new Date (date).getTime ();
    if (ms < 0) return '';
    if (ms < 1000) return 'now';
-   if (ms < 60 * 1000) return Math.floor (ms / 1000) + 's ago';
+   if (ms < 60 * 1000) return Math.round (ms / 1000) + 's ago';
    if (ms < 60 * 60 * 1000) return Math.floor (ms / (60 * 1000)) + 'm ago';
    if (ms < 24 * 60 * 60 * 1000) return Math.floor (ms / (60 * 60 * 1000)) + 'h ago';
    if (ms < 30 * 24 * 60 * 60 * 1000) return Math.floor (ms / (24 * 60 * 60 * 1000)) + 'd ago';
@@ -118,14 +118,24 @@ B.mrespond ([
 
          B.call (x, 'set', 'project', hash [1]);
 
-         if (! hash [2]) return B.call (x, 'navigate', 'files/' + hash [1] + '/doc/main.md');
+         var files = B.get ('files');
+
+         var defaultFile = '';
+         if (files) dale.stop (files, true, function (f) {
+            if (f.name === 'main.md') {
+               defaultFile = 'main.md';
+               return true;
+            }
+         });
+         if (! defaultFile && files && files.length) defaultFile = files [0].name;
+
+         if (! hash [2] && defaultFile !== '') return B.call (x, 'navigate', 'files/' + hash [1] + '/' + encodeURIComponent (defaultFile));
 
          var file = decodeURIComponent (hash.slice (2).join ('/'));
 
-         var files = B.get ('files');
          if (files && ! dale.stop (files, true, function (f) {
-            return f.name === file;
-         })) return B.call (x, 'navigate', 'files/' + hash [1] + '/doc/main.md');
+            if (f.name === file) return fileExists = true;
+         })) return B.call (x, 'navigate', 'files/' + hash [1] + '/' + encodeURIComponent (defaultFile));
 
          B.call (x, 'set', ['file', 'name'], file);
 
@@ -296,13 +306,13 @@ B.mrespond ([
          B.call (x, 'rem', 'search', 'project');
 
          B.call (x, 'add', 'projects', {id: rs.body.id, name: name}); // Put the project in projects temporarily until the list of projects is refreshed, so we can navigate to it.
-         B.call (x, 'navigate', 'files/' + rs.body.id + '/doc/main.md');
+         B.call (x, 'navigate', 'files/' + rs.body.id + '/main.md');
          B.call (x, 'load', 'projects');
       });
    }],
 
    ['change', ['new', 'project'], {priority: -1000}, function (x) {
-      if (B.get ('new', 'project') !== undefined) c ('.new-project-input') [0].focus ();
+      if (B.get ('new', 'project') !== undefined) c ('#new-project-input').focus ();
    }],
 
    ['edit', 'project', function (x) {
@@ -321,6 +331,7 @@ B.mrespond ([
    ['remove', 'project', function (x, project) {
       if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
 
+      B.call (x, 'snackbar', 'yellow', 'Deleting project...');
       B.call (x, 'delete', 'project/' + project.id, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete project');
          B.call (x, 'load', 'projects');
@@ -381,6 +392,7 @@ B.mrespond ([
       if (B.get ('view') !== 'files') return;
 
       if (ev.key === 'Enter' && c ('#create-file') && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
+      if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'rename', 'file');
 
       shortcut ('b', ev, x, 'navigate', 'projects');
       shortcut ('o', ev, x, 'set', ['settings', 'show'], ! B.get ('settings', 'show'));
@@ -390,14 +402,14 @@ B.mrespond ([
             ev.preventDefault ();
             c ('#search-file').focus ();
          }
-         shortcut ('y', ev, x, 'set', ['file', 'mode'], B.get ('file', 'mode') === 'edit' ? 'view' : 'edit');
+         shortcut ('i', ev, x, 'set', ['file', 'mode'], B.get ('file', 'mode') === 'edit' ? 'view' : 'edit');
          if (ev.metaKey && ev.key === 'e') {
             ev.preventDefault ();
             B.call (x, 'set', ['new', 'file'], '');
             B.call (x, 'set', ['new', 'type'], 'file');
          }
-         shortcut ('v', ev, x, 'remove', 'file', B.get ('file', 'name'));
-         if (B.get ('file', 'name') && ! B.get ('edit', 'file')) shortcut ('i', ev, x, 'set', ['edit', 'file'], {
+         shortcut ('u', ev, x, 'remove', 'file', B.get ('file', 'name'));
+         if (B.get ('file', 'name') && ! B.get ('edit', 'file')) shortcut ('y', ev, x, 'set', ['edit', 'file'], {
             newName: B.get ('file', 'name'),
             oldName: B.get ('file', 'name'),
          });
@@ -424,10 +436,19 @@ B.mrespond ([
          shortcut ('i', ev, x, 'set', ['new', 'type'], 'dialog');
          shortcut ('x', ev, x, 'rem', 'new', 'file');
       }
+
+      if (B.get ('edit', 'file') !== undefined) {
+         if (ev.key === 'Escape') return B.call (x, 'rem', 'edit', 'file');
+         if (c ('#rename-file') && ! c ('#rename-file').disabled) shortcut ('e', ev, x, 'rename', 'file');
+      }
    }],
 
    ['change', ['new', 'file'], {priority: -1000}, function (x) {
-      if (B.get ('new', 'file') !== undefined) c ('.new-file-input') [0].focus ();
+      if (B.get ('new', 'file') !== undefined) c ('#new-file-input').focus ();
+   }],
+
+   ['change', ['edit', 'file'], {priority: -1000}, function (x) {
+      if (B.get ('edit', 'file') !== undefined) c ('#edit-file-input').focus ();
    }],
 
    ['list', 'files', function (x) {
@@ -463,7 +484,8 @@ B.mrespond ([
       var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
          if (project.id === B.get ('project')) return project;
       });
-      if (! project) return;
+      var name = B.get ('file', 'name');
+      if (! project || name === undefined || name === '') return;
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
@@ -480,6 +502,7 @@ B.mrespond ([
          B.call (x, 'set', ['file', 'content'], content);
       }
       catch (error) {
+         console.log (name, error);
          B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
       }
    }],
@@ -502,6 +525,10 @@ B.mrespond ([
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a name');
 
       B.call (x, 'write', 'file', name, '', 'new');
+
+      B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
+      if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project'), + '/' + encodeURIComponent (name));
+
       B.call (x, 'rem', 'new', 'file');
       B.call (x, 'list', 'files');
    }],
@@ -592,7 +619,8 @@ B.mrespond ([
          views.image = undefined;
       }
       var name = B.get ('file', 'name') || '';
-      var edit = B.get ('file', 'mode') === 'edit';
+      var isCode = !! name.match (/\.(js|py)$/);
+      var edit = isCode || B.get ('file', 'mode') === 'edit';
       var el = document.getElementById (edit ? 'cm-editor' : 'cm-reader');
 
       if (! el || content instanceof Uint8Array) {
@@ -1250,7 +1278,8 @@ views.projects = function () {
                      views.tooltip ('D'),
                   ]],
                   ['input', {
-                     class: 'bg-vnavy border-box h-100 new-project-input outline-0 w-100',
+                     class: 'bg-vnavy border-box h-100 outline-0 w-100',
+                     id: 'new-project-input',
                      oninput: B.ev ('set', ['new', 'project', 'name']),
                      placeholder: 'Name your project',
                      style: style ({
@@ -1323,7 +1352,8 @@ views.projects = function () {
                         })
                      }],
                      ['input', {
-                        class: 'bg-vnavy border-box h-100 edit-project-input outline-0 w-100',
+                        class: 'bg-vnavy border-box h-100 outline-0 w-100',
+                        id: 'edit-project-input',
                         oninput: B.ev ('set', ['edit', 'project', 'name']),
                         placeholder: 'Rename your project',
                         style: style ({
@@ -1360,6 +1390,7 @@ views.projects = function () {
                ['button', {
                   class: 'bn fw7 pointer w-100',
                   disabled: allowEdit !== true,
+                  id: 'rename-file',
                   onclick: B.ev ('edit', 'project'),
                   style: style ({
                      'background-color': allowEdit === true ? css.colors.vgreen : '#555',
@@ -1488,7 +1519,7 @@ views.files = function () {
                            'padding-top': '0.75rem',
                         }),
                         title: 'Delete current file',
-                     }, [views.tooltip ('V'), '×']];
+                     }, [views.tooltip ('U'), '×']];
                   }),
                ]],
                B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
@@ -1560,7 +1591,12 @@ views.files = function () {
                      };
                   }
                   return ['div', {class: 'flex flex-auto flex-column'}, [
-                     ['div', {class: 'fw6 mb3 vnearwhite'}, iconAndName (file.name)],
+                     ['div', {
+                        class: 'bg-vhighlightblue br-pill dib fw6 mb3 vnearwhite',
+                        style: style ({
+                           padding: '0.5rem 1.25rem',
+                        }),
+                     }, iconAndName (file.name)],
                      ['div', {class: 'flex-auto relative'}, [
                         ['img', {
                            alt: file.name,
@@ -1578,22 +1614,30 @@ views.files = function () {
                      ['div', {class: 'f6 mt2'}, Math.round (file.content.length / 1024) + ' KB'],
                   ]],
                ]];
+               var isCode = !! file.name.match (/\.(js|py)$/);
                return ['div', {class: 'flex flex-auto flex-column'}, [
                   ['div', {class: 'flex items-center justify-between mb2'}, [
-                     ['div', {class: 'flex items-center'}, [
-                        ['span', {class: 'fw6 vnearwhite'}, iconAndName (file.name)],
+                     ['div', {
+                        class: 'bg-vhighlightblue br-pill flex items-center vnearwhite',
+                        style: style ({
+                           gap: '0.5rem',
+                           padding: '0.5rem 0.5rem 0.5rem 1.25rem',
+                        }),
+                     }, [
+                        ['span', {class: 'fw6'}, iconAndName (file.name)],
                         ['button', {
                            'aria-label': 'Rename file',
-                           class: 'bg-vhighlightblue bn br2 f6 fw6 ml4 pointer relative vnearwhite',
+                           class: 'bg-vhighlightblue bn br2 f6 fw6 pointer relative vnearwhite',
                            onclick: B.ev ('set', ['edit', 'file'], {
                               newName: file.name,
                               oldName: file.name,
                            }),
                            style: style ({
+                              'margin-left': '1rem',
                               padding: '0.25rem 0.75rem',
                            }),
                            title: 'Rename file',
-                        }, [views.tooltip ('I'), ['i', {class: 'bi bi-pencil mr1'}], 'Rename']],
+                        }, [views.tooltip ('Y'), ['i', {class: 'bi bi-pencil mr1'}], 'Rename']],
                         ['button', {
                            class: 'bg-vhighlightblue bn br2 f6 fw6 ml2 pointer vnearwhite',
                            style: style ({
@@ -1602,39 +1646,33 @@ views.files = function () {
                            title: 'Download file',
                         }, [['i', {class: 'bi bi-download mr1'}], 'Download']],
                      ]],
-                     ['div', {class: 'flex'}, [
+                     isCode ? ['div'] : ['div', {class: 'flex'}, [
                         ['span', {
                            class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
                            onclick: B.ev ('set', ['file', 'mode'], 'view'),
                            style: style ({
                               padding: '0.25rem 0.75rem',
                            }),
-                        }, [mode === 'edit' ? views.tooltip ('Y') : '', ['i', {class: 'bi bi-eye mr1'}], 'View']],
+                        }, [mode === 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-eye mr1'}], 'View']],
                         ['span', {
                            class: 'br2 f6 fw6 pointer relative ' + (mode === 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
                            onclick: B.ev ('set', ['file', 'mode'], 'edit'),
                            style: style ({
                               padding: '0.25rem 0.75rem',
                            }),
-                        }, [mode !== 'edit' ? views.tooltip ('Y') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
+                        }, [mode !== 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
                      ]],
                   ]],
-                  mode === 'edit'
+                  (isCode || mode === 'edit')
                      ? ['div', {
                         class: 'flex-auto overflow-hidden',
                         id: 'cm-editor',
                         opaque: true,
                      }]
-                     : file.name.match (/\.md$/)
-                        ? ['div', {
-                           class: 'flex-auto lh-copy overflow-auto vgray',
-                           opaque: true,
-                        }, ['LITERAL', marked.parse (file.content || '')]]
-                        : ['div', {
-                           class: 'flex-auto overflow-hidden',
-                           id: 'cm-reader',
-                           opaque: true,
-                        }],
+                     : ['div', {
+                        class: 'flex-auto lh-copy overflow-auto vgray',
+                        opaque: true,
+                     }, ['LITERAL', marked.parse (file.content || '')]],
                ]];
             })],
          ]],
@@ -1748,7 +1786,8 @@ views.files = function () {
                      }),
                   }],
                   ['input', {
-                     class: 'bg-vnavy border-box new-file-input outline-0 w-100',
+                     class: 'bg-vnavy border-box outline-0 w-100',
+                     id: 'new-file-input',
                      oninput: B.ev ('set', ['new', 'file']),
                      placeholder: 'Name your file',
                      style: style ({
@@ -1810,6 +1849,7 @@ views.files = function () {
                   }],
                   ['input', {
                      class: 'bg-vnavy border-box outline-0 pr3 w-100',
+                     id: 'edit-file-input',
                      oninput: B.ev ('set', ['edit', 'file', 'newName']),
                      placeholder: 'Rename your file',
                      style: style ({
@@ -1915,7 +1955,7 @@ views.files_old = function () {
                                  }) (),
                                  iconAndName (file)
                               ]],
-                              Delete && file !== 'doc/main.md' ? ['span', {
+                              Delete && file !== 'main.md' ? ['span', {
                                  class: 'f4 lh-solid pointer relative vpurple',
                                  onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'file', file])
                               }, [
@@ -1968,7 +2008,8 @@ views.files_old = function () {
                            ]],
                            ['div', {class: 'project-modal-title'}, isDialog ? 'Name your new dialog...' : 'Name your new doc...'],
                            ['input', {
-                              class: css.input + ' mb0 new-file-input',
+                              class: css.input + ' mb0',
+                              id: 'new-file-input',
                               type: 'text',
                               placeholder: isDialog ? 'my-dialog' : 'my-doc',
                               value: newFileName,

@@ -1,5 +1,59 @@
 # Vibey development notes
 
+## 2026-09-09
+
+Crazy that "js", the project name, gave the typical js yellow! This is a keeper.
+
+New favicon:
+```
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 16" width="18" height="16">
+  <rect width="18" height="16" fill="#111827"/>
+  <path fill="#fff" d="M1 1h2v2H1z M2 3h2v2H2z M3 5h2v2H3z M4 7h2v2H4z M5 9h1v1H5z M5 10h2v1H5z M6 11h2v2H6z M8 9h1v1H8z M7 10h2v1H7z M8 7h2v2H8z M9 5h2v2H9z M10 3h2v2H10z M11 1h2v2H11z"/>
+  <path fill="#c084fc" d="M15 1h2v2h-2z M14 3h2v2h-2z M13 5h2v2h-2z M12 7h2v2h-2z M11 9h2v2h-2z M10 11h2v2h-2z"/>
+</svg>
+```
+personal software that uses legos. Have auth, db, runtime provided. Then you really can focus on the logic, still full code, but the stuff around it works.
+
+python is anthropic. js is openai.
+
+personal uses for vibey:
+- coding harness (cc, pi, codex)
+- coding editor (vi + iterm)
+- terminal (sh + iterm)
+- research tool with ai (cc)
+- shared research with someone (cc + whatsapp/email)
+- taking notes & journaling (vi + iterm)
+- host my blog (wordpress + vps)
+- personal apps (vi + js + iterm)
+- host apps (js + vps)
+- work messaging (slack)
+- personal messaging (whatsapp)
+- store own pivs (tagaway + external drive)
+- share pivs with others during events (whatsapp)
+- spreadsheet (google docs)
+- email (gmail)
+- listening to music (youtube, vlc)
+- watching movies (youtube, streaming platforms)
+
+Chat design:
+- a chat is a list of messages separated by triple schwas + id + newline
+- main.md's snapshot appears as the first message, it reappears if it's edited over the course of the conversation, just before a message is sent
+- message also has from, and date, and indicate if binary (if so, the rest is base64 encoded)
+- everyone invoked can read all the messages in the chat
+- how do we indicate we want ai to respond to a message? how do we indicate a tool use? by setting the to field.
+- can you reply to a particular message?
+
+TODO files:
+- fix toggling between markdown and js/py, add py supportno view mode for code, more indent on the top pane where the text editor starts
+- chevron for rename+download pill, also for closing the pill
+- download
+- upload file/folder
+- open media file
+- update responders doc
+- (later) open sqlite files
+- (later) stream large files
+- (later) edit text file through diffs rather than whole file write (faster)
+
 ## 2026-09-08
 
 Some notes on Alexander - The process of creating life:

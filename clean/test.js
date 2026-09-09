@@ -116,7 +116,7 @@ if (mode === 'server') {
 
          suites.public = dale.go ([
             ['get', '/'],
-            ['get', '/favicon.ico'],
+            ['get', '/favicon.svg'],
             ... dale.go (['normalize.css/normalize', 'tachyons/css/tachyons.min', 'bootstrap-icons/font/bootstrap-icons.min'], function (v) {
                return ['get', '/assets/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
             }),
@@ -562,6 +562,15 @@ if (mode === 'server') {
                }) ();
             }],
             ['Delete project with a stopped container', 'delete', function (s) {return '/project/' + s.thirdProjectId}, 200],
+            ['Create a fourth project', 'post', '/project', {name: 'fourth'}, 200, function (s, rq, rs, next) {
+               s.fourthProjectId = rs.body.id;
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.fourthProjectId);
+                  await run ('docker', 'rm', 'vibey-project-' + s.fourthProjectId);
+                  next ();
+               }) ();
+            }],
+            ['Delete project with a removed container', 'delete', function (s) {return '/project/' + s.fourthProjectId}, 200],
             CONFIG.cloud ? [
                ['Login as non-creator', 'post', '/auth/login', {email: 'user2@example.com'}, 200, function (s, rq, rs) {
                   s.user1Headers = {cookie: s.headers.cookie, 'x-csrf': s.headers ['x-csrf']};

@@ -375,7 +375,7 @@ var run = async function (... args) {
          done ();
       });
       proc.on ('exit', function (code, signal) {
-         if (code !== null && code !== 0) output.code = code;
+         if (code !== null) output.code = code;
          if (signal !== null) output.signal = signal;
          done ();
       });
@@ -656,7 +656,7 @@ var routes = [
          ['get', '/'],
          ['get', /^\/assets\/.+/],
          ['get', '/client.js'],
-         ['get', '/favicon.ico'],
+         ['get', '/favicon.svg'],
          ['post', '/error'],
          ['post', '/auth/login'],
          ['get', /^\/auth\/verify\//],
@@ -701,6 +701,7 @@ var routes = [
             ['meta', {charset: 'utf-8'}],
             CONFIG.domain && CONFIG.domain.match (/\/app\/?$/) ? ['base', {href: '/app/'}] : '',
             ['title', 'vibey'],
+            ['link', {rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg'}],
             ['link', {rel: 'stylesheet', href: 'assets/bootstrap-icons/font/bootstrap-icons.min.css'}],
             ['link', {rel: 'stylesheet', href: 'assets/codemirror/lib/codemirror.css'}],
             ['link', {rel: 'stylesheet', href: 'assets/normalize.css/normalize.css'}],
@@ -710,6 +711,7 @@ var routes = [
             ['script', {src: 'assets/codemirror/lib/codemirror.js'}],
             ['script', {src: 'assets/codemirror/mode/markdown/markdown.js'}],
             ['script', {src: 'assets/codemirror/mode/javascript/javascript.js'}],
+            ['script', {src: 'assets/codemirror/mode/python/python.js'}],
             ['script', {src: 'assets/gotob/gotoB.min.js'}],
             ['script', {src: 'assets/marked/lib/marked.umd.js'}],
             ['script', {src: 'client.js'}],
@@ -721,9 +723,12 @@ var routes = [
       cicek.file (rq, rs, rq.url.replace ('assets/', ''), ['node_modules']);
    }],
    ['get', '/client.js', cicek.file],
-   ['get', '/favicon.ico', function (rq, rs) {
-      rs.writeHead (200, {'content-type': 'image/x-icon'});
-      rs.end (Buffer.from ('AAABAAEAEBAAAAEAIACKAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAFFJREFUeJxjEJRQ/08JZgARMEBIMTZ11DGAGENwyVPPAEKGoMvBAFEGYBPHagAhxdj4BA0gZCCGAegKqG4AOh+rAcgKCYUH7QwgOSnTxQBsGAAft/+qqAkz2wAAAABJRU5ErkJggg==', 'base64'));
+   ['get', '/favicon.svg', function (rq, rs) {
+      reply (rs, 200, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 16" width="18" height="16">\
+         <rect width="18" height="16" fill="#111827"/>\
+         <path fill="#fff" d="M1 1h2v2H1z M2 3h2v2H2z M3 5h2v2H3z M4 7h2v2H4z M5 9h1v1H5z M5 10h2v1H5z M6 11h2v2H6z M8 9h1v1H8z M7 10h2v1H7z M8 7h2v2H8z M9 5h2v2H9z M10 3h2v2H10z M11 1h2v2H11z"/>\
+         <path fill="#c084fc" d="M15 1h2v2h-2z M14 3h2v2h-2z M13 5h2v2h-2z M12 7h2v2h-2z M11 9h2v2h-2z M10 11h2v2h-2z"/>\
+      </svg>', {'content-type': 'image/svg+xml'});
    }],
 
    // *** ERROR REPORTING ***
@@ -1116,18 +1121,20 @@ var routes = [
       try {
          if (rq.body.sha) return reply (rs, 409, {error: 'Not implemented yet'});
          var file = await docker.read (rq.body.id, rq.body.path);
+         if (file.code === 0) delete file.code;
       }
       catch (error) {
-         clog (error);
          if (error.code === 1 && error.stderr.match ('No such file or directory')) return reply (rs, 404);
-         throw error;
+         clog ({priority: 'important', type: 'Read file error', error: formatError (error)});
+         reply (rs, 500);
       }
 
       var stdout = file.stdout || Buffer.alloc (0);
       var binary = stdout.slice (0, 512).indexOf (0) !== -1;
       if (binary) {
+         // cicek doesn't support sending buffers
          rs.log.code = 200;
-         rs.log.responseBody = '[BINARY]';
+         rs.log.responseBody = stdout.length;
          rs.writeHead (200, {'content-type': mime.lookup (rq.body.path) || 'application/octet-stream', 'x-binary': '1'});
          rs.end (stdout);
          return cicek.apres (rs);
@@ -1147,6 +1154,7 @@ var routes = [
       var content = rq.body.base64 ? Buffer.from (rq.body.content, 'base64') : rq.body.content;
 
       var result = await docker.write (rq.body.id, rq.body.path, content);
+      if (result.code === 0) delete result.code;
 
       redis ('hset', 'project:' + rq.body.id, 'last', now ());
       reply (rs, 200, result);
@@ -1162,6 +1170,7 @@ var routes = [
       ])) return;
 
       var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
+      if (result.code === 0) delete result.code;
 
       redis ('hset', 'project:' + rq.body.id, 'last', now ());
       return reply (rs, result.error ? 400 : 200, result);
@@ -1175,6 +1184,7 @@ var routes = [
       ])) return;
 
       var result = await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
+      if (result.code === 0) delete result.code;
 
       redis ('hset', 'project:' + rq.body.id, 'last', now ());
       reply (rs, 200, result);
@@ -1190,8 +1200,16 @@ var routes = [
 
       var containerId = 'vibey-project-' + rq.data.params.id;
 
-      await run ('docker', 'stop', containerId);
-      await run ('docker', 'rm', containerId);
+      var noSuchContainer = function (result) {
+         return result.code && result.stderr && result.stderr.match (/No such container|is not running/);
+      }
+
+      var stop = await run ('docker', 'stop', containerId, {catch: true});
+      if (stop.code && ! noSuchContainer (stop)) throw stop;
+
+      var rm = await run ('docker', 'rm', containerId, {catch: true});
+      if (rm.code && ! noSuchContainer (rm)) throw rm;
+
       await run ('docker', 'volume', 'rm', containerId);
 
       await redis ([
@@ -1286,7 +1304,7 @@ cicek.apres = function (rs) {
       ip: rs.log.origin,
       length: {
          rq: rs.log.requestBody === ''         ? 0 : JSON.stringify (rs.log.requestBody).length,
-         rs: rs.log.responseBody === undefined ? 0 : JSON.stringify (rs.log.responseBody).length
+         rs: rs.log.responseBody === undefined ? 0 : (type (rs.log.responseBody) !== 'integer' ? JSON.stringify (rs.log.responseBody).length : rs.log.responseBody)
       },
       userId: ! CONFIG.cloud ? undefined : (rs.request.user ? rs.request.user.id : 'anonymous')
    });
