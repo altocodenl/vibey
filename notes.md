@@ -44,15 +44,21 @@ Chat design:
 - can you reply to a particular message?
 
 TODO files:
-- fix toggling between markdown and js/py, add py supportno view mode for code, more indent on the top pane where the text editor starts
+- Fix new image logic
+- More indent on the top pane where the text editor starts
 - chevron for rename+download pill, also for closing the pill
 - download
 - upload file/folder
-- open media file
-- update responders doc
+- make sure the readme is aligned with server & client
 - (later) open sqlite files
-- (later) stream large files
+- (later) search text files
+- (later) stream large files (split them in pages)
 - (later) edit text file through diffs rather than whole file write (faster)
+
+My current logic for display doesn't make sense. Let's fix that:
+- Binary doesn't show a text editor.
+- Markdown shows the text editor in edit mode and the marked preview in read mode.
+- Non-binary, non-markdown shows the text editor and doesn't show the toggle.
 
 ## 2026-09-08
 

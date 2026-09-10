@@ -351,7 +351,7 @@ var run = async function (... args) {
          if (--wait > 0) return;
          if (type (output.stdout) === 'array') output.stdout = Buffer.concat (output.stdout);
          var logOutput = dale.obj (output, function (v, k) {
-            if (k === 'stdout' && v.length) return [k, '(' + v.length + ' ' + output.raw ? 'bytes' : 'characters' + ')'];
+            if (k === 'stdout' && v.length) return [k, '[' + v.length + ' ' + (options.raw ? 'bytes' : 'characters') + ']'];
             return [k, v];
          });
          var ms = Date.now () - t;

@@ -614,35 +614,36 @@ B.mrespond ([
 
    ['change', ['file', '*'], {priority: -1000}, function (x) {
       var content = B.get ('file', 'content');
-      if (views.image && views.image.content !== content) {
-         URL.revokeObjectURL (views.image.url);
-         views.image = undefined;
-      }
       var name = B.get ('file', 'name') || '';
-      var isCode = !! name.match (/\.(js|py)$/);
-      var edit = isCode || B.get ('file', 'mode') === 'edit';
-      var el = document.getElementById (edit ? 'cm-editor' : 'cm-reader');
 
-      if (! el || content instanceof Uint8Array) {
-         views.cm = undefined;
-         return;
+      // *** IMAGE ***
+
+      var image = B.get ('image');
+      if (image && image.content !== content) {
+         URL.revokeObjectURL (image.url);
+         B.call (x, 'rem', [], 'image');
+      }
+      var imageType = name.match (/\.(avif|bmp|gif|jpe?g|png|webp)$/i);
+      if (imageType && ! B.get ('image')) {
+         B.call (x, 'set', 'image', {
+            content: content,
+            url: URL.createObjectURL (new Blob ([content], {type: 'image/' + imageType [1].toLowerCase ().replace ('jpg', 'jpeg')})),
+         });
       }
 
-      if (views.cm && views.cm.getOption ('readOnly') === ! edit) {
-         if (views.cm.getValue () !== content) views.cm.setValue (content || '');
-         return;
-      }
+      // *** EDITOR ***
 
-      views.cm = CodeMirror (el, {
-         lineWrapping: true,
-         mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.md$/) ? 'markdown' : null,
-         readOnly: ! edit,
-         value: content || '',
-      });
+      var needEditor = ! (content instanceof Uint8Array) && (name.match (/\.md$/) && B.get ('file', 'mode') === 'edit');
 
-      if (edit) {
-         views.cm.focus ();
-         views.cm.on ('change', function (cm) {
+      if (needEditor) {
+         var editor = CodeMirror (c ('#code-editor'), {
+            lineWrapping: true,
+            mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
+            value: content || '',
+         });
+
+         editor.focus ();
+         editor.on ('change', function (cm) {
             var content = cm.getValue ();
             if (B.get ('file', 'content') !== content) B.call (x, 'write', 'file', B.get ('file', 'name'), content);
          });
@@ -1581,16 +1582,10 @@ views.files = function () {
             // Right pane
             ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, B.view ([['file'], ['file', 'mode']], function (file, mode) {
                if (! file) return ['div'];
-               var imageType = (file.name || '').match (/\.(avif|bmp|gif|jpe?g|png|webp)$/i);
-               if (imageType && file.content instanceof Uint8Array) {
-                  if (! views.image || views.image.content !== file.content) {
-                     if (views.image) URL.revokeObjectURL (views.image.url);
-                     views.image = {
-                        content: file.content,
-                        url: URL.createObjectURL (new Blob ([file.content], {type: 'image/' + imageType [1].toLowerCase ().replace ('jpg', 'jpeg')})),
-                     };
-                  }
-                  return ['div', {class: 'flex flex-auto flex-column'}, [
+
+               // Binary
+               if (file.content instanceof Uint8Array) return B.view ('image', function (image) {
+                  if (image) return ['div', {class: 'flex flex-auto flex-column'}, [
                      ['div', {
                         class: 'bg-vhighlightblue br-pill dib fw6 mb3 vnearwhite',
                         style: style ({
@@ -1601,20 +1596,23 @@ views.files = function () {
                         ['img', {
                            alt: file.name,
                            class: 'absolute h-100 left-0 top-0 w-100',
-                           src: views.image.url,
+                           src: image.url,
                            style: style ({'object-fit': 'contain'}),
                         }],
                      ]],
                   ]];
-               }
-               if (file.content instanceof Uint8Array) return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
-                  ['div', {class: 'tc'}, [
-                     ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],
-                     ['div', {class: 'f5'}, file.name],
-                     ['div', {class: 'f6 mt2'}, Math.round (file.content.length / 1024) + ' KB'],
-                  ]],
-               ]];
-               var isCode = !! file.name.match (/\.(js|py)$/);
+
+                  return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
+                     ['div', {class: 'tc'}, [
+                        ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],
+                        ['div', {class: 'f5'}, file.name],
+                        ['div', {class: 'f6 mt2'}, Math.round (file.content.length / 1024) + ' KB'],
+                     ]],
+                  ]];
+               });
+
+               var isMd = file.name.match (/\.md$/);
+
                return ['div', {class: 'flex flex-auto flex-column'}, [
                   ['div', {class: 'flex items-center justify-between mb2'}, [
                      ['div', {
@@ -1646,7 +1644,7 @@ views.files = function () {
                            title: 'Download file',
                         }, [['i', {class: 'bi bi-download mr1'}], 'Download']],
                      ]],
-                     isCode ? ['div'] : ['div', {class: 'flex'}, [
+                     isMd ? ['div', {class: 'flex'}, [
                         ['span', {
                            class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
                            onclick: B.ev ('set', ['file', 'mode'], 'view'),
@@ -1661,18 +1659,18 @@ views.files = function () {
                               padding: '0.25rem 0.75rem',
                            }),
                         }, [mode !== 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
-                     ]],
+                     ]] : ['div'],
                   ]],
-                  (isCode || mode === 'edit')
-                     ? ['div', {
-                        class: 'flex-auto overflow-hidden',
-                        id: 'cm-editor',
-                        opaque: true,
-                     }]
-                     : ['div', {
+                  (isMd && mode === 'read') ?
+                     ['div', {
                         class: 'flex-auto lh-copy overflow-auto vgray',
                         opaque: true,
-                     }, ['LITERAL', marked.parse (file.content || '')]],
+                     }, ['LITERAL', marked.parse (file.content || '')]]
+                     : ['div', {
+                        class: 'flex-auto overflow-hidden',
+                        id: 'code-editor',
+                        opaque: true,
+                     }]
                ]];
             })],
          ]],
