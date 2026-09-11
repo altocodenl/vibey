@@ -937,6 +937,8 @@ var routes = [
    ['post', '/creator/request', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
+      if (stop (rs, ['body', rq.body, {}, teishi.test.equal])) return;
+
       if (rq.user.creator) return reply (rs, 409, {error: 'Already a creator'});
 
       await sendmail ({
@@ -1009,7 +1011,7 @@ var routes = [
       if (stop (rs, [
          ['keys of body', dale.keys (rq.body), ['name', 'slot'], 'eachOf', teishi.test.equal],
          ['name', rq.body.name, 'string'],
-         ['slot', rq.body.slot, ['integer', 'undefined'], 'oneOf'],
+         ['slot', rq.body.slot, [1, 2, 3, 4, 5, undefined], 'oneOf', teishi.test.equal],
          function () {
             return ['length of name', rq.body.name.length, {min: 2}, teishi.test.range];
          }
@@ -1050,7 +1052,7 @@ var routes = [
 
       await docker.run (project.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local', {catch: true});
 
-      await docker.write (project.id, 'main.md', '# ' + rq.body.name);
+      await docker.write (project.id, 'main.md', '# ' + rq.body.name + '\n\n');
 
       reply (rs, 200, {id: project.id});
    }],
@@ -1061,7 +1063,7 @@ var routes = [
          ['keys of body', dale.keys (rq.body), ['id', 'name', 'slot'], 'eachOf', teishi.test.equal],
          ['id', rq.body.id, 'string'],
          ['name', rq.body.name, 'string'],
-         ['slot', rq.body.slot, ['integer', 'undefined'], 'oneOf'],
+         ['slot', rq.body.slot, [1, 2, 3, 4, 5, undefined], 'oneOf', teishi.test.equal],
          function () {
             return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
          }

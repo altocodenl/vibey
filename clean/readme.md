@@ -69,12 +69,12 @@ docker compose build --no-cache && cloud=1 docker compose up
 email:<email> <userId>
 loginLink:<link> <email>
 loginLinkR:<email> <loginLink> // reverse login link
-project created <date>
-        id <id>
-        last <date>
-        name <name>
-        owner <userId>
-        slot <integer|undefined>
+project:<projectId> created <date>
+                    id <id>
+                    last <date>
+                    name <name>
+                    owner <userId>
+                    slot <integer|undefined>
 owner:<userId> 1 session:<sessionId>
                2 project:<projectId>
                ...
@@ -163,13 +163,13 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 #### Project
 
-- **Request creator access**: `POST /creator/request`: expects `{}`. In local mode, this route returns a 404.
+- **Request creator access**: `POST /creator/request`: expects `{}`. Returns 409 if the user is already a creator. In local mode, this route returns a 404.
 - **Get projects**: `GET /projects`.
-- **Create project**: `POST /project`: expects `{name: <name>, slot: <positiveInteger|undefined>}`. Returns 403 if the user is not a creator, 409 if a project with that name exists.
-- **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <positiveInteger|undefined>}`. Returns 404 if project is not found, 409 if another project with the new name exists.
+- **Create project**: `POST /project`: expects `{name: <name>, slot: <positiveInteger|undefined>}`. Names must contain at least two characters. Returns 403 if the user is not a creator, 409 if the current user already has a project with that name. Assigning an occupied slot removes that slot from the project previously occupying it.
+- **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <positiveInteger|undefined>}`. Names must contain at least two characters. Returns 404 if project is not found, 409 if the current user has another project with the new name. Assigning an occupied slot removes that slot from the project previously occupying it.
 - **Read file**: `POST /project/read`: expects `{id: <projectId>, path: <path>, sha: <string|undefined>}`. Returns the file contents. Returns 404 if file not found.
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing.
-- **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. Returns 400 if the edit fails.
+- **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails.
 - **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>}`. Runs the command inside the project's container.
 - **Remove project**: `DELETE /project/<projectId>`
 
@@ -222,7 +222,8 @@ edit file newName "<new name>"
      project id <id>
              name "<project name>"
              slot <integer|undefined>
-file content "..." // Current file selected
+file actions <0|1> // Whether the filename pill shows Rename and Download; collapsed by default
+     content "..." // Current file selected
      delete <0|1>
      mode <edit|view>
      name "..."

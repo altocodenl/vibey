@@ -1,5 +1,42 @@
 # Vibey development notes
 
+## 2026-09-11
+
+These are the core insights for chat:
+- There's a top and bottom part on the right pane. The top is what's done or in progress; the bottom is your draft field for sending a new message.
+- The bottom is divided in two parts:
+   - a top part that has:
+      - A "To:" heading (like email)
+      - A dropdown next to it (which determines the to field of the message)
+      - An input field to narrow down the dropdown options quickly. Options for To: "everyone" (default), "shell", "<ai model>". Later it can also be an email address.
+      - A "Boom" button to send the message over. It should be in the bottom right, but space is scarce and the textarea has to be rectangular, so we do it like this instead.
+   - A bottom part that's a codemirror where you type your draft.
+- The core insight: a message to the shell or AI generates a placeholder response message, where the id of your original message is the to field. The response message is created as soon as the call is sent (call & response). This could be even be done for new messages being sent by a human that hasn't finished writing (but with the difference that you don't see them, you just see the potential message).
+- How it looks different:
+   - There's no general "Stop button", only one for in progress shell or AI responses.
+   - You could potentially send several shell and AI messages at the same time (you're no longer single threaded).
+- Implementation of the core insight: AI or shell calls stream output to that message through a dedicated PUT endpoint. The client does dedicated GET messages to responses that have status "ongoing", so you just refresh that part of the chat instead of everything. Each chunk that arrives to the chat is an update to the file made as an edit.
+- Emails: sidestepping the difficult question of people spamming through vibey, when you add an email address on the to, a side effect is to send an email that has a special reply-to field. When that reply-to field is used, the email lands back in the chat. This would allow agents to send and receive email too.
+- A chat is stored and served as a list of messages separated by triple schwas + id + newline
+- main.md's snapshot appears as the first message, it reappears if it's edited over the course of the conversation, just before a message is sent
+- message also has from, and date, and a binary flag (if so, the rest is base64 encoded). it has an optional to field that can be an automated actor (ai model or shell) or the id of a message. Perhaps potentially the id of a user so it's like a mention.
+- Everyone that has read access can read all the messages in the chat.
+
+Demo flow template:
+- (Log in)
+- Create a project
+- Land in main.md in edit mode, add your change
+- Create a new chat and ask a question to AI (or the shell, or someone else)
+
+TODO files:
+- upload file/folder
+- make sure the readme is aligned with client
+- (later) open sqlite files
+- (later) search text files
+- (later) stream large files (split them in pages)
+- (later) edit text file through diffs rather than whole file write (faster)
+- (later) tabs
+
 ## 2026-09-09
 
 Crazy that "js", the project name, gave the typical js yellow! This is a keeper.

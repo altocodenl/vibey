@@ -425,7 +425,7 @@ if (mode === 'server') {
             ['Get file that is not there', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/whatevs.md'}}, 404],
             ['Get main file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, function (s, rq, rs) {
                return assert ([
-                  ['body', rs.body, '# el norte', teishi.test.equal],
+                  ['body', rs.body, '# el norte\n\n', teishi.test.equal],
                   ['content-type', rs.headers ['content-type'], /text\/markdown/, teishi.test.match],
                ]);
             }],
@@ -446,7 +446,7 @@ if (mode === 'server') {
             ['List commits after edit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 2, "Edit 'main.md'");
             }],
-            ['Get main file after edit', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# El Norte!')],
+            ['Get main file after edit', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# El Norte!\n\n')],
             ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text not found/, teishi.test.match]);
             }],
@@ -454,7 +454,7 @@ if (mode === 'server') {
             ['List commits after noop edit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 2, "Edit 'main.md'");
             }],
-            ['Overwrite file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte'}}, 200, function (s, rq, rs) {
+            ['Overwrite file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte\n\n'}}, 200, function (s, rq, rs) {
                return assert ([
                   ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
                   ['sha', rs.body.sha, 'string'],
@@ -466,7 +466,7 @@ if (mode === 'server') {
             ['List commits after write', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 3, "Write 'main.md'");
             }],
-            ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte'}}, 200, assertBody ({})],
+            ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
             ['List commits after noop write', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 3, "Write 'main.md'");
             }],
@@ -537,7 +537,7 @@ if (mode === 'server') {
                   next ();
                }) ();
             }],
-            ['Read file after container has been turned off', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# el norte')],
+            ['Read file after container has been turned off', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# el norte\n\n')],
             ['Stop and remove container for next test', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'true'}}, 200, function (s, rq, rs, next) {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
@@ -553,7 +553,7 @@ if (mode === 'server') {
                   next ();
                }) ();
             }],
-            ['Read file after container has been removed', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# el norte')],
+            ['Read file after container has been removed', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 200, assertBody ('# el norte\n\n')],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {

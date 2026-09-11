@@ -5,7 +5,7 @@ var B = window.B;
 B.prod = true;
 B.internal.timeout = 500;
 
-var type = teishi.type, inc = teishi.inc, style = lith.css.style, clog = console.log, s = B.store;
+var type = teishi.type, inc = teishi.inc, eq = teishi.eq, style = lith.css.style, clog = console.log, s = B.store;
 
 // *** HELPERS ***
 
@@ -507,6 +507,22 @@ B.mrespond ([
       }
    }],
 
+   ['download', 'file', function (x) {
+      var file = B.get ('file');
+      if (! file || ! file.name || file.content === undefined) return;
+
+      var url = URL.createObjectURL (new Blob ([file.content], {type: 'application/octet-stream'}));
+      var link = document.createElement ('a');
+      link.download = file.name.split ('/').pop ();
+      link.href = url;
+      document.body.appendChild (link);
+      link.click ();
+      link.remove ();
+      setTimeout (function () {
+         URL.revokeObjectURL (url);
+      }, 60000);
+   }],
+
    ['write', 'file', function (x, name, content, New) {
       B.call (x, 'post', '/project/write', {id: B.get ('project'), path: name, content: content}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
@@ -607,12 +623,14 @@ B.mrespond ([
                   if (total === 1) B.call (x, 'navigate', 'files/' + projectId + '/' + name);
                }
             });
-         };
+         }
          reader.readAsArrayBuffer (file);
       });
    }],
 
-   ['change', ['file', '*'], {priority: -1000}, function (x) {
+   ['change', [/^(projects|project|file|image)$/], {match: B.changeResponder, priority: -1000}, function (x) {
+      if (B.get ('view') !== 'files') return;
+
       var content = B.get ('file', 'content');
       var name = B.get ('file', 'name') || '';
 
@@ -624,7 +642,7 @@ B.mrespond ([
          B.call (x, 'rem', [], 'image');
       }
       var imageType = name.match (/\.(avif|bmp|gif|jpe?g|png|webp)$/i);
-      if (imageType && ! B.get ('image')) {
+      if (imageType && ! B.get ('image') && content) {
          B.call (x, 'set', 'image', {
             content: content,
             url: URL.createObjectURL (new Blob ([content], {type: 'image/' + imageType [1].toLowerCase ().replace ('jpg', 'jpeg')})),
@@ -633,20 +651,28 @@ B.mrespond ([
 
       // *** EDITOR ***
 
-      var needEditor = ! (content instanceof Uint8Array) && (name.match (/\.md$/) && B.get ('file', 'mode') === 'edit');
+      var previousEditor = B.get ('editor');
+      if (previousEditor) {
+         previousEditor.getWrapperElement ().remove ();
+         B.call (x, 'mrem', [], 'editor');
+      }
 
-      if (needEditor) {
+      if (c ('#code-editor')) {
          var editor = CodeMirror (c ('#code-editor'), {
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
             value: content || '',
          });
 
+         editor.setCursor (editor.lineCount () - 1, Infinity);
          editor.focus ();
          editor.on ('change', function (cm) {
             var content = cm.getValue ();
             if (B.get ('file', 'content') !== content) B.call (x, 'write', 'file', B.get ('file', 'name'), content);
          });
+
+         // We use `mset` (mute set) because the editor object is circular, so gotoB chokes on its circularity when doing a data comparison on it.
+         B.call ('mset', 'editor', editor);
       }
    }],
 
@@ -672,6 +698,7 @@ B.mrespond ([
 var css = {
    button: 'bg-vblue bn br2 fw6 pa3 pointer white',
    colors: {
+      vblack:          '#000000',
       vblue:           '#4a69bd',
       vdeepnavy:       '#0f1530',
       vgray:           '#9aa4bf',
@@ -681,10 +708,11 @@ var css = {
       vmidnight:       '#1a1a2e',
       vnavy:           '#16213e',
       vnearwhite:      '#f5f7ff',
+      vorange:         '#c87533',
       vpurple:         '#5a189a',
       vred:            '#d33e43',
       vviolet:         '#b07aff',
-      vorange:         '#c87533'
+      vwhite:          '#ffffff',
    },
    input: 'ba bg-vdeepnavy br2 db mb3 outline-0 pa3 placeholder-vgray vborderblue-border vnearwhite w-100',
    join: function () {
@@ -1429,20 +1457,19 @@ views.files = function () {
    }
 
    var paneStyle = style ({
-      border: 'none',
       'border-radius': '1.125rem',
       'box-shadow': [
-         '0.75rem 0.75rem 2.25rem rgba(0, 0, 0, 0.45)',
-         '-0.75rem -0.75rem 2.25rem rgba(255, 255, 255, 0.1)',
-         '0.1875rem 0.1875rem 0.5625rem rgba(0, 0, 0, 0.3)',
-         '-0.1875rem -0.1875rem 0.5625rem rgba(255, 255, 255, 0.07)',
+         '0.75rem 0.75rem 2.25rem ' + css.rgba (css.colors.vblack, 0.45),
+         '-0.75rem -0.75rem 2.25rem ' + css.rgba (css.colors.vwhite, 0.1),
+         '0.1875rem 0.1875rem 0.5625rem ' + css.rgba (css.colors.vblack, 0.3),
+         '-0.1875rem -0.1875rem 0.5625rem ' + css.rgba (css.colors.vwhite, 0.07),
       ].join (', '),
       padding: '1.5rem',
    });
 
    return B.view ([['projects'], ['project']], function (projects, projectId) {
       if (! projects) return ['div', {
-         class: 'bg-vmidnight flex flex-wrap items-center justify-center min-vh-100',
+         class: 'bg-vmidnight flex flex-wrap items-center justify-center overflow-hidden vh-100',
          style: style ({gap: '2rem'}),
       }, dale.go (dale.times (80), () => views.spinny ())];
 
@@ -1451,7 +1478,7 @@ views.files = function () {
       });
 
       return ['div', {
-         class: views.projectColor (project.name) + ' border-box flex flex-column vh-100',
+         class: views.projectColor (project.name) + ' border-box flex flex-column overflow-hidden vh-100',
          style: style ({
             padding: '1.5rem 1.5rem 0 1.5rem',
          }),
@@ -1470,23 +1497,47 @@ views.files = function () {
                'background-color': css.colors.vnavy,
                'border-right': '0.0625rem solid ' + css.colors.vborderblue,
             }],
-            ['.CodeMirror-selected', {
+            ['.CodeMirror .CodeMirror-selected, .CodeMirror-focused .CodeMirror-selected', {
                'background-color': css.colors.vhighlightblue,
             }],
-            ['.cm-comment', {
+            ['.CodeMirror-linenumber', {
                color: css.colors.vgray,
             }],
-            ['.cm-header', {
-               color: css.colors.vlightblue,
+            ['.cm-s-default .cm-comment, .cm-s-default .cm-quote', {
+               color: css.colors.vgray,
             }],
-            ['.cm-link', {
+            ['.cm-s-default .cm-keyword, .cm-s-default .cm-atom', {
                color: css.colors.vviolet,
             }],
-            ['.cm-string', {
+            ['.cm-s-default .cm-number, .cm-s-default .cm-string-2', {
+               color: css.colors.vorange,
+            }],
+            ['.cm-s-default .cm-string', {
                color: css.colors.vgreen,
             }],
+            ['.cm-s-default .cm-def, .cm-s-default .cm-header, .cm-s-default .cm-link', {
+               color: css.colors.vlightblue,
+            }],
+            ['.cm-s-default .cm-variable, .cm-s-default .cm-operator', {
+               color: css.colors.vnearwhite,
+            }],
+            ['.cm-s-default .cm-variable-2, .cm-s-default .cm-property, .cm-s-default .cm-attribute', {
+               color: css.colors.vlightblue,
+            }],
+            ['.cm-s-default .cm-variable-3, .cm-s-default .cm-type, .cm-s-default .cm-builtin', {
+               color: css.colors.vviolet,
+            }],
+            ['.cm-s-default .cm-tag, .cm-s-default .cm-meta, .cm-s-default .cm-qualifier', {
+               color: css.colors.vorange,
+            }],
+            ['.cm-s-default .cm-bracket', {
+               color: css.colors.vnearwhite,
+            }],
+            ['.cm-s-default .cm-error', {
+               color: css.colors.vred,
+            }],
          ]],
-         ['div', {class: 'flex items-center mb3'}, [
+         ['div', {class: 'flex flex-shrink-0 items-center mb3'}, [
             ['span', {
                class: 'f1 fw7 lh-solid mr3 pointer relative',
                onclick: B.ev ('navigate', 'projects'),
@@ -1498,12 +1549,17 @@ views.files = function () {
                display: 'grid',
                flex: 1,
                gap: '1.5rem',
-               'grid-template-columns': '23.6fr 76.4fr',
+               'grid-template-columns': 'minmax(0, 23.6fr) minmax(0, 76.4fr)',
+               'grid-template-rows': 'minmax(0, 1fr)',
+               'min-height': 0,
             }),
          }, [
             // Left pane
-            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, [
-               ['div', {class: 'flex'}, [
+            ['div', {
+               class: 'bg-vnavy bn border-box flex flex-column overflow-hidden',
+               style: paneStyle,
+            }, [
+               ['div', {class: 'flex flex-shrink-0'}, [
                   ['button', {
                      class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vnearwhite',
                      onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file']),
@@ -1524,8 +1580,8 @@ views.files = function () {
                   }),
                ]],
                B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
-                  if (! files) return ['div', {class: 'flex-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
-                  if (! files.length) return ['div', {class: 'flex-auto pa3 tc vgray'}, 'No files yet.'];
+                  if (! files) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
+                  if (! files.length) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, 'No files yet.'];
                   var currentIndex = dale.stopNot (files, undefined, function (f, k) {
                      if (f.name === current) return k;
                   });
@@ -1549,12 +1605,11 @@ views.files = function () {
                      ]];
                   })];
                }),
-               ['div', {class: 'relative w-100'}, [
+               ['div', {class: 'flex-shrink-0 relative w-100'}, [
                   views.tooltip ('S'),
                   ['i', {
-                     class: 'absolute bi bi-search',
+                     class: 'absolute bi bi-search vmidblue',
                      style: style ({
-                        color: css.colors.vmidblue,
                         left: '0.875rem',
                         'pointer-events': 'none',
                         top: '50%',
@@ -1562,56 +1617,30 @@ views.files = function () {
                      }),
                   }],
                   ['input', {
-                     class: 'bg-vnavy border-box fw6 outline-0 w-100',
+                     class: 'ba bg-vnavy border-box bw1 f5 fw6 outline-0 pr3 vlightblue vmidblue-border w-100',
                      id: 'search-file',
                      oninput: B.ev ('set', ['search', 'file']),
                      placeholder: 'Search',
                      style: style ({
-                        border: '0.125rem solid ' + css.colors.vmidblue,
                         'border-radius': '0.75rem',
-                        color: css.colors.vlightblue,
-                        'font-size': '1rem',
                         height: '3rem',
                         'padding-left': '2.5rem',
-                        'padding-right': '1rem',
                      }),
                      type: 'text',
                   }],
                ]],
             ]],
             // Right pane
-            ['div', {class: 'bg-vnavy border-box flex flex-column', style: paneStyle}, B.view ([['file'], ['file', 'mode']], function (file, mode) {
+            ['div', {
+               class: 'bg-vnavy bn border-box flex flex-column overflow-auto',
+               style: paneStyle,
+            }, B.view ('file', function (file) {
                if (! file) return ['div'];
 
-               // Binary
-               if (file.content instanceof Uint8Array) return B.view ('image', function (image) {
-                  if (image) return ['div', {class: 'flex flex-auto flex-column'}, [
-                     ['div', {
-                        class: 'bg-vhighlightblue br-pill dib fw6 mb3 vnearwhite',
-                        style: style ({
-                           padding: '0.5rem 1.25rem',
-                        }),
-                     }, iconAndName (file.name)],
-                     ['div', {class: 'flex-auto relative'}, [
-                        ['img', {
-                           alt: file.name,
-                           class: 'absolute h-100 left-0 top-0 w-100',
-                           src: image.url,
-                           style: style ({'object-fit': 'contain'}),
-                        }],
-                     ]],
-                  ]];
+               var mode = file.mode || 'edit';
 
-                  return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
-                     ['div', {class: 'tc'}, [
-                        ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],
-                        ['div', {class: 'f5'}, file.name],
-                        ['div', {class: 'f6 mt2'}, Math.round (file.content.length / 1024) + ' KB'],
-                     ]],
-                  ]];
-               });
-
-               var isMd = file.name.match (/\.md$/);
+               var isBinary = file.content instanceof Uint8Array;
+               var isMd = ! isBinary && file.name.match (/\.md$/);
 
                return ['div', {class: 'flex flex-auto flex-column'}, [
                   ['div', {class: 'flex items-center justify-between mb2'}, [
@@ -1623,26 +1652,34 @@ views.files = function () {
                         }),
                      }, [
                         ['span', {class: 'fw6'}, iconAndName (file.name)],
-                        ['button', {
+                        file.actions ? ['button', {
                            'aria-label': 'Rename file',
-                           class: 'bg-vhighlightblue bn br2 f6 fw6 pointer relative vnearwhite',
+                           class: 'bg-vhighlightblue bn br2 f6 fw6 ml3 pointer relative vnearwhite',
                            onclick: B.ev ('set', ['edit', 'file'], {
                               newName: file.name,
                               oldName: file.name,
                            }),
                            style: style ({
-                              'margin-left': '1rem',
                               padding: '0.25rem 0.75rem',
                            }),
                            title: 'Rename file',
-                        }, [views.tooltip ('Y'), ['i', {class: 'bi bi-pencil mr1'}], 'Rename']],
-                        ['button', {
+                        }, [views.tooltip ('Y'), ['i', {class: 'bi bi-pencil mr1'}], 'Rename']] : '',
+                        file.actions ? ['button', {
                            class: 'bg-vhighlightblue bn br2 f6 fw6 ml2 pointer vnearwhite',
+                           onclick: B.ev ('download', 'file'),
                            style: style ({
                               padding: '0.25rem 0.75rem',
                            }),
                            title: 'Download file',
-                        }, [['i', {class: 'bi bi-download mr1'}], 'Download']],
+                        }, [['i', {class: 'bi bi-download mr1'}], 'Download']] : '',
+                        ['button', {
+                           'aria-expanded': file.actions ? 'true' : 'false',
+                           'aria-label': file.actions ? 'Hide file actions' : 'Show file actions',
+                           class: 'bg-transparent bn br-pill pointer pv1 vnearwhite',
+                           onclick: B.ev ('set', ['file', 'actions'], ! file.actions),
+                           title: file.actions ? 'Hide file actions' : 'Show file actions',
+                           type: 'button',
+                        }, ['i', {class: 'bi bi-chevron-' + (file.actions ? 'left' : 'right')}]],
                      ]],
                      isMd ? ['div', {class: 'flex'}, [
                         ['span', {
@@ -1661,13 +1698,30 @@ views.files = function () {
                         }, [mode !== 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
                      ]] : ['div'],
                   ]],
-                  (isMd && mode === 'read') ?
+                  isBinary ? B.view ('image', function (image) {
+                     if (image) return ['div', {class: 'flex-auto relative'}, [
+                        ['img', {
+                           alt: file.name,
+                           class: 'absolute h-100 left-0 top-0 w-100',
+                           src: image.url,
+                           style: style ({'object-fit': 'contain'}),
+                        }],
+                     ]];
+
+                     return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
+                        ['div', {class: 'tc'}, [
+                           ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],
+                           ['div', {class: 'f5'}, file.name],
+                           ['div', {class: 'f6 mt2'}, Math.round (file.content.length / 1024) + ' KB'],
+                        ]],
+                     ]];
+                  }) : (isMd && mode === 'view') ?
                      ['div', {
                         class: 'flex-auto lh-copy overflow-auto vgray',
                         opaque: true,
                      }, ['LITERAL', marked.parse (file.content || '')]]
                      : ['div', {
-                        class: 'flex-auto overflow-hidden',
+                        class: 'flex-auto mt2 overflow-hidden',
                         id: 'code-editor',
                         opaque: true,
                      }]
@@ -1696,39 +1750,39 @@ views.files = function () {
                      class: 'flex',
                      style: style ({gap: '0.5rem'}),
                   }, [
-                  ['button', {
-                     class: 'bn br2 f6 fw6 ph3 pointer pv2 relative ' + (newType === 'file' ? 'bg-vgreen' : 'bg-transparent vgray'),
-                     onclick: B.ev ('set', ['new', 'type'], 'file'),
-                     style: newType === 'file' ? undefined : style ({
-                        border: '0.0625rem solid ' + css.colors.vborderblue,
-                     }),
-                  }, [
-                     newType === 'file' ? '' : views.tooltip ('F'),
-                     ['i', {class: 'bi bi-file-text mr1'}],
-                     'File',
-                  ]],
-                  ['button', {
-                     class: 'bg-transparent bn br2 f6 fw6 o-40 ph3 pv2 vgray',
-                     disabled: true,
-                     style: style ({
-                        border: '0.0625rem solid ' + css.colors.vborderblue,
-                        cursor: 'not-allowed',
-                     }),
-                  }, [
-                     ['i', {class: 'bi bi-chat-dots mr1'}],
-                     'Chat',
-                  ]],
-                  ['button', {
-                     class: 'bg-transparent bn br2 f6 fw6 o-40 ph3 pv2 vgray',
-                     disabled: true,
-                     style: style ({
-                        border: '0.0625rem solid ' + css.colors.vborderblue,
-                        cursor: 'not-allowed',
-                     }),
-                  }, [
-                     ['i', {class: 'bi bi-code-square mr1'}],
-                     'App',
-                  ]],
+                     ['button', {
+                        class: 'bn br2 f6 fw6 ph3 pointer pv2 relative ' + (newType === 'file' ? 'bg-vgreen' : 'bg-transparent vgray'),
+                        onclick: B.ev ('set', ['new', 'type'], 'file'),
+                        style: newType === 'file' ? undefined : style ({
+                           border: '0.0625rem solid ' + css.colors.vborderblue,
+                        }),
+                     }, [
+                        newType === 'file' ? '' : views.tooltip ('F'),
+                        ['i', {class: 'bi bi-file-text mr1'}],
+                        'File',
+                     ]],
+                     ['button', {
+                        class: 'bg-transparent bn br2 f6 fw6 o-40 ph3 pv2 vgray',
+                        disabled: true,
+                        style: style ({
+                           border: '0.0625rem solid ' + css.colors.vborderblue,
+                           cursor: 'not-allowed',
+                        }),
+                     }, [
+                        ['i', {class: 'bi bi-chat-dots mr1'}],
+                        'Chat',
+                     ]],
+                     ['button', {
+                        class: 'bg-transparent bn br2 f6 fw6 o-40 ph3 pv2 vgray',
+                        disabled: true,
+                        style: style ({
+                           border: '0.0625rem solid ' + css.colors.vborderblue,
+                           cursor: 'not-allowed',
+                        }),
+                     }, [
+                        ['i', {class: 'bi bi-code-square mr1'}],
+                        'App',
+                     ]],
                   ]],
                   ['div', {
                      class: 'flex items-center',
@@ -1784,7 +1838,7 @@ views.files = function () {
                      }),
                   }],
                   ['input', {
-                     class: 'bg-vnavy border-box outline-0 w-100',
+                     class: 'bg-vnavy border-box f5 outline-0 pr3 w-100',
                      id: 'new-file-input',
                      oninput: B.ev ('set', ['new', 'file']),
                      placeholder: 'Name your file',
@@ -1792,24 +1846,18 @@ views.files = function () {
                         border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
                         'border-radius': '0.75rem',
                         color: css.rgba (css.colors.vlightblue, 0.8),
-                        'font-size': '1rem',
                         height: '3rem',
                         'padding-left': '2.5rem',
-                        'padding-right': '1rem',
                      }),
                      type: 'text',
                      value: newFile,
                   }],
                ]],
                ['button', {
-                  class: 'bn br2 f5 fw7 mt3 pointer pv3 relative w-100',
+                  class: (allowCreation === true ? 'bg-vgreen' : 'bg-vgray') + ' black bn br2 f5 fw7 mt3 pointer pv3 relative w-100',
                   disabled: allowCreation !== true,
                   id: 'create-file',
                   onclick: B.ev ('create', newType),
-                  style: style ({
-                     'background-color': allowCreation === true ? css.colors.vgreen : css.colors.vgray,
-                     color: '#000',
-                  }),
                }, [
                   allowCreation === true ? views.tooltip ('E') : '',
                   {
@@ -1846,7 +1894,7 @@ views.files = function () {
                      }),
                   }],
                   ['input', {
-                     class: 'bg-vnavy border-box outline-0 pr3 w-100',
+                     class: 'bg-vnavy border-box f5 outline-0 pr3 w-100',
                      id: 'edit-file-input',
                      oninput: B.ev ('set', ['edit', 'file', 'newName']),
                      placeholder: 'Rename your file',
@@ -1854,7 +1902,6 @@ views.files = function () {
                         border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
                         'border-radius': '0.75rem',
                         color: css.rgba (css.colors.vlightblue, 0.8),
-                        'font-size': '1rem',
                         height: '3rem',
                         'padding-left': '2.5rem',
                      }),
