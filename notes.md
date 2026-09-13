@@ -1,5 +1,17 @@
 # Vibey development notes
 
+## 2026-09-13
+
+TODO files:
+- optimize read file
+- upload folder
+- make sure the readme is aligned with client
+- (later) open sqlite files
+- (later) search text files
+- (later) stream large files (split them in pages)
+- (later) edit text file through diffs rather than whole file write (faster)
+- (later) tabs
+
 ## 2026-09-11
 
 These are the core insights for chat:

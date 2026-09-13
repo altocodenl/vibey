@@ -396,7 +396,7 @@ docker.run = async function (id, command, options) {
    // Retry commit up to 50x at ~1ms to handle concurrent git lock contention
    if (commit) {
       originalCommand = command;
-      command += ' && n=0; s=0; while [ $n -lt 50 ]; do if [ -n "$(git status --porcelain 2>/dev/null)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && git rev-parse HEAD && s=1 && break; fi; sleep 0.001; n=$((n+1)); done; [ $s = 0 ] && echo || true';
+      command += ' || exit $?; n=0; s=0; while [ $n -lt 50 ]; do if [ -n "$(git status --porcelain 2>/dev/null)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && git rev-parse HEAD && s=1 && break; fi; sleep 0.001; n=$((n+1)); done; [ $s = 0 ] && echo || true';
       delete options.commit;
    }
 
@@ -407,7 +407,7 @@ docker.run = async function (id, command, options) {
          var restart = await run ('docker', 'start', id, {catch: true});
          if (restart.code) return result;
       }
-      return docker.run (id.replace ('vibey-project-', ''), originalCommand || command, options);
+      return docker.run (id.replace ('vibey-project-', ''), originalCommand || command, {... options, commit});
    }
    if (result.code && ! (options && options.catch)) throw result;
    if (commit && result.stdout) {
@@ -419,13 +419,15 @@ docker.run = async function (id, command, options) {
    return result;
 }
 
-docker.read = function (id, path) {
-   return docker.run (id, 'cat ' + Path.quote (path), {raw: true});
+docker.read = async function (id, path) {
+   var result = await docker.run (id, 'cat ' + Path.quote (path), {catch: true, raw: true});
+   return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
-docker.write = function (id, path, content) {
+docker.write = async function (id, path, content) {
    var command = 'mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > ' + Path.quote (path);
-   return docker.run (id, command, {input: content, commit: 'Write ' + Path.quote (path)});
+   var result = await docker.run (id, command, {input: content, commit: 'Write ' + Path.quote (path), catch: true});
+   return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
 docker.edit = async function (id, path, oldText, newText) {
@@ -452,8 +454,7 @@ docker.edit = async function (id, path, oldText, newText) {
       + "' target=" + Path.quote (path) + ' ' + Path.quote (path);
 
    var result = await docker.run (id, script, {input: input, catch: true, commit: 'Edit ' + Path.quote (path)});
-   if (result.stderr) return {error: result.stderr};
-   return result;
+   return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
 docker.cleanup = async function () {
@@ -1120,16 +1121,14 @@ var routes = [
          ['sha', rq.body.sha, ['string', 'undefined'], 'oneOf'],
       ])) return;
 
-      try {
-         if (rq.body.sha) return reply (rs, 409, {error: 'Not implemented yet'});
-         var file = await docker.read (rq.body.id, rq.body.path);
-         if (file.code === 0) delete file.code;
+      if (rq.body.sha) return reply (rs, 409, {error: 'Not implemented yet'});
+      var file = await docker.read (rq.body.id, rq.body.path);
+      if (file.code) {
+         if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404);
+         clog ({priority: 'important', type: 'Read file error', error: formatError (file)});
+         return reply (rs, 500);
       }
-      catch (error) {
-         if (error.code === 1 && error.stderr.match ('No such file or directory')) return reply (rs, 404);
-         clog ({priority: 'important', type: 'Read file error', error: formatError (error)});
-         reply (rs, 500);
-      }
+      if (file.code === 0) delete file.code;
 
       var stdout = file.stdout || Buffer.alloc (0);
       var binary = stdout.slice (0, 512).indexOf (0) !== -1;
@@ -1158,8 +1157,8 @@ var routes = [
       var result = await docker.write (rq.body.id, rq.body.path, content);
       if (result.code === 0) delete result.code;
 
-      redis ('hset', 'project:' + rq.body.id, 'last', now ());
-      reply (rs, 200, result);
+      if (! result.code) redis ('hset', 'project:' + rq.body.id, 'last', now ());
+      reply (rs, result.code ? 400 : 200, result);
    }],
 
    ['post', '/project/edit', async function (rq, rs) {
@@ -1174,8 +1173,8 @@ var routes = [
       var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
       if (result.code === 0) delete result.code;
 
-      redis ('hset', 'project:' + rq.body.id, 'last', now ());
-      return reply (rs, result.error ? 400 : 200, result);
+      if (! result.code) redis ('hset', 'project:' + rq.body.id, 'last', now ());
+      return reply (rs, result.code ? 400 : 200, result);
    }],
 
    ['post', '/project/run', async function (rq, rs) {

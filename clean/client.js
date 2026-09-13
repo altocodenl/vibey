@@ -5,6 +5,31 @@ var B = window.B;
 B.prod = true;
 B.internal.timeout = 500;
 
+B.r.addLog = function (log) {
+   var stripContent = function (v) {
+      var t = type (v);
+      if (t === 'string') return v.length <= 1000 ? v : (v.slice (0, 1000) + ' [OMITTED ' + (v.length - 1000) + ' CHARACTERS]');
+      if (t === 'array') return dale.go (v.length <= 999 ? v : (v.slice (0, 999).concat (' [OMITTED ' + (v.length - 999) + ' ITEMS]')), function (v2) {
+         return stripContent (v2);
+      });
+      if (t === 'object') {
+         var keys = dale.keys (v);
+         if (keys.length > 999) {
+            var n = keys.length - 999;
+            keys = keys.slice (0, 999).concat ('OMITTED KEYS');
+            v ['OMITTED KEYS'] = n;
+         }
+         return dale.obj (keys, function (k2) {
+            return [k2, stripContent (v [k2])];
+         });
+      }
+      return v;
+   }
+   log.args = stripContent (log.args);
+   while (B.log.length >= 2000) B.log.shift ();
+   B.log.push (log);
+}
+
 var type = teishi.type, inc = teishi.inc, eq = teishi.eq, style = lith.css.style, clog = console.log, s = B.store;
 
 // *** HELPERS ***
@@ -435,6 +460,13 @@ B.mrespond ([
          shortcut ('f', ev, x, 'set', ['new', 'type'], 'file');
          shortcut ('i', ev, x, 'set', ['new', 'type'], 'dialog');
          shortcut ('x', ev, x, 'rem', 'new', 'file');
+         if (ev.metaKey && (ev.key === 'u' || ev.key === 'r')) {
+            var input = c (ev.key === 'u' ? '#upload-file' : '#upload-folder');
+            if (input) {
+               ev.preventDefault ();
+               input.click ();
+            }
+         }
       }
 
       if (B.get ('edit', 'file') !== undefined) {
@@ -487,21 +519,25 @@ B.mrespond ([
       var name = B.get ('file', 'name');
       if (! project || name === undefined || name === '') return;
 
+      B.call (x, 'rem', 'file', 'content');
+
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
          var headers = {'content-type': 'application/json'};
          if (B.get ('user', 'csrf')) headers ['x-csrf'] = B.get ('user', 'csrf');
          var rs = await fetch ('/project/read', {
-            body: JSON.stringify ({id: project.id, path: B.get ('file', 'name')}),
+            body: JSON.stringify ({id: project.id, path: name}),
             headers: headers,
             method: 'POST',
          });
          if (! rs.ok) throw rs;
          var binary = rs.headers.get ('x-binary');
          var content = binary ? new Uint8Array (await rs.arrayBuffer ()) : await rs.text ();
+         if (B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
          B.call (x, 'set', ['file', 'content'], content);
       }
       catch (error) {
+         if (B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
          console.log (name, error);
          B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
       }
@@ -557,8 +593,9 @@ B.mrespond ([
       });
       if (! project) return;
 
-      B.call (x, 'post', '/project/run', {id: project.id, command: 'rm -f /project/' + name}, function (x, error, rs) {
-         if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
+      var path = "'" + ('/project/' + name).replace (/'/g, "'\\''") + "'";
+      B.call (x, 'post', '/project/run', {id: project.id, command: 'rm -- ' + path}, function (x, error, rs) {
+         if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'list', 'files');
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project'));
       });
@@ -610,13 +647,20 @@ B.mrespond ([
             };
             if (binary) {
                body.base64 = true;
-               body.content = btoa (String.fromCharCode.apply (null, new Uint8Array (reader.result)));
+               var bytes = new Uint8Array (reader.result);
+               body.content = '';
+               dale.go (bytes, function (b) {
+                  body.content += String.fromCharCode (b);
+               });
+               body.content = btoa (body.content);
             }
             else {
                body.content = new TextDecoder ().decode (reader.result);
             }
             B.call (x, 'post', '/project/write', body, function (x, error) {
-               if (error) return B.call (x, 'snackbar', 'error', 'Failed to upload ' + name);
+               if (error) {
+                  return B.call (x, 'snackbar', 'error', 'Failed to upload ' + name);
+               }
                if (++done === total) {
                   B.call (x, 'snackbar', 'ok', 'Uploaded ' + total + ' file' + (total > 1 ? 's' : ''));
                   B.call (x, 'list', 'files');
@@ -1698,6 +1742,7 @@ views.files = function () {
                         }, [mode !== 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
                      ]] : ['div'],
                   ]],
+                  file.content === undefined ? ['div', {class: 'flex flex-auto items-center justify-center'}, views.spinny ()] :
                   isBinary ? B.view ('image', function (image) {
                      if (image) return ['div', {class: 'flex-auto relative'}, [
                         ['img', {
