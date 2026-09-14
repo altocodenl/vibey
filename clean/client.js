@@ -8,15 +8,16 @@ B.internal.timeout = 500;
 B.r.addLog = function (log) {
    var stripContent = function (v) {
       var t = type (v);
-      if (t === 'string') return v.length <= 1000 ? v : (v.slice (0, 1000) + ' [OMITTED ' + (v.length - 1000) + ' CHARACTERS]');
-      if (t === 'array') return dale.go (v.length <= 999 ? v : (v.slice (0, 999).concat (' [OMITTED ' + (v.length - 999) + ' ITEMS]')), function (v2) {
+      if (t === 'function') return '[FUNCTION] ' + v.toString ().slice (0, 50);
+      if (t === 'string') return v.length <= 100 ? v : (v.slice (0, 100) + ' [OMITTED ' + (v.length - 100) + ' CHARACTERS]');
+      if (t === 'array') return dale.go (v.length <= 99 ? v : (v.slice (0, 99).concat (' [OMITTED ' + (v.length - 99) + ' ITEMS]')), function (v2) {
          return stripContent (v2);
       });
       if (t === 'object') {
          var keys = dale.keys (v);
-         if (keys.length > 999) {
-            var n = keys.length - 999;
-            keys = keys.slice (0, 999).concat ('OMITTED KEYS');
+         if (keys.length > 99) {
+            var n = keys.length - 99;
+            keys = keys.slice (0, 99).concat ('OMITTED KEYS');
             v ['OMITTED KEYS'] = n;
          }
          return dale.obj (keys, function (k2) {
@@ -26,9 +27,14 @@ B.r.addLog = function (log) {
       return v;
    }
    log.args = stripContent (log.args);
-   while (B.log.length >= 2000) B.log.shift ();
+   while (B.log.length >= 1000) B.log.shift ();
    B.log.push (log);
 }
+
+B.debug = function () {
+   c ('body').innerHTML = '<pre>' + lith.entityify (cell.JSToText (B.r.log)) + '</pre>';
+}
+
 
 var type = teishi.type, inc = teishi.inc, eq = teishi.eq, style = lith.css.style, clog = console.log, s = B.store;
 
@@ -93,6 +99,10 @@ window.onerror = async function (message, source, lineno, colno, error) {
    }) ()});
 }
 
+// *** GLOBALS (we need these to be outside the store for performance reasons) ***
+
+var content, editor, image;
+
 // *** RESPONDERS ***
 
 B.mrespond ([
@@ -132,6 +142,8 @@ B.mrespond ([
 
       if (hash.length > 1 && hash [0] !== 'files') return B.call (x, 'navigate', 'projects');
 
+      if (hash [0] !== 'files') B.call (x, 'rem', [], ['file', 'files']);
+
       if (hash [0] === 'files') {
 
          if (hash.length === 1) return B.call (x, 'navigate', 'projects');
@@ -164,15 +176,11 @@ B.mrespond ([
 
          B.call (x, 'set', ['file', 'name'], file);
 
-         B.call (x, 'list', 'files');
+         if (! B.get ('files')) B.call (x, 'list', 'files');
       }
-      if (hash [0] !== 'files') B.call (x, 'rem', [], 'file');
 
       B.call (x, 'set', 'view', hash [0]);
 
-      if (inc (loggedViews, hash [0])) {
-         B.call (x, 'load', 'projects');
-      }
    }],
 
    ['stop', 'propagation', function (x, ev) {
@@ -264,6 +272,7 @@ B.mrespond ([
          }
 
          B.call (x, 'set', 'user', rs.body);
+         B.call (x, 'load', 'projects');
          B.call (x, 'read', 'hash');
       });
    }],
@@ -486,7 +495,7 @@ B.mrespond ([
    ['list', 'files', function (x) {
       // If no projects loaded yet, retry in 10ms.
       if (! B.get ('projects')) return setTimeout (function () {
-         B.call (x, 'list', 'files');
+         if (! B.get ('files')) B.call (x, 'list', 'files');
       }, 10);
 
       var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
@@ -494,7 +503,9 @@ B.mrespond ([
       });
       if (! project) return B.call (x, 'navigate', 'projects');
 
-      B.call (x, 'post', '/project/run', {id: project.id, command: "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %p\\n' | sort -t/ -k3"}, function (x, error, rs) {
+      if (! B.get ('files')) B.call (x, 'mset', 'files', []); // Set it to an empty array to prevent multiple in-flight calls.
+      B.call (x, 'post', '/project/run', {id: project.id, read: true, command: "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %p\\n' | sort -t/ -k3"}, function (x, error, rs) {
+         if (B.get ('project') !== project.id) return;
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          var files = dale.fil ((rs.body.stdout || '').split ('\n'), undefined, function (line) {
             if (! line) return;
@@ -519,7 +530,8 @@ B.mrespond ([
       var name = B.get ('file', 'name');
       if (! project || name === undefined || name === '') return;
 
-      B.call (x, 'rem', 'file', 'content');
+      content = undefined;
+      B.call (x, 'change', 'file');
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
@@ -532,9 +544,10 @@ B.mrespond ([
          });
          if (! rs.ok) throw rs;
          var binary = rs.headers.get ('x-binary');
-         var content = binary ? new Uint8Array (await rs.arrayBuffer ()) : await rs.text ();
+         var newContent = binary ? new Uint8Array (await rs.arrayBuffer ()) : await rs.text ();
          if (B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
-         B.call (x, 'set', ['file', 'content'], content);
+         content = newContent;
+         B.call (x, 'change', 'file');
       }
       catch (error) {
          if (B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
@@ -545,9 +558,9 @@ B.mrespond ([
 
    ['download', 'file', function (x) {
       var file = B.get ('file');
-      if (! file || ! file.name || file.content === undefined) return;
+      if (! file || ! file.name || content === undefined) return;
 
-      var url = URL.createObjectURL (new Blob ([file.content], {type: 'application/octet-stream'}));
+      var url = URL.createObjectURL (new Blob ([content], {type: 'application/octet-stream'}));
       var link = document.createElement ('a');
       link.download = file.name.split ('/').pop ();
       link.href = url;
@@ -559,14 +572,20 @@ B.mrespond ([
       }, 60000);
    }],
 
-   ['write', 'file', function (x, name, content, New) {
-      B.call (x, 'post', '/project/write', {id: B.get ('project'), path: name, content: content}, function (x, error, rs) {
+   ['write', 'file', function (x, name, newContent, New) {
+      var project = B.get ('project');
+      B.call (x, 'post', '/project/write', {id: project, path: name, content: newContent}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
+         if (B.get ('project') !== project) return;
 
-         if (! New) B.call (x, 'mset', ['file', 'content'], content);
-         else       B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + name);
+         if (New) B.call (x, 'navigate', 'files/' + project + '/' + name);
+         if (! New && B.get ('file', 'name') === name) content = newContent;
+
          dale.go (B.get ('files') || [], function (file, index) {
-            if (file.name === name) B.call (x, 'set', ['files', index, 'mtime'], Date.now ());
+            if (file.name === name) {
+               B.call (x, 'set', ['files', index, 'mtime'], Date.now ());
+               B.call (x, 'set', ['files', index, 'size'], newContent.length);
+            }
          });
       });
    }],
@@ -675,34 +694,30 @@ B.mrespond ([
    ['change', [/^(projects|project|file|image)$/], {match: B.changeResponder, priority: -1000}, function (x) {
       if (B.get ('view') !== 'files') return;
 
-      var content = B.get ('file', 'content');
       var name = B.get ('file', 'name') || '';
 
       // *** IMAGE ***
 
-      var image = B.get ('image');
       if (image && image.content !== content) {
          URL.revokeObjectURL (image.url);
-         B.call (x, 'rem', [], 'image');
+         image = '';
+         B.call (x, 'change', 'file');
       }
       var imageType = name.match (/\.(avif|bmp|gif|jpe?g|png|webp)$/i);
-      if (imageType && ! B.get ('image') && content) {
-         B.call (x, 'set', 'image', {
+      if (imageType && ! image && content) {
+         image = {
             content: content,
             url: URL.createObjectURL (new Blob ([content], {type: 'image/' + imageType [1].toLowerCase ().replace ('jpg', 'jpeg')})),
-         });
+         };
+         B.call (x, 'change', 'file');
       }
 
       // *** EDITOR ***
 
-      var previousEditor = B.get ('editor');
-      if (previousEditor) {
-         previousEditor.getWrapperElement ().remove ();
-         B.call (x, 'mrem', [], 'editor');
-      }
+      if (editor) editor.getWrapperElement ().remove ();
 
       if (c ('#code-editor')) {
-         var editor = CodeMirror (c ('#code-editor'), {
+         editor = CodeMirror (c ('#code-editor'), {
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
             value: content || '',
@@ -711,12 +726,9 @@ B.mrespond ([
          editor.setCursor (editor.lineCount () - 1, Infinity);
          editor.focus ();
          editor.on ('change', function (cm) {
-            var content = cm.getValue ();
-            if (B.get ('file', 'content') !== content) B.call (x, 'write', 'file', B.get ('file', 'name'), content);
+            var newContent = cm.getValue ();
+            if (content !== newContent) B.call (x, 'write', 'file', B.get ('file', 'name'), newContent);
          });
-
-         // We use `mset` (mute set) because the editor object is circular, so gotoB chokes on its circularity when doing a data comparison on it.
-         B.call ('mset', 'editor', editor);
       }
    }],
 
@@ -1683,7 +1695,7 @@ views.files = function () {
 
                var mode = file.mode || 'edit';
 
-               var isBinary = file.content instanceof Uint8Array;
+               var isBinary = content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
 
                return ['div', {class: 'flex flex-auto flex-column'}, [
@@ -1742,8 +1754,8 @@ views.files = function () {
                         }, [mode !== 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
                      ]] : ['div'],
                   ]],
-                  file.content === undefined ? ['div', {class: 'flex flex-auto items-center justify-center'}, views.spinny ()] :
-                  isBinary ? B.view ('image', function (image) {
+                  content === undefined ? ['div', {class: 'flex flex-auto items-center justify-center'}, views.spinny ()] :
+                  isBinary ? (function () {
                      if (image) return ['div', {class: 'flex-auto relative'}, [
                         ['img', {
                            alt: file.name,
@@ -1757,14 +1769,14 @@ views.files = function () {
                         ['div', {class: 'tc'}, [
                            ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],
                            ['div', {class: 'f5'}, file.name],
-                           ['div', {class: 'f6 mt2'}, Math.round (file.content.length / 1024) + ' KB'],
+                           ['div', {class: 'f6 mt2'}, Math.round (content.length / 1024) + ' KB'],
                         ]],
                      ]];
-                  }) : (isMd && mode === 'view') ?
+                  }) () : (isMd && mode === 'view') ?
                      ['div', {
                         class: 'flex-auto lh-copy overflow-auto vgray',
                         opaque: true,
-                     }, ['LITERAL', marked.parse (file.content || '')]]
+                     }, ['LITERAL', marked.parse (content || '')]]
                      : ['div', {
                         class: 'flex-auto mt2 overflow-hidden',
                         id: 'code-editor',

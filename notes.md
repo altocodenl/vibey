@@ -1,5 +1,19 @@
 # Vibey development notes
 
+## 2026-09-14
+
+A crystal clear value proposition.
+
+TODO files:
+- Fix direct project listing (must update list of files)
+- When switching files, ignore filtered out files
+- make sure the readme is aligned with client
+- (later) open sqlite files
+- (later) search text files
+- (later) stream large files (split them in pages)
+- (later) edit text file through diffs rather than whole file write (faster)
+- (later) tabs
+
 ## 2026-09-13
 
 TODO files:

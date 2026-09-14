@@ -79,118 +79,7 @@ var hitit = require ('hitit');
 
 var {inc, last, type} = teishi;
 
-// *** CELL (for logging, taken from github.com/altocodenl/cell) ***
-
-var cell = {};
-
-cell.unparseElement = function (v) {
-   if (v === null) return ' ';
-   if (type (v) !== 'string') return v + '';
-   if (v.length === 0) return '""';
-
-   if (v.match (/^-?(\d+\.)?\d+$/) !== null) return '"' + v + '"';
-   if (v.match ('"') || v.match (/\s/)) {
-      return '"' + v.replace (/\//g, '//').replace (/"/g, '/"') + '"';
-   }
-   return v;
-}
-
-cell.sorter = function (paths) {
-
-   var compare = function (v1, v2) {
-      if (v1 === v2) return 0;
-      var types = [type (v1) === 'string' ? 'text' : 'number', type (v2) === 'string' ? 'text' : 'number'];
-      if (types [0] !== types [1]) return types [0] === 'number' ? -1 : 1;
-      if (types [0] === 'number') return v1 - v2;
-
-      if (v1 === '=' && v2 === ':') return -1;
-      if (v1 === ':' && v2 === '=') return 1;
-
-      return v1 < v2 ? -1 : 1;
-   }
-
-   return paths.sort (function (a, b) {
-      var result = dale.stopNot (dale.times (Math.min (a.length, b.length), 0), 0, function (k) {
-         return compare (a [k], b [k]);
-      }) || 0;
-      return result !== 0 ? result : a.length - b.length;
-   });
-}
-
-cell.JSToText = function (text) {
-   return cell.pathsToText (cell.JSToPaths (text));
-}
-
-cell.pathsToText = function (paths) {
-
-   var spaces = function (n) {
-      return Array (n).fill (' ').join ('');
-   }
-
-   var output = [];
-
-   var pathToText = function (path, prefixIndent) {
-      var indentCount = 0;
-      return dale.go (path, function (step) {
-         step = cell.unparseElement (step);
-         if (! step.match (/\n/)) {
-            indentCount += step.length + 1;
-            return step;
-         }
-         return dale.go (step.split (/\n/), function (line, k) {
-            if (k === 0) {
-               indentCount++;
-               return line;
-            }
-            var indent = line.length === 0 ? '' : spaces (indentCount);
-            if (k === step.split (/\n/).length - 1) {
-               indentCount += line.length + 1;
-            }
-            return (prefixIndent || '') + indent + line;
-         }).join ('\n');
-      }).join (' ');
-   }
-
-   dale.go (paths, function (path, k) {
-      var commonPrefix = [];
-      if (k > 0) dale.stop (paths [k - 1], false, function (v, k) {
-         if (v === path [k]) commonPrefix.push (v);
-         else return false;
-      });
-      if (commonPrefix.length === 0) return output.push (pathToText (path));
-
-      var prefixIndent = spaces (pathToText (commonPrefix).length + 1);
-      output.push (prefixIndent + pathToText (path.slice (commonPrefix.length), prefixIndent));
-   });
-
-   return output.join ('\n');
-}
-
-cell.JSToPaths = function (v) {
-
-   var paths = [];
-
-   var singleToFourdata = function (v) {
-      var Type = type (v);
-      if (teishi.inc (['integer', 'float', 'string'], Type)) return v;
-      if (Type === 'boolean') return v ? 1 : 0;
-      if (Type === 'date') return v.toISOString ();
-      if (teishi.inc (['regex', 'function', 'infinity'], Type)) return v.toString ();
-      return '';
-   }
-
-   var recurse = function (v, path) {
-      if (v === undefined) return;
-      if (teishi.simple (v)) paths.push ([... path, singleToFourdata (v)]);
-      else                   dale.go (v, function (v2, k2) {
-         recurse (v2, [... path, type (k2) === 'integer' ? k2 + 1 : k2]);
-      });
-   }
-
-   recurse (v, [])
-
-   return cell.sorter (paths);
-}
+var cell = require ('./cell.js');
 
 // *** HELPERS ***
 
@@ -715,6 +604,7 @@ var routes = [
             ['script', {src: 'assets/codemirror/mode/python/python.js'}],
             ['script', {src: 'assets/gotob/gotoB.min.js'}],
             ['script', {src: 'assets/marked/lib/marked.umd.js'}],
+            ['script', {src: 'cell.js'}],
             ['script', {src: 'client.js'}],
          ]]
       ]]
@@ -723,6 +613,7 @@ var routes = [
    ['get', '/assets/*', function (rq, rs) {
       cicek.file (rq, rs, rq.url.replace ('assets/', ''), ['node_modules']);
    }],
+   ['get', '/cell.js', cicek.file],
    ['get', '/client.js', cicek.file],
    ['get', '/favicon.svg', function (rq, rs) {
       reply (rs, 200, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 16" width="18" height="16">\
@@ -1180,14 +1071,15 @@ var routes = [
    ['post', '/project/run', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'command'], 'eachOf', teishi.test.equal],
-         ['command', rq.body.command, 'string']
+         ['keys of body', dale.keys (rq.body), ['id', 'command', 'read'], 'eachOf', teishi.test.equal],
+         ['command', rq.body.command, 'string'],
+         ['read', rq.body.read, ['boolean', 'undefined'], 'oneOf']
       ])) return;
 
       var result = await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
       if (result.code === 0) delete result.code;
 
-      redis ('hset', 'project:' + rq.body.id, 'last', now ());
+      if (! rq.body.read) redis ('hset', 'project:' + rq.body.id, 'last', now ());
       reply (rs, 200, result);
    }],
 
