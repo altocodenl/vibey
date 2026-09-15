@@ -1,0 +1,11 @@
+admin info@altocode.nl
+baseURL http://localhost:5353
+backup enable 0
+cloud 1
+cookie expires 604800
+       name vibey
+email enable 0
+      from address info@altocode.nl
+           name "A friend from Vibey"
+port 5353
+redis db 0

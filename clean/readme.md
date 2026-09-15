@@ -43,25 +43,63 @@ Available in [cloud version](https://buildwithvibey.com) and local/self-hosted v
 docker compose up --build
 ```
 
-To run in cloud mode:
+To run in cloud mode, set this line in `config.4tx`:
 
 ```
-cloud=1 docker compose up --build
+cloud 1
 ```
 
-To run with both email on and cloud mode on:
+To run sending emails, set this line in `config.4tx`:
 
 ```
-cloud=1 email=1 docker compose up --build
+email enable 1
+```
+
+And set these three lines (with proper values) in `secret.4tx`:
+
+
+```
+email ses accessKeyId ...
+          region ...
+          secretAccessKey ...
 ```
 
 If you're meddling with the Dockerfiles and you need to bust the cache:
 
 ```
-docker compose build --no-cache && cloud=1 docker compose up
+docker compose build --no-cache && docker compose up
 ```
 
 ## Dataspace
+
+### secret.4tx
+
+```
+backup bucket accessKeyId <accessKey>
+              bucketName <bucketName>
+              host <host>
+              region <region>
+              secretAccessKey <secretKey>
+email ses accessKeyId <accessKey>
+          region <region>
+          secretAccessKey <secretKey>
+```
+
+### config.4tx
+
+```
+admin <adminEmail>
+baseURL <url>
+backup enable <0|1>
+cloud <0|1>
+cookie expires <expiration in seconds>
+       name <cookieName>
+email enable <0|1>
+      from address <email>
+           name <name>
+port <portNumber>
+redis db <number>
+```
 
 ### Redis
 
@@ -93,56 +131,6 @@ user:<id> count <integer>
 userCount <integer>
 ```
 
-### secret.js
-
-```
-{
-   backup: {
-      accessKeyId:     '...',
-      bucketName:      '...',
-      host:            '...',
-      region:          '...',
-      secretAccessKey: '...'
-   },
-   ses: {
-      accessKeyId:     '...',
-      secretAccessKey: '...'
-   }
-}
-```
-
-### Environment variables
-
-```
-baseURL <string> // To set the base domain (defaults to `http://localhost:5353`
-backup <"1"|anything else> // To enable backups to a S3-like bucket
-cloud <"1"|anything else> // To enable cloud mode
-email <"1"|anything else> // To enable sending emails
-```
-
-### Server config
-
-```
-admin <adminEmail>
-backup accessKey <accessKey>
-       bucketName <bucketName>
-       enable <0|1>
-       host <host>
-       secretAccessKey <secretKey>
-baseUrl <url>
-cloud <0|1>
-cookie expires <expiration in seconds>
-       name <cookieName>
-email enable <0|1>
-      from address <email>
-           name <name>
-      ses accessKeyId <accessKey>
-          region <region>
-          secretAccessKey <secretKey>
-port <portNumber>
-redis db <number>
-```
-
 ### API
 
 #### Public
@@ -167,7 +155,7 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - **Get projects**: `GET /projects`.
 - **Create project**: `POST /project`: expects `{name: <name>, slot: <positiveInteger|undefined>}`. Names must contain at least two characters. Returns 403 if the user is not a creator, 409 if the current user already has a project with that name. Assigning an occupied slot removes that slot from the project previously occupying it.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <positiveInteger|undefined>}`. Names must contain at least two characters. Returns 404 if project is not found, 409 if the current user has another project with the new name. Assigning an occupied slot removes that slot from the project previously occupying it.
-- **Read file**: `POST /project/read`: expects `{id: <projectId>, path: <path>, sha: <string|undefined>}`. Returns the file contents. Returns 404 if file not found.
+- **Read file**: `POST /project/read`: expects `{id: <projectId>, path: <path>}`. Returns the file contents. Returns 404 if file not found.
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>}`. Runs the command inside the project's container.
@@ -191,30 +179,85 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 #### General
 
-- `test *`: start the client side test suite. Only if the logged in user is admin.
+- `keydown *`: tracks the Command key and handles the global test shortcut:
+  - Command+Shift+L: calls `test all` if the logged in user is admin (matches Command plus uppercase `L`).
+  - Meta: sets `key.command` to true, showing keyboard shortcut tooltips.
+- `keyup|blur *`: clears `key.command` when Meta is released or the window loses focus.
+- `test *`: sets `test` to `{enabled: true}`. Loads the client side test suite (`test.js`) only if the logged in user is admin.
 - `navigate <targetPath>`: reads and optionally updates the hash. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
-- `read hash`: if the hash is `verify/<loginLink>`, calls `verify` with the login link. Otherwise, checks that the view in the hash exists and should be reachable by the user. If on the `projects` view, sets `project`. If on the `project` view, it sets `file`.
+- `read hash`: handles `verify/<loginLink>` and checks that the requested view is reachable by the user. For `files/<projectId>/<filename>`, validates the project and filename, sets `project` and `file.name`, and loads the file list if needed. Defaults to `main.md`, or the first available file. Leaving the files view clears `file` and `files`.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
 - `snackbar <type> [message]`: shows a notification with type (`ok`, `warning`, `error`). Auto-clears after 4 seconds. `snackbar clear` dismisses it immediately.
-- `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token is available. On 403 from a non-auth path, resets user state and redirects to login. Reports errors to the server.
+- `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token is available. Adds `x-test: 1` when `test` is truthy. On 403 from a non-auth path, resets user state and redirects to login. Reports errors to the server.
 
 #### Auth
 
 - `report error <error>`: posts an error to the server via `POST /error`.
-- `load user`: fetches the user information from `GET /auth/user`. Sets `user` to the response body. If cloud and no valid session, redirects to login. Otherwise calls `read hash`.
-- `login <email>`: sends a login link via `POST /auth/login`. On success, sets `user.loginLinkRequested`.
+- `load user`: if the hash contains a verification link, calls `read hash` directly. Otherwise, fetches user information from `GET /auth/user`. On success, sets `user` to the response body, loads projects and calls `read hash`. On 403, sets cloud mode and redirects to login; other errors show a snackbar.
+- `login <email>`: trims and lowercases the email, then sends a login link via `POST /auth/login`. On success, sets `user.loginLinkRequested` and, when `test` is truthy, stores the returned link at `test.loginLink`.
 - `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, stores the user info, loads projects, and navigates to projects. On error, shows a snackbar and navigates to login.
 - `logout`: logs out via `POST /auth/logout`. Resets user state and navigates to login.
 
 #### Projects
 
+- `keydown *`: handles shortcuts while in the projects view:
+  - Command+1–5: opens the project in that slot.
+  - Command+B: in search mode, returns to the spiral.
+  - Command+D: in the creation modal, generates a random name.
+  - Command+E: in search mode, opens project creation; in the creation modal, creates the project when the button is enabled.
+  - Enter: creates the project when the creation button is enabled.
+  - Escape: closes the creation modal.
+  - Command+S: opens and focuses search.
+- `change projects`: rereads the hash to validate navigation against the refreshed project list.
+- `change project`: clears `files` so the newly selected project's file list can be loaded.
 - `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
-- `create project`: creates a new project using the name at `new.project.name` via `POST /project`.
+- `create project`: creates a new project using the trimmed name at `new.project.name` and optional `new.project.slot` via `POST /project`. On success, clears the creation modal and project search, temporarily adds the project to `projects`, navigates to its `main.md` and reloads projects.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
 - `edit project`: renames and/or changes the slot of a project using the values at `edit.project` via `PUT /project`. On success, reloads projects and shows a snackbar.
-- `delete project <project>`: asks for confirmation, then deletes the project via `DELETE /project/<id>`. On success, reloads projects and shows a snackbar.
+- `remove project <project>`: asks for confirmation, then deletes the project via `DELETE /project/<id>`. On success, reloads projects and shows a snackbar.
+
+#### Files
+
+- `keydown *`: handles shortcuts while in the files view; returns without handling them during uploads. Rename submission shortcuts check for an enabled `#rename-file` button, which the current file rename modal does not provide.
+  - Command+B: returns to projects.
+  - Command+E: opens file creation; in the creation modal, creates when enabled. In rename, also attempts submission through `#rename-file`.
+  - Enter: creates a file when the creation button is enabled, or attempts rename submission through `#rename-file`.
+  - Escape: closes the creation or rename modal.
+  - Command+F: in creation, selects file type.
+  - Command+I: outside creation, toggles edit/view mode; in creation, selects dialog type.
+  - Command+J: outside creation, selects the next file in the filtered list, wrapping at the end.
+  - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning.
+  - Command+R: in creation, opens folder upload.
+  - Command+S: outside creation, focuses search.
+  - Command+U: outside creation, deletes the selected file; in creation, opens file upload.
+  - Command+X: closes the creation modal.
+  - Command+Y: outside creation, opens rename if a file is selected and rename is not already open.
+- `change files`: rereads the hash and scrolls the selected file into the center of the left pane. Runs at low priority so the DOM is ready.
+- `change file.name`: reads the selected file and scrolls its entry into the center of the left pane. Runs at low priority.
+- `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
+- `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
+- `list files`: lists project files through `POST /project/run`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then reads the selected file.
+- `read file`: fetches the selected file via `POST /project/read`. Clears the global `content` while loading, then sets it to text or a `Uint8Array` according to the `x-binary` response header and emits `change file`. Ignores responses if the selected project or filename has changed.
+- `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it; otherwise, updates the global `content` if the file is still selected.
+- `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list, closes the creation modal and refreshes the list.
+- `remove file <name>`: asks for confirmation, then deletes the file through `POST /project/run`. Refreshes the list and, if the deleted file was selected, navigates to the project's default file.
+- `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. On success, closes the rename modal, refreshes the list and updates navigation if the renamed file was selected.
+- `download file`: downloads the currently loaded content using the selected file's basename and a temporary blob URL.
+- `upload * <files>`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and base64-encoding detected binary content. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
+- `change projects|project|file|image`: manages image preview blob URLs and recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings, line wrapping and JavaScript/Python/Markdown modes; editor changes call `write file` immediately.
 
 ### Client state
+
+For performance purposes, we use three globals outside of the store:
+
+```
+content <string|Uint8Array|undefined> // Text, binary data, or undefined while loading
+editor <CodeMirror instance>
+image content <string|Uint8Array> // Content used to create the preview
+      url "<blob URL>"
+```
+
+Store:
 
 ```
 edit file newName "<new name>"
@@ -223,24 +266,19 @@ edit file newName "<new name>"
              name "<project name>"
              slot <integer|undefined>
 file actions <0|1> // Whether the filename pill shows Rename and Download; collapsed by default
-     content "..." // Current file selected
-     delete <0|1>
      mode <edit|view>
      name "..."
-files 1 name "<filename>"
+files 1 mtime <integer> // Modification time in milliseconds since Unix epoch
+        name "<filename>"
         size <integer> // File size in bytes
       ...
 hover project <project> // The project (or free project slot) being hovered on
 key command <0|1> // if set, the command key is pressed
-models anthropic "<model name>" context <size of context window in tokens>
-                 ...
-       openai "<model name> context <size of context window in tokens>
-              ...
 new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>
     type "dialog|file" // Whether the new file is a normal file or a dialog
-project <projectId|undefined>" // The current project selected
+project <projectId|undefined> // The current project selected
 projects 1 created <date>
            id <id>
            last <date>
@@ -248,25 +286,15 @@ projects 1 created <date>
            owner <userId>
            slot <integer|undefined>
          ...
-oauth code "<pasted callback URL or code>" // Manual OAuth code input
-      loading "<provider>" // Provider currently in OAuth flow (openai or claude)
-      step flow <paste_code|waiting> // Whether user must paste a code or wait for auto-callback
-           provider "<provider>" // Current OAuth step
-search file <text|undefined>
-       project <text|undefined>
-snackbar color <color>
-         message <message>
+search file <text|undefined> // Filters filenames using String.match (input is interpreted as a regex)
+       project <text|undefined> // Filters project names using String.match; undefined shows the spiral, a defined value shows the list
+snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
-settings claude hasKey <0|1>
-         claudeOAuth expired <0|1>
-                     loggedIn <0|1>
-         openai hasKey <0|1>
-         openaiOAuth expired <0|1>
-                     loggedIn <0|1>
-         show <0|1> // Flips the settings panel open
-         testButton <0|1>
+         type "<notification type>" // Usually ok, warning, or error
 test enabled <0|1> // Whether test mode is enabled
      loginLink // Login link for testing
+upload done <integer> // Successfully uploaded files; upload exists only while uploading
+       total <integer> // Total files in the upload
 user admin <false|true>
      creator <false|true>
      csrf "<CSRF token>"

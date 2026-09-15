@@ -110,7 +110,7 @@ B.mrespond ([
    // *** TEST ***
 
    ['test', '*', function (x) {
-      B.call (x, 'set', 'test', true);
+      B.call (x, 'set', 'test', {enabled: true});
       if (B.get ('user', 'admin')) c.loadScript ('test.js');
    }],
 
@@ -240,7 +240,7 @@ B.mrespond ([
    // *** ERROR ***
 
    ['report', 'error', function (x, error) {
-      c.ajax ('post', '/error', {}, {priority: 'important', ...error});
+      B.call (x, 'post', '/error', {priority: 'important', ...error});
    }],
 
    // *** KEYBOARD SHORTCUTS ***
@@ -316,6 +316,10 @@ B.mrespond ([
 
    ['change', 'projects', function (x) {
       B.call (x, 'read', 'hash');
+   }],
+
+   ['change', 'project', function (x) {
+      B.call (x, 'rem', [], 'files');
    }],
 
    ['load', 'projects', function (x) {
@@ -413,17 +417,22 @@ B.mrespond ([
 
    // *** FILES ***
 
-   ['change', 'files', function (x) {
+   ['change', 'files', {priority: -1000}, function (x) {
       B.call (x, 'read', 'hash');
+      var selected = c ('#selected-file');
+      if (selected) selected.scrollIntoView ({block: 'center'});
    }],
 
-   ['change', ['file', 'name'], function (x) {
+   ['change', ['file', 'name'], {priority: -1000}, function (x) {
       B.call (x, 'read', 'file');
+      var selected = c ('#selected-file');
+      if (selected) selected.scrollIntoView ({block: 'center'});
    }],
 
    ['keydown', '*', function (x, ev) {
 
       if (B.get ('view') !== 'files') return;
+      if (B.get ('upload')) return;
 
       if (ev.key === 'Enter' && c ('#create-file') && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
       if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'rename', 'file');
@@ -452,6 +461,13 @@ B.mrespond ([
             var files = B.get ('files'), current = B.get ('file', 'name');
             if (! files || ! files.length) return;
             ev.preventDefault ();
+
+            var search = B.get ('search', 'file');
+            files = dale.fil (files, undefined, function (file) {
+               if (search && ! file.name.match (search)) return;
+               return file;
+            });
+
             var index = dale.stopNot (files, undefined, function (f, k) {
                if (f.name === current) return k;
             });
@@ -652,9 +668,30 @@ B.mrespond ([
    }],
 
    ['upload', '*', function (x, files) {
-      if (! files || ! files.length) return;
+      if (! files || ! files.length || B.get ('upload')) return;
       var projectId = B.get ('project');
-      var done = 0, total = files.length;
+      var done = 0, finished = 0, total = files.length;
+      B.call (x, 'set', 'upload', {done: done, total: total});
+
+      var complete = function (error, name) {
+         finished++;
+         if (! error) B.call (x, 'set', ['upload', 'done'], ++done);
+         if (finished !== total) return;
+
+         B.call (x, 'rem', [], 'upload');
+         if (done !== total) {
+            B.call (x, 'snackbar', 'error', 'Uploaded ' + done + ' of ' + total + ' files; ' + (total - done) + ' failed');
+         }
+         else {
+            B.call (x, 'rem', 'new', ['file', 'type']);
+            B.call (x, 'snackbar', 'ok', 'Uploaded ' + total + ' file' + (total > 1 ? 's' : ''));
+         }
+         if (B.get ('project') !== projectId) return;
+         B.call (x, 'list', 'files');
+         B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
+         if (total === 1 && done === total) B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (name));
+      }
+
       dale.go (files, function (file) {
          var reader = new FileReader ();
          reader.onload = function () {
@@ -677,15 +714,11 @@ B.mrespond ([
                body.content = new TextDecoder ().decode (reader.result);
             }
             B.call (x, 'post', '/project/write', body, function (x, error) {
-               if (error) {
-                  return B.call (x, 'snackbar', 'error', 'Failed to upload ' + name);
-               }
-               if (++done === total) {
-                  B.call (x, 'snackbar', 'ok', 'Uploaded ' + total + ' file' + (total > 1 ? 's' : ''));
-                  B.call (x, 'list', 'files');
-                  if (total === 1) B.call (x, 'navigate', 'files/' + projectId + '/' + name);
-               }
+               complete (error, name);
             });
+         }
+         reader.onerror = reader.onabort = function () {
+            complete (true, file.webkitRelativePath || file.name);
          }
          reader.readAsArrayBuffer (file);
       });
@@ -718,6 +751,7 @@ B.mrespond ([
 
       if (c ('#code-editor')) {
          editor = CodeMirror (c ('#code-editor'), {
+            keyMap: B.get ('user', 'admin') ? 'vim' : undefined,
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
             value: content || '',
@@ -828,7 +862,7 @@ css.style = [
 
 var views = {};
 
-views.tooltip = function (tooltip) {
+views.tooltip = function (tooltip, placement) {
    return B.view (['key', 'command'], function (command) {
       if (! command) return ['span'];
       return ['span', {
@@ -839,7 +873,7 @@ views.tooltip = function (tooltip) {
             left: '0.625rem',
             padding: '0.125rem 0.5rem',
             'pointer-events': 'none',
-            top: '-1.75rem',
+            top: placement === 'below' ? '100%' : '-1.75rem',
             transform: 'translateX(-50%)',
             'z-index': 10
          }),
@@ -867,8 +901,8 @@ views.main = function () {
             return ['div', {
                class: 'absolute flex right-0 top-0',
                style: style ({
-                  gap: '1.5rem',
-                  margin: '1.5rem 1.5rem 0 0',
+                  gap: view === 'files' ? '0.5rem' : '1.5rem',
+                  margin: view === 'files' ? '0.75rem 1.5rem 0 0' : 'calc(1.5rem - 2vh) 1.5rem 0 0',
                })
             }, [
 
@@ -876,7 +910,8 @@ views.main = function () {
                B.view ([['settings', 'show'], ['view']], function (showSettings, view) {
                   if (view !== 'files') return ['span'];
                   return ['button', {
-                     class: css.button + ' bg-mid-gray f5 pa2 ph3 relative',
+                     class: css.button + ' bg-mid-gray f6 relative',
+                     style: style ({padding: '0.5rem 0.875rem'}),
                      onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
                   }, [
                      views.tooltip ('O'),
@@ -885,15 +920,38 @@ views.main = function () {
                   ]];
                }),
 
-               // Logout
-               ['button', {
-                  class: css.button + ' bg-vpurple f5 pa2 ph3',
-                  onclick: B.ev ('logout', []),
-                  title: B.get ('user', 'email') || ''
-               }, [
-                  ['i', {class: 'bi bi-person-walking mr1'}],
-                  'Logout'
-               ]]
+               // Account and logout
+               B.view (['user', 'email'], function (email) {
+                  var logout = ['button', {
+                     class: css.button + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3'),
+                     style: view === 'files' ? style ({padding: '0.5rem 0.875rem'}) : undefined,
+                     onclick: B.ev ('logout', []),
+                     title: email || '',
+                  }, [
+                     ['i', {class: 'bi bi-person-walking mr1'}],
+                     'Logout'
+                  ]];
+                  if (view !== 'projects') return logout;
+                  return ['div', {
+                     class: 'bg-vmidnight border-box flex flex-column vnearwhite',
+                     style: style ({
+                        'border-radius': '1.125rem',
+                        gap: '1rem',
+                        'max-width': '18rem',
+                        padding: '1.125rem',
+                        width: '18vw',
+                     }),
+                  }, [
+                     ['div', {class: 'f6 lh-copy'}, [
+                        'Logged in as ',
+                        ['span', {
+                           class: 'fw6',
+                           style: style ({'overflow-wrap': 'anywhere'}),
+                        }, email || 'local user'],
+                     ]],
+                     logout,
+                  ]];
+               })
             ]];
 
          }) (),
@@ -1055,22 +1113,49 @@ views.projects = function () {
       css.colors.vviolet,
    ];
 
-   return B.view ('projects', function (projects) {
+   return B.view ([['projects'], ['user', 'email'], ['search', 'project']], function (projects, email, search) {
+      var projectColor = views.projectColor (email);
+      var columnWidth = search !== undefined ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
 
       if (! projects) return ['div', {
-         class: 'bg-vmidnight flex flex-wrap items-center justify-center min-vh-100',
+         class: projectColor + ' flex flex-wrap items-center justify-center min-vh-100',
          style: style ({gap: '2rem'}),
       }, dale.go (dale.times (80), () => views.spinny ())];
 
 
-      return ['div', {class: 'bg-vmidnight flex items-center justify-center min-vh-100'}, [
+      return ['div', {
+         class: projectColor + ' flex items-center justify-center min-vh-100',
+      }, [
+         ['div', {
+            class: 'bg-vmidnight fixed',
+            style: style ({
+               'border-radius': '1.125rem',
+               bottom: 'calc(1.5rem - 2vh)',
+               left: '50%',
+               'pointer-events': 'none',
+               top: 'calc(1.5rem - 2vh)',
+               transform: 'translateX(-50%)',
+               width: columnWidth,
+            }),
+         }],
 
-         // Title
+         // Logo
          ['div', {style: style ({
             left: '1.5rem',
             position: 'fixed',
-            top: '1.5rem',
-         })}, ['span', {class: 'f2 fw7 vnearwhite'}, 'Projects']],
+            top: 'calc(1.5rem - 2vh)',
+         })}, ['img', {
+            alt: 'vibey',
+            class: 'db',
+            src: '/favicon.svg',
+            style: style ({
+               'background-color': css.colors.vmidnight,
+               'border-radius': '1.125rem',
+               height: '6.75rem',
+               padding: '1.125rem',
+               width: '7.59375rem',
+            }),
+         }]],
 
          // Spiral slots or project list
          B.view (['search', 'project'], function (search) {
@@ -1159,7 +1244,7 @@ views.projects = function () {
                      }),
                   }, [
                      ['div', {
-                        class: 'bg-vmidnight border-box center fixed flex left-0 right-0 w-100',
+                        class: 'border-box center fixed flex left-0 right-0 w-100',
                         style: style ({
                            gap: '0.75rem',
                            height: '14vh',
@@ -1170,7 +1255,7 @@ views.projects = function () {
                         }),
                      }, [
                         ['div', {
-                           class: 'bg-transparent flex items-center justify-center pointer relative vlightblue',
+                           class: 'bg-vmidnight flex items-center justify-center pointer relative vlightblue',
                            onclick: B.ev ('rem', 'search', 'project'),
                            style: style ({
                               border: '0.09375rem solid ' + css.colors.vborderblue,
@@ -1179,7 +1264,7 @@ views.projects = function () {
                            }),
                         }, [views.tooltip ('B'), ['span', {class: 'fw6 f4'}, '‹ Back to shell']]],
                         ['div', {
-                           class: 'bg-transparent flex items-center justify-center pointer relative vgreen',
+                           class: 'bg-vmidnight flex items-center justify-center pointer relative vgreen',
                            onclick: B.ev ('set', ['new', 'project'], {slot: undefined}),
                            style: style ({
                               border: '0.09375rem solid ' + css.colors.vborderblue,
@@ -1287,7 +1372,7 @@ views.projects = function () {
                      id: 'search-project',
                      onfocus: B.ev ('set', ['search', 'project'], ''),
                      oninput: B.ev ('set', ['search', 'project']),
-                     placeholder: 'Search',
+                     placeholder: 'Search projects',
                      style: style ({
                         border: vw (1.5) + ' solid ' + css.colors.vborderblue,
                         'border-radius': vw (slotBorderRadius),
@@ -1536,7 +1621,7 @@ views.files = function () {
       return ['div', {
          class: views.projectColor (project.name) + ' border-box flex flex-column overflow-hidden vh-100',
          style: style ({
-            padding: '1.5rem 1.5rem 0 1.5rem',
+            padding: '0.75rem 1.5rem 0 1.5rem',
          }),
       }, [
          ['style', [
@@ -1593,12 +1678,12 @@ views.files = function () {
                color: css.colors.vred,
             }],
          ]],
-         ['div', {class: 'flex flex-shrink-0 items-center mb3'}, [
+         ['div', {class: 'flex flex-shrink-0 items-center mb2'}, [
             ['span', {
-               class: 'f1 fw7 lh-solid mr3 pointer relative',
+               class: 'f2 fw7 lh-solid mr3 pointer relative',
                onclick: B.ev ('navigate', 'projects'),
-            }, ['‹', views.tooltip ('B')]],
-            ['span', {class: 'f2 fw7'}, project.name],
+            }, ['‹', views.tooltip ('B', 'below')]],
+            ['span', {class: 'f4 fw7'}, project.name],
          ]],
          ['div', {
             style: style ({
@@ -1649,6 +1734,7 @@ views.files = function () {
                      var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
                      return ['div', {
                         class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
+                        id: active ? 'selected-file' : undefined,
                         onclick: B.ev ('navigate', 'files/' + B.get ('project') + '/' + file.name),
                         style: style ({
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
@@ -1787,7 +1873,18 @@ views.files = function () {
          ]],
 
          // File creation modal
-         B.view ([['new', 'file'], ['new', 'type'], ['files']], function (newFile, newType, files) {
+         B.view ([['new', 'file'], ['new', 'type'], ['files'], ['upload']], function (newFile, newType, files, upload) {
+            if (upload) return views.modal ({}, [
+               ['div', {
+                  'aria-live': 'polite',
+                  class: 'flex items-center justify-center',
+                  role: 'status',
+                  style: style ({gap: '1rem'}),
+               }, [
+                  views.spinny (),
+                  ['span', {class: 'fw6 vnearwhite'}, 'Uploaded ' + upload.done + ' of ' + upload.total],
+               ]],
+            ]);
             if (newFile === undefined) return ['div'];
 
             var allowCreation = (function () {
@@ -1982,6 +2079,136 @@ views.files = function () {
       ]];
    });
 }
+
+// *** CHAT ***
+
+views.chat = function () {
+   return B.view ('file', function (file) {
+   });
+}
+
+// *** ENTRYPOINT ***
+
+B.call ('load', 'user');
+B.mount ('body', views.main);
+
+
+/* TODO: To be recycled later, perhaps
+ *
+ *
+ *
+ *
+ *
+
+
+   // *** OAUTH ***
+
+   ['login', 'oauth', function (x, provider) {
+      B.call (x, 'set', ['oauth', 'loading'], provider);
+      B.call (x, 'post', '/settings/login/' + provider, {}, function (x, error, rs) {
+         if (error) {
+            B.call (x, 'rem', 'oauth', 'loading');
+            return B.call (x, 'snackbar', 'error', 'Failed to start login');
+         }
+         window.open (rs.body.url, '_blank');
+         if (rs.body.flow === 'paste_code') {
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code'});
+            B.call (x, 'rem', 'oauth', 'loading');
+         }
+         else {
+            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting'});
+            B.call (x, 'complete', 'oauth', provider);
+         }
+      });
+   }],
+
+   ['complete', 'oauth', function (x, provider, code) {
+      B.call (x, 'set', ['oauth', 'loading'], provider);
+      B.call (x, 'post', '/settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
+         B.call (x, 'rem', [], 'oauth');
+         if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
+         B.call (x, 'load', 'settings');
+      });
+   }],
+
+   ['logout', 'oauth', function (x, provider) {
+      if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
+      B.call (x, 'post', '/settings/logout/' + provider, {}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to logout');
+         B.call (x, 'load', 'settings');
+      });
+   }],
+
+
+   // TODO: refactor from here below
+   ['.modal-actions', {
+      display: 'flex',
+      gap: 12,
+      'justify-content': 'flex-end',
+      'margin-top': 20
+   }],
+   ['.project-shell', {
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: 24,
+      padding: 24,
+      'min-height': '100vh',
+      'box-sizing': 'border-box'
+   }],
+   ['.project-main', {
+      display: 'grid',
+      'grid-template-columns': '23.6fr 76.4fr',
+      gap: 24,
+      flex: 1,
+      width: 1,
+      'min-height': 0,
+      'box-sizing': 'border-box'
+   }],
+   ['.project-pane', {
+      padding: 24,
+      'border-radius': 18,
+      border: '1px solid ' + css.colors.vborderblue,
+      'background-color': css.colors.vnavy,
+      'box-shadow': '0 20px 60px rgba(0, 0, 0, 0.22)',
+      'box-sizing': 'border-box',
+      'min-height': 0
+   }],
+   ['.project-left-pane', {
+      'min-width': 0
+   }],
+   ['.project-right-pane', {
+      'min-width': 0,
+      display: 'flex',
+      'flex-direction': 'column'
+   }],
+   ['.flip-card', {
+      perspective: 1200,
+   }],
+   ['.flip-card-inner', {
+      position: 'relative',
+      width: 1,
+      height: 1,
+      transition: 'transform 0.6s ease',
+      'transform-style': 'preserve-3d',
+      'transform-origin': 'center center',
+   }],
+   ['.flip-card-inner.flipped', {
+      transform: 'rotateY(180deg)',
+   }],
+   ['.flip-card-front, .flip-card-back', {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: 1,
+      height: 1,
+      'backface-visibility': 'hidden',
+      '-webkit-backface-visibility': 'hidden',
+   }],
+   ['.flip-card-back', {
+      transform: 'rotateY(180deg)',
+   }],
+
+
 
 views.files_old = function () {
 
@@ -2265,126 +2492,6 @@ views.files_old = function () {
       ]];
    });
 }
-
-// *** ENTRYPOINT ***
-
-B.call ('load', 'user');
-B.mount ('body', views.main);
-
-
-/* TODO: To be recycled later, perhaps
- *
- *
- *
-
-   // *** OAUTH ***
-
-   ['login', 'oauth', function (x, provider) {
-      B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', '/settings/login/' + provider, {}, function (x, error, rs) {
-         if (error) {
-            B.call (x, 'rem', 'oauth', 'loading');
-            return B.call (x, 'snackbar', 'error', 'Failed to start login');
-         }
-         window.open (rs.body.url, '_blank');
-         if (rs.body.flow === 'paste_code') {
-            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code'});
-            B.call (x, 'rem', 'oauth', 'loading');
-         }
-         else {
-            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting'});
-            B.call (x, 'complete', 'oauth', provider);
-         }
-      });
-   }],
-
-   ['complete', 'oauth', function (x, provider, code) {
-      B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', '/settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
-         B.call (x, 'rem', [], 'oauth');
-         if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
-         B.call (x, 'load', 'settings');
-      });
-   }],
-
-   ['logout', 'oauth', function (x, provider) {
-      if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
-      B.call (x, 'post', '/settings/logout/' + provider, {}, function (x, error) {
-         if (error) return B.call (x, 'snackbar', 'error', 'Failed to logout');
-         B.call (x, 'load', 'settings');
-      });
-   }],
-
-
-   // TODO: refactor from here below
-   ['.modal-actions', {
-      display: 'flex',
-      gap: 12,
-      'justify-content': 'flex-end',
-      'margin-top': 20
-   }],
-   ['.project-shell', {
-      display: 'flex',
-      'flex-direction': 'column',
-      gap: 24,
-      padding: 24,
-      'min-height': '100vh',
-      'box-sizing': 'border-box'
-   }],
-   ['.project-main', {
-      display: 'grid',
-      'grid-template-columns': '23.6fr 76.4fr',
-      gap: 24,
-      flex: 1,
-      width: 1,
-      'min-height': 0,
-      'box-sizing': 'border-box'
-   }],
-   ['.project-pane', {
-      padding: 24,
-      'border-radius': 18,
-      border: '1px solid ' + css.colors.vborderblue,
-      'background-color': css.colors.vnavy,
-      'box-shadow': '0 20px 60px rgba(0, 0, 0, 0.22)',
-      'box-sizing': 'border-box',
-      'min-height': 0
-   }],
-   ['.project-left-pane', {
-      'min-width': 0
-   }],
-   ['.project-right-pane', {
-      'min-width': 0,
-      display: 'flex',
-      'flex-direction': 'column'
-   }],
-   ['.flip-card', {
-      perspective: 1200,
-   }],
-   ['.flip-card-inner', {
-      position: 'relative',
-      width: 1,
-      height: 1,
-      transition: 'transform 0.6s ease',
-      'transform-style': 'preserve-3d',
-      'transform-origin': 'center center',
-   }],
-   ['.flip-card-inner.flipped', {
-      transform: 'rotateY(180deg)',
-   }],
-   ['.flip-card-front, .flip-card-back', {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: 1,
-      height: 1,
-      'backface-visibility': 'hidden',
-      '-webkit-backface-visibility': 'hidden',
-   }],
-   ['.flip-card-back', {
-      transform: 'rotateY(180deg)',
-   }],
-
-
 
 
 */

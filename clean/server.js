@@ -1,63 +1,29 @@
+// *** CONFIG ***
+
+var fs = require ('fs');
+var cell = require ('./cell.js');
+
 /* *** SHAPE OF secret.js ***
 
-module.exports = {
-   backup: {
-      accessKeyId:     '...',
-      bucketName:      '...',
-      host:            '...',
-      region:          '...',
-      secretAccessKey: '...'
-   },
-   ses: {
-      accessKeyId:     '...',
-      secretAccessKey: '...'
-   },
-}
-
+backup bucket accessKeyId ...
+              bucketName ...
+              host ...
+              region ...
+              secretAccessKey ...
+email ses accessKeyId ...
+          region ...
+          secretAccessKey ...
 */
 
 try {
-   var SECRET = require ('./secret.js');
+   var CONFIG = cell.textToJS (fs.readFileSync ('config.4tx', 'utf8'));
+   var SECRET = cell.textToJS (fs.readFileSync ('secret.4tx', 'utf8'));
 }
 catch (error) {
+   console.log (error);
+   var CONFIG = {};
    var SECRET = {};
 }
-
-// *** CONFIG ***
-
-var CONFIG = {
-   admin: 'info@altocode.nl',
-   baseURL: process.env.baseURL || 'http://localhost:5353',
-   cloud: process.env.cloud === '1',
-   backup: {
-      ... (SECRET.backup || {}),
-      enable: process.env.backup === '1',
-   },
-   cookie: {
-      expires: 7 * 24 * 60 * 60,
-      name:    'vibey'
-   },
-   email: {
-      enable: process.env.email === '1',
-      from: {
-         address: 'info@altocode.nl',
-         name: 'A friend from Vibey',
-      },
-      ses: {
-         accessKeyId:     SECRET.ses?.accessKeyId,
-         region:          'eu-west-1',
-         secretAccessKey: SECRET.ses?.secretAccessKey
-      },
-   },
-   port: 5353,
-   redis: {
-      db: 0
-   }
-}
-
-// *** TEST ***
-
-var test = require ('./test.js');
 
 // *** SETUP ***
 
@@ -71,7 +37,7 @@ var dale   = require ('dale');
 var teishi = require ('teishi');
 var lith   = require ('lith');
 var cicek  = require ('cicek');
-var Redis  = require ('redis').createClient ({db: CONFIG.redis.db});
+var Redis  = require ('redis').createClient ({db: CONFIG.redis?.db});
 
 var aws4  = require ('aws4');
 var mime  = require ('mime');
@@ -79,7 +45,9 @@ var hitit = require ('hitit');
 
 var {inc, last, type} = teishi;
 
-var cell = require ('./cell.js');
+// *** TEST ***
+
+var test = require ('./test.js');
 
 // *** HELPERS ***
 
@@ -360,7 +328,7 @@ var backup = {};
 
 // Based off https://gist.github.com/adv0r/1dfaf7999d7aac95d473e65b675496b0
 backup.presign = function (method, key, expires) {
-   var region    = CONFIG.backup.host.match (/s3\.([^.]+)\./) [1];
+   var region    = SECRET.backup?.bucket?.host?.match (/s3\.([^.]+)\./)?.[1];
 
    var now       = new Date ().toISOString ().replace (/[-:]/g, '').replace (/\..+/, '') + 'Z';
    var shortDate = now.slice (0, 8);
@@ -368,22 +336,22 @@ backup.presign = function (method, key, expires) {
 
    var query = [
       'X-Amz-Algorithm=AWS4-HMAC-SHA256',
-      'X-Amz-Credential=' + encodeURIComponent (CONFIG.backup.accessKeyId + '/' + scope),
+      'X-Amz-Credential=' + encodeURIComponent (SECRET.backup?.bucket?.accessKeyId + '/' + scope),
       'X-Amz-Date=' + now,
       'X-Amz-Expires=' + (expires || 300),
       'X-Amz-SignedHeaders=host'
    ].join ('&');
 
-   var canonical = [method, '/' + key, query, 'host:' + CONFIG.backup.bucketName + '.' + CONFIG.backup.host, '', 'host', 'UNSIGNED-PAYLOAD'].join ('\n');
+   var canonical = [method, '/' + key, query, 'host:' + SECRET.backup?.bucket?.bucketName + '.' + SECRET.backup?.bucket?.host, '', 'host', 'UNSIGNED-PAYLOAD'].join ('\n');
    var toSign    = ['AWS4-HMAC-SHA256', now, scope, crypto.createHash ('sha256').update (canonical).digest ('hex')].join ('\n');
 
    var hmac = function (key, data) {
       return crypto.createHmac ('sha256', key).update (data).digest ();
    }
-   var signingKey = hmac (hmac (hmac (hmac ('AWS4' + CONFIG.backup.secretAccessKey, shortDate), region), 's3'), 'aws4_request');
+   var signingKey = hmac (hmac (hmac (hmac ('AWS4' + SECRET.backup?.bucket?.secretAccessKey, shortDate), region), 's3'), 'aws4_request');
    var signature  = crypto.createHmac ('sha256', signingKey).update (toSign).digest ('hex');
 
-   return 'https://' + CONFIG.backup.bucketName + '.' + CONFIG.backup.host + '/' + key + '?' + query + '&X-Amz-Signature=' + signature;
+   return 'https://' + SECRET.backup?.bucket?.bucketName + '.' + SECRET.backup?.bucket?.host + '/' + key + '?' + query + '&X-Amz-Signature=' + signature;
 }
 
 backup.list = async function (prefix) {
@@ -395,13 +363,13 @@ backup.list = async function (prefix) {
       if (next) path += '&continuation-token=' + encodeURIComponent (next);
 
       var signed = aws4.sign ({
-         host:    CONFIG.backup.bucketName + '.' + CONFIG.backup.host,
+         host:    SECRET.backup?.bucket?.bucketName + '.' + SECRET.backup?.bucket?.host,
          path:    path,
          service: 's3',
-         region:  CONFIG.backup.region,
+         region:  SECRET.backup?.bucket?.region,
       }, {
-         accessKeyId:     CONFIG.backup.accessKeyId,
-         secretAccessKey: CONFIG.backup.secretAccessKey,
+         accessKeyId:     SECRET.backup?.bucket?.accessKeyId,
+         secretAccessKey: SECRET.backup?.bucket?.secretAccessKey,
       });
 
       var body = await new Promise (function (resolve, reject) {
@@ -430,7 +398,7 @@ backup.list = async function (prefix) {
 
 docker.backup = async function (id) {
 
-   if (! CONFIG.backup.enable) return;
+   if (! CONFIG.backup?.enable) return;
 
    var [tracked, files, lastCommit] = await dale.async (dale.times (3), function (k) {
       if (k === 1) return docker.run (id, 'git -C /project ls-files -co --exclude-standard');
@@ -483,20 +451,20 @@ var rateLimit = async function (prefix, max, ttl) {
 // *** EMAIL ***
 
 var mailer;
-if (CONFIG.email.ses.accessKeyId && CONFIG.email.ses.secretAccessKey) {
-   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (CONFIG.email.ses));
+if (CONFIG.email?.enable && SECRET.email?.ses?.accessKeyId && SECRET.email?.ses?.secretAccessKey) {
+   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (SECRET.email?.ses));
 }
 
 var sendmail = function (options) {
    return new Promise (function (resolve, reject) {
-      if (! CONFIG.email.enable) {
+      if (! CONFIG.email?.enable) {
          clog ({type: 'Skipping email', to: options.to, subject: options.subject});
          return resolve ();
       }
       mailer.sendMail ({
-         from:    CONFIG.email.from.name + ' <' + CONFIG.email.from.address + '>',
+         from:    CONFIG.email?.from?.name + ' <' + CONFIG.email?.from?.address + '>',
          to:      options.to,
-         replyTo: CONFIG.email.from.address,
+         replyTo: CONFIG.email?.from?.address,
          subject: options.subject,
          html:    lith.g (options.message)
       }, function (error) {
@@ -520,7 +488,7 @@ var routes = [
          return rs.next ();
       }
 
-      var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
+      var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie?.name] ? rq.data.cookie [CONFIG.cookie?.name] : undefined;
 
       if (sessionId) {
          var session = await redis ('hgetall', 'session:' + sessionId);
@@ -556,7 +524,7 @@ var routes = [
       });
 
       if (! rq.user && ! publicPath) {
-         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
+         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, false, {
             httponly: true,
             path: '/',
             samesite: 'Lax',
@@ -570,7 +538,7 @@ var routes = [
 
       if (rq.user && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
          ['hmset', 'session:' + sessionId, {
-            expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
+            expires: new Date (Date.now () + CONFIG.cookie?.expires * 1000).toISOString (),
             last: JSON.stringify ({
                date: now (),
                ip:   rs.log.origin
@@ -589,7 +557,7 @@ var routes = [
          ['head', [
             ['meta', {name: 'viewport', content: 'width=device-width,initial-scale=1'}],
             ['meta', {charset: 'utf-8'}],
-            CONFIG.domain && CONFIG.domain.match (/\/app\/?$/) ? ['base', {href: '/app/'}] : '',
+            CONFIG.baseURL?.match (/\/app\/?$/) ? ['base', {href: '/app/'}] : '',
             ['title', 'vibey'],
             ['link', {rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg'}],
             ['link', {rel: 'stylesheet', href: 'assets/bootstrap-icons/font/bootstrap-icons.min.css'}],
@@ -599,6 +567,7 @@ var routes = [
          ]],
          ['body', [
             ['script', {src: 'assets/codemirror/lib/codemirror.js'}],
+            ['script', {src: 'assets/codemirror/keymap/vim.js'}],
             ['script', {src: 'assets/codemirror/mode/markdown/markdown.js'}],
             ['script', {src: 'assets/codemirror/mode/javascript/javascript.js'}],
             ['script', {src: 'assets/codemirror/mode/python/python.js'}],
@@ -617,7 +586,7 @@ var routes = [
    ['get', '/client.js', cicek.file],
    ['get', '/favicon.svg', function (rq, rs) {
       reply (rs, 200, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 16" width="18" height="16">\
-         <rect width="18" height="16" fill="#111827"/>\
+         <rect width="18" height="16" fill="#1a1a2e"/>\
          <path fill="#fff" d="M1 1h2v2H1z M2 3h2v2H2z M3 5h2v2H3z M4 7h2v2H4z M5 9h1v1H5z M5 10h2v1H5z M6 11h2v2H6z M8 9h1v1H8z M7 10h2v1H7z M8 7h2v2H8z M9 5h2v2H9z M10 3h2v2H10z M11 1h2v2H11z"/>\
          <path fill="#c084fc" d="M15 1h2v2h-2z M14 3h2v2h-2z M13 5h2v2h-2z M12 7h2v2h-2z M11 9h2v2h-2z M10 11h2v2h-2z"/>\
       </svg>', {'content-type': 'image/svg+xml'});
@@ -704,7 +673,7 @@ var routes = [
          ]);
       }
 
-      if (! CONFIG.email.enable) clog ({type: 'New login link', email: rq.body.email, fullLoginLink});
+      if (! CONFIG.email?.enable) clog ({type: 'New login link', email: rq.body.email, fullLoginLink});
 
       await sendmail ({
          to: rq.body.email,
@@ -740,7 +709,7 @@ var routes = [
       await redis ([
          ['hmset',  'session:' + sessionId, {
             csrf,
-            expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
+            expires: new Date (Date.now () + CONFIG.cookie?.expires * 1000).toISOString (),
             last: JSON.stringify ({
                date: now (),
                ip:   rs.log.origin
@@ -761,12 +730,12 @@ var routes = [
          csrf,
          email: user.email,
          mode: 'cloud',
-      }, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {
+      }, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, sessionId, {
          expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10),
          httponly: true,
          path: '/',
          samesite: 'Lax',
-         secure: CONFIG.baseURL.match ('localhost') ? undefined : true,
+         secure: CONFIG.baseURL?.match ('localhost') ? undefined : true,
       })});
    }],
 
@@ -789,11 +758,11 @@ var routes = [
          ['srem', 'owner:' + rq.user.id, 'session:' + rq.user.session]
       ]);
 
-      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
+      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, false, {
          httponly: true,
          path: '/',
          samesite: 'Lax',
-         secure: CONFIG.baseURL.match ('localhost') ? undefined : true,
+         secure: CONFIG.baseURL?.match ('localhost') ? undefined : true,
       })});
    }],
 
@@ -817,7 +786,7 @@ var routes = [
 
       await redis ('del', ... ['user:' + rq.user.id, 'email:' + rq.user.email, 'owner:' + rq.user.id, ... keys]);
 
-      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
+      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, false, {
          httponly: true,
          path: '/',
          samesite: 'Lax',
@@ -834,7 +803,7 @@ var routes = [
       if (rq.user.creator) return reply (rs, 409, {error: 'Already a creator'});
 
       await sendmail ({
-         to: CONFIG.email.address,
+         to: CONFIG.admin,
          subject: 'Vibey creator request',
          message: ['p', [
             'New creator request from: ' + rq.user.email,
@@ -1007,12 +976,10 @@ var routes = [
    ['post', '/project/read', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'path', 'sha'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['id', 'path'], 'eachOf', teishi.test.equal],
          ['path', rq.body.path, 'string'],
-         ['sha', rq.body.sha, ['string', 'undefined'], 'oneOf'],
       ])) return;
 
-      if (rq.body.sha) return reply (rs, 409, {error: 'Not implemented yet'});
       var file = await docker.read (rq.body.id, rq.body.path);
       if (file.code) {
          if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404);

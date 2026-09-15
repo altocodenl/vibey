@@ -1,5 +1,41 @@
 # Vibey development notes
 
+## 2026-09-15
+
+- TODO
+   - file
+      - tabs
+      - open sqlite files
+      - search text files
+      - stream large files (split them in pages)
+      - edit text file through diffs (edits) rather than whole file write (faster)
+      - client tests
+   - project
+      - autobackup
+      - client tests
+      - skip docker.exec to have a slash command time by 10x
+
+On identifying users by their credentials, so we can show with which account they authenticated against an AI provider:
+```
+It is absolutely a massive wall. Registering an official OAuth app with Anthropic or OpenAI requires enterprise-grade vetting, developer applications, and strict compliance checks.
+Fortunately, you can completely bypass this wall. Because your project is an open-source agent, you do not need to register a formal OAuth app with the AI providers to show users which account they are using.
+Here are the two smart, low-friction paths open-source developers use instead:
+Path 1: The "Bring Your Own Key" (BYOK) Identity Hack
+If you ask users to input a standard API key (sk-...), you can look up their account identity programmatically using lightweight API tricks—no OAuth required.
+For OpenAI Keys: OpenAI lets you query your own key profile instantly. Just make a GET request to https://openai.com or list the organizations. The API returns the exact account name, user ID, and organization name linked to that specific key.
+For Anthropic Keys: As mentioned earlier, Anthropic doesn't have a clean /me endpoint. Instead, make a dummy, 1-token call to the v1/messages endpoint. The HTTP response headers or the initial handshake payload return the active organization_id (e.g., org_abc123). You can display this Org ID to the user as their unique account identifier.
+```
+
+Next up:
+- Chat view
+- Chat message format (three schwas as the beginning, four schwas as the beginning of the body (the headers are sandwiched)
+- Send call to shell
+- Stream shell response
+
+Someone typing should also be seen as a response in progress! This is big. Only that you don't stream it. But you could potentially show that it is in reply to X message, if it that's the case.
+
+Having links between messages and responses is going to be big. It will allow you to jump, by clicking or using the keyboard, to the relevant message.
+
 ## 2026-09-14
 
 A crystal clear value proposition.
