@@ -1,5 +1,45 @@
 # Vibey development notes
 
+## 2026-09-16
+
+Clients are orchestrators.
+
+```
+əəə head <id>
+from ...
+id ...
+t ...
+to ...
+əəə body <id>
+```
+
+For pending messages
+
+```
+pending 1
+t-start ...
+t-end ...
+```
+
+No end marker, then you have the next 3schwa + head block or the end of file
+
+All changes to the dialog go through edits. We need a dedicated query endpoint for making refreshs lighter.
+
+OK, endpoint for sending the message:
+POST /project/message body base64 <0|1>
+                           file <fileName>
+                           id <projectId>
+                           message <text|base64>
+                           to <all|messageId|shell|ai-gpt6|ai-opus4.6>
+
+The endpoint:
+1. validates the fields. message cannot contain a header line or a body line.
+2. creates the full message with header & body in memory, generating id, t (ISO timestamp) and from (user.id)
+3. If the file doesn't exist, it creates it empty with touch.
+4. It calls docker.edit using the EOF to be sure to append to whatever is there.
+
+The endpoint assumes that there are other concurrent messages being posted. This will require docker.edit to behave transactionally with replacements. Let's tackle this a bit later.
+
 ## 2026-09-15
 
 - TODO

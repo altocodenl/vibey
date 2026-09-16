@@ -381,13 +381,22 @@ B.mrespond ([
 
       if (B.get ('view') !== 'projects') return;
 
-      var projects = B.get ('projects');
-      if (projects) dale.go ([1, 2, 3, 4, 5], function (slot) {
-         var project = dale.stopNot (projects, undefined, function (project) {
-            if (project.slot === slot) return project;
-         });
-         if (project) shortcut (slot + '', ev, x, 'navigate', 'files/' + project.id);
-      });
+      if (inc (['1', '2', '3', '4', '5'], ev.key)) {
+         var projects = B.get ('projects');
+         var project;
+         if (B.get ('search', 'project') === undefined) {
+            project = dale.stopNot (projects, undefined, function (project) {
+               if (project.slot === parseInt (ev.key)) return project;
+            });
+         }
+         if (B.get ('search', 'project') !== undefined && projects) {
+            var filteredProjects = dale.fil (projects, undefined, function (project) {
+               if (project.name.match (B.get ('search', 'project'))) return project;
+            });
+            project = filteredProjects [parseInt (ev.key) - 1];
+         }
+         if (project) shortcut (ev.key, ev, x, 'navigate', 'files/' + project.id);
+      }
 
       if (ev.metaKey && ev.key === 's') {
          shortcut ('s', ev, x, 'set', ['search', 'project'], '');
@@ -611,6 +620,8 @@ B.mrespond ([
 
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a name');
 
+      if (! name.match (/\.[a-z]{2,3}$/i)) name += '.md';
+
       B.call (x, 'write', 'file', name, '', 'new');
 
       B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
@@ -749,8 +760,8 @@ B.mrespond ([
 
       if (editor) editor.getWrapperElement ().remove ();
 
-      if (c ('#code-editor')) {
-         editor = CodeMirror (c ('#code-editor'), {
+      if (c ('#file-editor')) {
+         editor = CodeMirror (c ('#file-editor'), {
             keyMap: B.get ('user', 'admin') ? 'vim' : undefined,
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
@@ -764,20 +775,40 @@ B.mrespond ([
             if (content !== newContent) B.call (x, 'write', 'file', B.get ('file', 'name'), newContent);
          });
       }
+
+      if (c ('#chat-editor')) {
+         editor = CodeMirror (c ('#chat-editor'), {
+            keyMap: B.get ('user', 'admin') ? 'vim' : undefined,
+            lineWrapping: true,
+            mode: 'markdown',
+            value: B.get ('message', 'body') || '',
+         });
+
+         editor.setCursor (editor.lineCount () - 1, Infinity);
+         editor.focus ();
+         editor.on ('change', function (cm) {
+            B.call (x, 'set', ['message', 'body'], cm.getValue ());
+         });
+      }
    }],
 
    // *** CHATS ***
 
-   ['create', 'dialog', function (x, name) {
+   ['create', 'message', function (x, to, name, body) {
+      var project = B.get ('project');
+      if (! project || B.get ('file', 'name') !== name) return;
+      if (! body.trim ()) return;
 
-      B.call (x, 'post', '/project/' + B.get ('project') + '/dialog/new', {slug: name.length ? name : undefined, provider: 'openai'}, function (x, error, rs) {
-
-         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem creating the dialog');
-
-         B.call (x, 'madd', 'files', rs.body.filename);
-         B.call (x, 'rem', 'new', 'file');
-         B.call (x, 'navigate', 'files/' + B.get ('project') + '/' + rs.body.filename);
-         B.call (x, 'list', 'files');
+      B.call (x, 'post', '/project/message', {
+         body: body,
+         file: name,
+         id: project,
+         to: to || 'all',
+      }, function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem sending the message');
+         if (B.get ('project') !== project || B.get ('file', 'name') !== name) return;
+         if (B.get ('message', 'body') === body) B.call (x, 'set', ['message', 'body'], '');
+         B.call (x, 'read', 'file');
       });
    }],
 
@@ -1276,12 +1307,13 @@ views.projects = function () {
                      (function () {
                         var cardWidth = 70 / phi;
                         var cycle = 8;
-                        var index = 0;
-                        return dale.fil (projects, undefined, function (project) {
-                           if (! project.name.match (search)) return;
-                           var offset = 15 + (Math.sin (index++ * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
+                        var filteredProjects = dale.fil (projects, undefined, function (project) {
+                           if (project.name.match (search)) return project;
+                        });
+                        return dale.go (filteredProjects, function (project, index) {
+                           var offset = 15 + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
                            return ['div', {
-                              class: 'border-box flex items-center justify-between pointer ' + views.projectColor (project.name),
+                              class: 'border-box flex items-center justify-between pointer relative ' + views.projectColor (project.name),
                               onclick: B.ev ('navigate', 'files/' + project.id),
                               style: style ({
                                  'border-radius': '0.75rem',
@@ -1293,6 +1325,7 @@ views.projects = function () {
                                  width: cardWidth + 'vw',
                               }),
                            }, [
+                              index < 5 ? views.tooltip (index + 1) : '',
                               ['span', {class: 'flex flex-column justify-center'}, [
                                  ['span', {class: 'f4 fw6'}, project.name],
                                  ['span', {
@@ -1779,6 +1812,8 @@ views.files = function () {
             }, B.view ('file', function (file) {
                if (! file) return ['div'];
 
+               if (file.name.match (/^chat\/.+\.md$/)) return views.chat ();
+
                var mode = file.mode || 'edit';
 
                var isBinary = content instanceof Uint8Array;
@@ -1865,7 +1900,7 @@ views.files = function () {
                      }, ['LITERAL', marked.parse (content || '')]]
                      : ['div', {
                         class: 'flex-auto mt2 overflow-hidden',
-                        id: 'code-editor',
+                        id: 'file-editor',
                         opaque: true,
                      }]
                ]];
@@ -2084,11 +2119,100 @@ views.files = function () {
 
 views.chat = function () {
    return B.view ('file', function (file) {
+      return ['div', {class: 'flex flex-auto flex-column'}, [
+         // Messages
+         B.view (['user', 'id'], function (userId) {
+            return ['div', {class: 'flex-auto overflow-y-auto pa3'}, dale.fil ((content || '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1), undefined, function (message) {
+               var body = message.match (/^əəə body [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im);
+               if (! body) return;
+               var head = message.slice (0, body.index);
+               var from = head.match (/^from (.+)$/m) [1];
+               var time = head.match (/^t (.+)$/m) || head.match (/^t-start (.+)$/m);
+               body = message.slice (body.index + body [0].length).replace (/\n$/, '');
+               return ['div', {
+                  class: views.projectColor (body) + ' border-box lh-copy mb4 ph3 pv1 relative',
+                  opaque: true,
+                  style: style ({
+                     'border-radius': '1.125rem',
+                     'box-shadow': [
+                        '0.375rem 0.375rem 1.125rem ' + css.rgba (css.colors.vblack, 0.25),
+                        '-0.375rem -0.375rem 1.125rem ' + css.rgba (css.colors.vwhite, 0.04),
+                     ].join (', '),
+                     'overflow-wrap': 'anywhere',
+                  }),
+               }, [
+                  ['div', {
+                     class: views.projectColor (from) + ' absolute br-pill f7 lh-solid ph2 pv1',
+                     style: style ({
+                        right: '0.75rem',
+                        top: '0.5rem',
+                     }),
+                  }, from === userId ? 'You' : from],
+                  from === 'shell'
+                     ? ['pre', {class: 'code f7 ma0 overflow-x-auto'}, body]
+                     : ['LITERAL', marked.parse (body)],
+                  ['div', {
+                     class: views.projectColor (ago (time)) + ' absolute br-pill f7 lh-solid ph2 pv1',
+                     style: style ({
+                        bottom: '0.5rem',
+                        right: '0.75rem',
+                     }),
+                  }, time ? ago (time [1]) : ''],
+               ]];
+            })];
+         }),
+         // Draft
+         ['div', {
+            class: 'flex flex-column flex-shrink-0',
+            style: style ({
+               'border-top': '0.1875rem solid ' + css.colors.vborderblue,
+               height: '30%',
+            }),
+         }, [
+            B.view ('message', function (message) {
+               return ['div', {
+                  class: 'flex items-center pv3',
+                  style: style ({gap: '0.75rem'}),
+               }, [
+                  ['label', {class: 'fw6 vlightblue', for: 'chat-to'}, 'To:'],
+                  ['select', {
+                     class: 'ba bg-vnavy br2 f5 pa2 vlightblue vborderblue-border',
+                     id: 'chat-to',
+                     onchange: B.ev ('set', ['message', 'to']),
+                  }, [
+                     ['option', {selected: message.to === 'all', value: 'all'}, 'all'],
+                     ['option', {selected: message.to === 'shell', value: 'shell'}, 'shell'],
+                     ['option', {selected: message.to === 'ai-gpt-6', value: 'ai-gpt-6'}, 'ai-gpt-6'],
+                     ['option', {selected: message.to === 'ai-opus-4.6', value: 'ai-opus-4.6'}, 'ai-opus-4.6'],
+                  ]],
+                  ['input', {
+                     'aria-label': 'Filter recipients',
+                     class: 'ba bg-vnavy br2 f5 flex-auto outline-0 pa2 vlightblue vborderblue-border',
+                     placeholder: 'Filter recipients',
+                     style: style ({'min-width': 0}),
+                     type: 'text',
+                  }],
+                  ['button', {
+                     class: 'bg-vgreen bn br2 f5 flex-shrink-0 fw7 ph3 pv2 black pointer',
+                     onclick: B.ev ('create', 'message', message.to, file.name, message.body),
+                     type: 'button',
+                  }, 'Boom'],
+               ]];
+            }),
+            ['div', {
+               class: 'flex-auto overflow-hidden',
+               id: 'chat-editor',
+               opaque: true,
+               style: style ({'min-height': 0}),
+            }],
+         ]],
+      ]];
    });
 }
 
 // *** ENTRYPOINT ***
 
+B.call ('set', 'message', {body: '', to: 'all'});
 B.call ('load', 'user');
 B.mount ('body', views.main);
 

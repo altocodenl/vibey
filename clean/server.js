@@ -288,6 +288,11 @@ docker.write = async function (id, path, content) {
 }
 
 docker.edit = async function (id, path, oldText, newText) {
+   if (oldText === '[EOF]') {
+      var result = await docker.run (id, 'cat >> ' + Path.quote (path), {input: newText, catch: true, commit: 'Edit ' + Path.quote (path)});
+      return result.code ? {code: result.code, error: result.stderr} : result;
+   }
+
    oldText = Buffer.from (oldText);
    newText = Buffer.from (newText);
    var input = Buffer.concat ([Buffer.from (oldText.length + '\n' + newText.length + '\n'), oldText, newText]);
@@ -611,6 +616,7 @@ var routes = [
          creator: !! rq.user.creator,
          csrf: rq.user.csrf,
          email: rq.user.email,
+         id: rq.user.id,
          mode: 'cloud',
       });
    }],
@@ -960,7 +966,7 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', ['/project/read', '/project/write', '/project/edit', '/project/run'], async function (rq, rs) {
+   ['post', ['/project/read', '/project/write', '/project/edit', '/project/run', '/project/message'], async function (rq, rs) {
 
       if (stop (rs, ['id', rq.body.id, 'string'])) return;
 
@@ -1048,6 +1054,91 @@ var routes = [
 
       if (! rq.body.read) redis ('hset', 'project:' + rq.body.id, 'last', now ());
       reply (rs, 200, result);
+   }],
+
+   ['post', '/project/message', async function (rq, rs) {
+      if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'id', 'to'], 'eachOf', teishi.test.equal],
+         ['base64', rq.body.base64, ['boolean', 'undefined'], 'oneOf'],
+         ['file', rq.body.file, 'string'],
+         ['id', rq.body.id, 'string'],
+         ['body', rq.body.body, 'string'],
+         ['body without marker lines', rq.body.body, /^(?![\s\S]*(^|\n)əəə (head|body))/, teishi.test.match],
+         ['to', rq.body.to, 'string'],
+         ['to', rq.body.to, undefined, function () {
+            if (teishi.inc (['all', 'shell', 'ai-gpt-6', 'ai-opus-4.6'], rq.body.to)) return true;
+            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test (rq.body.to)) return true;
+            return ['to must be all, shell, ai-gpt-6, ai-opus-4.6, or a message UUID'];
+         }],
+      ])) return;
+
+      var id = crypto.randomUUID ();
+
+      var message = [
+         'əəə head ' + id,
+         rq.body.base64 ? 'base64 1' : '',
+         'from ' + rq.user.id,
+         'id ' + id,
+         't ' + now (),
+         'to ' + rq.body.to,
+         'əəə body ' + id,
+         rq.body.body,
+      ].join ('\n');
+
+      var result = await docker.run (rq.body.id, 'mkdir -p ' + Path.quote (Path.dirname (rq.body.file)) + ' && touch ' + Path.quote (rq.body.file), {catch: true});
+      if (result.code) return reply (rs, 400, {code: result.code, error: result.stderr});
+
+      result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + message);
+      if (result.code) return reply (rs, 400, result);
+
+      redis ('hset', 'project:' + rq.body.id, 'last', now ());
+
+      if (rq.body.to !== 'shell') return reply (rs, 200, {id: id});
+
+      var responseId = crypto.randomUUID ();
+      var tStart = now ();
+
+      var responseMessage = [
+         'əəə head ' + responseId,
+         'from shell',
+         'id ' + responseId,
+         'pending 1',
+         't-start ' + tStart,
+         'to ' + id,
+         'əəə body ' + responseId,
+         '',
+      ].join ('\n');
+
+      result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
+      if (result.code) return reply (rs, 400, result);
+
+      reply (rs, 200, {id: id, responseId: responseId});
+
+      var shellResult = await docker.run (rq.body.id, rq.body.body, {catch: true});
+
+      var oldHead = [
+         'əəə head ' + responseId,
+         'from shell',
+         'id ' + responseId,
+         'pending 1',
+         't-start ' + tStart,
+      ].join ('\n');
+
+      var newHead = [
+         'əəə head ' + responseId,
+         'from shell',
+         'id ' + responseId,
+         't-end ' + now (),
+         't-start ' + tStart,
+      ].join ('\n');
+
+      var oldBody = 'əəə body ' + responseId + '\n';
+      var newBody = 'əəə body ' + responseId + '\n' + ((shellResult.stderr ? shellResult.stderr + '\n' : '') + shellResult.stdout).replace (/\n$/, '');
+
+      await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
+      await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
+
+      redis ('hset', 'project:' + rq.body.id, 'last', now ());
    }],
 
    ['delete', '/project/:id', async function (rq, rs) {

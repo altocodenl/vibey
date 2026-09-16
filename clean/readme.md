@@ -157,8 +157,9 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <positiveInteger|undefined>}`. Names must contain at least two characters. Returns 404 if project is not found, 409 if the current user has another project with the new name. Assigning an occupied slot removes that slot from the project previously occupying it.
 - **Read file**: `POST /project/read`: expects `{id: <projectId>, path: <path>}`. Returns the file contents. Returns 404 if file not found.
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing. If operation concludes with a non-zero code, returns 400 instead of 200.
-- **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
+- **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once, except for the reserved value `'[EOF]'`, which appends `newText` to the end of the file. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>}`. Runs the command inside the project's container.
+- **Send message**: `POST /project/message`: expects `{id: <projectId>, file: <fileName>, base64: <boolean|undefined>, body: <text|base64>, to: <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID>}`. Appends a message with server-generated UUID, timestamp and sender, creating the file and parent folders if needed. Rejects complete header/body marker lines in `body`. Returns `{id: <messageUUID>}`, or 400 if validation or persistence fails.
 - **Remove project**: `DELETE /project/<projectId>`
 
 #### Admin
@@ -244,7 +245,11 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. On success, closes the rename modal, refreshes the list and updates navigation if the renamed file was selected.
 - `download file`: downloads the currently loaded content using the selected file's basename and a temporary blob URL.
 - `upload * <files>`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and base64-encoding detected binary content. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
-- `change projects|project|file|image`: manages image preview blob URLs and recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings, line wrapping and JavaScript/Python/Markdown modes; editor changes call `write file` immediately.
+- `change projects|project|file|image`: manages image preview blob URLs and recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings, line wrapping and JavaScript/Python/Markdown modes; file editor changes call `write file` immediately, while chat editor changes update `message.body`.
+
+#### Chat
+
+- `create message <to> <name> <body>`: posts to `POST /project/message`, defaulting the recipient to `all`. Ignores blank messages. On success, if the same project and file are selected, clears the draft if unchanged and refreshes the file list and chat. Preserves the draft on failure.
 
 ### Client state
 
@@ -274,6 +279,8 @@ files 1 mtime <integer> // Modification time in milliseconds since Unix epoch
       ...
 hover project <project> // The project (or free project slot) being hovered on
 key command <0|1> // if set, the command key is pressed
+message body <text> // Current chat draft, initially empty
+        to <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID> // Recipient, initially all
 new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>

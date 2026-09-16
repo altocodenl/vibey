@@ -530,6 +530,59 @@ if (mode === 'server') {
             ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 8, "Run 'echo foo > doc/another.md && cat doc/another.md'");
             }],
+
+            ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, function (s, rq, rs) {
+               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
+            }],
+            ['Read file after append to empty file', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/empty.md'}}, 200, assertBody ('first message\n')],
+            ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, function (s, rq, rs) {
+               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
+            }],
+            ['Read file after second append', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'doc/empty.md'}}, 200, function (s, rq, rs, next) {
+               if (! assertBody ('first message\nsecond message\n') (s, rq, rs)) return false;
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.projectId);
+                  next ();
+               }) ();
+            }],
+
+            ['Post message to new chat in missing folder', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', body: 'Hello everyone!', to: 'all'}}, 200, function (s, rq, rs) {
+               s.messageId = rs.body.id;
+               return assert (['message id', rs.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match]);
+            }],
+            ['Read new chat message', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'chat/nested/test.md'}}, 200, function (s, rq, rs) {
+               s.chatContent = rs.body;
+               return assert ([
+                  ['head marker', rs.body.indexOf ('\nəəə head ' + s.messageId + '\n'), 0, teishi.test.equal],
+                  ['id header', rs.body.indexOf ('\nid ' + s.messageId + '\n') !== -1, true, teishi.test.equal],
+                  ['from header', rs.body, /\nfrom [^\s]+\n/, teishi.test.match],
+                  ['timestamp header', rs.body, /\nt [^\s]+\n/, teishi.test.match],
+                  ['recipient and body', rs.body.endsWith ('\nto all\nəəə body ' + s.messageId + '\nHello everyone!'), true, teishi.test.equal],
+                  ['no base64 header', /\nbase64 /.test (rs.body), false, teishi.test.equal],
+               ]);
+            }],
+            ['Post base64 reply to existing message', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: Buffer.from ('Hello back!').toString ('base64'), to: s.messageId}}, 200, function (s, rq, rs) {
+               s.replyId = rs.body.id;
+               return assert ([
+                  ['reply id', rs.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match],
+                  ['distinct id', rs.body.id === s.messageId, false, teishi.test.equal],
+               ]);
+            }],
+            ['Read chat with appended reply', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'chat/nested/test.md'}}, 200, function (s, rq, rs, next) {
+               var appended = rs.body.slice (s.chatContent.length);
+               if (! assert ([
+                  ['original message preserved', rs.body.slice (0, s.chatContent.length), s.chatContent, teishi.test.equal],
+                  ['reply head', appended.indexOf ('\nəəə head ' + s.replyId + '\n'), 0, teishi.test.equal],
+                  ['base64 header', appended, /\nbase64 1\n/, teishi.test.match],
+                  ['reply id header', appended.indexOf ('\nid ' + s.replyId + '\n') !== -1, true, teishi.test.equal],
+                  ['reply recipient and body', appended.endsWith ('\nto ' + s.messageId + '\nəəə body ' + s.replyId + '\n' + Buffer.from ('Hello back!').toString ('base64')), true, teishi.test.equal],
+               ])) return false;
+               (async function () {
+                  await run ('docker', 'stop', 'vibey-project-' + s.projectId);
+                  next ();
+               }) ();
+            }],
+
             ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
                if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\n', teishi.test.equal])) return false;
                (async function () {
