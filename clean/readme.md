@@ -214,13 +214,15 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
 - `create project`: creates a new project using the trimmed name at `new.project.name` and optional `new.project.slot` via `POST /project`. On success, clears the creation modal and project search, temporarily adds the project to `projects`, navigates to its `main.md` and reloads projects.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
-- `edit project`: renames and/or changes the slot of a project using the values at `edit.project` via `PUT /project`. On success, reloads projects and shows a snackbar.
+- `edit project`: renames and/or changes the slot of a project using the values at `edit.project` via `PUT /project`. The slot selector's “None” option uses the string `null`, which is converted to `undefined` rather than parsed as a number. On success, reloads projects and shows a snackbar.
 - `remove project <project>`: asks for confirmation, then deletes the project via `DELETE /project/<id>`. On success, reloads projects and shows a snackbar.
 
 #### Files
 
 - `keydown *`: handles shortcuts while in the files view; returns without handling them during uploads. Rename submission shortcuts check for an enabled `#rename-file` button, which the current file rename modal does not provide.
   - Command+B: returns to projects.
+  - Command+D: when the chat recipient input is present, focuses it and selects its text.
+  - Command+Enter: when the chat editor is present, calls `create message` with the current recipient, filename and draft body (the same action as Boom).
   - Command+E: opens file creation; in the creation modal, creates when enabled. In rename, also attempts submission through `#rename-file`.
   - Enter: creates a file when the creation button is enabled, or attempts rename submission through `#rename-file`.
   - Escape: closes the creation or rename modal.
@@ -249,6 +251,7 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 #### Chat
 
+- `change file`: uses `match: B.changeResponder` and priority `-1001` to scroll the first `.messages` element to its `scrollHeight` after rendering and the editor setup/focus responder at `-1000`.
 - `create message <to> <name> <body>`: posts to `POST /project/message`, defaulting the recipient to `all`. Ignores blank messages. On success, if the same project and file are selected, clears the draft if unchanged and refreshes the file list and chat. Preserves the draft on failure.
 
 ### Client state
@@ -269,7 +272,7 @@ edit file newName "<new name>"
           oldName "<original name>"
      project id <id>
              name "<project name>"
-             slot <integer|undefined>
+             slot <integer|numeric string|"null"|undefined> // "null" is the edit selector's None option
 file actions <0|1> // Whether the filename pill shows Rename and Download; collapsed by default
      mode <edit|view>
      name "..."

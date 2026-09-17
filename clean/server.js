@@ -1133,7 +1133,7 @@ var routes = [
       ].join ('\n');
 
       var oldBody = 'əəə body ' + responseId + '\n';
-      var newBody = 'əəə body ' + responseId + '\n' + ((shellResult.stderr ? shellResult.stderr + '\n' : '') + shellResult.stdout).replace (/\n$/, '');
+      var newBody = 'əəə body ' + responseId + '\n' + ((shellResult.stderr ? shellResult.stderr + '\n' : '') + (shellResult.stdout || '')).replace (/\n$/, '');
 
       await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
       await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);

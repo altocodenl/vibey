@@ -1,5 +1,18 @@
 # Vibey development notes
 
+## 2026-09-17
+
+The feeling must remain the same. The geometry must surprise.
+
+Some notes on Alexander - The process of creating life:
+- "So a pattern language, if it has been well-constructed, sublimtaes the inner desires and necessities which have connection to our feelings and dreams, transforms them into geometry, expresses them in a deep enough way to make art of them, casts them in such a way that they have the power to become living flesh in buildings."
+- "The pattern language, then, is that aspect of the world which steers buildings towards the creation of a living state."
+- "The umbrella-filled street is a being; it is a picture of the self, quite different (..) from the dry, air-conditioned perfect concrete-box schools and classrooms of the 1970's."
+- "the flowerbed in the top of the wall is a strange and unexpected thing. Yet it touches the heart immediately."
+- "This is what it means to have centers which have life in them - that the entity defined by a pattern digs deep into the experience of life, and creates a feeling of live lived, life passed, the sadness and tranquility and happiness of actual life, raw as it is."
+- "Before starting to make anything, or design anything, one has to choose and define the content of the centers functionally and geometrically, and their relationships."
+- "The main thing is that you must get clear what the essential centeres are which will give the thing an actual profound *life*."
+
 ## 2026-09-16
 
 Clients are orchestrators.
@@ -206,7 +219,7 @@ Some notes on Alexander - The process of creating life:
 - "In this example these centers, *the list alone*, creates an almost magical atmosphere. As soon as we name them, *just from naming them*, we begin to feel the aura of the place."
 - "Out entire approach during the pattern language stage of work on a living process, is to get a glimpse of the centeres that will make the building which is to be designed, come to life *as a whole*."
 - "The essence of the point, is to find - or create - a set of centers which, together, will generate a complete and coherent object of the type we are looking for. (...) We then use intuition and feeling to judge the deficiencies in the whole which is created, to make us aware of *more* centers that still need to be created."
-- "In waht sense is the second list more essential than the first? *It is more essential, because it deals with feeling, and at a much deeper level.* The second system of centers is more deely connected to human feelings *as they really are*."
+- "In what sense is the second list more essential than the first? *It is more essential, because it deals with feeling, and at a much deeper level.* The second system of centers is more deely connected to human feelings *as they really are*."
 - "The centers of rain on your face and centers of unprotected pahts were latent in the actual existence of the people and the place, *as it all was*."
 - "What, then, defines essential centers and distinguishes them from trivial centers? The answer, briefly put, is this. The essential centers are those whose presence is already latent i n the field - which go the heart of the living structure that is already there - which summarize, or encapsulate, the essence of the real life which is going on."
 - "the crux of all life is, nevertheless, the difference between recognizing the essential thing and separating it from the trivial thing."

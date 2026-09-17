@@ -358,7 +358,7 @@ B.mrespond ([
       var name = edit.name.trim ();
       if (! name) return;
 
-      B.call (x, 'put', '/project', {id: edit.id, name: name, slot: edit.slot ? parseInt (edit.slot) : undefined}, function (x, error) {
+      B.call (x, 'put', '/project', {id: edit.id, name: name, slot: (edit.slot && edit.slot !== 'null') ? parseInt (edit.slot) : undefined}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to rename project');
          B.call (x, 'rem', 'edit', 'project');
          B.call (x, 'load', 'projects');
@@ -442,6 +442,18 @@ B.mrespond ([
 
       if (B.get ('view') !== 'files') return;
       if (B.get ('upload')) return;
+
+      if (ev.metaKey && ev.key === 'd' && c ('#chat-to')) {
+         ev.preventDefault ();
+         c ('#chat-to').focus ();
+         c ('#chat-to').select ();
+         return;
+      }
+
+      if (ev.metaKey && ev.key === 'Enter' && c ('#chat-editor')) {
+         ev.preventDefault ();
+         return B.call (x, 'create', 'message', B.get ('message', 'to'), B.get ('file', 'name'), B.get ('message', 'body'));
+      }
 
       if (ev.key === 'Enter' && c ('#create-file') && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
       if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'rename', 'file');
@@ -794,6 +806,12 @@ B.mrespond ([
 
    // *** CHATS ***
 
+   ['change', 'file', {match: B.changeResponder, priority: -1001}, function (x) {
+      var messages = c ('.messages') [0];
+      clog (messages);
+      if (messages) messages.scrollTop = messages.scrollHeight;
+   }],
+
    ['create', 'message', function (x, to, name, body) {
       var project = B.get ('project');
       if (! project || B.get ('file', 'name') !== name) return;
@@ -1069,11 +1087,10 @@ views.modal = function (attributes, contents) {
    ]];
 }
 
-views.projectColor = function (text) {
+views.projectColor = function (text, textOnly) {
 
    var projectColors = [
-      {bg: 'bg-vblue',        fg: 'vnearwhite'},
-      {bg: 'bg-vpurple',      fg: 'vnearwhite'},
+      {bg: 'bg-vgreen',       fg: 'vnearwhite'},
       {bg: 'bg-light-purple', fg: 'vnearwhite'},
       {bg: 'bg-vgray',        fg: 'vdeepnavy'},
       {bg: 'bg-dark-green',   fg: 'vnearwhite'},
@@ -1086,7 +1103,7 @@ views.projectColor = function (text) {
       return a + b.charCodeAt (0);
    });
    var colors = projectColors [sum % projectColors.length];
-   return colors.bg + ' ' + colors.fg;
+   return textOnly ? colors.bg.replace (/^bg-/, '') : colors.bg + ' ' + colors.fg;
 }
 
 views.projects = function () {
@@ -1135,14 +1152,6 @@ views.projects = function () {
    var barHeight = slotHeight * 2;
    var barWidth  = barHeight * slotWidth / slotHeight;
    var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
-
-   var slotColors = [
-      css.colors.vblue,
-      css.colors.vgreen,
-      css.colors.vorange,
-      css.colors.vpurple,
-      css.colors.vviolet,
-   ];
 
    return B.view ([['projects'], ['user', 'email'], ['search', 'project']], function (projects, email, search) {
       var projectColor = views.projectColor (email);
@@ -1216,7 +1225,6 @@ views.projects = function () {
                            onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
                            onmouseleave: B.ev ('rem', [], 'hover'),
                            style: style ({
-                              'background-color': matchingProject ? undefined : css.rgba (slotColors [index], 0.15),
                               border: vw (1.5) + ' solid ' + css.colors.vborderblue,
                               'border-radius': vw (slotBorderRadius),
                               height: vw (slotHeight),
@@ -1229,11 +1237,20 @@ views.projects = function () {
                               return word [0];
                            }).slice (0, 3).join (' ')], views.tooltip (index + 1)];
 
-                           if (! matchingProject) return ['span', {
-                              opaque: true,
-                              class: 'flex items-center justify-center w-100 h-100',
-                              onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
-                           }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.vgreen + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']];
+                           if (! matchingProject) return [
+                              ['div', {
+                                 class: views.projectColor ('slot ' + (index + 1)) + ' absolute absolute--fill br-inherit',
+                                 style: style ({
+                                    opacity: 0.15,
+                                    'pointer-events': 'none',
+                                 }),
+                              }],
+                              ['span', {
+                                 class: 'flex h-100 items-center justify-center relative w-100',
+                                 onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
+                                 opaque: true,
+                              }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.vgreen + '" stroke-width="5" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>']],
+                           ];
                         }) ()];
                      }),
 
@@ -1583,7 +1600,7 @@ views.projects = function () {
                   }, [
                      ['option', {
                         selected: ! editProject.slot,
-                        value: '',
+                        value: 'null',
                      }, 'None'],
                      dale.go (dale.times (5, 1), function (n) {
                         return ['option', {value: n, selected: editProject.slot === n}, 'Slot ' + n];
@@ -2120,44 +2137,83 @@ views.files = function () {
 views.chat = function () {
    return B.view ('file', function (file) {
       return ['div', {class: 'flex flex-auto flex-column'}, [
+         ['style', [
+            ['.chat-message pre', {
+               'max-width': '100%',
+               'overflow-x': 'auto',
+               'white-space': 'pre-wrap',
+            }],
+         ]],
          // Messages
          B.view (['user', 'id'], function (userId) {
-            return ['div', {class: 'flex-auto overflow-y-auto pa3'}, dale.fil ((content || '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1), undefined, function (message) {
-               var body = message.match (/^əəə body [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im);
+            var messageIndexes = {};
+            var messageCount = 0;
+            var messages = (content || '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1);
+            dale.go (messages, function (message) {
+               var id = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
+               if (id) messageIndexes [id [1].toLowerCase ()] = String (++messageCount).padStart (4, '0');
+            });
+            return ['div', {
+               class: 'flex-auto messages overflow-y-auto pa3',
+            }, dale.fil (messages, undefined, function (message) {
+               var body = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
                if (! body) return;
+               var messageId = body [1];
                var head = message.slice (0, body.index);
+               var replyTo = head.match (/^to ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/im);
                var from = head.match (/^from (.+)$/m) [1];
-               var time = head.match (/^t (.+)$/m) || head.match (/^t-start (.+)$/m);
+               var to = head.match (/^to (.+)$/m);
+               to = to ? to [1] : '';
+               var fromLabel = from === userId ? 'you' : from;
+               if (to && to !== 'all' && ! replyTo) fromLabel += ' -> ' + to;
+               var shell = from === 'shell' || to === 'shell';
+               var start = head.match (/^t-start (.+)$/m);
+               var end = head.match (/^t-end (.+)$/m);
+               var time = head.match (/^t (.+)$/m) || start;
+               var timeLabel = time ? ago (time [1]) : '';
+               if (start && end) {
+                  var duration = new Date (end [1]).getTime () - new Date (start [1]).getTime ();
+                  if (isFinite (duration) && duration >= 0) timeLabel = (duration < 1000 ? Math.ceil (duration) + 'ms' : Math.ceil (duration / 1000) + 's') + ' · ' + timeLabel;
+               }
                body = message.slice (body.index + body [0].length).replace (/\n$/, '');
-               return ['div', {
-                  class: views.projectColor (body) + ' border-box lh-copy mb4 ph3 pv1 relative',
+               var pane = ['div', {
+                  class: views.projectColor (messageId.slice (0, 4), true) + ' bl border-box br3 bt chat-message lh-copy mw-100 ph3 pv1',
                   opaque: true,
                   style: style ({
-                     'border-radius': '1.125rem',
-                     'box-shadow': [
-                        '0.375rem 0.375rem 1.125rem ' + css.rgba (css.colors.vblack, 0.25),
-                        '-0.375rem -0.375rem 1.125rem ' + css.rgba (css.colors.vwhite, 0.04),
-                     ].join (', '),
+                     'border-width': '0.25rem',
+                     'min-width': 0,
                      'overflow-wrap': 'anywhere',
+                     width: 'fit-content',
                   }),
                }, [
-                  ['div', {
-                     class: views.projectColor (from) + ' absolute br-pill f7 lh-solid ph2 pv1',
-                     style: style ({
-                        right: '0.75rem',
-                        top: '0.5rem',
-                     }),
-                  }, from === userId ? 'You' : from],
-                  from === 'shell'
-                     ? ['pre', {class: 'code f7 ma0 overflow-x-auto'}, body]
+                  shell
+                     ? ['pre', {class: 'code f7 ma0 mw-100 overflow-x-auto pa2'}, body]
                      : ['LITERAL', marked.parse (body)],
+               ]];
+               return ['div', {
+                  class: 'border-box items-start mb4 mw-100 w-100',
+                  style: style ({
+                     display: 'grid',
+                     gap: '0.75rem',
+                     'grid-template-columns': 'max-content minmax(0, max-content) minmax(min(8rem, 25%), 1fr)',
+                  }),
+               }, [
+                  ['pre', {class: 'code f6 fw7 lh-solid ma0'}, [
+                     replyTo ? ['span', {class: views.projectColor (replyTo [1].slice (0, 4), true)}, (messageIndexes [replyTo [1].toLowerCase ()] || '????') + '\n |- '] : '',
+                     ['span', {class: views.projectColor (messageId.slice (0, 4), true)}, messageIndexes [messageId.toLowerCase ()]],
+                  ]],
+                  pane,
                   ['div', {
-                     class: views.projectColor (ago (time)) + ' absolute br-pill f7 lh-solid ph2 pv1',
+                     class: 'code f6 flex flex-column fw7 justify-between lh-solid self-stretch',
                      style: style ({
-                        bottom: '0.5rem',
-                        right: '0.75rem',
+                        gap: '0.5rem',
+                        'min-width': 0,
+                        'overflow-wrap': 'anywhere',
                      }),
-                  }, time ? ago (time [1]) : ''],
+                  }, [
+                     ['div', {class: views.projectColor (fromLabel, true)}, fromLabel],
+                     ['div', {class: views.projectColor (timeLabel, true)}, timeLabel],
+                  ]],
                ]];
             })];
          }),
@@ -2174,29 +2230,32 @@ views.chat = function () {
                   class: 'flex items-center pv3',
                   style: style ({gap: '0.75rem'}),
                }, [
-                  ['label', {class: 'fw6 vlightblue', for: 'chat-to'}, 'To:'],
-                  ['select', {
-                     class: 'ba bg-vnavy br2 f5 pa2 vlightblue vborderblue-border',
-                     id: 'chat-to',
-                     onchange: B.ev ('set', ['message', 'to']),
-                  }, [
-                     ['option', {selected: message.to === 'all', value: 'all'}, 'all'],
-                     ['option', {selected: message.to === 'shell', value: 'shell'}, 'shell'],
-                     ['option', {selected: message.to === 'ai-gpt-6', value: 'ai-gpt-6'}, 'ai-gpt-6'],
-                     ['option', {selected: message.to === 'ai-opus-4.6', value: 'ai-opus-4.6'}, 'ai-opus-4.6'],
-                  ]],
+                  ['label', {
+                     class: 'fw6 relative vlightblue',
+                     for: 'chat-to',
+                  }, [views.tooltip ('D'), 'To:']],
                   ['input', {
-                     'aria-label': 'Filter recipients',
-                     class: 'ba bg-vnavy br2 f5 flex-auto outline-0 pa2 vlightblue vborderblue-border',
-                     placeholder: 'Filter recipients',
+                     autocomplete: 'off',
+                     class: 'ba bg-vnavy br2 f5 flex-auto outline-0 pa2 vborderblue-border vlightblue',
+                     id: 'chat-to',
+                     list: 'chat-recipients',
+                     oninput: B.ev ('set', ['message', 'to']),
+                     placeholder: 'Recipient',
                      style: style ({'min-width': 0}),
                      type: 'text',
+                     value: message.to,
                   }],
+                  ['datalist', {id: 'chat-recipients'}, [
+                     ['option', {value: 'all'}],
+                     ['option', {value: 'shell'}],
+                     ['option', {value: 'ai-gpt-6'}],
+                     ['option', {value: 'ai-opus-4.6'}],
+                  ]],
                   ['button', {
-                     class: 'bg-vgreen bn br2 f5 flex-shrink-0 fw7 ph3 pv2 black pointer',
+                     class: 'bg-vgreen black bn br2 f5 flex-shrink-0 fw7 ph3 pv2 pointer relative',
                      onclick: B.ev ('create', 'message', message.to, file.name, message.body),
                      type: 'button',
-                  }, 'Boom'],
+                  }, [views.tooltip ('↵'), 'Boom']],
                ]];
             }),
             ['div', {

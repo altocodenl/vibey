@@ -4,6 +4,8 @@ ENV TZ=UTC
 
 RUN apk add --no-cache python3 git curl bash findutils
 
+RUN npm install -g @openai/codex
+
 WORKDIR /project
 
 RUN mkdir doc dialog
