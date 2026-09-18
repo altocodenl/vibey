@@ -561,6 +561,42 @@ if (mode === 'server') {
                   ['no base64 header', /\nbase64 /.test (rs.body), false, teishi.test.equal],
                ]);
             }],
+            ['Read message by id', 'put', '/project/message', function (s) {
+               return {
+                  file: 'chat/nested/test.md',
+                  messageId: s.messageId,
+                  projectId: s.projectId,
+               };
+            }, 200, function (s, rq, rs) {
+               return assertBody (s.chatContent.slice (1)) (s, rq, rs);
+            }],
+            ['Read message with invalid id', 'put', '/project/message', function (s) {
+               return {
+                  file: 'chat/nested/test.md',
+                  messageId: 'invalid',
+                  projectId: s.projectId,
+               };
+            }, 400],
+            ['Read message without file', 'put', '/project/message', function (s) {
+               return {
+                  messageId: s.messageId,
+                  projectId: s.projectId,
+               };
+            }, 400],
+            ['Read missing message', 'put', '/project/message', function (s) {
+               return {
+                  file: 'chat/nested/test.md',
+                  messageId: '00000000-0000-0000-0000-000000000000',
+                  projectId: s.projectId,
+               };
+            }, 404],
+            ['Read message from missing file', 'put', '/project/message', function (s) {
+               return {
+                  file: 'chat/missing.md',
+                  messageId: s.messageId,
+                  projectId: s.projectId,
+               };
+            }, 404],
             ['Post base64 reply to existing message', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: Buffer.from ('Hello back!').toString ('base64'), to: s.messageId}}, 200, function (s, rq, rs) {
                s.replyId = rs.body.id;
                return assert ([
@@ -581,6 +617,28 @@ if (mode === 'server') {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   next ();
                }) ();
+            }],
+
+            ['Read first message without appended reply', 'put', '/project/message', function (s) {
+               return {
+                  file: 'chat/nested/test.md',
+                  messageId: s.messageId,
+                  projectId: s.projectId,
+               };
+            }, 200, function (s, rq, rs) {
+               return assertBody (s.chatContent.slice (1)) (s, rq, rs);
+            }],
+            ['Read reply by uppercase id', 'put', '/project/message', function (s) {
+               return {
+                  file: 'chat/nested/test.md',
+                  messageId: s.replyId.toUpperCase (),
+                  projectId: s.projectId,
+               };
+            }, 200, function (s, rq, rs) {
+               return assert ([
+                  ['reply head', rs.body.indexOf ('əəə head ' + s.replyId + '\n'), 0, teishi.test.equal],
+                  ['reply body', rs.body.endsWith ('əəə body ' + s.replyId + '\n' + Buffer.from ('Hello back!').toString ('base64')), true, teishi.test.equal],
+               ]);
             }],
 
             ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
@@ -638,6 +696,13 @@ if (mode === 'server') {
                ['Create project as non-creator', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Please request creator access'})],
                ['Update another user\'s project', 'put', '/project', function (s) {return {id: s.projectId, name: 'hacked'}}, 404],
                ['Read file from another user\'s project', 'post', '/project/read', function (s) {return {id: s.projectId, path: 'main.md'}}, 404],
+               ['Read message from another user\'s project', 'put', '/project/message', function (s) {
+                  return {
+                     file: 'chat/nested/test.md',
+                     messageId: s.messageId,
+                     projectId: s.projectId,
+                  };
+               }, 404],
                ['Write file to another user\'s project', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/hack.md', content: 'hacked'}}, 404],
                ['Edit file in another user\'s project', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'el', newText: 'EL'}}, 404],
                ['Run command on another user\'s project', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls'}}, 404],

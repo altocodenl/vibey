@@ -1,5 +1,36 @@
 # Vibey development notes
 
+## 2026-09-18
+
+If most teams are now developing with AI using specs, they are not working step-wise. That means that adjustments don't come at the right time. AI, and any accelerating technology in general, tends to make one asleep at the wheel of not paying attention to the whole step by step. I'm guessing that Alexander's approach in book 3 is about using new technologies, but not falling asleep at the wheel at all; rather, being even more aware, because the speed is still high, so the hard work of listening and being guided to deep feeling is constant.
+
+Explaining vibey as a one-two punch:
+1. We're social animals (even when introverted we use language with ourselves). Our communication and production are in different, multiple places. Bringing them together is powerful.
+2. If that place is open source and is not trying to extract maximum profit from you, you can build on it and trust it in the long run. Excitement need not be followed by disappointment.
+
+Living process doesn't get stuck in local maxima. Interesting. Even if there are local maxima, the process is smart enough to break free of them and move on. I wonder if this creates an intermediate tension, where the degree of life is affected by the moving to a new area, but which is still offset by the potential of what's coming (and therefore the degree of life always increases).
+
+Seven colors for projects and messages: gold, silver, violet, orange, green, turquoise, brick.
+
+It is so liberating to not have to write an API endpoint for every single thing. The client just do a /project/run for most things. What changes everything is that it is your own project/server, so you can just run arbitrary commands against it, and still there is reasonable safety (autogit, offsite backups, the other projects are not affected).
+
+Vibey is perhaps the negative impression of these notes.
+
+Thinking that one is always working on two levels (there are always levels lower and higher than those two). Clean work is work that pays attention to the content of those two levels themselves (be them code and UI, or spec and UI). The moment you stop caring about the neatness of one of those two levels, the level of life breaks down.
+
+https://paulgraham.com/persistence.html
+"The persistent are attached to the goal. The obstinate are attached to their ideas about how to reach it."
+
+This is where the flux challenge comes handy.
+- Problem: update all in-progress messages by querying them.
+- In the server, easy: query by message id, just return the head and body.
+- In the client:
+   - When the content changes, if the file is a chat, search for pending messages. Put them in pending messages (state), as a list of texts (projectId/file/<messageId>). Before updating the content, make sure that the current project and file still match.
+   - When the list of pending messages changes, iterate them all:
+      - If there's an entry for it in pending requests (which will be a interval at 100ms), don't do anything.
+      - If there's not, create an interval that queries the endpoint in the server and then updates by local client edit just that message as a whole.
+      - Then iterate all the pending requests, if any doesn't match a pending message, delete the interval.
+
 ## 2026-09-17
 
 The feeling must remain the same. The geometry must surprise.

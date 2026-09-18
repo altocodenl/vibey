@@ -25,6 +25,7 @@ catch (error) {
    var SECRET = {};
 }
 
+
 // *** SETUP ***
 
 var child   = require ('child_process')
@@ -281,15 +282,27 @@ docker.read = async function (id, path) {
    return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
-docker.write = async function (id, path, content) {
+docker.write = async function (id, path, content, noCommit) {
    var command = 'mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > ' + Path.quote (path);
-   var result = await docker.run (id, command, {input: content, commit: 'Write ' + Path.quote (path), catch: true});
+   var result = await docker.run (id, command, {input: content, commit: noCommit ? undefined : ('Write ' + Path.quote (path)), catch: true});
    return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
 docker.edit = async function (id, path, oldText, newText) {
+
+   var lockKey = 'lock:edit:' + id + ':' + path;
+   while (true) {
+      var count = await redis ('incr', lockKey);
+      if (count === 1) {
+         await redis ('expire', lockKey, 10);
+         break;
+      }
+      await new Promise (function (resolve) {setTimeout (resolve, 50)});
+   }
+
    if (oldText === '[EOF]') {
       var result = await docker.run (id, 'cat >> ' + Path.quote (path), {input: newText, catch: true, commit: 'Edit ' + Path.quote (path)});
+      await redis ('del', lockKey);
       return result.code ? {code: result.code, error: result.stderr} : result;
    }
 
@@ -316,6 +329,7 @@ docker.edit = async function (id, path, oldText, newText) {
       + "' target=" + Path.quote (path) + ' ' + Path.quote (path);
 
    var result = await docker.run (id, script, {input: input, catch: true, commit: 'Edit ' + Path.quote (path)});
+   await redis ('del', lockKey);
    return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
@@ -572,6 +586,7 @@ var routes = [
          ]],
          ['body', [
             ['script', {src: 'assets/codemirror/lib/codemirror.js'}],
+            ['script', {src: 'assets/codemirror/addon/search/searchcursor.js'}],
             ['script', {src: 'assets/codemirror/keymap/vim.js'}],
             ['script', {src: 'assets/codemirror/mode/markdown/markdown.js'}],
             ['script', {src: 'assets/codemirror/mode/javascript/javascript.js'}],
@@ -1056,6 +1071,41 @@ var routes = [
       reply (rs, 200, result);
    }],
 
+   ['put', '/project/message', async function (rq, rs) {
+      if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['file', 'messageId', 'projectId'], 'eachOf', teishi.test.equal],
+         ['file', rq.body.file, 'string'],
+         ['messageId', rq.body.messageId, 'string'],
+         ['projectId', rq.body.projectId, 'string'],
+         ['messageId', rq.body.messageId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match],
+      ])) return;
+
+      var projects = await getForUser (rq.user.id, 'project');
+      var match = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === rq.body.projectId) return project;
+      });
+      if (! match) return reply (rs, 404);
+
+      var result = await docker.read (rq.body.projectId, rq.body.file);
+      if (result.code) {
+         if (result.code === 1 && result.error && result.error.match ('No such file or directory')) return reply (rs, 404);
+         clog ({
+            error: formatError (result),
+            priority: 'important',
+            type: 'Read message error',
+         });
+         return reply (rs, 500);
+      }
+      var text = (result.stdout || Buffer.alloc (0)).toString ('utf8');
+      var head = text.match (new RegExp ('^əəə head ' + rq.body.messageId + '\\n', 'im'));
+      if (! head) return reply (rs, 404);
+      var rest = text.slice (head.index + head [0].length);
+      var nextHead = rest.match (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im);
+      var message = head [0] + (nextHead ? rest.slice (0, nextHead.index).replace (/\n$/, '') : rest);
+      if (! message.match (new RegExp ('^əəə body ' + rq.body.messageId + '\\n', 'im'))) return reply (rs, 404);
+      reply (rs, 200, message, {'content-type': 'text/plain; charset=utf-8'});
+   }],
+
    ['post', '/project/message', async function (rq, rs) {
       if (stop (rs, [
          ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'id', 'to'], 'eachOf', teishi.test.equal],
@@ -1093,14 +1143,18 @@ var routes = [
 
       redis ('hset', 'project:' + rq.body.id, 'last', now ());
 
-      if (rq.body.to !== 'shell') return reply (rs, 200, {id: id});
+      if (rq.body.to !== 'shell' && ! rq.body.to.match (/^ai-/)) return reply (rs, 200, {id: id});
+
+      if (rq.body.to.match (/^ai-/)) {
+         var flavor = rq.body.to === 'ai-opus-4.6' ? 'anthropic' : rq.body.to === 'ai-gpt-6' ? 'openai' : undefined;
+      }
 
       var responseId = crypto.randomUUID ();
       var tStart = now ();
 
       var responseMessage = [
          'əəə head ' + responseId,
-         'from shell',
+         'from ' + rq.body.to,
          'id ' + responseId,
          'pending 1',
          't-start ' + tStart,
@@ -1114,11 +1168,129 @@ var routes = [
 
       reply (rs, 200, {id: id, responseId: responseId});
 
-      var shellResult = await docker.run (rq.body.id, rq.body.body, {catch: true});
+      if (rq.body.to === 'shell') {
+         var shellResult = await docker.run (rq.body.id, rq.body.body, {catch: true});
+         var output = ((shellResult.stderr ? shellResult.stderr + '\n' : '') + (shellResult.stdout || '')).replace (/\n$/, '');
+      }
+
+      if (flavor) {
+         var aiErrors = [];
+         var parseAIChunk = flavor === 'anthropic' ? function (line) {
+            var event = JSON.parse (line);
+            var errorText;
+            if (event.type === 'assistant' && (event.error || event.is_api_error_message)) {
+               errorText = ((event.message && event.message.content) || []).filter (function (block) {
+                  return block.type === 'text';
+               }).map (function (block) {return block.text}).join ('\n');
+            }
+            if (event.type === 'result' && event.is_error) {
+               errorText = event.result || (event.errors || []).join ('\n');
+            }
+            if (errorText) {
+               if (aiErrors.indexOf (errorText) !== -1) return;
+               aiErrors.push (errorText);
+               return (output ? '\n\n' : '') + errorText;
+            }
+            if (event.type === 'assistant' && event.message && event.message.content) {
+               return {replace: true, text: event.message.content.filter (function (block) {
+                  return block.type === 'text';
+               }).map (function (block) {return block.text}).join ('\n')};
+            }
+            if (event.type === 'result' && ! event.is_error && event.result) {
+               return {replace: true, text: event.result};
+            }
+         } : function (line) {
+            var event = JSON.parse (line);
+            if (event.type === 'item.completed' && event.item && event.item.type === 'agent_message') return event.item.text;
+         };
+
+         var command = flavor === 'anthropic'
+            ? 'claude -p --model claude-opus-4-6 --output-format stream-json --verbose --dangerously-skip-permissions'
+            : 'codex exec --json -m "gpt-6-astra" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
+
+         var containerId = 'vibey-project-' + rq.body.id;
+
+         if (flavor === 'openai') {
+            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', tokens: {access_token: SECRET.openai.accessToken, id_token: SECRET.openai.idToken, refresh_token: SECRET.openai.refreshToken, account_id: SECRET.openai.accountId}});
+            var result = await docker.write (rq.body.id, '/tmp/codex-auth/auth.json', codexAuth, 'noCommit');
+            if (result.code) throw result;
+         }
+
+         var dockerArgs = ['exec'];
+         if (flavor === 'anthropic') dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + SECRET.anthropic);
+         if (flavor === 'openai')    dockerArgs.push ('-e', 'CODEX_HOME=/tmp/codex-auth');
+         dockerArgs.push (containerId, 'sh', '-c', command + ' ' + Path.quote (rq.body.body));
+
+         var output = '', buffer = '', stdout = '', stderr = '';
+         var oldBody = 'əəə body ' + responseId + '\n';
+         var editQueue = Promise.resolve (), editError, processError;
+         var proc = child.spawn ('docker', dockerArgs);
+
+         await new Promise (function (resolve, reject) {
+            var processLines = function (lines) {
+               dale.go (lines, function (line) {
+                  if (! line) return;
+                  try {
+                     var chunk = parseAIChunk (line);
+                     if (! chunk) return;
+                     if (chunk.replace) output = chunk.text;
+                     else               output += chunk;
+                     var newBody = 'əəə body ' + responseId + '\n' + output;
+                     editQueue = editQueue.then (async function () {
+                        if (editError) return;
+                        var result = await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
+                        if (result.code) throw result;
+                        oldBody = newBody;
+                     }).catch (function (error) {
+                        editError = error;
+                        clog ({priority: 'important', type: 'AI stream persistence error', error: formatError (error), responseId});
+                        reject (error);
+                     });
+                  } catch (e) {
+                     clog ({priority: 'important', type: 'AI stream parse error', error: formatError (e), responseId});
+                  }
+               });
+            };
+            proc.stdout.setEncoding ('utf8');
+            proc.stderr.setEncoding ('utf8');
+            proc.stdout.on ('data', function (chunk) {
+               stdout += chunk;
+               buffer += chunk;
+               var lines = buffer.split ('\n');
+               buffer = lines.pop ();
+               processLines (lines);
+            });
+            proc.stderr.on ('data', function (chunk) {
+               stderr += chunk;
+            });
+            proc.on ('error', function (error) {
+               processError = 'AI process failed to start: ' + error.message;
+            });
+            proc.on ('close', function (code, signal) {
+               if (buffer) processLines ([buffer]);
+               buffer = '';
+               if (! processError && (code !== 0 || signal)) {
+                  processError = signal ? 'AI process terminated by signal ' + signal : 'AI process exited with code ' + code;
+               }
+               if (processError) clog ({priority: 'important', type: 'AI process error', error: processError, code, signal, stdout, stderr, responseId});
+               editQueue.then (function () {
+                  if (editError) return reject (editError);
+                  resolve ();
+               }, reject);
+            });
+         });
+         if (processError || (! output && stderr)) {
+            output = processError
+               ? (output ? output + '\n\n' : '') + processError + (stderr ? '\n' + stderr : '')
+               : stderr;
+            var result = await docker.edit (rq.body.id, rq.body.file, oldBody, 'əəə body ' + responseId + '\n' + output);
+            if (result.code) throw result;
+         }
+      }
 
       var oldHead = [
          'əəə head ' + responseId,
-         'from shell',
+         'from ' + rq.body.to,
          'id ' + responseId,
          'pending 1',
          't-start ' + tStart,
@@ -1126,17 +1298,19 @@ var routes = [
 
       var newHead = [
          'əəə head ' + responseId,
-         'from shell',
+         'from ' + rq.body.to,
          'id ' + responseId,
          't-end ' + now (),
          't-start ' + tStart,
       ].join ('\n');
 
-      var oldBody = 'əəə body ' + responseId + '\n';
-      var newBody = 'əəə body ' + responseId + '\n' + ((shellResult.stderr ? shellResult.stderr + '\n' : '') + (shellResult.stdout || '')).replace (/\n$/, '');
+      if (rq.body.to === 'shell') {
+         var oldBody = 'əəə body ' + responseId + '\n';
+         var newBody = 'əəə body ' + responseId + '\n' + output;
+         await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
+      }
 
       await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
-      await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
 
       redis ('hset', 'project:' + rq.body.id, 'last', now ());
    }],

@@ -116,6 +116,7 @@ project:<projectId> created <date>
 owner:<userId> 1 session:<sessionId>
                2 project:<projectId>
                ...
+lock:edit:<projectId>:<path> <integer> // per-file edit lock, expires 10s
 rateLimit:<identifier> <number>
 session:<session> csrf <csrfToken>
                   expires <date>
@@ -159,7 +160,8 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once, except for the reserved value `'[EOF]'`, which appends `newText` to the end of the file. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>}`. Runs the command inside the project's container.
-- **Send message**: `POST /project/message`: expects `{id: <projectId>, file: <fileName>, base64: <boolean|undefined>, body: <text|base64>, to: <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID>}`. Appends a message with server-generated UUID, timestamp and sender, creating the file and parent folders if needed. Rejects complete header/body marker lines in `body`. Returns `{id: <messageUUID>}`, or 400 if validation or persistence fails.
+- **Send message**: `POST /project/message`: expects `{id: <projectId>, file: <fileName>, base64: <boolean|undefined>, body: <text|base64>, to: <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID>}`. Appends a message with server-generated UUID, timestamp and sender, creating the file and parent folders if needed. Rejects complete header/body marker lines in `body`. Returns `{id: <messageUUID>, responseId: <messageUUID>}` for shell messages, otherwise `{id: <messageUUID>}`; 400 if validation or persistence fails.
+- **Read message**: `PUT /project/message`: expects `{projectId: <projectId>, file: <fileName>, messageId: <messageUUID>}`. Returns the message as text, including its head and body markers. Returns 404 if the project is not owned by the user, the file is missing, or the message is not found; 400 for invalid input.
 - **Remove project**: `DELETE /project/<projectId>`
 
 #### Admin
@@ -232,6 +234,9 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
   - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning.
   - Command+R: in creation, opens folder upload.
   - Command+S: outside creation, focuses search.
+  - Command+/: focuses the visible content search input.
+  - Enter/Shift+Enter in text search: selects the next/previous match, wrapping around.
+  - Escape in text search: clears the query and highlights.
   - Command+U: outside creation, deletes the selected file; in creation, opens file upload.
   - Command+X: closes the creation modal.
   - Command+Y: outside creation, opens rename if a file is selected and rename is not already open.
@@ -247,11 +252,17 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. On success, closes the rename modal, refreshes the list and updates navigation if the renamed file was selected.
 - `download file`: downloads the currently loaded content using the selected file's basename and a temporary blob URL.
 - `upload * <files>`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and base64-encoding detected binary content. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
-- `change projects|project|file|image`: manages image preview blob URLs and recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings, line wrapping and JavaScript/Python/Markdown modes; file editor changes call `write file` immediately, while chat editor changes update `message.body`.
+- `change projects|project|file|image`: manages image preview blob URLs and recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings, line wrapping and JavaScript/Python/Markdown modes; file editor changes call `write file` immediately, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
+- `change search.content.query`: calls `highlight content`.
+- `change view`: calls `highlight content` at low priority, after rendering.
+- `highlight content`: highlights literal, case-insensitive matches for `search.content.query`, sets `search.content.count` and resets `search.content.current` to 0. Clears both integers when the query is empty or no text editor is active.
+- `find content <backwards>`: selects, outlines and scrolls to the next/previous match, wrapping at either end. Sets the 1-based `search.content.current` without moving focus from search.
 
 #### Chat
 
-- `change file`: uses `match: B.changeResponder` and priority `-1001` to scroll the first `.messages` element to its `scrollHeight` after rendering and the editor setup/focus responder at `-1000`.
+- `change content|file|project|view`: finds chat messages with `pending 1` in their headers and sets `pending.messages` to their `projectId/file/messageId` keys. Clears the list outside a loaded chat.
+- `change pending.messages`: starts a 100ms polling interval for each new key and clears intervals for keys no longer pending. Calls `PUT /project/message`, skipping ticks while a request is in flight. Checks project/file and interval before replacing only that message in local `content`, then emits `change content`; does not write to the server or recreate the draft editor.
+- `change content|file`: uses `match: B.changeResponder` and priority `-1001` to scroll the first `.messages` element to its `scrollHeight` after rendering.
 - `create message <to> <name> <body>`: posts to `POST /project/message`, defaulting the recipient to `all`. Ignores blank messages. On success, if the same project and file are selected, clears the draft if unchanged and refreshes the file list and chat. Preserves the draft on failure.
 
 ### Client state
@@ -288,6 +299,8 @@ new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>
     type "dialog|file" // Whether the new file is a normal file or a dialog
+pending messages <array of "projectId/file/messageId"> // Pending messages in the current chat; initially empty
+        requests <map of "projectId/file/messageId" to interval ID> // Active 100ms polling intervals; initially empty
 project <projectId|undefined> // The current project selected
 projects 1 created <date>
            id <id>
@@ -296,7 +309,10 @@ projects 1 created <date>
            owner <userId>
            slot <integer|undefined>
          ...
-search file <text|undefined> // Filters filenames using String.match (input is interpreted as a regex)
+search content count <integer> // Number of text-editor matches; 0 for an empty query or no active text editor
+               current <integer> // 1-based selected match; 0 when no match is selected; resets when highlighting is rebuilt
+               query <text> // Shared content search input, initially empty; literal, case-insensitive text-editor search; filters message bodies, senders (own ID as "you") and destinations with smartcase (uppercase in query makes matching case-sensitive)
+       file <text|undefined> // Filters filenames using String.match (input is interpreted as a regex)
        project <text|undefined> // Filters project names using String.match; undefined shows the spiral, a defined value shows the list
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
