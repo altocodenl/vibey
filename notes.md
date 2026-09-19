@@ -1,5 +1,31 @@
 # Vibey development notes
 
+## 2026-09-19
+
+Some notes on Alexander - The process of creating life:
+- "Ultimately, the success of your list of centers, your pattern language, determines whether or not the thing which is created will have life."
+- "the list of centers (...) must be judged according to the likelihood of its creating life. This can be done. You can often tell just from looking at a list of centers that it may not produce life, because you can tell that it has obvious gaps, or problems, or misses the main point in some essential way."
+- "we have to work, with a constant intuitiion about the life, at what is going to intensify this life. This can only be done in a spiritual state of mind."
+- "What is real life in a person? What kind of thing will produce real, deep life in an event?"
+- "which things, events, moments, kinds of centers, will create a spiritual awakening in a person or a person's life."
+- "I am trying to find those aspects (...) which will illuminate existence and make a person come in touch with his eternal life."
+- "John Holland has given an extraordinary and up-to-date mathematical account of the way schemata *must* appear in any successful adaptive system: ADAPTATION IN NATURAL AND ARTIFICIAL SYSTEMS"
+- "Deep feeling: the aim of every living process is, at each step, to increase the deep feeling of the whole"
+- "We come now, to the most important and most profound aspect of living process. I beliieve it is the deepest issue in this book. (...) The issue has to do with feeling. I assert, simply, that all living process hinges on the production ofo deep feeling. And I assert that this one idea encapsulates all the other ideas, and covers all the other aspects of living process."
+
+
+TODO AI in chat:
+   - proper auth
+   - context
+      - prompt + main.md
+      - don't bust cache
+   - tool call
+      - description of shell command
+      - interpret as shell
+   - stream
+      - pass buffers to run
+      - show stats
+
 ## 2026-09-18
 
 If most teams are now developing with AI using specs, they are not working step-wise. That means that adjustments don't come at the right time. AI, and any accelerating technology in general, tends to make one asleep at the wheel of not paying attention to the whole step by step. I'm guessing that Alexander's approach in book 3 is about using new technologies, but not falling asleep at the wheel at all; rather, being even more aware, because the speed is still high, so the hard work of listening and being guided to deep feeling is constant.
@@ -42,7 +68,7 @@ Some notes on Alexander - The process of creating life:
 - "the flowerbed in the top of the wall is a strange and unexpected thing. Yet it touches the heart immediately."
 - "This is what it means to have centers which have life in them - that the entity defined by a pattern digs deep into the experience of life, and creates a feeling of live lived, life passed, the sadness and tranquility and happiness of actual life, raw as it is."
 - "Before starting to make anything, or design anything, one has to choose and define the content of the centers functionally and geometrically, and their relationships."
-- "The main thing is that you must get clear what the essential centeres are which will give the thing an actual profound *life*."
+- "The main thing is that you must get clear what the essential centeres are which will give the thing an actual profound *life*. Once you have that clear mentally, you can start the actual geometrical unfolding of the plan or the design."
 
 ## 2026-09-16
 

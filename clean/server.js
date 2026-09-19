@@ -207,9 +207,9 @@ var run = async function (... args) {
 
       var done = function () {
          if (--wait > 0) return;
-         if (type (output.stdout) === 'array') output.stdout = Buffer.concat (output.stdout);
          var logOutput = dale.obj (output, function (v, k) {
-            if (k === 'stdout' && v.length) return [k, '[' + v.length + ' ' + (options.raw ? 'bytes' : 'characters') + ']'];
+            if (options [k]) return [k, '[callback]'];
+            if (k === 'stdout' && v.length) return [k, '[' + v.length + ' characters]'];
             return [k, v];
          });
          var ms = Date.now () - t;
@@ -220,9 +220,11 @@ var run = async function (... args) {
 
       dale.go (['stdout', 'stderr'], function (k) {
          proc [k].on ('data', function (chunk) {
-            var raw = k === 'stdout' && options.raw;
-            if (output [k] === undefined) output [k] = raw ? [] : '';
-            raw ? output [k].push (chunk) : output [k] += chunk;
+            if (options [k]) options [k] (chunk);
+            else {
+               if (output [k] === undefined) output [k] = '';
+               output [k] += chunk;
+            }
          });
          proc [k].on ('end', done);
       });
@@ -278,8 +280,9 @@ docker.run = async function (id, command, options) {
 }
 
 docker.read = async function (id, path) {
-   var result = await docker.run (id, 'cat ' + Path.quote (path), {catch: true, raw: true});
-   return result.code ? {code: result.code, error: result.stderr} : result;
+   var chunks = [];
+   var result = await docker.run (id, 'cat ' + Path.quote (path), {catch: true, stdout: function (chunk) {chunks.push (chunk)}});
+   return result.code ? {code: result.code, error: result.stderr} : {stdout: Buffer.concat (chunks)};
 }
 
 docker.write = async function (id, path, content, noCommit) {
@@ -1146,7 +1149,7 @@ var routes = [
       if (rq.body.to !== 'shell' && ! rq.body.to.match (/^ai-/)) return reply (rs, 200, {id: id});
 
       if (rq.body.to.match (/^ai-/)) {
-         var flavor = rq.body.to === 'ai-opus-4.6' ? 'anthropic' : rq.body.to === 'ai-gpt-6' ? 'openai' : undefined;
+         var aiFlavor = rq.body.to === 'ai-opus-4.6' ? 'anthropic' : rq.body.to === 'ai-gpt-6' ? 'openai' : undefined;
       }
 
       var responseId = crypto.randomUUID ();
@@ -1168,124 +1171,101 @@ var routes = [
 
       reply (rs, 200, {id: id, responseId: responseId});
 
+      var output = '', oldBody = 'əəə body ' + responseId + '\n';
+      var editQueue = Promise.resolve (), editError;
+      var streamEdit = function () {
+         var newBody = 'əəə body ' + responseId + '\n' + output;
+         editQueue = editQueue.then (async function () {
+            if (editError) return;
+            var result = await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
+            if (result.code) throw result;
+            oldBody = newBody;
+         }).catch (function (error) {
+            editError = error;
+            clog ({priority: 'important', type: 'Stream persistence error', error: formatError (error), responseId});
+         });
+      };
+
       if (rq.body.to === 'shell') {
-         var shellResult = await docker.run (rq.body.id, rq.body.body, {catch: true});
-         var output = ((shellResult.stderr ? shellResult.stderr + '\n' : '') + (shellResult.stdout || '')).replace (/\n$/, '');
+         await docker.run (rq.body.id, rq.body.body, {catch: true, stdout: function (chunk) {
+            output += chunk;
+            streamEdit ();
+         }, stderr: function (chunk) {
+            output += chunk;
+            streamEdit ();
+         }});
+         await editQueue;
       }
 
-      if (flavor) {
-         var aiErrors = [];
-         var parseAIChunk = flavor === 'anthropic' ? function (line) {
-            var event = JSON.parse (line);
-            var errorText;
-            if (event.type === 'assistant' && (event.error || event.is_api_error_message)) {
-               errorText = ((event.message && event.message.content) || []).filter (function (block) {
-                  return block.type === 'text';
-               }).map (function (block) {return block.text}).join ('\n');
-            }
-            if (event.type === 'result' && event.is_error) {
-               errorText = event.result || (event.errors || []).join ('\n');
-            }
-            if (errorText) {
-               if (aiErrors.indexOf (errorText) !== -1) return;
-               aiErrors.push (errorText);
-               return (output ? '\n\n' : '') + errorText;
-            }
-            if (event.type === 'assistant' && event.message && event.message.content) {
-               return {replace: true, text: event.message.content.filter (function (block) {
-                  return block.type === 'text';
-               }).map (function (block) {return block.text}).join ('\n')};
-            }
-            if (event.type === 'result' && ! event.is_error && event.result) {
-               return {replace: true, text: event.result};
-            }
-         } : function (line) {
-            var event = JSON.parse (line);
-            if (event.type === 'item.completed' && event.item && event.item.type === 'agent_message') return event.item.text;
-         };
+      if (aiFlavor) {
+         if (aiFlavor === 'anthropic') var command = 'claude -p --model claude-opus-4-6 --output-format stream-json --verbose --dangerously-skip-permissions'
+         if (aiFlavor === 'openai')    var command = 'codex exec --json -m "gpt-6-astra" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
 
-         var command = flavor === 'anthropic'
-            ? 'claude -p --model claude-opus-4-6 --output-format stream-json --verbose --dangerously-skip-permissions'
-            : 'codex exec --json -m "gpt-6-astra" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
-
-         var containerId = 'vibey-project-' + rq.body.id;
-
-         if (flavor === 'openai') {
+         if (aiFlavor === 'openai') {
             var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', tokens: {access_token: SECRET.openai.accessToken, id_token: SECRET.openai.idToken, refresh_token: SECRET.openai.refreshToken, account_id: SECRET.openai.accountId}});
             var result = await docker.write (rq.body.id, '/tmp/codex-auth/auth.json', codexAuth, 'noCommit');
             if (result.code) throw result;
          }
 
          var dockerArgs = ['exec'];
-         if (flavor === 'anthropic') dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + SECRET.anthropic);
-         if (flavor === 'openai')    dockerArgs.push ('-e', 'CODEX_HOME=/tmp/codex-auth');
-         dockerArgs.push (containerId, 'sh', '-c', command + ' ' + Path.quote (rq.body.body));
+         if (aiFlavor === 'anthropic') dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + SECRET.anthropic);
+         if (aiFlavor === 'openai')    dockerArgs.push ('-e', 'CODEX_HOME=/tmp/codex-auth');
+         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', command + ' ' + Path.quote (rq.body.body));
 
-         var output = '', buffer = '', stdout = '', stderr = '';
-         var oldBody = 'əəə body ' + responseId + '\n';
-         var editQueue = Promise.resolve (), editError, processError;
-         var proc = child.spawn ('docker', dockerArgs);
+         var buffer = '';
 
-         await new Promise (function (resolve, reject) {
-            var processLines = function (lines) {
-               dale.go (lines, function (line) {
-                  if (! line) return;
-                  try {
-                     var chunk = parseAIChunk (line);
-                     if (! chunk) return;
-                     if (chunk.replace) output = chunk.text;
-                     else               output += chunk;
-                     var newBody = 'əəə body ' + responseId + '\n' + output;
-                     editQueue = editQueue.then (async function () {
-                        if (editError) return;
-                        var result = await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
-                        if (result.code) throw result;
-                        oldBody = newBody;
-                     }).catch (function (error) {
-                        editError = error;
-                        clog ({priority: 'important', type: 'AI stream persistence error', error: formatError (error), responseId});
-                        reject (error);
-                     });
-                  } catch (e) {
-                     clog ({priority: 'important', type: 'AI stream parse error', error: formatError (e), responseId});
-                  }
-               });
-            };
-            proc.stdout.setEncoding ('utf8');
-            proc.stderr.setEncoding ('utf8');
-            proc.stdout.on ('data', function (chunk) {
-               stdout += chunk;
-               buffer += chunk;
-               var lines = buffer.split ('\n');
-               buffer = lines.pop ();
-               processLines (lines);
-            });
-            proc.stderr.on ('data', function (chunk) {
-               stderr += chunk;
-            });
-            proc.on ('error', function (error) {
-               processError = 'AI process failed to start: ' + error.message;
-            });
-            proc.on ('close', function (code, signal) {
-               if (buffer) processLines ([buffer]);
-               buffer = '';
-               if (! processError && (code !== 0 || signal)) {
-                  processError = signal ? 'AI process terminated by signal ' + signal : 'AI process exited with code ' + code;
+         var processLines = function (lines) {
+            var parseChunk = aiFlavor === 'anthropic' ? function (line) {
+               var event = JSON.parse (line);
+               if (event.type === 'assistant' && event.message && event.message.content) {
+                  return {replace: true, text: event.message.content.filter (function (block) {
+                     return block.type === 'text';
+                  }).map (function (block) {return block.text}).join ('\n')};
                }
-               if (processError) clog ({priority: 'important', type: 'AI process error', error: processError, code, signal, stdout, stderr, responseId});
-               editQueue.then (function () {
-                  if (editError) return reject (editError);
-                  resolve ();
-               }, reject);
+               if (event.type === 'result' && event.result) {
+                  return {replace: true, text: event.result};
+               }
+            } : function (line) {
+               var event = JSON.parse (line);
+               if (event.type === 'item.completed' && event.item && event.item.type === 'agent_message') return event.item.text;
+            };
+            dale.go (lines, function (line) {
+               if (! line) return;
+               try {
+                  var chunk = parseChunk (line);
+                  if (! chunk) return;
+                  if (chunk.replace) output = chunk.text;
+                  else               output += chunk;
+                  streamEdit ();
+               } catch (e) {
+                  clog ({priority: 'important', type: 'AI stream parse error', error: formatError (e), responseId});
+               }
             });
-         });
-         if (processError || (! output && stderr)) {
-            output = processError
-               ? (output ? output + '\n\n' : '') + processError + (stderr ? '\n' + stderr : '')
-               : stderr;
-            var result = await docker.edit (rq.body.id, rq.body.file, oldBody, 'əəə body ' + responseId + '\n' + output);
-            if (result.code) throw result;
          }
+
+         var aiResult = await run ('docker', ... dockerArgs, {catch: true, stdout: function (chunk) {
+            buffer += chunk;
+            var lines = buffer.split ('\n');
+            buffer = lines.pop ();
+            processLines (lines);
+         }, stderr: function (chunk) {
+            output += chunk;
+            streamEdit ();
+         }});
+
+         if (buffer) processLines ([buffer]);
+
+         if (aiResult.code === -1) {
+            output += (output ? '\n\n' : '') + 'AI process failed to start: ' + aiResult.error;
+            streamEdit ();
+         }
+         else if (aiResult.code || aiResult.signal) {
+            var error = aiResult.signal ? 'AI process terminated by signal ' + aiResult.signal : 'AI process exited with code ' + aiResult.code;
+            output += (output ? '\n\n' : '') + error;
+            streamEdit ();
+         }
+
+         await editQueue;
       }
 
       var oldHead = [
@@ -1303,12 +1283,6 @@ var routes = [
          't-end ' + now (),
          't-start ' + tStart,
       ].join ('\n');
-
-      if (rq.body.to === 'shell') {
-         var oldBody = 'əəə body ' + responseId + '\n';
-         var newBody = 'əəə body ' + responseId + '\n' + output;
-         await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
-      }
 
       await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
 
