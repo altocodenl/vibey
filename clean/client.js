@@ -609,7 +609,6 @@ B.mrespond ([
       }
       catch (error) {
          if (B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
-         console.log (name, error);
          B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
       }
    }],
@@ -964,7 +963,6 @@ B.mrespond ([
 
    ['change', [/^(content|file)$/], {match: B.changeResponder, priority: -1001}, function (x) {
       var messages = c ('.messages') [0];
-      clog (messages);
       if (messages) messages.scrollTop = messages.scrollHeight;
    }],
 
@@ -985,6 +983,39 @@ B.mrespond ([
          B.call (x, 'read', 'file');
       });
    }],
+
+   // *** CREDENTIALS ***
+
+   ['start', 'pkce', function (x, provider) {
+      B.call (x, 'set', ['pkce', 'loading'], provider);
+      B.call (x, 'post', '/credentials/' + provider + '/start', {}, function (x, error, rs) {
+         if (error) {
+            B.call (x, 'rem', 'pkce', 'loading');
+            return B.call (x, 'snackbar', 'error', 'Failed to start login');
+         }
+         window.open (rs.body.url, '_blank');
+         B.call (x, 'set', ['pkce', 'step'], {provider: provider, flow: 'paste_code'});
+         B.call (x, 'rem', 'pkce', 'loading');
+      });
+   }],
+
+   ['complete', 'pkce', function (x, provider, code) {
+      B.call (x, 'set', ['pkce', 'loading'], provider);
+      B.call (x, 'post', '/credentials/' + provider + '/complete', {code: code}, function (x, error, rs) {
+         B.call (x, 'rem', [], 'pkce');
+         if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
+         B.call (x, 'load', 'user');
+      });
+   }],
+
+   ['remove', 'credential', function (x, provider) {
+      if (! confirm ('Remove ' + (provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' credential?')) return;
+      B.call (x, 'delete', '/credentials/' + provider, {}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to remove credential');
+         B.call (x, 'load', 'user');
+      });
+   }],
+
 
 ]);
 
@@ -1125,7 +1156,7 @@ views.main = function () {
                      style: style ({padding: '0.5rem 0.875rem'}),
                      onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
                   }, [
-                     views.tooltip ('O'),
+                     views.tooltip ('O', 'below'),
                      ['i', {class: 'bi mr1 ' + (showSettings ? 'bi-check-lg' : 'bi-wrench-adjustable mr1')}],
                      showSettings ? 'Done with this' : 'Settings'
                   ]];
@@ -1819,6 +1850,24 @@ views.files = function () {
       padding: '1.5rem',
    });
 
+   var flipCard = function (frontClass, front, back) {
+      return B.view (['settings', 'show'], function (showSettings) {
+         return ['div', {
+            class: 'bg-vdeepnavy bn border-box flex flex-column ' + (showSettings ? 'overflow-auto' : frontClass),
+            style: paneStyle,
+         }, showSettings ? [
+            ['div', {class: 'flex items-center justify-between mb3'}, [
+               ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
+               ['span', {
+                  class: 'f3 light-blue pointer relative',
+                  onclick: B.ev ('set', ['settings', 'show'], false),
+               }, [views.tooltip ('O', 'below'), '×']],
+            ]],
+            type (back) === 'function' ? back () : back,
+         ] : type (front) === 'function' ? front () : front];
+      });
+   }
+
    return B.view ([['projects'], ['project']], function (projects, projectId) {
       if (! projects) return ['div', {
          class: 'bg-vmidnight flex flex-wrap items-center justify-center overflow-hidden vh-100',
@@ -1922,10 +1971,7 @@ views.files = function () {
             }),
          }, [
             // Left pane
-            ['div', {
-               class: 'bg-vdeepnavy bn border-box flex flex-column overflow-hidden',
-               style: paneStyle,
-            }, [
+            flipCard ('overflow-hidden', function () {return [
                ['div', {class: 'flex flex-shrink-0 mb3'}, [
                   ['button', {
                      class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vnearwhite',
@@ -1997,12 +2043,9 @@ views.files = function () {
                      type: 'text',
                   }],
                ]],
-            ]],
+            ]}, []),
             // Right pane
-            ['div', {
-               class: 'bg-vdeepnavy bn border-box flex flex-column overflow-auto',
-               style: paneStyle,
-            }, B.view ('file', function (file) {
+            flipCard ('overflow-auto', function () {return B.view ('file', function (file) {
                if (! file) return ['div'];
 
                if (file.name.match (/^chat\/.+\.md$/)) return views.chat ();
@@ -2135,7 +2178,44 @@ views.files = function () {
                      }),
                   ]] : '',
                ]];
-            })],
+            })}, function () {return B.view (['pkce'], function (pkce) {
+               pkce = pkce || {};
+               var step = pkce.step;
+               if (step) return ['div', [
+                  ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (step.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
+                  ['input', {
+                     class: css.input + ' f6 mb2 w-100',
+                     oninput: B.ev ('set', ['pkce', 'code']),
+                     placeholder: 'Paste code here...',
+                     type: 'text',
+                     value: pkce.code || '',
+                  }],
+                  ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
+                     ['button', {
+                        class: css.button + ' f6 flex-auto',
+                        disabled: ! (pkce.code || '').trim (),
+                        onclick: B.ev ('complete', 'pkce', step.provider, pkce.code || ''),
+                     }, 'Submit'],
+                     ['button', {
+                        class: css.button + ' f6',
+                        style: style ({'background-color': css.colors.vborderblue}),
+                        onclick: B.ev ('rem', [], 'pkce'),
+                     }, 'Cancel'],
+                  ]],
+               ]];
+               return ['div', [
+                  ['button', {
+                     class: css.button + ' f6 mb2 w-100',
+                     disabled: pkce.loading === 'anthropic',
+                     onclick: B.ev ('start', 'pkce', 'anthropic'),
+                  }, pkce.loading === 'anthropic' ? 'Opening browser...' : 'Log in to Claude'],
+                  ['button', {
+                     class: css.button + ' f6 w-100',
+                     disabled: pkce.loading === 'openai',
+                     onclick: B.ev ('start', 'pkce', 'openai'),
+                  }, pkce.loading === 'openai' ? 'Opening browser...' : 'Log in to ChatGPT'],
+               ]];
+            })}),
          ]],
 
          // File creation modal
@@ -2501,6 +2581,7 @@ views.chat = function () {
             }),
          }, [
             B.view ('message', function (message) {
+               message = message || {};
                return ['div', {
                   class: 'flex items-center pv3',
                   style: style ({gap: '0.75rem'}),
@@ -2555,430 +2636,5 @@ views.chat = function () {
 
 CodeMirror.Vim.unmap ('/');
 
-B.call ('set', 'pending', {
-   messages: [],
-   requests: {},
-});
-B.call ('set', ['search', 'content'], {
-   count: 0,
-   current: 0,
-   query: '',
-});
-B.call ('set', 'message', {body: '', to: 'all'});
 B.call ('load', 'user');
 B.mount ('body', views.main);
-
-
-/* TODO: To be recycled later, perhaps
- *
- *
- *
- *
- *
-
-
-   // *** OAUTH ***
-
-   ['login', 'oauth', function (x, provider) {
-      B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', '/settings/login/' + provider, {}, function (x, error, rs) {
-         if (error) {
-            B.call (x, 'rem', 'oauth', 'loading');
-            return B.call (x, 'snackbar', 'error', 'Failed to start login');
-         }
-         window.open (rs.body.url, '_blank');
-         if (rs.body.flow === 'paste_code') {
-            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'paste_code'});
-            B.call (x, 'rem', 'oauth', 'loading');
-         }
-         else {
-            B.call (x, 'set', ['oauth', 'step'], {provider: provider, flow: 'waiting'});
-            B.call (x, 'complete', 'oauth', provider);
-         }
-      });
-   }],
-
-   ['complete', 'oauth', function (x, provider, code) {
-      B.call (x, 'set', ['oauth', 'loading'], provider);
-      B.call (x, 'post', '/settings/login/' + provider + '/callback', {code: code}, function (x, error, rs) {
-         B.call (x, 'rem', [], 'oauth');
-         if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
-         B.call (x, 'load', 'settings');
-      });
-   }],
-
-   ['logout', 'oauth', function (x, provider) {
-      if (! confirm ('Log out from ' + (provider === 'claude' ? 'Anthropic (Claude)' : 'OpenAI (ChatGPT)') + ' subscription?')) return;
-      B.call (x, 'post', '/settings/logout/' + provider, {}, function (x, error) {
-         if (error) return B.call (x, 'snackbar', 'error', 'Failed to logout');
-         B.call (x, 'load', 'settings');
-      });
-   }],
-
-
-   // TODO: refactor from here below
-   ['.modal-actions', {
-      display: 'flex',
-      gap: 12,
-      'justify-content': 'flex-end',
-      'margin-top': 20
-   }],
-   ['.project-shell', {
-      display: 'flex',
-      'flex-direction': 'column',
-      gap: 24,
-      padding: 24,
-      'min-height': '100vh',
-      'box-sizing': 'border-box'
-   }],
-   ['.project-main', {
-      display: 'grid',
-      'grid-template-columns': '23.6fr 76.4fr',
-      gap: 24,
-      flex: 1,
-      width: 1,
-      'min-height': 0,
-      'box-sizing': 'border-box'
-   }],
-   ['.project-pane', {
-      'background-color': css.colors.vdeepnavy,
-      border: '0.0625rem solid ' + css.colors.vborderblue,
-      'border-radius': '1.125rem',
-      'box-shadow': '0 1.25rem 3.75rem ' + css.rgba (css.colors.vblack, 0.22),
-      'box-sizing': 'border-box',
-      'min-height': 0,
-      padding: '1.5rem',
-   }],
-   ['.project-left-pane', {
-      'min-width': 0
-   }],
-   ['.project-right-pane', {
-      'min-width': 0,
-      display: 'flex',
-      'flex-direction': 'column'
-   }],
-   ['.flip-card', {
-      perspective: 1200,
-   }],
-   ['.flip-card-inner', {
-      position: 'relative',
-      width: 1,
-      height: 1,
-      transition: 'transform 0.6s ease',
-      'transform-style': 'preserve-3d',
-      'transform-origin': 'center center',
-   }],
-   ['.flip-card-inner.flipped', {
-      transform: 'rotateY(180deg)',
-   }],
-   ['.flip-card-front, .flip-card-back', {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: 1,
-      height: 1,
-      'backface-visibility': 'hidden',
-      '-webkit-backface-visibility': 'hidden',
-   }],
-   ['.flip-card-back', {
-      transform: 'rotateY(180deg)',
-   }],
-
-
-
-views.files_old = function () {
-
-   var iconAndName = function (name) {
-      if (name.match ('^doc/')) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], name];
-      if (name.match ('^dialog/')) return [['i', {class: 'bi bi-chat-left-dots mr1 vpurple'}], name];
-      return name;
-   }
-
-   return B.view ([['projects'], ['project']], function (projects, project) {
-      if (! projects) return ['div', {class: 'tc pv5'}, dale.go (dale.times (8), () => views.spinny ())];
-
-      return ['div', {
-         class: 'bg-vmidnight border-box flex flex-column min-vh-100',
-         style: style ({
-            gap: '1.5rem',
-            padding: '1.5rem',
-         }),
-      }, [
-         ['div', {class: 'flex items-center'}, [
-            ['span', {
-               class: 'f1 fw7 lh-solid light-blue mr3 pointer relative',
-               onclick: B.ev ('navigate', 'projects'),
-            }, [
-               views.tooltip ('B'),
-               '‹'
-            ]],
-            ['span', {class: 'f2 fw7 vnearwhite'}, project]
-         ]],
-         ['div', {
-            class: 'border-box w-100',
-            style: style ({
-               display: 'grid',
-               flex: 1,
-               gap: '1.5rem',
-               'grid-template-columns': '23.6fr 76.4fr',
-               'min-height': 0,
-            }),
-         }, [
-            B.view ([['files'], ['file', 'name'], ['new', 'file'], ['file', 'delete'], ['key', 'command'], ['new', 'type'], ['settings', 'show']], function (files, name, newFileName, Delete, command, newType, showSettings) {
-
-               return ['div', {class: 'flip-card'}, ['div', {class: 'flip-card-inner' + (showSettings ? ' flipped' : '')}, [
-                  ['div', {class: 'flip-card-front project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
-                  ['div', {style: style ({flex: 1, overflow: 'auto'})}, [
-                     ['br'], ['br'],
-                     ! files ? ['div', {class: 'vgray lh-copy'}, views.spinny ()] : ! files.length ? ['div', {class: 'vgray lh-copy'}, 'No files yet.'] : ['div', dale.go (files, function (file, index) {
-                        var active = file === name;
-                        return ['div', {
-                           class: 'mb2 pb2',
-                           style: style ({
-                              'border-bottom': '1px solid ' + css.colors.vborderblue,
-                              'background-color': active ? css.colors.vhighlightblue : undefined,
-                              'border-left': active ? '3px solid ' + css.colors.vblue : '3px solid transparent',
-                              padding: '8px 10px',
-                              'border-radius': 4,
-                           })
-                        }, [
-                           ['div', {
-                              class: 'flex justify-between items-center'
-                           }, [
-                              ['div', {
-                                 class: (active ? 'vnearwhite fw6' : file.indexOf ('doc/') === 0 ? 'light-blue' : 'vnearwhite') + ' fw5 lh-copy pointer relative',
-                                 onclick: B.ev ('navigate', 'project/' + B.get ('project') + '/' + file)
-                              }, [
-                                 (function () {
-                                    if (active || ! command) return;
-                                    var prev = files.indexOf (name) - 1, next = files.indexOf (name) + 1;
-                                    if (prev < 0) prev = files.length - 1;
-                                    if (next === files.length) next = 0;
-                                    if (index === prev) return ['span', {class: 'cmd-tooltip'}, 'K'];
-                                    if (index === next) return ['span', {class: 'cmd-tooltip'}, 'J'];
-                                    return
-                                 }) (),
-                                 iconAndName (file)
-                              ]],
-                              Delete && file !== 'main.md' ? ['span', {
-                                 class: 'f4 lh-solid pointer relative vpurple',
-                                 onclick: B.ev (['stop', 'propagation', {raw: 'event'}], ['remove', 'file', file])
-                              }, [
-                                 file === name ? ['span', {class: 'cmd-tooltip', style: style ({left: 'auto', right: 0, transform: 'none'})}, 'V'] : [],
-                                 '×'
-                              ]] : []
-                           ]]
-
-                        ]];
-                     })]
-                  ]],
-                  ['div', {class: 'flex mt3', style: style ({gap: '0.5rem'})}, [
-                     ['button', {
-                        class: css.button + ' f6 ph3 pv2 shadow-primary relative',
-                        onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file'])
-                     }, [
-                        command ? ['span', {class: 'cmd-tooltip'}, 'D'] : '',
-                        '+ Add'
-                     ]],
-                     ['button', {
-                        class: css.button + ' f6 ph3 pv2 relative bg-purple',
-                        onclick: B.ev ('set', ['file', 'delete'], ! Delete)
-                     }, [
-                        command ? ['span', {class: 'cmd-tooltip'}, 'X'] : '',
-                        ['i', {class: 'bi ' + (Delete ? 'bi-check-lg' : 'bi-eraser-fill') + ' mr1'}], Delete ? 'Done deleting' : 'Delete'
-                     ]],
-                  ]],
-
-                  newFileName !== undefined ? (function () {
-                     var isDialog = newType === 'dialog';
-                     return ['div', {class: 'modal-backdrop', onclick: B.ev (['rem', 'new', 'file'], ['rem', 'new', 'type'])}, [
-                        ['div', {class: 'modal-card', onclick: 'event.stopPropagation()'}, [
-                           ['div', {class: 'flex mb3', style: style ({gap: '0.5rem'})}, [
-                              ['button', {
-                                 class: css.button + ' f6 ph3 pv2 relative vgray ' + (! isDialog ? ' shadow-primary' : ''),
-                                 style: ! isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.vborderblue}),
-                                 onclick: B.ev ('set', ['new', 'type'], 'doc')
-                              }, [
-                                 command ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
-                                 ['i', {class: 'bi bi-file-text mr1'}], 'Doc'
-                              ]],
-                              ['button', {
-                                 class: css.button + ' f6 ph3 pv2 relative vgray ' + (isDialog ? ' shadow-primary' : ''),
-                                 style: isDialog ? '' : style ({'background-color': 'transparent', border: '1px solid ' + css.colors.vborderblue}),
-                                 onclick: B.ev ('set', ['new', 'type'], 'dialog')
-                              }, [
-                                 command ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
-                                 ['i', {class: 'bi bi-chat-dots mr1'}], 'Dialog'
-                              ]]
-                           ]],
-                           ['div', {class: 'project-modal-title'}, isDialog ? 'Name your new dialog...' : 'Name your new doc...'],
-                           ['input', {
-                              class: css.input + ' mb0',
-                              id: 'new-file-input',
-                              type: 'text',
-                              placeholder: isDialog ? 'my-dialog' : 'my-doc',
-                              value: newFileName,
-                              oninput: B.ev ('set', ['new', 'file']),
-                           }],
-                           ['div', {class: 'modal-actions'}, [
-                              ['button', {class: css.button + ' relative', onclick: B.ev (['rem', 'new', 'file'], ['rem', 'new', 'type'])}, [
-                                 command ? ['span', {class: 'cmd-tooltip'}, 'X'] : '',
-                                 'Cancel'
-                              ]],
-                              ['button', {class: css.button + ' relative', onclick: B.ev ('create', 'file'), disabled: ! ((newFileName || '').trim ())}, [
-                                 command ? ['span', {class: 'cmd-tooltip'}, 'D'] : '',
-                                 isDialog ? 'Create dialog' : 'Create doc'
-                              ]]
-                           ]]
-                        ]]
-                     ]];
-                  }) () : ''
-               ]],
-               ['div', {class: 'flip-card-back project-pane project-left-pane', style: style ({display: 'flex', 'flex-direction': 'column'})}, [
-                  ['div', {class: 'flex items-center justify-between mb3'}, [
-                     ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
-                     ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
-                  ]],
-                  ['div', {class: 'vgray lh-copy tc', style: style ({flex: 1, display: 'flex', 'align-items': 'center', 'justify-content': 'center'})}, [
-                     ['div', [
-                        ['i', {class: 'bi bi-gear db f1 mb3 light-blue'}],
-                        'Settings will appear here'
-                     ]]
-                  ]]
-                  ]]
-               ]]];
-            }),
-            B.view ([['file', 'content'], ['file', 'mode'], ['file', 'name'], ['settings', 'show']], function (content, mode, fileName, showSettings) {
-               if (fileName === undefined) fileName = '';
-               return ['div', {class: 'flip-card'}, [['div', {class: 'flip-card-inner' + (showSettings ? ' flipped' : '')}, [
-                  ['div', {class: 'flip-card-front project-pane project-right-pane'}, [
-                  B.view ([['new', 'file'], ['key', 'command']], function (newFile, command) {
-                     var showTooltip = command && newFile === undefined;
-                     return ['div', {class: 'flex items-center mb3'}, [
-                        ['span', {class: 'fw6 vnearwhite mr3'}, iconAndName (fileName)],
-                        (function () {
-                           if (fileName.match (/^dialog\//)) return ['div', 'hallo']; // TODO: add ai/human/terminal mode
-                           return [
-                              ['span', {
-                                 class: 'pointer fw6 mr3 relative vnearwhite',
-                                 style: style ({'background-color': mode !== 'edit' ? css.colors.vhighlightblue : undefined, 'border-radius': 6, padding: '6px 16px'}),
-                                 onclick: B.ev ('set', ['file', 'mode'], 'view')
-                              }, [
-                                 showTooltip && mode && mode !== 'view' ? ['span', {class: 'cmd-tooltip'}, 'I'] : '',
-                                 ['i', {class: 'bi bi-eye mr1'}], 'View'
-                              ]],
-                              ['span', {
-                                 class: 'pointer fw6 relative vnearwhite',
-                                 style: style ({'background-color': mode === 'edit' ? css.colors.vhighlightblue : undefined, 'border-radius': 6, padding: '6px 16px'}),
-                                 onclick: B.ev ('set', ['file', 'mode'], 'edit')
-                              }, [
-                                 showTooltip && mode !== 'edit' ? ['span', {class: 'cmd-tooltip'}, 'E'] : '',
-                                 ['i', {class: 'bi bi-hand-index mr1'}], 'Edit'
-                              ]],
-                           ];
-                        }) ()
-                     ]];
-                  }),
-                  (function () {
-                     var isDialog = fileName.match (/^dialog\//);
-                     if (mode === 'edit' && ! isDialog) return ['textarea', {
-                        class: 'bg-vnavy bn border-box db f5 lh-copy monospace outline-0 vnearwhite w-100',
-                        onchange: B.ev ('write', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
-                        oninput: B.ev ('write', 'file', B.get ('file', 'name'), {raw: 'this.value'}),
-                        style: style ({
-                           'border-radius': '1.125rem',
-                           flex: 1,
-                           padding: '0.75rem',
-                           resize: 'none',
-                        }),
-                        value: content,
-                        autofocus: true
-                     }, content || ''];
-
-                     var hasActiveAIKey = dale.stop (['claude', 'openai'], true, function (k) {
-                        if (B.get ('settings', k + 'OAuth', 'loggedIn') && ! B.get ('settings', k + 'OAuth', 'expired')) return true;
-                        if (B.get ('settings', k, 'hasKey')) return true;
-                     });
-
-                     if (isDialog && ! hasActiveAIKey) return ['div', {class: 'flex items-center justify-center tc vgray f5 lh-copy', style: style ({flex: 1})}, ['div', {class: 'pa4'}, [['i', {class: 'bi bi-plug db f2 mb3'}], 'No active AI connection yet.', ['br'], ['button', {class: css.button + ' mt3', onclick: B.ev ('set', ['settings', 'show'], true)}, 'Add one now']]]];
-
-                     return ['div', {class: 'vgray lh-copy', style: style ({flex: 1, overflow: 'auto'}), opaque: true}, ['LITERAL', marked.parse (content || '')]];
-                  }) (),
-               ]],
-               ['div', {class: 'flip-card-back project-pane project-right-pane', style: style ({overflow: 'auto'})}, [
-                  ['div', {class: 'flex items-center justify-between mb3'}, [
-                     ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
-                     ['span', {class: 'f3 pointer light-blue', onclick: B.ev ('set', ['settings', 'show'], false)}, '×']
-                  ]],
-                  B.view ([['settings'], ['oauth']], function (settingsData, oauth) {
-                     settingsData = settingsData || {};
-                     oauth = oauth || {};
-                     var openaiOAuth = settingsData.openaiOAuth || {};
-                     var oauthLoading = oauth.loading;
-                     var oauthStep = oauth.step;
-                     var oauthCode = oauth.code;
-                     var isPaste = oauthStep && oauthStep.provider === 'openai' && oauthStep.flow === 'paste_code';
-                     var isWaiting = oauthStep && oauthStep.provider === 'openai' && oauthStep.flow === 'waiting';
-
-                     return ['div', [
-                        ['div', {class: 'f6 vgray mb3 lh-copy'}, 'Use your existing ChatGPT subscription. Logs in via OAuth — no API key needed.'],
-
-                        ['div', {
-                           class: 'ba bg-vdeepnavy br3 mb3 pa3 vborderblue-border',
-                        }, [
-                           ['div', {class: 'flex items-center justify-between mb2'}, [
-                              ['span', {class: 'fw6 light-blue'}, 'ChatGPT Plus/Pro'],
-                              openaiOAuth.loggedIn
-                                 ? ['span', {class: 'f6', style: style ({color: openaiOAuth.expired ? '#f0ad4e' : css.colors.vgreen})}, openaiOAuth.expired ? '⚠ Expired' : '✓ Connected']
-                                 : ['span', {class: 'f6 vpurple'}, '✗ Not connected']
-                           ]],
-
-                           openaiOAuth.loggedIn && ! isPaste && ! isWaiting ? ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
-                              openaiOAuth.expired ? ['button', {class: css.button + ' f6', onclick: B.ev ('login', 'oauth', 'openai'), disabled: oauthLoading === 'openai'}, 'Re-authenticate'] : [],
-                              ['button', {
-                                 class: css.button + ' bg-vpurple f6',
-                                 disabled: oauthLoading === 'openai',
-                                 onclick: B.ev ('logout', 'oauth', 'openai'),
-                              }, 'Logout']
-                           ]] : [],
-
-                           ! openaiOAuth.loggedIn && ! isPaste && ! isWaiting ? ['button', {
-                              class: css.button + ' f6 mt2',
-                              onclick: B.ev ('login', 'oauth', 'openai'),
-                              disabled: oauthLoading === 'openai'
-                           }, oauthLoading === 'openai' ? 'Opening browser...' : 'Login with ChatGPT'] : [],
-
-                           isPaste ? ['div', {class: 'mt2'}, [
-                              ['div', {class: 'f6 mb2 lh-copy', style: style ({color: '#f0ad4e'})}, 'A browser tab opened. After OpenAI redirects to localhost:1455, copy the full URL and paste it below.'],
-                              ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
-                                 ['input', {
-                                    class: 'bg-vmidnight',
-                                    type: 'text',
-                                    value: oauthCode || '',
-                                    placeholder: 'Paste callback URL here...',
-                                    oninput: B.ev ('set', ['oauth', 'code'], {raw: 'this.value'}),
-                                    style: style ({flex: 1, padding: '0.5rem', 'border-radius': 6, border: 'none', color: css.colors.nearwhite, 'font-family': 'monospace', 'font-size': '12px'})
-                                 }],
-                                 ['button', {class: css.button + ' f6', onclick: B.ev ('complete', 'oauth', 'openai', oauthCode || ''), disabled: ! oauthCode || ! oauthCode.trim ()}, 'Submit'],
-                                 ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.vborderblue}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
-                              ]]
-                           ]] : [],
-
-                           isWaiting ? ['div', {class: 'mt2'}, [
-                              ['div', {class: 'f6 mb2 lh-copy', style: style ({color: '#f0ad4e'})}, oauthLoading === 'openai' ? '⏳ Waiting for browser authentication...' : '✓ Authentication complete!'],
-                              ['div', {class: 'f6 vgray mb2 lh-copy'}, 'Complete the login in the browser tab. This page will update automatically.'],
-                              ['button', {class: css.button + ' f6', style: style ({'background-color': css.colors.vborderblue}), onclick: B.ev (['rem', 'oauth', 'step'], ['rem', 'oauth', 'loading'])}, 'Cancel']
-                           ]] : []
-                        ]]
-                     ]];
-                  })
-               ]]
-            ]]]];
-            }),
-         ]]
-      ]];
-   });
-}
-
-
-*/

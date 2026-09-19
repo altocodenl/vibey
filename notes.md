@@ -13,7 +13,6 @@ Some notes on Alexander - The process of creating life:
 - "Deep feeling: the aim of every living process is, at each step, to increase the deep feeling of the whole"
 - "We come now, to the most important and most profound aspect of living process. I beliieve it is the deepest issue in this book. (...) The issue has to do with feeling. I assert, simply, that all living process hinges on the production ofo deep feeling. And I assert that this one idea encapsulates all the other ideas, and covers all the other aspects of living process."
 
-
 TODO AI in chat:
    - proper auth
    - context
@@ -25,6 +24,30 @@ TODO AI in chat:
    - stream
       - pass buffers to run
       - show stats
+
+Design storage of ai credentials:
+- Has to be per user.
+- For now, each owner has credentials that they can use in the projects automatically.
+- Cannot be per project, the burden of configuring for each project is too large. Later, we can do this if the need arises.
+- We will only store four sets of credentials per user: openai oauth token, openai api key, anthropic oauth token, anthropic api key.
+- For now, there will be no decision of what key is used: if a model supports oauth token, we default to that. If the model is only supported by api key, we use that (for example, old gpts).
+- We will store all credentials in a redis key for each user, called credentials:<userId> (there will be an entry for it inside owner:<...>). The key will be a hash mapping to a json of the shape: {anthropic: {api: ..., oauth: {...}}, openai: {api: ..., oauth: {...}}}. Any of the outer or inner fields can be either undefined or properly set.
+- We'll have a hash with model data defined in server.js that we will embed directly onto the client (no need for a request).
+- Endpoints:
+   - POST /credentials/:provider/start (starts pkce)
+   - POST /credentials/:provider/complete (finishes pkce)
+   - POST /credentials/api-key (send api key for anthropic or openai)
+   - DELETE /credentials/:credential-type (delete api key or oauth)
+   - Which credentials are active are returned inside the user when quering GET /auth/user in user.credentials
+
+TODO now:
+- Review PKCE
+- Document responders and new endpoints
+- Work on UX for settings (also adding API keys)
+- Update file list after shell calls
+- Flip card.
+- Enable chat in creation of new file
+- Keep on working on TODO AI
 
 ## 2026-09-18
 

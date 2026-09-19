@@ -1198,17 +1198,23 @@ var routes = [
       }
 
       if (aiFlavor) {
+         var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
+
          if (aiFlavor === 'anthropic') var command = 'claude -p --model claude-opus-4-6 --output-format stream-json --verbose --dangerously-skip-permissions'
          if (aiFlavor === 'openai')    var command = 'codex exec --json -m "gpt-6-astra" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
 
          if (aiFlavor === 'openai') {
-            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', tokens: {access_token: SECRET.openai.accessToken, id_token: SECRET.openai.idToken, refresh_token: SECRET.openai.refreshToken, account_id: SECRET.openai.accountId}});
+            if (! credentials.openai?.oauth) return reply (rs, 400, {error: 'No OpenAI credential'});
+            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', tokens: {access_token: credentials.openai.oauth.access, refresh_token: credentials.openai.oauth.refresh}});
             var result = await docker.write (rq.body.id, '/tmp/codex-auth/auth.json', codexAuth, 'noCommit');
             if (result.code) throw result;
          }
 
          var dockerArgs = ['exec'];
-         if (aiFlavor === 'anthropic') dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + SECRET.anthropic);
+         if (aiFlavor === 'anthropic') {
+            if (! credentials.anthropic?.oauth) return reply (rs, 400, {error: 'No Anthropic credential'});
+            dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + credentials.anthropic.oauth.access);
+         }
          if (aiFlavor === 'openai')    dockerArgs.push ('-e', 'CODEX_HOME=/tmp/codex-auth');
          dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', command + ' ' + Path.quote (rq.body.body));
 
@@ -1314,6 +1320,106 @@ var routes = [
       await redis ([
          ['del',  'project:' + rq.data.params.id],
          ['srem', 'owner:' + rq.user.id, 'project:' + rq.data.params.id]
+      ]);
+
+      reply (rs, 200);
+   }],
+
+   // *** CREDENTIALS ***
+
+   ['post', '/credentials/:provider/start', async function (rq, rs) {
+      if (! inc (['anthropic', 'openai'], rq.data.params.provider)) return reply (rs, 400, {error: 'Invalid provider'});
+
+      var b64url = function (buffer) {
+         return buffer.toString ('base64').replace (/\+/g, '-').replace (/\//g, '_').replace (/=/g, '');
+      };
+      var verifier  = b64url (crypto.randomBytes (32));
+      var challenge = b64url (crypto.createHash ('sha256').update (verifier).digest ());
+
+      await redis ('setex', 'pkce:' + rq.user.id + ':' + rq.data.params.provider, 900, JSON.stringify ({verifier: verifier}));
+
+      var params = rq.data.params.provider === 'anthropic' ? new URLSearchParams ({
+         client_id: Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString (),
+         code: 'true',
+         code_challenge: challenge,
+         code_challenge_method: 'S256',
+         redirect_uri: 'https://console.anthropic.com/oauth/code/callback',
+         response_type: 'code',
+         scope: 'org:create_api_key user:profile user:inference',
+         state: verifier,
+      }) : new URLSearchParams ({
+         client_id: 'app_EMoamEEZ73f0CkXaXp7hrann',
+         code_challenge: challenge,
+         code_challenge_method: 'S256',
+         codex_cli_simplified_flow: 'true',
+         id_token_add_organizations: 'true',
+         redirect_uri: 'http://localhost:1455/auth/callback',
+         response_type: 'code',
+         scope: 'openid profile email offline_access',
+         state: crypto.randomBytes (16).toString ('hex'),
+      });
+
+      var url = (rq.data.params.provider === 'anthropic' ? 'https://claude.ai/oauth/authorize' : 'https://auth.openai.com/oauth/authorize') + '?' + params.toString ();
+
+      reply (rs, 200, {url: url});
+   }],
+
+   ['post', '/credentials/:provider/complete', async function (rq, rs) {
+      if (! inc (['anthropic', 'openai'], rq.data.params.provider)) return reply (rs, 400, {error: 'Invalid provider'});
+
+      if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), 'code', 'eachOf', teishi.test.equal],
+         ['code', rq.body.code, 'string'],
+      ])) return;
+
+      var pending = await redis ('get', 'pkce:' + rq.user.id + ':' + rq.data.params.provider);
+      if (! pending) return reply (rs, 400, {error: 'No pending PKCE flow'});
+      pending = JSON.parse (pending);
+
+      await redis ('del', 'pkce:' + rq.user.id + ':' + rq.data.params.provider);
+
+      var code = rq.body.code.split ('#') [0];
+
+      var tokenURL = rq.data.params.provider === 'anthropic' ? 'https://console.anthropic.com/v1/oauth/token' : 'https://auth.openai.com/oauth/token';
+      var clientId = rq.data.params.provider === 'anthropic' ? Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString () : 'app_EMoamEEZ73f0CkXaXp7hrann';
+      var redirectURI = rq.data.params.provider === 'anthropic' ? 'https://console.anthropic.com/oauth/code/callback' : 'http://localhost:1455/auth/callback';
+
+      var isAnthropic = rq.data.params.provider === 'anthropic';
+
+      var response = await fetch (tokenURL, {
+         method: 'POST',
+         headers: {'Content-Type': isAnthropic ? 'application/json' : 'application/x-www-form-urlencoded'},
+         body: isAnthropic ? JSON.stringify ({
+            client_id: clientId,
+            code: code,
+            code_verifier: pending.verifier,
+            grant_type: 'authorization_code',
+            redirect_uri: redirectURI,
+            state: rq.body.code.split ('#') [1],
+         }) : new URLSearchParams ({
+            client_id: clientId,
+            code: code,
+            code_verifier: pending.verifier,
+            grant_type: 'authorization_code',
+            redirect_uri: redirectURI,
+         }),
+      });
+
+      if (! response.ok) return reply (rs, 400, {error: 'Token exchange failed: ' + await response.text ()});
+
+      var tokenData = await response.json ();
+
+      var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
+      if (! credentials [rq.data.params.provider]) credentials [rq.data.params.provider] = {};
+      credentials [rq.data.params.provider].oauth = {
+         access: tokenData.access_token,
+         expires: Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000,
+         refresh: tokenData.refresh_token,
+      };
+
+      await redis ([
+         ['hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials)],
+         ['sadd', 'owner:' + rq.user.id, 'credentials:' + rq.user.id],
       ]);
 
       reply (rs, 200);
