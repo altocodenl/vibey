@@ -1,5 +1,26 @@
 # Vibey development notes
 
+## 2026-09-21
+
+TODO now:
+- put message to open settings if you select "ai" (only shown when there's no ai credential)
+- show stats of how many tokens have been used per message
+- finish auth: add api token, delete credentials
+- pass system prompt + main.md + entire chat (minus long messages, trim at 10k, no need for a tmp file, you can just grep the chat which has it in full); show main.md as hidden message
+- hide long outputs
+- make sure we don't bust cache
+- enable tool call: shell command
+- enable an agent calling another agent (indents further in the UI); limit nesting to 4 levels in the UI
+- Enable script to call agent: add write hook already set
+
+Demo ideas:
+1. travel-plans: two agents doing research, validating each others work, even two of the same kind working in parallel. give access to my wife while it's going, she can then see it too, modify main.md (friend lives in X), then submit a question.
+2. customer-proposal: send you a proposal & pics for it: ask AI to give read access to a single file to an email address, uncreated; submit pivs & message. then log in as the other user to see it. Then, go back to the first user, who receives an email by the customer and forwards it to the project, to draft a reply.
+- game: ask ai to make you a snake-o-saurus game with something special for some friends, make it be through login, save hi scores per user and display them (minus the @...).
+- sunday-dinner: add ideas for dinner, a list of guests, a time & place; ask ai to generate a list of guests. ask to generate a shopping list. when the event is done, allow people to submit pictures there.
+
+- (superseded by game) personal software: habit tracker. Submit updates via AI, have AI write a dashboard that you can see as a file.
+
 ## 2026-09-19
 
 Some notes on Alexander - The process of creating life:
@@ -21,6 +42,7 @@ TODO AI in chat:
    - tool call
       - description of shell command
       - interpret as shell
+      - large tool calls (>10kb) go to a /tmp file
    - stream
       - pass buffers to run
       - show stats
@@ -47,6 +69,7 @@ TODO now:
 - Update file list after shell calls
 - Flip card.
 - Enable chat in creation of new file
+- Improve combobox
 - Keep on working on TODO AI
 
 ## 2026-09-18

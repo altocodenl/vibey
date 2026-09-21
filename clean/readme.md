@@ -143,7 +143,7 @@ userCount <integer>
 
 Except for `GET /auth/user`, all other auth routes will return a 404 in local mode.
 
-- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, csrf: <token>, email: <email>, mode: 'cloud'}` in cloud mode and `{mode: 'local'}` local mode.
+- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, credentials: <object>, csrf: <token>, email: <email>, id: <user id>, mode: 'cloud'}` in cloud mode and `{mode: 'local'}` in local mode. `credentials` lists stored providers and credential types as presence flags (for example, `anthropic.oauth: true`), never credential values or tokens.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet. Sends a login link by email.
 - **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
@@ -203,6 +203,7 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 #### Projects
 
+- `request creator`: requests creator access via `POST /creator/request` with an empty body (`{}`). Ignores requests outside cloud mode, from existing creators, or when `user.creatorRequest` is already set. Sets `user.creatorRequest` to `pending` while sending and `sent` on success, showing a snackbar confirming admin review. On error, clears the request state to allow retrying and shows an error snackbar.
 - `keydown *`: handles shortcuts while in the projects view:
   - Command+1–5: opens the project in that slot.
   - Command+B: in search mode, returns to the spiral.
@@ -229,7 +230,8 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
   - Enter: creates a file when the creation button is enabled, or attempts rename submission through `#rename-file`.
   - Escape: closes the creation or rename modal.
   - Command+F: in creation, selects file type.
-  - Command+I: outside creation, toggles edit/view mode; in creation, selects dialog type.
+  - Command+I: outside creation, toggles edit/view mode; in creation, selects chat type.
+  - Command+M: outside creation, focuses the chat editor when present.
   - Command+J: outside creation, selects the next file in the filtered list, wrapping at the end.
   - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning.
   - Command+R: in creation, opens folder upload.

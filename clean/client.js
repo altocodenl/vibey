@@ -314,6 +314,20 @@ B.mrespond ([
 
    // *** PROJECTS ***
 
+   ['request', 'creator', function (x) {
+      if (B.get ('user', 'creator') || B.get ('user', 'creatorRequest') || B.get ('user', 'mode') !== 'cloud') return;
+
+      B.call (x, 'set', ['user', 'creatorRequest'], 'pending');
+      B.call (x, 'post', '/creator/request', {}, function (x, error) {
+         if (error) {
+            B.call (x, 'rem', 'user', 'creatorRequest');
+            return B.call (x, 'snackbar', 'error', (error.body || {}).error || 'Failed to request creator access');
+         }
+         B.call (x, 'set', ['user', 'creatorRequest'], 'sent');
+         B.call (x, 'snackbar', 'ok', 'Creator access requested. An admin will review your request.');
+      });
+   }],
+
    ['change', 'projects', function (x) {
       B.call (x, 'read', 'hash');
    }],
@@ -443,6 +457,31 @@ B.mrespond ([
       if (B.get ('view') !== 'files') return;
       if (B.get ('upload')) return;
 
+      var recipient = ev.target && ev.target.closest && ev.target.closest ('.chat-recipient');
+      if (recipient && ! ev.isComposing && ! ev.altKey && ! ev.ctrlKey && ! ev.metaKey) {
+         if (ev.key === 'Escape') {
+            ev.preventDefault ();
+            ev.target.blur ();
+            return;
+         }
+         var options = Array.from (recipient.querySelectorAll ('.chat-recipient-options button'));
+         if (ev.key === 'Enter' && ev.target.id === 'chat-to' && options.length === 1) {
+            ev.preventDefault ();
+            options [0].click ();
+            return;
+         }
+         if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+            if (! options.length) return;
+
+            ev.preventDefault ();
+            var index = options.indexOf (document.activeElement);
+            if (index === -1) index = ev.key === 'ArrowDown' ? 0 : options.length - 1;
+            else index = (index + (ev.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+            options [index].focus ();
+            return;
+         }
+      }
+
       if (ev.metaKey && ev.key === '/') {
          var contentSearch = c ('#search-text') || c ('#search-messages');
          if (contentSearch) {
@@ -493,6 +532,10 @@ B.mrespond ([
             B.call (x, 'set', ['new', 'file'], '');
             B.call (x, 'set', ['new', 'type'], 'file');
          }
+         if (ev.metaKey && ev.key === 'm' && editor) {
+            ev.preventDefault ();
+            editor.focus ();
+         }
          shortcut ('u', ev, x, 'remove', 'file', B.get ('file', 'name'));
          if (B.get ('file', 'name') && ! B.get ('edit', 'file')) shortcut ('y', ev, x, 'set', ['edit', 'file'], {
             newName: B.get ('file', 'name'),
@@ -525,7 +568,7 @@ B.mrespond ([
          if (ev.key === 'Escape') return B.call (x, 'rem', 'new', 'file');
          if (c ('#create-file') && ! c ('#create-file').disabled) shortcut ('e', ev, x, 'create', 'file');
          shortcut ('f', ev, x, 'set', ['new', 'type'], 'file');
-         shortcut ('i', ev, x, 'set', ['new', 'type'], 'dialog');
+         shortcut ('i', ev, x, 'set', ['new', 'type'], 'chat');
          shortcut ('x', ev, x, 'rem', 'new', 'file');
          if (ev.metaKey && (ev.key === 'u' || ev.key === 'r')) {
             var input = c (ev.key === 'u' ? '#upload-file' : '#upload-folder');
@@ -653,6 +696,7 @@ B.mrespond ([
       if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a name');
 
       if (! name.match (/\.[a-z]{2,3}$/i)) name += '.md';
+      if (B.get ('new', 'type') === 'chat') name = 'chat/' + name;
 
       B.call (x, 'write', 'file', name, '', 'new');
 
@@ -767,7 +811,7 @@ B.mrespond ([
       });
    }],
 
-   ['change', [/^(projects|project|file|image)$/], {match: B.changeResponder, priority: -1000}, function (x) {
+   ['change', [/^(projects|project|file|image|settings)$/], {match: B.changeResponder, priority: -1000}, function (x) {
       if (B.get ('view') !== 'files') return;
 
       var name = B.get ('file', 'name') || '';
@@ -963,7 +1007,7 @@ B.mrespond ([
 
    ['change', [/^(content|file)$/], {match: B.changeResponder, priority: -1001}, function (x) {
       var messages = c ('.messages') [0];
-      if (messages) messages.scrollTop = messages.scrollHeight;
+      if (messages && messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100) messages.scrollTop = messages.scrollHeight;
    }],
 
    ['create', 'message', function (x, to, name, body) {
@@ -1090,6 +1134,16 @@ css.style = [
 
    ['.chat-recipient-options', {display: 'none'}],
    ['.chat-recipient:focus-within .chat-recipient-options', {display: 'block'}],
+   ['.chat-recipient-options button:focus, .chat-recipient-options button:only-child', {
+      'background-color': css.colors.vhighlightblue,
+   }],
+   ['.chat-message a', {
+      color: 'inherit',
+      'text-decoration': 'underline',
+   }],
+   ['.chat-message a:hover', {
+      color: css.colors.vlightblue,
+   }],
 
    // *** SPINNY ***
 
@@ -1123,9 +1177,9 @@ views.tooltip = function (tooltip, placement) {
    });
 }
 
-views.spinny = function () {
+views.spinny = function (color) {
    return ['span', {
-      class: 'b code dib f2 lh-solid spinny tc vblue',
+      class: 'b code dib f2 lh-solid spinny tc ' + (color || 'vblue'),
       style: style ({width: '2ch'}),
    }];
 }
@@ -1248,7 +1302,7 @@ views.login = function () {
                   class: css.join (emailValid ? 'bg-vgreen' : 'bg-mid-gray', css.button, 'db w-100').replace ('bg-vblue', ''),
                   disabled: ! emailValid,
                   onclick: B.ev ('login', user.email),
-               }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Send me a link to get in') : 'Enter your email'],
+               }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Let me in') : 'Enter your email'],
             ]]
          ]]
       ]];
@@ -1346,8 +1400,9 @@ views.projects = function () {
    var barWidth  = barHeight * slotWidth / slotHeight;
    var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
 
-   return B.view ([['projects'], ['user', 'email'], ['search', 'project']], function (projects, email, search) {
+   return B.view ([['projects'], ['user', 'email'], ['search', 'project'], ['user', 'creator']], function (projects, email, search, creator) {
       var columnWidth = search !== undefined ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
+      var emailHue = dale.go ((email || '').split (''), function (c) { return c.charCodeAt (0); }).reduce (function (a, b) { return a + b; }, 0) % 360;
 
       if (! projects) return ['div', {
          class: 'bg-vdeepnavy flex flex-wrap items-center justify-center min-vh-100 vnearwhite',
@@ -1359,8 +1414,9 @@ views.projects = function () {
          class: 'bg-vdeepnavy flex items-center justify-center min-vh-100 vnearwhite',
       }, [
          ['div', {
-            class: 'bg-vdeepnavy fixed',
+            class: 'fixed',
             style: style ({
+               'background-color': 'hsla(' + emailHue + ', 70%, 50%, 0.2)',
                'border-radius': '1.125rem',
                bottom: 'calc(1.5rem - 2vh)',
                left: '50%',
@@ -1448,11 +1504,11 @@ views.projects = function () {
 
                      // Status bar
                      B.view (['hover', 'project'], function (project) {
-                        if (! project) return ['div'];
+                        if (creator && ! project) return ['div'];
                         return ['div', {
-                           class: 'absolute flex flex-column items-center justify-center ' + views.projectColor (project.name),
+                           class: ('absolute ba border-box flex flex-column items-center justify-center vborderblue-border ' + (creator ? views.projectColor (project.name) : 'bg-vmidnight vlightblue')).split (' ').sort ().join (' '),
                            style: style ({
-                              border: vw (1.5) + ' solid ' + css.colors.vborderblue,
+                              'border-width': '0.09375rem',
                               'border-radius': vw (slotBorderRadius),
                               'font-size': vw (13),
                               height: vw (barHeight),
@@ -1460,7 +1516,17 @@ views.projects = function () {
                               top: vw (barBottom - barHeight),
                               width: vw (barWidth),
                            }),
-                        }, [
+                        }, ! creator ? B.view ([['user', 'creatorRequest'], ['user', 'mode']], function (request, mode) {
+                           return ['div', {class: 'border-box pa2 tc w-100'}, [
+                              mode === 'cloud' ? ['button', {
+                                 class: (css.button + ' f7' + (request ? ' o-60' : '')).split (' ').sort ().join (' '),
+                                 disabled: !! request,
+                                 onclick: B.ev ('request', 'creator'),
+                                 type: 'button',
+                              }, request === 'pending' ? 'Requesting...' : request === 'sent' ? 'Request sent' : 'Request creator access'] : '',
+                              ['p', {class: 'lh-copy mb0 mt2'}, 'Or ask a creator to share a project with you.'],
+                           ]];
+                        }) : [
                            ['span', {
                               class: 'fw6',
                               style: style ({'font-size': '120%'}),
@@ -2178,9 +2244,45 @@ views.files = function () {
                      }),
                   ]] : '',
                ]];
-            })}, function () {return B.view (['pkce'], function (pkce) {
+            })}, function () {return B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
                pkce = pkce || {};
                var step = pkce.step;
+               if (pkce.confirm && ! step) return views.modal ({
+                  'aria-label': 'Connect account',
+                  'aria-modal': 'true',
+                  role: 'dialog',
+               }, [
+                  ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, 'Connect ' + (pkce.confirm === 'anthropic' ? 'Anthropic' : 'OpenAI')],
+                  ['p', {class: 'lh-copy mb3 mt0 vnearwhite'}, 'Here’s what will happen:'],
+                  ['ol', {class: 'lh-copy mb4 mt0 pl3 vlightblue'}, pkce.confirm === 'anthropic' ? [
+                     ['li', 'Click the button below to be taken to Claude\'s login page.'],
+                     ['li', 'Come back and paste the code you got.'],
+                  ] : [
+                     ['li', 'Click the button below to be taken to OpenAI\'s login page.'],
+                     ['li', 'You’ll be taken to a broken page with a URL that starts with "localhost:1455...". This is expected.'],
+                     ['li', 'Copy that entire URL, come back and paste it here.'],
+                  ]],
+                  ((credentials || {}) [pkce.confirm] || {}).oauth
+                     ? ['p', {class: 'lh-copy mb4 mt0 vpurple'}, 'Completing this login will replace your currently connected account for this provider.']
+                     : '',
+                  ['div', {
+                     class: 'flex flex-wrap',
+                     style: style ({gap: '0.75rem'}),
+                  }, [
+                     ['button', {
+                        class: (css.button.replace ('bg-vblue', pkce.confirm === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
+                        disabled: !! pkce.loading,
+                        onclick: B.ev ('start', 'pkce', pkce.confirm),
+                        type: 'button',
+                     }, pkce.loading ? 'Opening browser...' : 'Start login'],
+                     ['button', {
+                        class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
+                        disabled: !! pkce.loading,
+                        onclick: B.ev ('rem', [], 'pkce'),
+                        type: 'button',
+                     }, 'Cancel'],
+                  ]],
+               ]);
                if (step) return ['div', [
                   ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (step.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
                   ['input', {
@@ -2203,18 +2305,37 @@ views.files = function () {
                      }, 'Cancel'],
                   ]],
                ]];
-               return ['div', [
-                  ['button', {
-                     class: css.button + ' f6 mb2 w-100',
-                     disabled: pkce.loading === 'anthropic',
-                     onclick: B.ev ('start', 'pkce', 'anthropic'),
-                  }, pkce.loading === 'anthropic' ? 'Opening browser...' : 'Log in to Claude'],
-                  ['button', {
-                     class: css.button + ' f6 w-100',
-                     disabled: pkce.loading === 'openai',
-                     onclick: B.ev ('start', 'pkce', 'openai'),
-                  }, pkce.loading === 'openai' ? 'Opening browser...' : 'Log in to ChatGPT'],
-               ]];
+               return ['div', dale.go (['anthropic', 'openai'], function (provider) {
+                  var configured = dale.fil ((credentials || {}) [provider] || {}, undefined, function (present, name) {
+                     if (present) return name;
+                  }).sort ();
+                  return ['section', {class: 'mb4'}, [
+                     ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, provider === 'anthropic' ? 'Anthropic' : 'OpenAI'],
+                     configured.length ? ['ul', {class: 'list mb3 mt0 pa0'}, dale.go (configured, function (name) {
+                        return ['li', {class: 'f6 lh-copy mb2 vlightblue'}, [
+                           ['i', {class: 'bi bi-check-circle mr2 vgreen'}],
+                           (name === 'oauth' ? 'Account' : name === 'apiKey' ? 'API key' : name) + ' added',
+                        ]];
+                     })] : ['p', {class: 'f6 mb3 mt0 vgray'}, 'No credentials added'],
+                     ['div', {
+                        class: 'flex flex-wrap',
+                        style: style ({gap: '0.75rem'}),
+                     }, [
+                        ['button', {
+                           class: (css.button.replace ('bg-vblue', provider === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
+                           disabled: !! pkce.loading,
+                           onclick: B.ev ('set', 'pkce', {confirm: provider}),
+                           type: 'button',
+                        }, pkce.loading === provider ? 'Opening browser...' : inc (configured, 'oauth') ? 'Add new account' : 'Add account'],
+                        ['button', {
+                           class: (css.button.replace ('bg-vblue', 'bg-vhighlightblue').replace ('white', 'vlightblue') + ' f6 flex-auto o-50').split (' ').sort ().join (' '),
+                           disabled: true,
+                           title: 'API key support is not available yet',
+                           type: 'button',
+                        }, inc (configured, 'apiKey') ? 'Add new API key' : 'Add API key'],
+                     ]],
+                  ]];
+               })];
             })}),
          ]],
 
@@ -2262,13 +2383,13 @@ views.files = function () {
                         'File',
                      ]],
                      ['button', {
-                        class: 'bg-transparent bn br2 f6 fw6 o-40 ph3 pv2 vgray',
-                        disabled: true,
-                        style: style ({
+                        class: 'bn br2 f6 fw6 ph3 pointer pv2 relative ' + (newType === 'chat' ? 'bg-vgreen' : 'bg-transparent vgray'),
+                        onclick: B.ev ('set', ['new', 'type'], 'chat'),
+                        style: newType === 'chat' ? undefined : style ({
                            border: '0.0625rem solid ' + css.colors.vborderblue,
-                           cursor: 'not-allowed',
                         }),
                      }, [
+                        newType === 'chat' ? '' : views.tooltip ('I'),
                         ['i', {class: 'bi bi-chat-dots mr1'}],
                         'Chat',
                      ]],
@@ -2328,6 +2449,15 @@ views.files = function () {
                   ]],
                ]],
                ['div', {class: 'relative w-100'}, [
+                  newType === 'chat' ? ['span', {
+                     class: 'absolute f5 fw6 vmidblue',
+                     style: style ({
+                        left: '2.5rem',
+                        'pointer-events': 'none',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                     }),
+                  }, 'chat/'] : '',
                   ['i', {
                      class: 'absolute bi bi-pencil vmidblue',
                      style: style ({
@@ -2341,13 +2471,13 @@ views.files = function () {
                      class: 'bg-vdeepnavy border-box f5 outline-0 pr3 w-100',
                      id: 'new-file-input',
                      oninput: B.ev ('set', ['new', 'file']),
-                     placeholder: 'Name your file',
+                     placeholder: newType === 'chat' ? 'Name your chat' : 'Name your file',
                      style: style ({
                         border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
                         'border-radius': '0.75rem',
                         color: css.rgba (css.colors.vlightblue, 0.8),
                         height: '3rem',
-                        'padding-left': '2.5rem',
+                        'padding-left': newType === 'chat' ? '5.25rem' : '2.5rem',
                      }),
                      type: 'text',
                      value: newFile,
@@ -2480,6 +2610,10 @@ views.chat = function () {
                var end = head.match (/^t-end (.+)$/m);
                var time = head.match (/^t (.+)$/m) || start;
                var timeLabel = time ? ago (time [1]) : '';
+               var tokenLabel = end ? dale.fil (['cache', 'in', 'out'], undefined, function (name) {
+                  var tokens = head.match (new RegExp ('^tokens-' + name + ' (\\d+)$', 'm'));
+                  if (tokens) return size (Number (tokens [1])).replace (/B$/, '') + ' t' + name;
+               }).join (' · ') : '';
                if (start && end) {
                   var duration = new Date (end [1]).getTime () - new Date (start [1]).getTime ();
                   if (isFinite (duration) && duration >= 0) timeLabel = (duration < 1000 ? Math.ceil (duration) + 'ms' : Math.ceil (duration / 1000) + 's') + ' · ' + timeLabel;
@@ -2498,19 +2632,35 @@ views.chat = function () {
                   shell
                      ? ['pre', {class: 'code f7 ma0 mw-100 overflow-x-auto pa2'}, body]
                      : ['LITERAL', marked.parse (body)],
-                  /^pending 1$/m.test (head) ? ['div', {class: 'pv2', role: 'status', 'aria-label': 'Response in progress'}, dale.go (dale.times (3), function () {return views.spinny ()})] : '',
+                  /^pending 1$/m.test (head) ? ['div', {
+                     'aria-label': 'Response in progress',
+                     class: 'pv2',
+                     role: 'status',
+                  }, dale.go (dale.times (3), function () {
+                     return views.spinny (views.projectColor (messageIndexes [messageId.toLowerCase ()], true));
+                  })] : '',
                ]];
                return ['div', {
-                  class: 'border-box items-start mb4 mw-100 w-100',
+                  class: 'border-box items-start mb4 mw-100 pv3 relative w-100',
                   style: style ({
                      display: 'grid',
                      gap: '0.75rem',
                      'grid-template-columns': 'max-content minmax(0, max-content) minmax(min(8rem, 25%), 1fr)',
                   }),
                }, [
-                  ['pre', {class: 'code f6 fw7 lh-solid ma0'}, [
+                  ['div', {
+                     class: views.projectColor (messageIndexes [messageId.toLowerCase ()]) + ' absolute absolute--fill',
+                     style: style ({
+                        'border-radius': '0.75rem',
+                        opacity: 0.2,
+                        'pointer-events': 'none',
+                     }),
+                  }],
+                  ['pre', {class: 'code f6 fw7 lh-solid ma0 pl3'}, [
                      replyTo ? ['span', {class: views.projectColor (messageIndexes [replyTo [1].toLowerCase ()], true)}, (messageIndexes [replyTo [1].toLowerCase ()] || '????') + '\n |- '] : '',
-                     ['span', {class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true)}, messageIndexes [messageId.toLowerCase ()]],
+                     ['span', {
+                        class: 'bg-vmidnight br2 dib ph2 pv1 ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
+                     }, messageIndexes [messageId.toLowerCase ()]],
                   ]],
                   pane,
                   ['div', {
@@ -2521,8 +2671,15 @@ views.chat = function () {
                         'overflow-wrap': 'anywhere',
                      }),
                   }, [
-                     ['div', {class: views.projectColor (fromLabel, true)}, fromLabel],
-                     ['div', {class: views.projectColor (timeLabel, true)}, timeLabel],
+                     ['div', {
+                        class: 'bg-vmidnight br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true),
+                     }, fromLabel],
+                     tokenLabel ? ['div', {
+                        class: 'bg-vmidnight br2 dib lh-copy ph2 pv1 vlightblue',
+                     }, tokenLabel] : '',
+                     ['div', {
+                        class: 'bg-vmidnight br2 dib ph2 pv1 ' + views.projectColor (timeLabel, true),
+                     }, timeLabel],
                   ]],
                ]];
             });
@@ -2606,11 +2763,12 @@ views.chat = function () {
                      ['div', {
                         class: 'absolute ba bg-vdeepnavy border-box br2 chat-recipient-options w-100',
                         style: style ({bottom: '100%', 'z-index': 10}),
-                     }, dale.go (['all', 'shell', 'ai-gpt-6', 'ai-opus-4.6'], function (to) {
+                     }, dale.fil (['all', 'shell', 'ai-gpt-6', 'ai-opus-4.6'], undefined, function (to) {
+                        if (to.indexOf ((message.to || '').trim ().toLowerCase ()) === -1) return;
                         return ['button', {
                            class: 'bg-vdeepnavy bn db f5 pa2 pointer tl vlightblue w-100',
                            type: 'button',
-                           onclick: B.ev ('set', ['message', 'to'], to) + ' document.activeElement.blur ();',
+                           onclick: B.ev ('set', ['message', 'to'], to) + ' if (editor) editor.focus ();',
                         }, to];
                      })],
                   ]],
@@ -2622,11 +2780,16 @@ views.chat = function () {
                ]];
             }),
             ['div', {
-               class: 'flex-auto overflow-hidden',
-               id: 'chat-editor',
-               opaque: true,
+               class: 'flex-auto relative',
                style: style ({'min-height': 0}),
-            }],
+            }, [
+               views.tooltip ('M'),
+               ['div', {
+                  class: 'absolute absolute--fill overflow-hidden',
+                  id: 'chat-editor',
+                  opaque: true,
+               }],
+            ]],
          ]],
       ]];
    });

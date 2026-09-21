@@ -195,6 +195,7 @@ if (mode === 'server') {
                      ['body', rs.body, 'object'],
                      ['body.count', rs.body.count, 'integer'],
                      ['body.creator', rs.body.creator, true, teishi.test.equal],
+                     ['body.credentials', rs.body.credentials, {}, teishi.test.equal],
                      ['body.csrf', rs.body.csrf, s.headers ['x-csrf'], teishi.test.equal],
                      ['body.email', rs.body.email, 'hello@example.com', teishi.test.equal],
                   ]);
@@ -821,11 +822,11 @@ if (mode === 'client') {
          var button = c ('button') [0];
          return assert ([
             ['button enabled', button.disabled, false, teishi.test.equal],
-            ['button text', button.innerHTML, 'Send me a link to get in', teishi.test.equal],
+            ['button text', button.innerHTML, 'Let me in', teishi.test.equal],
          ]);
       }],
       ['Send login link', function (next) {
-         find ('button', 'Send me a link to get in').click ();
+         find ('button', 'Let me in').click ();
          next (1000, 1);
       }, function () {
          return assert ([

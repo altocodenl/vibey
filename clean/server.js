@@ -628,10 +628,17 @@ var routes = [
    ['get', '/auth/user', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 200, {mode: 'local'});
 
+      var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
+
       reply (rs, 200, {
          admin: rq.user.email === CONFIG.admin ? true : undefined,
          count: parseInt (rq.user.count),
-         creator: !! rq.user.creator,
+         creator: rq.user.email === CONFIG.admin || !! rq.user.creator,
+         credentials: dale.obj (credentials, function (types, provider) {
+            return [provider, dale.obj (types, function (credential, name) {
+               return [name, true];
+            })];
+         }),
          csrf: rq.user.csrf,
          email: rq.user.email,
          id: rq.user.id,
@@ -1171,7 +1178,7 @@ var routes = [
 
       reply (rs, 200, {id: id, responseId: responseId});
 
-      var output = '', oldBody = 'əəə body ' + responseId + '\n';
+      var output = '', oldBody = 'əəə body ' + responseId + '\n', usage;
       var editQueue = Promise.resolve (), editError;
       var streamEdit = function () {
          var newBody = 'əəə body ' + responseId + '\n' + output;
@@ -1205,8 +1212,8 @@ var routes = [
 
          if (aiFlavor === 'openai') {
             if (! credentials.openai?.oauth) return reply (rs, 400, {error: 'No OpenAI credential'});
-            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', tokens: {access_token: credentials.openai.oauth.access, refresh_token: credentials.openai.oauth.refresh}});
-            var result = await docker.write (rq.body.id, '/tmp/codex-auth/auth.json', codexAuth, 'noCommit');
+            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', last_refresh: new Date ().toISOString (), tokens: {access_token: credentials.openai.oauth.access, refresh_token: credentials.openai.oauth.refresh, id_token: credentials.openai.oauth.idToken || '', account_id: credentials.openai.oauth.accountId || ''}});
+            var result = await docker.write (rq.body.id, '/home/vibey/.codex/auth.json', codexAuth, 'noCommit');
             if (result.code) throw result;
          }
 
@@ -1215,24 +1222,44 @@ var routes = [
             if (! credentials.anthropic?.oauth) return reply (rs, 400, {error: 'No Anthropic credential'});
             dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + credentials.anthropic.oauth.access);
          }
-         if (aiFlavor === 'openai')    dockerArgs.push ('-e', 'CODEX_HOME=/tmp/codex-auth');
-         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', command + ' ' + Path.quote (rq.body.body));
+         if (aiFlavor === 'openai')    dockerArgs.push ('-i', '-e', 'CODEX_HOME=/home/vibey/.codex');
+         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', command + (aiFlavor === 'openai' ? ' -' : ' ' + Path.quote (rq.body.body) + ' < /dev/null'));
 
          var buffer = '';
+         var lastFullText = '';
 
          var processLines = function (lines) {
             var parseChunk = aiFlavor === 'anthropic' ? function (line) {
                var event = JSON.parse (line);
+               if (event.type === 'result' && event.usage) {
+                  usage = {
+                     cache: event.usage.cache_read_input_tokens || 0,
+                     fresh: event.usage.input_tokens + (event.usage.cache_creation_input_tokens || 0),
+                     output: event.usage.output_tokens,
+                  };
+               }
                if (event.type === 'assistant' && event.message && event.message.content) {
-                  return {replace: true, text: event.message.content.filter (function (block) {
+                  var fullText = event.message.content.filter (function (block) {
                      return block.type === 'text';
-                  }).map (function (block) {return block.text}).join ('\n')};
+                  }).map (function (block) {return block.text}).join ('\n');
+                  var delta = fullText.slice (lastFullText.length);
+                  lastFullText = fullText;
+                  return delta || undefined;
                }
                if (event.type === 'result' && event.result) {
-                  return {replace: true, text: event.result};
+                  var delta = event.result.slice (lastFullText.length);
+                  lastFullText = event.result;
+                  return delta || undefined;
                }
             } : function (line) {
                var event = JSON.parse (line);
+               if (event.type === 'turn.completed' && event.usage) {
+                  usage = {
+                     cache: event.usage.cached_input_tokens || 0,
+                     fresh: event.usage.input_tokens - (event.usage.cached_input_tokens || 0),
+                     output: event.usage.output_tokens,
+                  };
+               }
                if (event.type === 'item.completed' && event.item && event.item.type === 'agent_message') return event.item.text;
             };
             dale.go (lines, function (line) {
@@ -1240,8 +1267,7 @@ var routes = [
                try {
                   var chunk = parseChunk (line);
                   if (! chunk) return;
-                  if (chunk.replace) output = chunk.text;
-                  else               output += chunk;
+                  output += chunk + '\n';
                   streamEdit ();
                } catch (e) {
                   clog ({priority: 'important', type: 'AI stream parse error', error: formatError (e), responseId});
@@ -1249,7 +1275,7 @@ var routes = [
             });
          }
 
-         var aiResult = await run ('docker', ... dockerArgs, {catch: true, stdout: function (chunk) {
+         var aiResult = await run ('docker', ... dockerArgs, {catch: true, input: aiFlavor === 'openai' ? rq.body.body : undefined, stdout: function (chunk) {
             buffer += chunk;
             var lines = buffer.split ('\n');
             buffer = lines.pop ();
@@ -1288,7 +1314,11 @@ var routes = [
          'id ' + responseId,
          't-end ' + now (),
          't-start ' + tStart,
-      ].join ('\n');
+      ].concat (usage ? [
+         'tokens-in ' + usage.fresh,
+         'tokens-cache ' + usage.cache,
+         'tokens-out ' + usage.output,
+      ] : []).join ('\n');
 
       await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
 
@@ -1379,6 +1409,11 @@ var routes = [
       await redis ('del', 'pkce:' + rq.user.id + ':' + rq.data.params.provider);
 
       var code = rq.body.code.split ('#') [0];
+      try {
+         var parsed = new URL (code.trim ());
+         if (parsed.searchParams.get ('code')) code = parsed.searchParams.get ('code');
+      }
+      catch (e) {}
 
       var tokenURL = rq.data.params.provider === 'anthropic' ? 'https://console.anthropic.com/v1/oauth/token' : 'https://auth.openai.com/oauth/token';
       var clientId = rq.data.params.provider === 'anthropic' ? Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString () : 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -1411,11 +1446,23 @@ var routes = [
 
       var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
       if (! credentials [rq.data.params.provider]) credentials [rq.data.params.provider] = {};
-      credentials [rq.data.params.provider].oauth = {
+      var oauthData = {
          access: tokenData.access_token,
          expires: Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000,
          refresh: tokenData.refresh_token,
       };
+
+      if (rq.data.params.provider === 'openai') {
+         try {
+            var jwt = JSON.parse (Buffer.from (tokenData.access_token.split ('.') [1], 'base64').toString ());
+            var accountId = jwt ['https://api.openai.com/auth'] && jwt ['https://api.openai.com/auth'].chatgpt_account_id;
+            if (accountId) oauthData.accountId = accountId;
+            if (tokenData.id_token) oauthData.idToken = tokenData.id_token;
+         }
+         catch (e) {}
+      }
+
+      credentials [rq.data.params.provider].oauth = oauthData;
 
       await redis ([
          ['hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials)],
