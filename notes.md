@@ -1,5 +1,43 @@
 # Vibey development notes
 
+## 2026-09-22
+
+It's almost incredible that the CLI approach (run CC and codex in the container) actually worked. I'm still reeling from it. We have web search.
+
+Now that AI (for good and bad) will do more thinking and information processing for us, our emotional role is even more important. We set in motion things, we decide when they are done, we react when we want to change them. It's perhaps a continuation of what other social technologies did to us (writing, code of laws), where we decide less and our emotions still remain crucial.
+
+If living structure is geometrical and works at every level, it has to be the same way with code. Perhaps a big reason that we have such dead code is that we thought could get away with it because of hiding it under miniaturization (which compacts space and time of processing). But that's jsut a great carpet under to sweep things. In the end, the geometry of it all will shine through, dead or alive.
+
+Tool call: we only want to do it through vibey for edit? No, it'd be nice to see what other things it is doing. So, as much as possible, all run, edit, write and read should go through vibey tool calls, to have transparency.
+
+Tool call format/prompt:
+- When you make a tool call, don't send anything after that. Vibey will re-send you the result.
+- Always starts with "tool-call: OP" in a new line, where OP can be read|write|edit|run.
+- The second line is always a description of what you're doing, assumed to not have new lines
+- The third line for read, write and edit is path: ... . A path is assumed to not have literal newlines.
+- The third line for run is command: ... . A command is assumed to not have literal newlines.
+- read or run are considered finished after a third line and any other output is discarded.
+- For write, from the fourth line onwards until the end of the message, that's what you will write to the file.
+- For edit, the fourth line is expected to start with: "old text:". The old text begins in the fourth line. Then, the new text is what goes below a single line that starts with "new line:" and has nothing else on that line.
+
+Tool call loop:
+- Parse the tool call if it's there
+- Remove text that makes the tool call from the AI output and save the AI output as a message
+- Create a new message for the tool call itself
+- Make the tool call and stream it to the new message for the tool call
+- When the tool call message is done, send the whole chat again to the same AI.
+
+TODO now:
+- enable tool call: read, edit, write, run
+- expand long messages, including main.md
+- message navigation
+   - Tooltips on the highest visible message if it's truncated (to see it well at the top, with the previous message showing a bit if there's one) and the same for the lowest message that is truncated. The tooltips are H and L.
+- put message to open settings if you select "ai" (only shown when there's no ai credential)
+- images in chat + show local images embedded in docs
+- enable an agent calling another agent (indents further in the UI); limit nesting to 4 levels in the UI
+- Enable script to call agent: add write hook already set
+- Stop call (interrupting ai and shell too)
+
 ## 2026-09-21
 
 TODO now:

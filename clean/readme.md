@@ -116,6 +116,7 @@ project:<projectId> created <date>
 owner:<userId> 1 session:<sessionId>
                2 project:<projectId>
                ...
+credentials:<userId> data <JSON> // {provider: {account: {access, expires, refresh, ...}, apiKey: "<key>"}}
 lock:edit:<projectId>:<path> <integer> // per-file edit lock, expires 10s
 rateLimit:<identifier> <number>
 session:<session> csrf <csrfToken>
@@ -143,7 +144,7 @@ userCount <integer>
 
 Except for `GET /auth/user`, all other auth routes will return a 404 in local mode.
 
-- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, credentials: <object>, csrf: <token>, email: <email>, id: <user id>, mode: 'cloud'}` in cloud mode and `{mode: 'local'}` in local mode. `credentials` lists stored providers and credential types as presence flags (for example, `anthropic.oauth: true`), never credential values or tokens.
+- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, credentials: <object>, csrf: <token>, email: <email>, id: <user id>, mode: 'cloud'}` in cloud mode and `{mode: 'local'}` in local mode. `credentials` lists stored providers and credential types as presence flags (for example, `anthropic.account: true`), never credential values or tokens.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet. Sends a login link by email.
 - **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
@@ -163,6 +164,13 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - **Send message**: `POST /project/message`: expects `{id: <projectId>, file: <fileName>, base64: <boolean|undefined>, body: <text|base64>, to: <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID>}`. Appends a message with server-generated UUID, timestamp and sender, creating the file and parent folders if needed. Rejects complete header/body marker lines in `body`. Returns `{id: <messageUUID>, responseId: <messageUUID>}` for shell messages, otherwise `{id: <messageUUID>}`; 400 if validation or persistence fails.
 - **Read message**: `PUT /project/message`: expects `{projectId: <projectId>, file: <fileName>, messageId: <messageUUID>}`. Returns the message as text, including its head and body markers. Returns 404 if the project is not owned by the user, the file is missing, or the message is not found; 400 for invalid input.
 - **Remove project**: `DELETE /project/<projectId>`
+
+#### Credentials
+
+- **Start PKCE**: `POST /credentials/:provider/start`: starts the OAuth PKCE flow for `:provider` (`anthropic` or `openai`). Returns a URL to open in the browser.
+- **Complete PKCE**: `POST /credentials/:provider/complete`: expects `{code: <string>}`. Exchanges the authorization code for tokens and stores the account credential.
+- **Add API key**: `POST /credentials/:provider/apiKey`: expects `{key: <string>}`. Stores the API key for the provider.
+- **Remove credential**: `DELETE /credentials/:provider/:name`: removes a single credential type (`:name` is `account` or `apiKey`) for the given provider.
 
 #### Admin
 
@@ -200,6 +208,13 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `login <email>`: trims and lowercases the email, then sends a login link via `POST /auth/login`. On success, sets `user.loginLinkRequested` and, when `test` is truthy, stores the returned link at `test.loginLink`.
 - `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, stores the user info, loads projects, and navigates to projects. On error, shows a snackbar and navigates to login.
 - `logout`: logs out via `POST /auth/logout`. Resets user state and navigates to login.
+
+#### Credentials
+
+- `start pkce <provider>`: opens the provider's login page in a new tab and sets `pkce.step` to receive the code.
+- `complete pkce <provider> <code>`: exchanges the authorization code for tokens via `POST /credentials/:provider/complete`. On success, clears `pkce` and reloads user.
+- `save apiKey <provider> <key>`: saves the API key via `POST /credentials/:provider/apiKey`. On success, clears `pkce` and reloads user.
+- `remove credential <provider> <name>`: asks for confirmation, then removes the credential via `DELETE /credentials/:provider/:name`. On success, reloads user.
 
 #### Projects
 
@@ -300,7 +315,13 @@ message body <text> // Current chat draft, initially empty
 new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>
-    type "dialog|file" // Whether the new file is a normal file or a dialog
+    type "chat|file" // Whether the new file is a normal file or a chat
+pkce apiKey <provider|undefined> // When set, shows the API key modal for the provider
+     code "<string>" // Code or API key being entered
+     confirm <provider|undefined> // When set, shows the PKCE confirmation modal
+     loading <provider|undefined> // Provider currently opening a browser tab
+     step flow "paste_code"
+          provider <provider> // Active PKCE code-entry step
 pending messages <array of "projectId/file/messageId"> // Pending messages in the current chat; initially empty
         requests <map of "projectId/file/messageId" to interval ID> // Active 100ms polling intervals; initially empty
 project <projectId|undefined> // The current project selected
@@ -316,6 +337,7 @@ search content count <integer> // Number of text-editor matches; 0 for an empty 
                query <text> // Shared content search input, initially empty; literal, case-insensitive text-editor search; filters message bodies, senders (own ID as "you") and destinations with smartcase (uppercase in query makes matching case-sensitive)
        file <text|undefined> // Filters filenames using String.match (input is interpreted as a regex)
        project <text|undefined> // Filters project names using String.match; undefined shows the spiral, a defined value shows the list
+settings show <0|1> // Whether the settings panel is visible
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
          type "<notification type>" // Usually ok, warning, or error
@@ -324,9 +346,16 @@ test enabled <0|1> // Whether test mode is enabled
 upload done <integer> // Successfully uploaded files; upload exists only while uploading
        total <integer> // Total files in the upload
 user admin <false|true>
+     count <integer>
      creator <false|true>
+     creatorRequest <pending|sent|undefined> // Creator access request state
+     credentials anthropic account <true|undefined>
+                          apiKey <true|undefined>
+                openai account <true|undefined>
+                       apiKey <true|undefined>
      csrf "<CSRF token>"
      email "<email entered in the login form>"
+     id <userId>
      loginLinkRequested <0|1> // Whether the login link was already sent
      mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 view "<view name>"

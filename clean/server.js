@@ -25,7 +25,6 @@ catch (error) {
    var SECRET = {};
 }
 
-
 // *** SETUP ***
 
 var child   = require ('child_process')
@@ -45,6 +44,19 @@ var mime  = require ('mime');
 var hitit = require ('hitit');
 
 var {inc, last, type} = teishi;
+
+// *** SYSTEM PROMPT ***
+
+var systemPrompt = fs.readFileSync ('prompt.md', 'utf8');
+
+// *** MODELS ***
+
+var models = [
+   {provider: 'openai',    model: 'gpt-6',   canonical: 'gpt-6-astra',    window: 1050000},
+   {provider: 'openai',    model: 'gpt-5.6', canonical: 'gpt-5.6-sol',    window: 1050000},
+   {provider: 'openai',    model: 'gpt-4.1', canonical: 'gpt-4.1',        window: 1047576, requireAPIKey: true},
+   {provider: 'anthropic', model: 'opus-4.6', canonical: 'claude-opus-4-6', window: 1000000},
+];
 
 // *** TEST ***
 
@@ -596,6 +608,7 @@ var routes = [
             ['script', {src: 'assets/codemirror/mode/python/python.js'}],
             ['script', {src: 'assets/gotob/gotoB.min.js'}],
             ['script', {src: 'assets/marked/lib/marked.umd.js'}],
+            ['script', 'var models = ' + JSON.stringify (models)],
             ['script', {src: 'cell.js'}],
             ['script', {src: 'client.js'}],
          ]]
@@ -1126,9 +1139,10 @@ var routes = [
          ['body without marker lines', rq.body.body, /^(?![\s\S]*(^|\n)əəə (head|body))/, teishi.test.match],
          ['to', rq.body.to, 'string'],
          ['to', rq.body.to, undefined, function () {
-            if (teishi.inc (['all', 'shell', 'ai-gpt-6', 'ai-opus-4.6'], rq.body.to)) return true;
+            var aiTargets = dale.go (models, function (m) {return 'ai-' + m.model});
+            if (teishi.inc (['all', 'shell'].concat (aiTargets), rq.body.to)) return true;
             if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test (rq.body.to)) return true;
-            return ['to must be all, shell, ai-gpt-6, ai-opus-4.6, or a message UUID'];
+            return ['to must be all, shell, ' + aiTargets.join (', ') + ', or a message UUID'];
          }],
       ])) return;
 
@@ -1155,10 +1169,6 @@ var routes = [
 
       if (rq.body.to !== 'shell' && ! rq.body.to.match (/^ai-/)) return reply (rs, 200, {id: id});
 
-      if (rq.body.to.match (/^ai-/)) {
-         var aiFlavor = rq.body.to === 'ai-opus-4.6' ? 'anthropic' : rq.body.to === 'ai-gpt-6' ? 'openai' : undefined;
-      }
-
       var responseId = crypto.randomUUID ();
       var tStart = now ();
 
@@ -1173,15 +1183,10 @@ var routes = [
          '',
       ].join ('\n');
 
-      result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
-      if (result.code) return reply (rs, 400, result);
-
-      reply (rs, 200, {id: id, responseId: responseId});
-
       var output = '', oldBody = 'əəə body ' + responseId + '\n', usage;
       var editQueue = Promise.resolve (), editError;
       var streamEdit = function () {
-         var newBody = 'əəə body ' + responseId + '\n' + output;
+         var newBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
          editQueue = editQueue.then (async function () {
             if (editError) return;
             var result = await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
@@ -1194,6 +1199,10 @@ var routes = [
       };
 
       if (rq.body.to === 'shell') {
+         result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
+         if (result.code) return reply (rs, 400, result);
+         reply (rs, 200, {id: id, responseId: responseId});
+
          await docker.run (rq.body.id, rq.body.body, {catch: true, stdout: function (chunk) {
             output += chunk;
             streamEdit ();
@@ -1202,30 +1211,113 @@ var routes = [
             streamEdit ();
          }});
          await editQueue;
+
+         var shellHead = [
+            'əəə head ' + responseId,
+            'from shell',
+            'id ' + responseId,
+            'pending 1',
+            't-start ' + tStart,
+         ].join ('\n');
+
+         var shellDone = [
+            'əəə head ' + responseId,
+            'from shell',
+            'id ' + responseId,
+            't-end ' + now (),
+            't-start ' + tStart,
+         ].join ('\n');
+
+         await docker.edit (rq.body.id, rq.body.file, shellHead, shellDone);
+         redis ('hset', 'project:' + rq.body.id, 'last', now ());
+         return;
       }
 
-      if (aiFlavor) {
+      var aiModel = dale.stopNot (models, undefined, function (m) {if (rq.body.to === 'ai-' + m.model) return m});
+      var aiFlavor = aiModel ? aiModel.provider : undefined;
+      for (var turn = 0; ; turn++) {
+         var chat = await docker.read (rq.body.id, rq.body.file);
+         if (chat.code) throw chat;
+         var transcript = chat.stdout.toString ('utf8');
+         var entries = transcript.split (/^əəə head /im).slice (1);
+         var lastMain = undefined, hasSystemPrompt = false;
+         dale.go (entries, function (entry, index) {
+            var body = entry.match (/^əəə body [0-9a-f-]{36}\n/im);
+            if (! body) return;
+            var head = entry.slice (0, body.index);
+            if (/^from systemPrompt$/m.test (head)) hasSystemPrompt = true;
+            if (! /^from main\.md$/m.test (head)) return;
+            lastMain = entry.slice (body.index + body [0].length);
+            // Remove the separator before the next message, not main.md's own trailing newline.
+            if (index < entries.length - 1) lastMain = lastMain.replace (/\n$/, '');
+         });
+
+         if (! hasSystemPrompt) {
+            var systemId = crypto.randomUUID ();
+            var systemMessage = [
+               'əəə head ' + systemId,
+               'from systemPrompt',
+               'id ' + systemId,
+               'to all',
+               'əəə body ' + systemId,
+               systemPrompt.replace (/^əəə (head|body)/gm, '> əəə $1'),
+            ].join ('\n');
+            result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + systemMessage);
+            if (result.code) throw result;
+            transcript += '\n' + systemMessage;
+         }
+
+         var main = await docker.read (rq.body.id, 'main.md');
+         if (main.code && ! (main.code === 1 && /No such file or directory/.test (main.error || ''))) {
+            throw main;
+         }
+         if (! main.code) {
+            var mainBody = main.stdout.toString ('utf8').replace (/^əəə (head|body)/gm, '> əəə $1');
+            if (mainBody !== lastMain) {
+               var mainId = crypto.randomUUID ();
+               var mainMessage = [
+                  'əəə head ' + mainId,
+                  'from main.md',
+                  'id ' + mainId,
+                  'to all',
+                  'əəə body ' + mainId,
+                  mainBody,
+               ].join ('\n');
+               result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + mainMessage);
+               if (result.code) throw result;
+               transcript += '\n' + mainMessage;
+            }
+         }
+
+         // Context is saved first; the transcript does not include the new pending response.
+         if (turn === 0) {
+            result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
+            if (result.code) return reply (rs, 400, result);
+            reply (rs, 200, {id: id, responseId: responseId});
+         }
+         else await startMessage (rq.body.to, responseId);
+
          var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
 
-         if (aiFlavor === 'anthropic') var command = 'claude -p --model claude-opus-4-6 --output-format stream-json --verbose --dangerously-skip-permissions'
-         if (aiFlavor === 'openai')    var command = 'codex exec --json -m "gpt-6-astra" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
+         if (aiFlavor === 'anthropic') var command = 'claude -p --model ' + aiModel.canonical + ' --output-format stream-json --verbose --dangerously-skip-permissions'
+         if (aiFlavor === 'openai')    var command = 'codex exec --json -m "' + aiModel.canonical + '" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
 
          if (aiFlavor === 'openai') {
-            if (! credentials.openai?.oauth) return reply (rs, 400, {error: 'No OpenAI credential'});
-            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', last_refresh: new Date ().toISOString (), tokens: {access_token: credentials.openai.oauth.access, refresh_token: credentials.openai.oauth.refresh, id_token: credentials.openai.oauth.idToken || '', account_id: credentials.openai.oauth.accountId || ''}});
+            if (! credentials.openai?.account) throw new Error ('No OpenAI credential');
+            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', last_refresh: new Date ().toISOString (), tokens: {access_token: credentials.openai.account.access, refresh_token: credentials.openai.account.refresh, id_token: credentials.openai.account.idToken || '', account_id: credentials.openai.account.accountId || ''}});
             var result = await docker.write (rq.body.id, '/home/vibey/.codex/auth.json', codexAuth, 'noCommit');
             if (result.code) throw result;
          }
 
-         var dockerArgs = ['exec'];
+         var dockerArgs = ['exec', '-i'];
          if (aiFlavor === 'anthropic') {
-            if (! credentials.anthropic?.oauth) return reply (rs, 400, {error: 'No Anthropic credential'});
-            dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + credentials.anthropic.oauth.access);
+            if (! credentials.anthropic?.account) throw new Error ('No Anthropic credential');
+            dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + credentials.anthropic.account.access);
          }
-         if (aiFlavor === 'openai')    dockerArgs.push ('-i', '-e', 'CODEX_HOME=/home/vibey/.codex');
-         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', command + (aiFlavor === 'openai' ? ' -' : ' ' + Path.quote (rq.body.body) + ' < /dev/null'));
+         if (aiFlavor === 'openai') dockerArgs.push ('-e', 'CODEX_HOME=/home/vibey/.codex');
+         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', command + (aiFlavor === 'openai' ? ' -' : ''));
 
-         var buffer = '';
+         var buffer = '', aiStderr = '';
          var lastFullText = '';
 
          var processLines = function (lines) {
@@ -1267,7 +1359,7 @@ var routes = [
                try {
                   var chunk = parseChunk (line);
                   if (! chunk) return;
-                  output += chunk + '\n';
+                  output += (aiFlavor === 'openai' && output ? '\n\n' : '') + chunk;
                   streamEdit ();
                } catch (e) {
                   clog ({priority: 'important', type: 'AI stream parse error', error: formatError (e), responseId});
@@ -1275,15 +1367,38 @@ var routes = [
             });
          }
 
-         var aiResult = await run ('docker', ... dockerArgs, {catch: true, input: aiFlavor === 'openai' ? rq.body.body : undefined, stdout: function (chunk) {
-            buffer += chunk;
-            var lines = buffer.split ('\n');
-            buffer = lines.pop ();
-            processLines (lines);
-         }, stderr: function (chunk) {
-            output += chunk;
-            streamEdit ();
-         }});
+         var prompt = (transcript + '\n').replace (
+            /^əəə head ([0-9a-f-]{36})\n[\s\S]*?^əəə body \1\n/gim,
+            function (head) {
+               return head.replace (/^(pending|t|t-start|t-end|tokens-in|tokens-cache|tokens-out) .*\n/gm, '');
+            }
+         );
+
+         prompt = prompt.replace (
+            /(^əəə head ([0-9a-f-]{36})\n[\s\S]*?^əəə body \2\n)([\s\S]*?)(?=^əəə head [0-9a-f-]{36}\n|(?![\s\S]))/gim,
+            function (match, header, id, body) {
+               if (/^from (systemPrompt|main\.md)$/m.test (header)) return match;
+               // Preserve the separator newline without counting it as body text.
+               var separator = body.endsWith ('\n') ? '\n' : '';
+               if (separator) body = body.slice (0, -1);
+               if (body.length <= 10000) return match;
+               return header + body.slice (0, 5000) + '\n[TRIMMED ' + (body.length - 10000) + ' CHARS]\n' + body.slice (-5000) + separator;
+            }
+         );
+
+         var aiResult = await run ('docker', ... dockerArgs, {
+            catch: true,
+            input: prompt,
+            stderr: function (chunk) {
+               aiStderr += chunk;
+            },
+            stdout: function (chunk) {
+               buffer += chunk;
+               var lines = buffer.split ('\n');
+               buffer = lines.pop ();
+               processLines (lines);
+            },
+         });
 
          if (buffer) processLines ([buffer]);
 
@@ -1298,31 +1413,151 @@ var routes = [
          }
 
          await editQueue;
+
+         var oldHead = [
+            'əəə head ' + responseId,
+            'from ' + rq.body.to,
+            'id ' + responseId,
+            'pending 1',
+            't-start ' + tStart,
+         ].join ('\n');
+
+         var newHead = [
+            'əəə head ' + responseId,
+            'from ' + rq.body.to,
+            'id ' + responseId,
+            't-end ' + now (),
+            't-start ' + tStart,
+         ].concat (usage ? [
+            'tokens-in ' + usage.fresh,
+            'tokens-cache ' + usage.cache,
+            'tokens-out ' + usage.output,
+         ] : []).join ('\n');
+
+         var parseToolCall = function (text) {
+            var start = /^tool-call:.*$/m.exec (text);
+            if (! start) return;
+
+            var lines = text.slice (start.index).split ('\n');
+            var op = /^tool-call: (read|write|edit|run)$/.exec (lines [0]);
+            if (! op) return {error: 'Expected tool-call: read|write|edit|run'};
+            op = op [1];
+
+            var description = lines [1];
+            if (! description || ! description.trim ()) return {error: 'Expected a description on line 2'};
+
+            var key = op === 'run' ? 'command' : 'path';
+            var prefix = key + ': ';
+            if (! lines [2] || ! lines [2].startsWith (prefix)) {
+               return {error: 'Expected ' + prefix + '... on line 3'};
+            }
+            var value = lines [2].slice (prefix.length);
+            if (! value.trim ()) return {error: key + ' must not be empty'};
+
+            var call = {op: op, description: description};
+            call [key] = value;
+            if (op === 'read' || op === 'run') return call;
+
+            if (op === 'write') {
+               if (lines.length < 4) return {error: 'Expected file content starting on line 4'};
+               call.content = lines.slice (3).join ('\n');
+               return call;
+            }
+
+            if (lines [3] !== 'old text:') {
+               return {error: 'Expected old text: on line 4'};
+            }
+            var separator = lines.indexOf ('new line:', 4);
+            if (separator === -1) return {error: 'Expected a line containing exactly new line:'};
+            call.oldText = lines.slice (4, separator).join ('\n');
+            call.newText = lines.slice (separator + 1).join ('\n');
+            if (! call.oldText) return {error: 'Old text must not be empty; use [EOF] to append'};
+            return call;
+         }
+
+         var makeToolCall = async function (call, onOutput) {
+            if (call.error) return {code: 1, error: call.error};
+            try {
+               if (call.op === 'read') return await docker.read (rq.body.id, call.path);
+               if (call.op === 'write') return await docker.write (rq.body.id, call.path, call.content);
+               if (call.op === 'edit') return await docker.edit (rq.body.id, call.path, call.oldText, call.newText);
+               if (call.op === 'run') return await docker.run (rq.body.id, call.command, {
+                  catch: true,
+                  stdout: onOutput,
+                  stderr: onOutput,
+               });
+               return {code: 1, error: 'Unknown tool: ' + call.op};
+            }
+            catch (error) {
+               return {code: error.code || 1, error: formatError (error)};
+            }
+         }
+
+         var toolCall = ! aiResult.code && ! aiResult.signal ? parseToolCall (output) : undefined;
+
+         var toolCallText;
+         if (toolCall) {
+            var toolCallIndex = /^tool-call:.*$/m.exec (output).index;
+            toolCallText = output.slice (toolCallIndex);
+            output = output.slice (0, toolCallIndex);
+            if (! toolCall.error) {
+               output = output.trimEnd ();
+               output += (output ? '\n\n' : '') + toolCall.description;
+               var toolCallLines = toolCallText.split ('\n');
+               if (toolCall.op === 'read' || toolCall.op === 'run') toolCallLines = toolCallLines.slice (0, 3);
+               toolCallLines.splice (1, 1);
+               toolCallText = toolCallLines.join ('\n');
+            }
+         }
+         if (aiStderr) output += '\n\n' + aiStderr;
+         streamEdit ();
+         await editQueue;
+         if (editError) throw editError;
+
+         result = await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
+         if (result.code) throw result;
+         redis ('hset', 'project:' + rq.body.id, 'last', now ());
+         if (! toolCall) break;
+
+         // Reuse the stream writer only after the previous message's edits have finished.
+         var startMessage = async function (from, to, body) {
+            responseId = crypto.randomUUID ();
+            tStart = now ();
+            output = body || '';
+            usage = undefined;
+            editQueue = Promise.resolve ();
+            editError = undefined;
+            oldBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
+            var head = [
+               'əəə head ' + responseId,
+               'from ' + from,
+               'id ' + responseId,
+               'pending 1',
+               't-start ' + tStart,
+            ].join ('\n');
+            var result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + head + '\nto ' + to + '\n' + oldBody);
+            if (result.code) throw result;
+            return head;
+         };
+
+         var toolHead = await startMessage ('shell', responseId, toolCallText + '\n\nResult:\n');
+         var toolResult = turn >= 49 ? {code: 1, error: 'Tool-call limit reached (50 AI responses).'} : await makeToolCall (toolCall, function (chunk) {
+            output += chunk.toString ('utf8');
+            streamEdit ();
+         });
+         if (toolCall.op !== 'run' && toolResult.stdout) output += toolResult.stdout.toString ('utf8');
+         if (toolResult.error) output += '\n' + toolResult.error;
+         if (toolResult.signal) output += '\nSignal: ' + toolResult.signal;
+         output += '\nExit code: ' + (toolResult.code || 0);
+         streamEdit ();
+         await editQueue;
+         if (editError) throw editError;
+         result = await docker.edit (rq.body.id, rq.body.file, toolHead, toolHead.replace ('\npending 1\n', '\nt-end ' + now () + '\n'));
+         if (result.code) throw result;
+         redis ('hset', 'project:' + rq.body.id, 'last', now ());
+         if (turn >= 49) break;
       }
 
-      var oldHead = [
-         'əəə head ' + responseId,
-         'from ' + rq.body.to,
-         'id ' + responseId,
-         'pending 1',
-         't-start ' + tStart,
-      ].join ('\n');
-
-      var newHead = [
-         'əəə head ' + responseId,
-         'from ' + rq.body.to,
-         'id ' + responseId,
-         't-end ' + now (),
-         't-start ' + tStart,
-      ].concat (usage ? [
-         'tokens-in ' + usage.fresh,
-         'tokens-cache ' + usage.cache,
-         'tokens-out ' + usage.output,
-      ] : []).join ('\n');
-
-      await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
-
-      redis ('hset', 'project:' + rq.body.id, 'last', now ());
    }],
 
    ['delete', '/project/:id', async function (rq, rs) {
@@ -1446,7 +1681,7 @@ var routes = [
 
       var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
       if (! credentials [rq.data.params.provider]) credentials [rq.data.params.provider] = {};
-      var oauthData = {
+      var accountData = {
          access: tokenData.access_token,
          expires: Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000,
          refresh: tokenData.refresh_token,
@@ -1456,18 +1691,48 @@ var routes = [
          try {
             var jwt = JSON.parse (Buffer.from (tokenData.access_token.split ('.') [1], 'base64').toString ());
             var accountId = jwt ['https://api.openai.com/auth'] && jwt ['https://api.openai.com/auth'].chatgpt_account_id;
-            if (accountId) oauthData.accountId = accountId;
-            if (tokenData.id_token) oauthData.idToken = tokenData.id_token;
+            if (accountId) accountData.accountId = accountId;
+            if (tokenData.id_token) accountData.idToken = tokenData.id_token;
          }
          catch (e) {}
       }
 
-      credentials [rq.data.params.provider].oauth = oauthData;
+      credentials [rq.data.params.provider].account = accountData;
 
       await redis ([
          ['hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials)],
          ['sadd', 'owner:' + rq.user.id, 'credentials:' + rq.user.id],
       ]);
+
+      reply (rs, 200);
+   }],
+
+   ['post', '/credentials/:provider/apiKey', async function (rq, rs) {
+      var provider = rq.data.params.provider;
+      if (! inc (['anthropic', 'openai'], provider)) return reply (rs, 400, {error: 'Invalid provider'});
+      if (type (rq.body.key) !== 'string' || ! rq.body.key.trim ()) return reply (rs, 400, {error: 'Missing key'});
+
+      var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
+      if (! credentials [provider]) credentials [provider] = {};
+      credentials [provider].apiKey = rq.body.key.trim ();
+
+      await redis ([
+         ['hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials)],
+         ['sadd', 'owner:' + rq.user.id, 'credentials:' + rq.user.id],
+      ]);
+
+      reply (rs, 200);
+   }],
+
+   ['delete', '/credentials/:provider/:name', async function (rq, rs) {
+      var provider = rq.data.params.provider;
+      var name = rq.data.params.name;
+      if (! inc (['anthropic', 'openai'], provider)) return reply (rs, 400, {error: 'Invalid provider'});
+      if (! inc (['account', 'apiKey'], name)) return reply (rs, 400, {error: 'Invalid credential type'});
+
+      var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
+      if (credentials [provider]) delete credentials [provider] [name];
+      await redis ('hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials));
 
       reply (rs, 200);
    }],
