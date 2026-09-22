@@ -1698,8 +1698,10 @@ var upsertDocMainContextBlock = async function (projectName, filename) {
 //   Claude: docs.anthropic.com/en/docs/about-claude/models (200K standard)
 var MODELS = {
    openai: {
-      'gpt-6':             {context: 1000000},
-      'gpt-5.6':           {context: 1000000},
+      'gpt-6-astra':       {context: 1000000},
+      'gpt-5.6-sol':       {context: 1000000},
+      'gpt-5.6-terra':     {context: 1000000},
+      'gpt-5.6-luna':      {context: 1000000},
       'gpt-5.5':           {context: 1000000, apiKeyOnly: true},
       'gpt-5.4':           {context: 1000000, apiKeyOnly: true},
       'gpt-5.2':           {context: 272000,  apiKeyOnly: true},
@@ -1726,7 +1728,7 @@ var getContextWindowSize = function (model) {
 };
 
 var defaultModelForProvider = function (provider) {
-   return provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.6';
+   return provider === 'claude' ? 'claude-sonnet-4-6' : 'gpt-5.6-sol';
 };
 
 // Tool definitions (written once, converted to both provider formats below)
@@ -2558,7 +2560,7 @@ var normalizeMessagesForResponsesApi = function (messages) {
 
 // Implementation function for OpenAI (streaming with tool support)
 var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal, rq) {
-   model = model || 'gpt-5.6';
+   model = model || 'gpt-5.6-sol';
 
    var systemPrompt = await loadInjectedPrompt (projectName);
 
