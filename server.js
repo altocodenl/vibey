@@ -2558,7 +2558,7 @@ var normalizeMessagesForResponsesApi = function (messages) {
 
 // Implementation function for OpenAI (streaming with tool support)
 var chatWithOpenAI = async function (projectName, messages, model, onChunk, abortSignal, rq) {
-   model = model || 'gpt-5.5';
+   model = model || 'gpt-5.6';
 
    var systemPrompt = await loadInjectedPrompt (projectName);
 
