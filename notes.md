@@ -1,5 +1,41 @@
 # Vibey development notes
 
+## 2026-09-23
+
+I am looking for that inner light in the color of vibey. I feel there's something there already, the seed.
+
+ui extension:
+- load code dynamically into client.js, scary. this could work. load it from the project on project load. on project unload, reload client.js with hard refresh.
+
+access:
+- shell calling another project (read/write/edit/run/chat). This would allow all cross-project ops. Also: interpret at the vibey level: since commands go through the host, you don't need credentials. You know that that command is running inside project Y, and if it refers project X, check if X allows access to Y. If it does, interpret the command as a special tool call across projects. Done!
+
+Cancelling an ongoing message: set "cancelled <t>" and "pending 0" through an edit to the chat. On every chunk, shell or ai check the head of the message and, if cancelled, stop.
+
+TODO next:
+- endpoint for file
+
+- TODO
+   - access
+      - shell calling another project (read/write/edit/run/chat). This would allow all cross-project ops. Also: interpret at the vibey level: since commands go through the host, you don't need credentials. You know that that command is running inside project Y, and if it refers project X, check if X allows access to Y. If it does, interpret the command as a special tool call across projects. Done!
+      - read/write access to another user
+   - chat
+      - Upload images, allow download to project or to local
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - show local images embedded in docs
+      - tabs
+      - open sqlite files
+      - search text files
+      - stream large files (split them in pages)
+      - edit text file through diffs (edits) rather than whole file write (faster)
+      - client tests
+   - project
+      - autobackup
+      - client tests
+      - skip docker.exec to have a slash command time by 10x
+
 ## 2026-09-22
 
 It's almost incredible that the CLI approach (run CC and codex in the container) actually worked. I'm still reeling from it. We have web search.

@@ -196,7 +196,7 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `keyup|blur *`: clears `key.command` when Meta is released or the window loses focus.
 - `test *`: sets `test` to `{enabled: true}`. Loads the client side test suite (`test.js`) only if the logged in user is admin.
 - `navigate <targetPath>`: reads and optionally updates the hash. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
-- `read hash`: handles `verify/<loginLink>` and checks that the requested view is reachable by the user. For `files/<projectId>/<filename>`, validates the project and filename, sets `project` and `file.name`, and loads the file list if needed. Defaults to `main.md`, or the first available file. Leaving the files view clears `file` and `files`.
+- `read hash`: handles `verify/<loginLink>` and checks that the requested view is reachable by the user. For `files/<projectId>/<filename>`, validates the project and filename, sets `project` and `file.name`, and loads the file list if needed. Defaults to `main.md`, or the first available file. Leaving the files view clears `file` and `files`. If `extendClient` is set, leaving that project (including switching projects) reloads the page at the destination hash to discard extension runtime state.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
 - `snackbar <type> [message]`: shows a notification with type (`ok`, `warning`, `error`). Auto-clears after 4 seconds. `snackbar clear` dismisses it immediately.
 - `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in the request if the CSRF token is available. Adds `x-test: 1` when `test` is truthy. On 403 from a non-auth path, resets user state and redirects to login. Reports errors to the server.
@@ -229,6 +229,7 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
   - Command+S: opens and focuses search.
 - `change projects`: rereads the hash to validate navigation against the refreshed project list.
 - `change project`: clears `files` so the newly selected project's file list can be loaded.
+- `load clientExtension`: checks the loaded file list for root-level `extend-client.js`. If present and the hash still points to the selected project, stores its project ID in `extendClient`, reads the script via `POST /project/read`, and evaluates it in global scope with access to `B`, `views`, etc. Skips loading when `extendClient` is already set and ignores responses if the marker or destination project has changed. Loading and evaluation errors show a snackbar. Only use trusted project code: extensions run with full app privileges. Refresh the page inside the project to activate extension changes. Leaving the project reloads the page even if loading or evaluation failed. Logout clears the marker but does not undo already-running extension code.
 - `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
 - `create project`: creates a new project using the trimmed name at `new.project.name` and optional `new.project.slot` via `POST /project`. On success, clears the creation modal and project search, temporarily adds the project to `projects`, navigates to its `main.md` and reloads projects.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
@@ -245,7 +246,8 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
   - Enter: creates a file when the creation button is enabled, or attempts rename submission through `#rename-file`.
   - Escape: closes the creation or rename modal.
   - Command+F: in creation, selects file type.
-  - Command+I: outside creation, toggles edit/view mode; in creation, selects chat type.
+  - Command+I: outside creation, scrolls down by chat message when the chat is visible, otherwise toggles edit/view mode; in creation, selects chat type.
+  - Command+O: outside creation, scrolls up by chat message when the chat is visible.
   - Command+M: outside creation, focuses the chat editor when present.
   - Command+J: outside creation, selects the next file in the filtered list, wrapping at the end.
   - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning.
@@ -257,12 +259,13 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
   - Command+U: outside creation, deletes the selected file; in creation, opens file upload.
   - Command+X: closes the creation modal.
   - Command+Y: outside creation, opens rename if a file is selected and rename is not already open.
+  - Command+9: toggles settings.
 - `change files`: rereads the hash and scrolls the selected file into the center of the left pane. Runs at low priority so the DOM is ready.
 - `change file.name`: reads the selected file and scrolls its entry into the center of the left pane. Runs at low priority.
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
-- `list files`: lists project files through `POST /project/run`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then reads the selected file.
-- `read file`: fetches the selected file via `POST /project/read`. Clears the global `content` while loading, then sets it to text or a `Uint8Array` according to the `x-binary` response header and emits `change file`. Ignores responses if the selected project or filename has changed.
+- `list files`: lists project files through `POST /project/run`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then calls `load clientExtension` and reads the selected file.
+- `read file`: fetches the selected file via `POST /project/read`. Clears the global `content` while loading, then sets it to text or a `Uint8Array` according to the `x-binary` response header and emits `change file`. For chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it; otherwise, updates the global `content` if the file is still selected.
 - `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list, closes the creation modal and refreshes the list.
 - `remove file <name>`: asks for confirmation, then deletes the file through `POST /project/run`. Refreshes the list and, if the deleted file was selected, navigates to the project's default file.
@@ -277,10 +280,12 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 #### Chat
 
+- `cancel message <id>`: replaces `pending 1` in the message header with `cancelled <ISO timestamp>` and `pending 0` through `POST /project/edit`. Sets `cancelling.<id>` while saving and clears it afterward. On success, rereads the selected chat; on failure, shows a snackbar. The server checks for cancellation every 100ms while an AI, shell message or run tool process is active and kills its process group when cancelled.
+- `scroll chat <direction>`: scrolls the visible chat by message, up for negative values and down otherwise. Aligns a partially visible message before advancing to the adjacent one.
 - `change content|file|project|view`: finds chat messages with `pending 1` in their headers and sets `pending.messages` to their `projectId/file/messageId` keys. Clears the list outside a loaded chat.
-- `change pending.messages`: starts a 100ms polling interval for each new key and clears intervals for keys no longer pending. Calls `PUT /project/message`, skipping ticks while a request is in flight. Checks project/file and interval before replacing only that message in local `content`, then emits `change content`; does not write to the server or recreate the draft editor.
+- `change pending.messages`: starts a 100ms polling interval for each new key and clears intervals for keys no longer pending. Calls `PUT /project/message`, skipping ticks while a request is in flight. Checks project/file and interval before replacing only that message in local `content`, then emits `change content`. Refreshes the file list when the updated message is no longer pending; does not write to the server or recreate the draft editor directly.
 - `change content|file`: uses `match: B.changeResponder` and priority `-1001` to scroll the first `.messages` element to its `scrollHeight` after rendering.
-- `create message <to> <name> <body>`: posts to `POST /project/message`, defaulting the recipient to `all`. Ignores blank messages. On success, if the same project and file are selected, clears the draft if unchanged and refreshes the file list and chat. Preserves the draft on failure.
+- `create message <to> <name> <body>`: posts to `POST /project/message`, trimming the recipient and defaulting it to `all` when blank. Ignores blank messages. On success, if the same project and file are selected, clears the draft if unchanged and refreshes the file list and chat. Preserves the draft on failure.
 
 ### Client state
 
@@ -296,11 +301,13 @@ image content <string|Uint8Array> // Content used to create the preview
 Store:
 
 ```
+cancelling <messageId> <true|undefined> // Whether a cancellation edit is being saved
 edit file newName "<new name>"
           oldName "<original name>"
      project id <id>
              name "<project name>"
              slot <integer|numeric string|"null"|undefined> // "null" is the edit selector's None option
+extendClient <projectId|undefined> // Project whose client extension started loading; prevents duplicate loads and triggers a page reload when leaving; cleared on logout
 file actions <0|1> // Whether the filename pill shows Rename and Download; collapsed by default
      mode <edit|view>
      name "..."
@@ -311,7 +318,7 @@ files 1 mtime <integer> // Modification time in milliseconds since Unix epoch
 hover project <project> // The project (or free project slot) being hovered on
 key command <0|1> // if set, the command key is pressed
 message body <text> // Current chat draft, initially empty
-        to <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID> // Recipient, initially all
+        to <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID> // Recipient; restored from chat when blank, defaults to all
 new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>

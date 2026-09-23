@@ -251,6 +251,7 @@ var run = async function (... args) {
          if (signal !== null) output.signal = signal;
          done ();
       });
+      if (options.onSpawn) options.onSpawn (proc);
    });
 }
 
@@ -1185,6 +1186,68 @@ var routes = [
 
       var output = '', oldBody = 'əəə body ' + responseId + '\n', usage;
       var editQueue = Promise.resolve (), editError;
+      var cancelled = false;
+      var processFile = function (messageId) {
+         return '/tmp/vibey-process-' + messageId;
+      };
+      var groupedCommand = function (command) {
+         return 'setsid --wait sh -c ' + Path.quote (
+            'echo $$ > ' + Path.quote (processFile (responseId))
+            + '; exec sh -c ' + Path.quote (command)
+         );
+      };
+
+      var watchCancellation = function (proc) {
+         var messageId = responseId;
+         var pidFile = processFile (messageId);
+         var checking = false, ended = false;
+         cancelled = false;
+
+         var interval = setInterval (async function () {
+            if (checking || ended || cancelled) return;
+            checking = true;
+            try {
+               var chat = await docker.read (rq.body.id, rq.body.file);
+               if (ended || chat.code) return;
+               if (! new RegExp (
+                  '^əəə head ' + messageId + '\n(?:(?!əəə (?:head|body) )[^\n]*\n)*cancelled .+$', 'im'
+               ).test (chat.stdout.toString ('utf8'))) return;
+               cancelled = true;
+               var result = await docker.run (rq.body.id, 'bash -c ' + Path.quote (
+                  'read -r pid < ' + Path.quote (pidFile)
+                  + ' && kill -KILL -- "-$pid"'
+               ), {catch: true});
+               if (result.code) {
+                  cancelled = false;
+                  return;
+               }
+               clearInterval (interval);
+            }
+            catch (error) {
+               cancelled = false;
+               clog ({error: formatError (error), responseId: messageId, type: 'Cancellation check error'});
+            }
+            finally {
+               checking = false;
+            }
+         }, 100);
+
+         var stop = function () {
+            ended = true;
+            clearInterval (interval);
+         };
+         proc.once ('error', stop);
+         proc.once ('exit', stop);
+         proc.once ('close', async function () {
+            try {
+               await docker.run (rq.body.id, 'rm -f ' + Path.quote (pidFile));
+            }
+            catch (error) {
+               clog ({error: formatError (error), responseId: messageId, type: 'Process cleanup error'});
+            }
+         });
+      };
+
       var streamEdit = function () {
          var newBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
          editQueue = editQueue.then (async function () {
@@ -1203,7 +1266,7 @@ var routes = [
          if (result.code) return reply (rs, 400, result);
          reply (rs, 200, {id: id, responseId: responseId});
 
-         await docker.run (rq.body.id, rq.body.body, {catch: true, stdout: function (chunk) {
+         await docker.run (rq.body.id, groupedCommand (rq.body.body), {catch: true, onSpawn: watchCancellation, stdout: function (chunk) {
             output += chunk;
             streamEdit ();
          }, stderr: function (chunk) {
@@ -1211,6 +1274,8 @@ var routes = [
             streamEdit ();
          }});
          await editQueue;
+
+         if (cancelled) return;
 
          var shellHead = [
             'əəə head ' + responseId,
@@ -1309,13 +1374,25 @@ var routes = [
             if (result.code) throw result;
          }
 
-         var dockerArgs = ['exec', '-i'];
          if (aiFlavor === 'anthropic') {
             if (! credentials.anthropic?.account) throw new Error ('No Anthropic credential');
+            var claudeAuth = JSON.stringify ({claudeAiOauth: {
+               accessToken:  credentials.anthropic.account.access,
+               clientId:     Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString (),
+               expiresAt:    credentials.anthropic.account.expires,
+               refreshToken: credentials.anthropic.account.refresh,
+            }});
+            var result = await docker.write (rq.body.id, '/home/vibey/.claude/.credentials.json', claudeAuth, 'noCommit');
+            if (result.code) throw result;
+         }
+
+         var dockerArgs = ['exec', '-i'];
+         if (aiFlavor === 'anthropic') {
+            dockerArgs.push ('-e', 'CLAUDE_CONFIG_DIR=/home/vibey/.claude');
             dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + credentials.anthropic.account.access);
          }
          if (aiFlavor === 'openai') dockerArgs.push ('-e', 'CODEX_HOME=/home/vibey/.codex');
-         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', command + (aiFlavor === 'openai' ? ' -' : ''));
+         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', groupedCommand (command + (aiFlavor === 'openai' ? ' -' : '')));
 
          var buffer = '', aiStderr = '';
          var lastFullText = '';
@@ -1386,9 +1463,12 @@ var routes = [
             }
          );
 
+         prompt += '\nCurrent chat file: ' + JSON.stringify (rq.body.file) + '\n';
+
          var aiResult = await run ('docker', ... dockerArgs, {
             catch: true,
             input: prompt,
+            onSpawn: watchCancellation,
             stderr: function (chunk) {
                aiStderr += chunk;
             },
@@ -1401,6 +1481,11 @@ var routes = [
          });
 
          if (buffer) processLines ([buffer]);
+
+         if (cancelled) {
+            await editQueue;
+            return;
+         }
 
          if (aiResult.code === -1) {
             output += (output ? '\n\n' : '') + 'AI process failed to start: ' + aiResult.error;
@@ -1481,8 +1566,9 @@ var routes = [
                if (call.op === 'read') return await docker.read (rq.body.id, call.path);
                if (call.op === 'write') return await docker.write (rq.body.id, call.path, call.content);
                if (call.op === 'edit') return await docker.edit (rq.body.id, call.path, call.oldText, call.newText);
-               if (call.op === 'run') return await docker.run (rq.body.id, call.command, {
+               if (call.op === 'run') return await docker.run (rq.body.id, groupedCommand (call.command), {
                   catch: true,
+                  onSpawn: watchCancellation,
                   stdout: onOutput,
                   stderr: onOutput,
                });
@@ -1545,6 +1631,10 @@ var routes = [
             output += chunk.toString ('utf8');
             streamEdit ();
          });
+         if (cancelled) {
+            await editQueue;
+            return;
+         }
          if (toolCall.op !== 'run' && toolResult.stdout) output += toolResult.stdout.toString ('utf8');
          if (toolResult.error) output += '\n' + toolResult.error;
          if (toolResult.signal) output += '\nSignal: ' + toolResult.signal;

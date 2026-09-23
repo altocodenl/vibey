@@ -125,6 +125,11 @@ B.mrespond ([
    ['read', 'hash', function (x) {
       var hash = window.location.hash.slice (2).split ('/');
 
+      var extensionProject = B.get ('extendClient');
+      if (extensionProject && (hash [0] !== 'files' || hash [1] !== extensionProject)) {
+         return window.location.reload ();
+      }
+
       var authViews   = ['login', 'verify'];
       var loggedViews = ['projects', 'files'];
 
@@ -336,6 +341,31 @@ B.mrespond ([
       B.call (x, 'rem', [], 'files');
    }],
 
+   ['load', 'clientExtension', function (x) {
+      var project = B.get ('project');
+      var hash = window.location.hash.slice (2).split ('/');
+      if (B.get ('extendClient') || hash [0] !== 'files' || hash [1] !== project) return;
+
+      if (! dale.stop (B.get ('files') || [], true, function (file) {
+         return file.name === 'extend-client.js';
+      })) return;
+
+      B.call (x, 'set', 'extendClient', project);
+      B.call (x, 'post', '/project/read', {id: project, path: 'extend-client.js'}, function (x, error, rs) {
+         var hash = window.location.hash.slice (2).split ('/');
+         if (B.get ('extendClient') !== project || hash [0] !== 'files' || hash [1] !== project) return;
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading extend-client.js');
+
+         try {
+            // Run in global scope, with access to B, views, etc.
+            window.eval (rs.body + '\n//# sourceURL=extend-client.js');
+         }
+         catch (error) {
+            B.call (x, 'snackbar', 'error', 'There was a problem running extend-client.js');
+         }
+      });
+   }],
+
    ['load', 'projects', function (x) {
       B.call (x, 'get', '/projects', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading projects');
@@ -519,14 +549,18 @@ B.mrespond ([
       if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'rename', 'file');
 
       shortcut ('b', ev, x, 'navigate', 'projects');
-      shortcut ('o', ev, x, 'set', ['settings', 'show'], ! B.get ('settings', 'show'));
+      shortcut ('9', ev, x, 'set', ['settings', 'show'], ! B.get ('settings', 'show'));
 
       if (B.get ('new', 'file') === undefined) {
          if (ev.metaKey && ev.key === 's') {
             ev.preventDefault ();
             c ('#search-file').focus ();
          }
-         shortcut ('i', ev, x, 'set', ['file', 'mode'], B.get ('file', 'mode') === 'edit' ? 'view' : 'edit');
+         if (c ('.messages') [0]) {
+            shortcut ('o', ev, x, 'scroll', 'chat', -1);
+            shortcut ('i', ev, x, 'scroll', 'chat', 1);
+         }
+         else shortcut ('i', ev, x, 'set', ['file', 'mode'], B.get ('file', 'mode') === 'edit' ? 'view' : 'edit');
          if (ev.metaKey && ev.key === 'e') {
             ev.preventDefault ();
             B.call (x, 'set', ['new', 'file'], '');
@@ -620,6 +654,7 @@ B.mrespond ([
          });
          B.call (x, 'set', 'files', files);
 
+         B.call (x, 'load', 'clientExtension');
          B.call (x, 'read', 'file');
       });
    }],
@@ -648,6 +683,20 @@ B.mrespond ([
          var newContent = binary ? new Uint8Array (await rs.arrayBuffer ()) : await rs.text ();
          if (B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
          content = newContent;
+         if (/^chat\/.+\.md$/.test (name) && ! (B.get ('message', 'to') || '').trim ()) {
+            var entries = content.split (/^əəə head [0-9a-f-]{36}\n/im).slice (1).reverse ();
+            var recipient = dale.stopNot (entries, undefined, function (entry) {
+               var body = entry.match (/^əəə body [0-9a-f-]{36}\n/im);
+               if (! body) return;
+               var head = entry.slice (0, body.index);
+               var from = head.match (/^from (.+)$/m);
+               if (! from || /^(ai-|shell$|systemPrompt$|main\.md$)/.test (from [1])) return;
+               var to = head.match (/^to (.+)$/m);
+               to = to ? to [1].trim () : '';
+               return /^(ai-|shell$)/.test (to) ? to : 'all';
+            }) || 'all';
+            B.call (x, 'set', ['message', 'to'], recipient);
+         }
          B.call (x, 'change', 'file');
          if (/^chat\/.+\.md$/.test (name)) requestAnimationFrame (function () {
             if (B.get ('view') !== 'files' || B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
@@ -950,6 +999,60 @@ B.mrespond ([
 
    // *** CHATS ***
 
+   ['cancel', 'message', function (x, id) {
+      var project = B.get ('project');
+      var name = B.get ('file', 'name');
+      if (! project || ! name || typeof content !== 'string') return;
+      if (B.get ('cancelling', id)) return;
+
+      var head = content.match (new RegExp (
+         '^əəə head ' + id + '\\n[\\s\\S]*?^əəə body ' + id + '\\n', 'im'
+      ));
+      if (! head || ! /^pending 1$/m.test (head [0])) return;
+
+      B.call (x, 'set', ['cancelling', id], true);
+      B.call (x, 'post', '/project/edit', {
+         id: project,
+         newText: head [0].replace (/^pending 1$/m, 'cancelled ' + new Date ().toISOString () + '\npending 0'),
+         oldText: head [0],
+         path: name,
+      }, function (x, error) {
+         B.call (x, 'rem', 'cancelling', id);
+         if (error) return B.call (x, 'snackbar', 'error', 'Could not stop the message; it may have already finished');
+         if (B.get ('project') !== project || B.get ('file', 'name') !== name) return;
+         B.call (x, 'read', 'file');
+      });
+   }],
+
+   ['scroll', 'chat', function (x, direction) {
+      var viewport = c ('.messages') [0];
+      if (! viewport) return;
+
+      var rows = Array.from (viewport.children);
+      var up = direction < 0;
+      if (! up) rows.reverse ();
+
+      var top = viewport.getBoundingClientRect ().top + viewport.clientTop;
+      var bottom = top + viewport.clientHeight;
+      var tolerance = parseFloat (getComputedStyle (document.documentElement).fontSize) / 16;
+
+      var target = dale.stopNot (rows, undefined, function (row, index) {
+         var rect = row.getBoundingClientRect ();
+         if (rect.bottom <= top + tolerance || rect.top >= bottom - tolerance) return;
+
+         var fullyVisible = rect.top >= top - tolerance && rect.bottom <= bottom + tolerance;
+         var oversized = rect.height > viewport.clientHeight;
+         var aligned = Math.abs (up ? rect.top - top : rect.bottom - bottom) <= tolerance;
+
+         if (fullyVisible || (oversized && aligned)) {
+            return index === 0 ? false : rows [index - 1].getBoundingClientRect ();
+         }
+         return rect;
+      });
+
+      if (target) viewport.scrollTop += up ? target.top - top : target.bottom - bottom;
+   }],
+
    ['change', [/^(content|file|project|view)$/], {match: B.changeResponder}, function (x) {
       var name = B.get ('file', 'name') || '';
       var project = B.get ('project');
@@ -997,8 +1100,11 @@ B.mrespond ([
                var end = nextHead ? head.index + head [0].length + nextHead.index - 1 : content.length;
                var updated = content.slice (0, head.index) + rs.body + content.slice (end);
                if (updated === content) return;
+               var body = rs.body.match (/^əəə body [0-9a-f-]{36}\n/im);
+               var finished = body && ! /^pending 1$/m.test (rs.body.slice (0, body.index));
                content = updated;
                B.call (x, 'change', 'content');
+               if (finished) B.call (x, 'list', 'files');
             });
          }, 100);
          B.call (x, 'set', ['pending', 'requests', key], interval);
@@ -1020,11 +1126,13 @@ B.mrespond ([
       if (! project || B.get ('file', 'name') !== name) return;
       if (! body.trim ()) return;
 
+      to = (to || '').trim () || 'all';
+
       B.call (x, 'post', '/project/message', {
          body: body,
          file: name,
          id: project,
-         to: to || 'all',
+         to: to,
       }, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem sending the message');
          if (B.get ('project') !== project || B.get ('file', 'name') !== name) return;
@@ -1223,7 +1331,7 @@ views.main = function () {
                      style: style ({padding: '0.5rem 0.875rem'}),
                      onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
                   }, [
-                     views.tooltip ('O', 'below'),
+                     views.tooltip ('9', 'below'),
                      ['i', {class: 'bi mr1 ' + (showSettings ? 'bi-check-lg' : 'bi-wrench-adjustable mr1')}],
                      showSettings ? 'Done with this' : 'Settings'
                   ]];
@@ -1940,7 +2048,7 @@ views.files = function () {
                ['span', {
                   class: 'f3 light-blue pointer relative',
                   onclick: B.ev ('set', ['settings', 'show'], false),
-               }, [views.tooltip ('O', 'below'), '×']],
+               }, [views.tooltip ('9', 'below'), '×']],
             ]],
             type (back) === 'function' ? back () : back,
          ] : type (front) === 'function' ? front () : front];
@@ -2071,7 +2179,7 @@ views.files = function () {
                      }, [views.tooltip ('U'), '×']];
                   }),
                ]],
-               B.view ([['files'], ['file', 'name'], ['search', 'file']], function (files, current, search) {
+               B.view ([['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file']], function (files, current, pending, search) {
                   if (! files) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
                   if (! files.length) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, 'No files yet.'];
                   var currentIndex = dale.stopNot (files, undefined, function (f, k) {
@@ -2093,7 +2201,10 @@ views.files = function () {
                         }),
                      }, [
                         tooltip ? views.tooltip (tooltip) : '',
-                        ['div', iconAndName (file.name)],
+                        ['div', {class: 'flex items-center', style: style ({gap: '0.5rem'})}, [
+                           iconAndName (file.name),
+                           (pending || []).some (function (k) {return k.indexOf (file.name) !== -1;}) ? ['span', {style: style ({transform: 'scale(0.75)'})}, views.spinny (active ? 'vnearwhite' : 'vlightblue')] : '',
+                        ]],
                         ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
                      ]];
                   })];
@@ -2628,6 +2739,159 @@ views.chat = function () {
       return ! query || (query !== query.toLowerCase () ? text : text.toLowerCase ()).indexOf (query) !== -1;
    };
 
+   var parseToolResult = function (b) {
+      var match = b.match (/^tool-call: (edit|read|run|write)\n/);
+      if (! match) return;
+      var op = match [1];
+      var rest = b.slice (match [0].length);
+      var resultSplit = rest.indexOf ('\n\nResult:\n');
+      if (resultSplit === -1) return;
+      var header = rest.slice (0, resultSplit);
+      var result = rest.slice (resultSplit + '\n\nResult:\n'.length);
+      var exitMatch = result.match (/\nExit code: (-?\d+)$/);
+      var exitCode = exitMatch ? parseInt (exitMatch [1]) : undefined;
+      if (exitMatch) result = result.slice (0, exitMatch.index);
+      var tool = {
+         exitCode: exitCode,
+         op: op,
+         result: result.replace (/\n+$/, ''),
+      };
+      if (op === 'run') {
+         var cmdMatch = header.match (/^command: (.+)/);
+         tool.command = cmdMatch ? cmdMatch [1] : '';
+      }
+      else {
+         var pathMatch = header.match (/^path: (.+)/);
+         tool.path = pathMatch ? pathMatch [1] : '';
+         if (op === 'edit') {
+            var oldStart = header.indexOf ('\nold text:\n');
+            if (oldStart !== -1) {
+               var afterOld = header.slice (oldStart + '\nold text:\n'.length);
+               var newStart = afterOld.indexOf ('\nnew line:\n');
+               if (newStart !== -1) {
+                  tool.newText = afterOld.slice (newStart + '\nnew line:\n'.length);
+                  tool.oldText = afterOld.slice (0, newStart);
+               }
+            }
+         }
+         if (op === 'write') {
+            var pathEnd = header.indexOf ('\n');
+            tool.content = pathEnd !== -1 ? header.slice (pathEnd + 1) : '';
+         }
+      }
+      return tool;
+   };
+
+   var renderToolResult = function (tool) {
+      var icons = {
+         edit: 'bi-pencil',
+         read: 'bi-eye',
+         run: 'bi-terminal',
+         write: 'bi-file-earmark-plus',
+      };
+      var opColors = {
+         edit: css.colors.vorange,
+         read: css.colors.vlightblue,
+         run: css.colors.vpurple,
+         write: css.colors.vgreen,
+      };
+      var color = opColors [tool.op];
+      var border = css.rgba (color, 0.2);
+      var ok = tool.exitCode === 0;
+
+      return ['div', {
+         class: 'code overflow-hidden',
+      }, [
+         ['div', {
+            class: 'f7 flex fw7 items-center',
+            style: style ({
+               'background-color': css.rgba (color, 0.15),
+               color: color,
+               gap: '0.375rem',
+               padding: '0.375rem 0.625rem',
+            }),
+         }, [
+            ['i', {class: 'bi ' + icons [tool.op]}],
+            tool.op,
+            ['span', {
+               class: 'f7 fw5 truncate',
+               style: style ({
+                  color: css.colors.vgray,
+                  'min-width': 0,
+               }),
+            }, tool.op === 'run' ? tool.command : (tool.path || '').replace (/^\/project\//, '')],
+         ]],
+         tool.op === 'edit' && tool.oldText !== undefined ? ['div', [
+            ['div', {
+               class: 'f7',
+               style: style ({
+                  'background-color': css.rgba (css.colors.vred, 0.08),
+                  'border-top': '0.0625rem solid ' + css.rgba (css.colors.vred, 0.15),
+                  padding: '0.375rem 0.625rem',
+               }),
+            }, [
+               ['div', {
+                  class: 'fw7 mb1',
+                  style: style ({
+                     color: css.colors.vred,
+                     'font-size': '0.5625rem',
+                  }),
+               }, '− old'],
+               ['pre', {
+                  class: 'ma0 overflow-x-auto',
+                  style: style ({opacity: '0.7'}),
+               }, tool.oldText || '(empty)'],
+            ]],
+            ['div', {
+               class: 'f7',
+               style: style ({
+                  'background-color': css.rgba (css.colors.vgreen, 0.08),
+                  'border-top': '0.0625rem solid ' + css.rgba (css.colors.vgreen, 0.15),
+                  padding: '0.375rem 0.625rem',
+               }),
+            }, [
+               ['div', {
+                  class: 'fw7 mb1',
+                  style: style ({
+                     color: css.colors.vgreen,
+                     'font-size': '0.5625rem',
+                  }),
+               }, '+ new'],
+               ['pre', {class: 'ma0 overflow-x-auto vgreen'}, tool.newText || '(empty)'],
+            ]],
+         ]] : '',
+         tool.op === 'write' && tool.content ? ['div', {
+            class: 'f7',
+            style: style ({
+               'border-top': '0.0625rem solid ' + border,
+               'max-height': '12rem',
+               'overflow-y': 'auto',
+               padding: '0.375rem 0.625rem',
+            }),
+         }, ['pre', {class: 'ma0 overflow-x-auto vgray'}, tool.content]] : '',
+         tool.result ? ['div', {
+            class: 'f7',
+            style: style ({
+               'border-top': '0.0625rem solid ' + border,
+               'max-height': '20rem',
+               'overflow-y': 'auto',
+               padding: '0.375rem 0.625rem',
+            }),
+         }, ['pre', {class: 'ma0 overflow-x-auto vnearwhite'}, tool.result]] : '',
+         tool.exitCode !== undefined ? ['div', {
+            class: 'f7 fw7 tr',
+            style: style ({
+               'border-top': '0.0625rem solid ' + border,
+               color: ok ? css.colors.vgreen : css.colors.vred,
+               padding: '0.25rem 0.625rem',
+            }),
+         }, [
+            ['i', {class: 'bi mr1 ' + (ok ? 'bi-check-circle' : 'bi-x-circle')}],
+            ok ? 'ok' : 'exit ' + tool.exitCode,
+         ]] : '',
+      ]];
+   };
+
    return B.view ('file', function (file) {
       return ['div', {
          class: 'flex flex-auto flex-column',
@@ -2643,17 +2907,24 @@ views.chat = function () {
          // Messages
          B.view ([['search', 'content', 'query'], ['user', 'id'], ['content']], function (query, userId) {
             query = query || '';
-            var messages = (content || '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1);
+            var messages = (type (content) === 'string' ? content : '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1);
             messages = dale.fil (messages, undefined, function (message) {
                var body = message.match (/^əəə body [0-9a-f-]{36}\n/im);
                if (body && /^from systemPrompt$/m.test (message.slice (0, body.index))) return;
                return message;
             });
+            var maxIndent = 4;
             var messageIndexes = {};
+            var messageLevels = {};
             var messageCount = 0;
             dale.go (messages, function (message) {
                var id = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
-               if (id) messageIndexes [id [1].toLowerCase ()] = String (++messageCount).padStart (4, '0');
+               if (! id) return;
+               var key = id [1].toLowerCase ();
+               messageIndexes [key] = String (++messageCount).padStart (4, '0');
+               var head = message.slice (0, id.index);
+               var replyTo = head.match (/^to ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/im);
+               messageLevels [key] = replyTo ? Math.min ((messageLevels [replyTo [1].toLowerCase ()] || 0) + 1, maxIndent - 1) : 0;
             });
 
             var rendered = dale.fil (messages, undefined, function (message) {
@@ -2671,12 +2942,26 @@ views.chat = function () {
                var shell = from === 'shell' || to === 'shell';
                var start = head.match (/^t-start (.+)$/m);
                var end = head.match (/^t-end (.+)$/m);
+               var cancelled = head.match (/^cancelled (.+)$/m);
                var time = head.match (/^t (.+)$/m) || start;
                var timeLabel = time ? ago (time [1]) : '';
                var tokenLabel = end ? dale.fil (['cache', 'in', 'out'], undefined, function (name) {
                   var tokens = head.match (new RegExp ('^tokens-' + name + ' (\\d+)$', 'm'));
                   if (tokens) return size (Number (tokens [1])).replace (/B$/, '') + 't' + {cache: 'c', in: 'i', out: 'o'} [name];
                }).join (' + ') : '';
+               var model = dale.stopNot (models, undefined, function (m) {
+                  if (from === 'ai-' + m.model) return m;
+               });
+               var usageLabel = '';
+               if (end && model && model.window && ! /^pending 1$/m.test (head)) {
+                  var tokensIn = head.match (/^tokens-in (\d+)$/m);
+                  var tokensCache = head.match (/^tokens-cache (\d+)$/m);
+                  var tokensOut = head.match (/^tokens-out (\d+)$/m);
+                  if (tokensIn && tokensCache && tokensOut) {
+                     var total = Number (tokensIn [1]) + Number (tokensCache [1]) + Number (tokensOut [1]);
+                     usageLabel = (total / model.window * 100).toFixed (1) + '% context';
+                  }
+               }
                if (start && end) {
                   var duration = new Date (end [1]).getTime () - new Date (start [1]).getTime ();
                   if (isFinite (duration) && duration >= 0) timeLabel = (duration < 1000 ? Math.ceil (duration) + 'ms' : Math.ceil (duration / 1000) + 's') + ' · ' + timeLabel;
@@ -2694,12 +2979,16 @@ views.chat = function () {
                   truncatedBody = body.slice (0, firstEnd) + '\n\n(omitting ' + omitted + ' lines)\n\n' + body.slice (lastStart + 1);
                }
                var renderBody = function (b) {
-                  return shell
-                     ? ['pre', {class: 'code f7 ma0 mw-100 overflow-x-auto pa2'}, b]
-                     : ['LITERAL', marked.parse (b)];
+                  if (shell) {
+                     var tool = parseToolResult (b);
+                     if (tool) return renderToolResult (tool);
+                     return ['pre', {class: 'code f7 ma0 mw-100 overflow-x-auto pa2'}, b];
+                  }
+                  return ['LITERAL', marked.parse (b).replace (/<a href="(?!https?:\/\/)([^"]*)">/g, '<a href="#/files/' + B.get ('project') + '/$1">')];
                };
+               var isToolResult = shell && parseToolResult (truncatedBody || body);
                var pane = ['div', {
-                  class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' bl border-box br3 bt chat-message lh-copy mw-100 ph3 pv1' + (shell || /^ai-/.test (from) ? ' code' : ''),
+                  class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' bl border-box br3 bt chat-message lh-copy mw-100' + (isToolResult ? '' : ' ph3 pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
                   opaque: true,
                   style: style ({
                      'border-width': '0.25rem',
@@ -2725,6 +3014,9 @@ views.chat = function () {
                   }, dale.go (dale.times (3), function () {
                      return views.spinny (views.projectColor (messageIndexes [messageId.toLowerCase ()], true));
                   })] : '',
+                  cancelled ? ['div', {
+                     class: 'f7' + (isToolResult ? ' ph3' : '') + ' pv2',
+                  }, '(cancelled ' + ago (cancelled [1]) + ')'] : ['span'],
                ]];
                return ['div', {
                   class: 'border-box items-start mb4 mw-100 pv3 relative w-100',
@@ -2732,6 +3024,8 @@ views.chat = function () {
                      display: 'grid',
                      gap: '0.75rem',
                      'grid-template-columns': 'max-content minmax(0, max-content) minmax(min(8rem, 25%), 1fr)',
+                     'margin-left': messageLevels [messageId.toLowerCase ()] ? (messageLevels [messageId.toLowerCase ()] * 2) + 'rem' : undefined,
+                     width: messageLevels [messageId.toLowerCase ()] ? 'calc(100% - ' + (messageLevels [messageId.toLowerCase ()] * 2) + 'rem)' : undefined,
                   }),
                }, [
                   ['div', {
@@ -2745,6 +3039,15 @@ views.chat = function () {
                   ['pre', {class: 'code f6 fw7 lh-solid ma0 pl3'}, [
                      replyTo ? ['span', {class: views.projectColor (messageIndexes [replyTo [1].toLowerCase ()], true)}, (messageIndexes [replyTo [1].toLowerCase ()] || '????') + '\n |- '] : '',
                      ['span', {class: 'br2 dib ph2 pv1 ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true)}, messageIndexes [messageId.toLowerCase ()]],
+                     /^pending 1$/m.test (head) ? B.view (['cancelling', messageId], function (cancelling) {
+                        return ['button', {
+                           'aria-label': 'Stop message ' + messageIndexes [messageId.toLowerCase ()],
+                           class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
+                           disabled: !! cancelling,
+                           onclick: B.ev ('cancel', 'message', messageId),
+                           type: 'button',
+                        }, cancelling ? 'Stopping...' : '■ Stop'];
+                     }) : ['span'],
                   ]],
                   pane,
                   ['div', {
@@ -2758,6 +3061,7 @@ views.chat = function () {
                      ['div', {class: 'flex flex-column'}, [
                         ['div', {class: 'br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true)}, fromLabel],
                         tokenLabel ? ['div', {class: 'br2 dib lh-copy mt2 ph2 pv1 vlightblue'}, tokenLabel] : '',
+                        usageLabel ? ['div', {class: 'br2 dib lh-copy mt2 ph2 pv1 vlightblue'}, usageLabel] : '',
                      ]],
                      ['div', {class: 'br2 dib ph2 pv1 ' + views.projectColor (timeLabel, true)}, timeLabel],
                   ]],
@@ -2768,9 +3072,25 @@ views.chat = function () {
                style: style ({'min-height': 0}),
             }, [
                ['div', {
-                  class: 'flex-auto messages overflow-y-auto pa3',
+                  class: 'flex flex-auto relative',
                   style: style ({'min-height': 0}),
-               }, rendered],
+               }, [
+                  ['div', {
+                     class: 'flex-auto messages overflow-y-auto pa3',
+                     style: style ({
+                        'min-height': 0,
+                        'min-width': 0,
+                     }),
+                  }, rendered],
+                  ['div', {
+                     class: 'absolute left-0 ma1 top-0 z-1',
+                     style: style ({'pointer-events': 'none'}),
+                  }, views.tooltip ('O', 'below')],
+                  ['div', {
+                     class: 'absolute bottom-0 left-0 ma1 z-1',
+                     style: style ({'pointer-events': 'none'}),
+                  }, views.tooltip ('I')],
+               ]],
                ['div', {class: 'flex-shrink-0 mv3 relative w-100'}, [
                   views.tooltip ('/'),
                   ['i', {
@@ -2814,11 +3134,12 @@ views.chat = function () {
             class: 'flex flex-column flex-shrink-0',
             style: style ({
                'border-top': '0.1875rem solid ' + css.colors.vborderblue,
-               height: '25%',
+               height: '20%',
             }),
          }, [
             B.view ('message', function (message) {
                message = message || {};
+               var recipient = message.to || '';
                return ['div', {
                   class: 'flex items-center pv3',
                   style: style ({gap: '0.75rem'}),
@@ -2836,24 +3157,34 @@ views.chat = function () {
                         class: 'ba bg-vdeepnavy border-box br2 f5 outline-0 pa2 vborderblue-border vlightblue w-100',
                         id: 'chat-to',
                         oninput: B.ev ('set', ['message', 'to']),
-                        placeholder: 'Recipient',
+                        placeholder: 'all',
                         type: 'text',
-                        value: message.to,
+                        value: recipient,
                      }],
                      ['div', {
                         class: 'absolute ba bg-vdeepnavy border-box br2 chat-recipient-options w-100',
                         style: style ({bottom: '100%', 'z-index': 10}),
-                     }, dale.fil (['all', 'shell'].concat (dale.fil (models, undefined, function (m) {
-                        var creds = (B.get ('user', 'credentials') || {}) [m.provider] || {};
-                        if (creds.account || creds.apiKey) return 'ai-' + m.model;
-                     })), undefined, function (to) {
-                        if (to.indexOf ((message.to || '').trim ().toLowerCase ()) === -1) return;
+                     }, dale.fil (['all', 'shell'].concat (function () {
+                        var aiOptions = dale.fil (models, undefined, function (m) {
+                           var creds = (B.get ('user', 'credentials') || {}) [m.provider] || {};
+                           if (creds.account || creds.apiKey) return 'ai-' + m.model;
+                        });
+                        return aiOptions.length ? aiOptions : ['ai'];
+                     } ()), undefined, function (to) {
+                        if (to.indexOf (recipient.trim ().toLowerCase ()) === -1) return;
                         return ['button', {
                            class: 'bg-vdeepnavy bn db f5 pa2 pointer tl vlightblue w-100',
                            type: 'button',
                            onclick: B.ev ('set', ['message', 'to'], to) + ' if (editor) editor.focus ();',
                         }, to];
                      })],
+                     ! dale.fil (models, undefined, function (m) {
+                        var creds = (B.get ('user', 'credentials') || {}) [m.provider] || {};
+                        if (creds.account || creds.apiKey) return true;
+                     }).length && /^ai/i.test (recipient) ? ['div', {
+                        class: 'absolute f7 fw6 gold',
+                        style: style ({bottom: '100%', 'margin-bottom': '0.25rem'}),
+                     }, 'Open settings to add an AI provider'] : '',
                   ]],
                   ['button', {
                      class: 'bg-vgreen black bn br2 f5 flex-shrink-0 fw7 ph3 pv2 pointer relative',
