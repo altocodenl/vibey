@@ -157,6 +157,7 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - **Get projects**: `GET /projects`.
 - **Create project**: `POST /project`: expects `{name: <name>, slot: <positiveInteger|undefined>}`. Names must contain at least two characters. Returns 403 if the user is not a creator, 409 if the current user already has a project with that name. Assigning an occupied slot removes that slot from the project previously occupying it.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <positiveInteger|undefined>}`. Names must contain at least two characters. Returns 404 if project is not found, 409 if the current user has another project with the new name. Assigning an occupied slot removes that slot from the project previously occupying it.
+- **Serve file**: `GET /project/<projectId>/file/<path>`: serves a file from `/project` through `docker.read`, with its MIME type or `application/octet-stream`. Requires project ownership. Returns 404 if the project is not owned by the user or the file is missing, 400 for absolute paths, null bytes or `..` segments, and 500 for other read errors. Symlinks are followed. Uses `cicek.cache` for ETags and 304 responses, with `Cache-Control: private, no-cache`. Sends `nosniff` and a sandbox CSP for safe previews.
 - **Read file**: `POST /project/read`: expects `{id: <projectId>, path: <path>}`. Returns the file contents. Returns 404 if file not found.
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once, except for the reserved value `'[EOF]'`, which appends `newText` to the end of the file. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
@@ -265,14 +266,14 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
 - `list files`: lists project files through `POST /project/run`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then calls `load clientExtension` and reads the selected file.
-- `read file`: fetches the selected file via `POST /project/read`. Clears the global `content` while loading, then sets it to text or a `Uint8Array` according to the `x-binary` response header and emits `change file`. For chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
+- `read file`: clears the global `content` and emits `change file`. For images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`, case-insensitive), returns without fetching content; the view loads the image directly through `GET /project/<projectId>/file/<path>` and shows a snackbar on load failure. For other files, fetches via `POST /project/read`, sets `content` to text or a `Uint8Array` according to the `x-binary` response header and emits `change file`. For chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it; otherwise, updates the global `content` if the file is still selected.
 - `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list, closes the creation modal and refreshes the list.
 - `remove file <name>`: asks for confirmation, then deletes the file through `POST /project/run`. Refreshes the list and, if the deleted file was selected, navigates to the project's default file.
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. On success, closes the rename modal, refreshes the list and updates navigation if the renamed file was selected.
-- `download file`: downloads the currently loaded content using the selected file's basename and a temporary blob URL.
+- `download file`: downloads the selected file's server copy through `GET /project/<projectId>/file/<path>`, encoding the project ID and each path segment. Uses a temporary anchor with the file's basename as its download name; does not require loaded content.
 - `upload * <files>`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and base64-encoding detected binary content. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
-- `change projects|project|file|image`: manages image preview blob URLs and recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings, line wrapping and JavaScript/Python/Markdown modes; file editor changes call `write file` immediately, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
+- `change projects|project|file|settings`: recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings for admins, line wrapping and JavaScript/Python/Markdown modes; file editor changes call `write file` immediately, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
 - `change search.content.query`: calls `highlight content`.
 - `change view`: calls `highlight content` at low priority, after rendering.
 - `highlight content`: highlights literal, case-insensitive matches for `search.content.query`, sets `search.content.count` and resets `search.content.current` to 0. Clears both integers when the query is empty or no text editor is active.
@@ -289,13 +290,11 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 ### Client state
 
-For performance purposes, we use three globals outside of the store:
+For performance purposes, we use two globals outside of the store:
 
 ```
 content <string|Uint8Array|undefined> // Text, binary data, or undefined while loading
 editor <CodeMirror instance>
-image content <string|Uint8Array> // Content used to create the preview
-      url "<blob URL>"
 ```
 
 Store:

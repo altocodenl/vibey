@@ -1018,6 +1018,43 @@ var routes = [
       rs.next ();
    }],
 
+   ['get', /^\/project\/([^/]+)\/file\/(.+)$/, async function (rq, rs) {
+      var id = rq.data.params [0], path = rq.data.params [1];
+      var projects = await getForUser (rq.user.id, 'project');
+      var match = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === id) return project;
+      });
+      if (! match) return reply (rs, 404);
+
+      if (path.indexOf ('\0') !== -1 || path [0] === '/' || inc (path.split ('/'), '..')) {
+         return reply (rs, 400, {error: 'Invalid path'});
+      }
+
+      var file = await docker.read (id, '/project/' + path);
+      if (file.code) {
+         if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404);
+         clog ({priority: 'important', type: 'Read file error', error: formatError (file)});
+         return reply (rs, 500);
+      }
+
+      var buffer = file.stdout || Buffer.alloc (0);
+      var headers = {
+         'content-type': mime.lookup (path) || 'application/octet-stream',
+         'cache-control': 'private, no-cache',
+         'x-content-type-options': 'nosniff',
+         'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
+      };
+      var cached = cicek.cache (rq.method, buffer, rq.headers, headers, 200);
+      if (! cached) headers ['content-length'] = buffer.length;
+
+      rs.log.code = cached ? 304 : 200;
+      rs.log.responseBody = cached ? 0 : buffer.length;
+      rs.log.responseHeaders = headers;
+      rs.writeHead (rs.log.code, headers);
+      rs.end (cached ? undefined : buffer);
+      return cicek.apres (rs);
+   }],
+
    ['post', '/project/read', async function (rq, rs) {
 
       if (stop (rs, [

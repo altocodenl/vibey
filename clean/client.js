@@ -101,7 +101,7 @@ window.onerror = async function (message, source, lineno, colno, error) {
 
 // *** GLOBALS (we need these to be outside the store for performance reasons) ***
 
-var content, editor, image;
+var content, editor;
 
 // *** RESPONDERS ***
 
@@ -669,6 +669,8 @@ B.mrespond ([
       content = undefined;
       B.call (x, 'change', 'file');
 
+      if (/\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (name)) return;
+
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
          var headers = {'content-type': 'application/json'};
@@ -712,18 +714,14 @@ B.mrespond ([
 
    ['download', 'file', function (x) {
       var file = B.get ('file');
-      if (! file || ! file.name || content === undefined) return;
+      if (! file || ! file.name) return;
 
-      var url = URL.createObjectURL (new Blob ([content], {type: 'application/octet-stream'}));
       var link = document.createElement ('a');
       link.download = file.name.split ('/').pop ();
-      link.href = url;
+      link.href = '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + file.name.split ('/').map (encodeURIComponent).join ('/');
       document.body.appendChild (link);
       link.click ();
       link.remove ();
-      setTimeout (function () {
-         URL.revokeObjectURL (url);
-      }, 60000);
    }],
 
    ['write', 'file', function (x, name, newContent, New) {
@@ -865,26 +863,10 @@ B.mrespond ([
       });
    }],
 
-   ['change', [/^(projects|project|file|image|settings)$/], {match: B.changeResponder, priority: -1000}, function (x) {
+   ['change', [/^(projects|project|file|settings)$/], {match: B.changeResponder, priority: -1000}, function (x) {
       if (B.get ('view') !== 'files') return;
 
       var name = B.get ('file', 'name') || '';
-
-      // *** IMAGE ***
-
-      if (image && image.content !== content) {
-         URL.revokeObjectURL (image.url);
-         image = '';
-         B.call (x, 'change', 'file');
-      }
-      var imageType = name.match (/\.(avif|bmp|gif|jpe?g|png|webp)$/i);
-      if (imageType && ! image && content) {
-         image = {
-            content: content,
-            url: URL.createObjectURL (new Blob ([content], {type: 'image/' + imageType [1].toLowerCase ().replace ('jpg', 'jpeg')})),
-         };
-         B.call (x, 'change', 'file');
-      }
 
       // *** EDITOR ***
 
@@ -2242,7 +2224,8 @@ views.files = function () {
 
                var mode = file.mode || 'edit';
 
-               var isBinary = content instanceof Uint8Array;
+               var isImage = /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (file.name);
+               var isBinary = isImage || content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
 
                var fileHeader = ['div', {class: 'flex items-center justify-between mb2'}, [
@@ -2308,17 +2291,17 @@ views.files = function () {
 
                return ['div', {class: 'flex flex-auto flex-column'}, [
                   fileHeader,
+                  isImage ? ['div', {class: 'flex-auto relative'}, [
+                     ['img', {
+                        alt: file.name,
+                        class: 'absolute h-100 left-0 top-0 w-100',
+                        src: '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + file.name.split ('/').map (encodeURIComponent).join ('/'),
+                        onerror: B.ev ('snackbar', 'error', 'There was a problem loading the image'),
+                        style: style ({'object-fit': 'contain'}),
+                     }],
+                  ]] :
                   content === undefined ? ['div', {class: 'flex flex-auto items-center justify-center'}, views.spinny ()] :
                   isBinary ? (function () {
-                     if (image) return ['div', {class: 'flex-auto relative'}, [
-                        ['img', {
-                           alt: file.name,
-                           class: 'absolute h-100 left-0 top-0 w-100',
-                           src: image.url,
-                           style: style ({'object-fit': 'contain'}),
-                        }],
-                     ]];
-
                      return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
                         ['div', {class: 'tc'}, [
                            ['i', {class: 'bi bi-file-earmark-binary db f1 mb3'}],

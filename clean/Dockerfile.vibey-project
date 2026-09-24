@@ -2,7 +2,7 @@ FROM node:22-alpine
 
 ENV TZ=UTC
 
-RUN apk add --no-cache python3 git curl bash findutils sudo util-linux
+RUN apk add --no-cache python3 git curl bash findutils sudo util-linux ripgrep
 
 RUN npm install -g @openai/codex@0.155.1 @anthropic-ai/claude-code@2.1.277
 

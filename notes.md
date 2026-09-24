@@ -1,5 +1,12 @@
 # Vibey development notes
 
+## 2026-09-24
+
+TODO next:
+- endpoint for file, show inline
+- colors for file names?
+- api support, show money in gauges
+
 ## 2026-09-23
 
 I am looking for that inner light in the color of vibey. I feel there's something there already, the seed.
@@ -13,7 +20,9 @@ access:
 Cancelling an ongoing message: set "cancelled <t>" and "pending 0" through an edit to the chat. On every chunk, shell or ai check the head of the message and, if cancelled, stop.
 
 TODO next:
-- endpoint for file
+- endpoint for file, show inline
+- colors for file names?
+- api support, show money in gauges
 
 - TODO
    - access
