@@ -2,10 +2,44 @@
 
 ## 2026-09-24
 
-TODO next:
-- endpoint for file, show inline
-- colors for file names?
-- api support, show money in gauges
+Basic access flow:
+- In project X, owned by me, I say to AI: add access to <email address>
+- AI creates or updates a file call access.md, with a line: read/write <email address>
+- AI also calls a pseudo command "vibey credentials"
+- When the pseudo command runs, vibey host interprets the shell as read permissions from the project.
+- For this bare version, just create an entry that makes a key access:<email> and puts project:... there
+- When loading projects or routes with projects, act as if the owner of the account of that email has access
+
+It's a major feature that credentials are account based, not project based. An unexpected one, too.
+
+Next:
+- delete POST /project/read and use the GET
+- improve access code
+
+- TODO
+   - access
+      - shell calling another project (read/write/edit/run/chat). This would allow all cross-project ops. Also: interpret at the vibey level: since commands go through the host, you don't need credentials. You know that that command is running inside project Y, and if it refers project X, check if X allows access to Y. If it does, interpret the command as a special tool call across projects. Done!
+      - read/write access to another user: improve code
+      - tests
+   - chat
+      - api key support, show money in gauges
+      - Upload images, allow download to project or to local
+      - enable an agent calling another agent
+      - cron file
+      - tests
+   - file
+      - show local images embedded in docs
+      - tabs
+      - open sqlite files
+      - search text files
+      - stream large files (split them in pages)
+      - edit text file through diffs (edits) rather than whole file write (faster)
+      - client tests
+   - project
+      - autobackup
+      - client tests
+      - skip docker.exec to have a slash command time by 10x
+
 
 ## 2026-09-23
 
@@ -28,10 +62,12 @@ TODO next:
    - access
       - shell calling another project (read/write/edit/run/chat). This would allow all cross-project ops. Also: interpret at the vibey level: since commands go through the host, you don't need credentials. You know that that command is running inside project Y, and if it refers project X, check if X allows access to Y. If it does, interpret the command as a special tool call across projects. Done!
       - read/write access to another user
+      - tests
    - chat
       - Upload images, allow download to project or to local
       - enable an agent calling another agent
       - cron file
+      - tests
    - file
       - show local images embedded in docs
       - tabs

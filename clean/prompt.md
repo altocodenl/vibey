@@ -48,3 +48,19 @@ Formats:
 The examples above are indented for readability; emit calls without that indentation or Markdown fences. Paths and commands cannot contain literal newlines. The third line is "path: PATH" for read, write and edit, or "command: COMMAND" for run. For read and run, the call ends after the third line; further output is discarded. For write, everything from the fourth line to the end is file content. For edit, the fourth line contains "old text:"; old text begins on the fifth line and ends at a line containing exactly "new line:". Everything after that is new text.
 
 Read before editing. Check tool results for errors.
+
+## Project access
+
+When the project owner asks you to grant access to an email address, read /project/access.md first. If it does not exist, create it. Otherwise preserve existing entries and add the requested address only if absent. Each entry is a line in this format:
+
+read/write someone@example.com
+
+Use lowercase email addresses. Blank lines and headings starting with # are allowed. After saving the file successfully, invoke this exact standalone Vibey tool call:
+
+ tool-call: run
+ Apply project access permissions
+ command: vibey credentials
+
+Emit the call without indentation or Markdown fences. This is a pseudo-command interpreted by the Vibey host, not an executable inside the container. Do not use internal shell tools, wrap it in another command, or combine it with other commands.
+
+Only the project owner can apply grants. Grants are additive: removing an entry does not revoke existing access. Recipients can access the project after signing in with that email, even if they had no account when access was granted. Access includes reading, writing, running commands, renaming and deleting the project; it is not read-only or sandboxed access. Do not claim access was granted until the tool returns success.

@@ -182,13 +182,21 @@ var redis = function (command) {
 }
 
 var getForUser = async function (userId, entity) {
-   var items = dale.fil (await redis ('smembers', 'owner:' + userId), undefined, function (key) {
+   var keys = await redis ('smembers', 'owner:' + userId);
+   if (entity === 'project') {
+      var email = await redis ('hget', 'user:' + userId, 'email');
+      if (email) keys = [... new Set (keys.concat (await redis ('smembers', 'access:' + email.toLowerCase ())))];
+   }
+   var items = dale.fil (keys, undefined, function (key) {
       if (key.match (new RegExp ('^' + entity + ':'))) return key;
    });
 
-   return await redis (dale.go (items, function (item) {
+   var results = await redis (dale.go (items, function (item) {
       return ['hgetall', item];
    }));
+   return dale.fil (results, undefined, function (item) {
+      if (item && item.id) return item;
+   });
 }
 
 // *** COMMANDS ***
@@ -256,6 +264,28 @@ var run = async function (... args) {
 }
 
 var docker = {};
+
+docker.credentials = async function (id, userId) {
+   var owner = await redis ('hget', 'project:' + id, 'owner');
+   if (owner !== userId) return {code: 1, error: 'Only the project owner can grant access'};
+
+   var file = await docker.read (id, '/project/access.md');
+   if (file.code) return file;
+
+   var emails = [], lines = file.stdout.toString ('utf8').split (/\r?\n/);
+   for (var line of lines) {
+      line = line.trim ();
+      if (! line || line.startsWith ('#')) continue;
+      var match = /^read\/write\s+([^\s@]+@[^\s@]+\.[^\s@]+)$/i.exec (line);
+      if (! match) return {code: 1, error: 'Invalid access.md line: ' + line};
+      emails.push (match [1].toLowerCase ());
+   }
+   emails = [... new Set (emails)];
+   if (emails.length) await redis (dale.go (emails, function (email) {
+      return ['sadd', 'access:' + email, 'project:' + id];
+   }));
+   return {code: 0, stdout: 'Access granted to: ' + (emails.join (', ') || '(none)') + '\n'};
+};
 
 Path.quote = function (path) {
    return "'" + path.replace (/'/g, "'\\''") + "'";
@@ -1125,7 +1155,9 @@ var routes = [
          ['read', rq.body.read, ['boolean', 'undefined'], 'oneOf']
       ])) return;
 
-      var result = await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
+      var result = rq.body.command.trim () === 'vibey credentials'
+         ? await docker.credentials (rq.body.id, rq.user.id)
+         : await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
       if (result.code === 0) delete result.code;
 
       if (! rq.body.read) redis ('hset', 'project:' + rq.body.id, 'last', now ());
@@ -1303,7 +1335,12 @@ var routes = [
          if (result.code) return reply (rs, 400, result);
          reply (rs, 200, {id: id, responseId: responseId});
 
-         await docker.run (rq.body.id, groupedCommand (rq.body.body), {catch: true, onSpawn: watchCancellation, stdout: function (chunk) {
+         if (rq.body.body.trim () === 'vibey credentials') {
+            var credentialsResult = await docker.credentials (rq.body.id, rq.user.id);
+            output += credentialsResult.stdout || credentialsResult.error || 'Could not sync access\n';
+            streamEdit ();
+         }
+         else await docker.run (rq.body.id, groupedCommand (rq.body.body), {catch: true, onSpawn: watchCancellation, stdout: function (chunk) {
             output += chunk;
             streamEdit ();
          }, stderr: function (chunk) {
@@ -1603,6 +1640,11 @@ var routes = [
                if (call.op === 'read') return await docker.read (rq.body.id, call.path);
                if (call.op === 'write') return await docker.write (rq.body.id, call.path, call.content);
                if (call.op === 'edit') return await docker.edit (rq.body.id, call.path, call.oldText, call.newText);
+               if (call.op === 'run' && call.command.trim () === 'vibey credentials') {
+                  var result = await docker.credentials (rq.body.id, rq.user.id);
+                  if (onOutput) onOutput (result.stdout || result.error || '');
+                  return result;
+               }
                if (call.op === 'run') return await docker.run (rq.body.id, groupedCommand (call.command), {
                   catch: true,
                   onSpawn: watchCancellation,

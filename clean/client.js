@@ -669,7 +669,7 @@ B.mrespond ([
       content = undefined;
       B.call (x, 'change', 'file');
 
-      if (/\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (name)) return;
+      if (/\.(avif|bmp|gif|jpe?g|png|webp|pdf)$/i.test (name)) return;
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
@@ -834,24 +834,18 @@ B.mrespond ([
       dale.go (files, function (file) {
          var reader = new FileReader ();
          reader.onload = function () {
-            var binary = new Uint8Array (reader.result).slice (0, 512).indexOf (0) !== -1;
             var name = file.webkitRelativePath || file.name;
             var body = {
+               base64: true,
+               content: '',
                id: projectId,
                path: name,
             };
-            if (binary) {
-               body.base64 = true;
-               var bytes = new Uint8Array (reader.result);
-               body.content = '';
-               dale.go (bytes, function (b) {
-                  body.content += String.fromCharCode (b);
-               });
-               body.content = btoa (body.content);
-            }
-            else {
-               body.content = new TextDecoder ().decode (reader.result);
-            }
+            var bytes = new Uint8Array (reader.result);
+            dale.go (bytes, function (b) {
+               body.content += String.fromCharCode (b);
+            });
+            body.content = btoa (body.content);
             B.call (x, 'post', '/project/write', body, function (x, error) {
                complete (error, name);
             });
@@ -874,7 +868,7 @@ B.mrespond ([
 
       if (c ('#file-editor')) {
          editor = CodeMirror (c ('#file-editor'), {
-            keyMap: B.get ('user', 'admin') ? 'vim' : undefined,
+            keyMap: B.get ('user', 'admin') ? 'vim' : 'default',
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
             value: content || '',
@@ -891,7 +885,7 @@ B.mrespond ([
 
       if (c ('#chat-editor')) {
          editor = CodeMirror (c ('#chat-editor'), {
-            keyMap: B.get ('user', 'admin') ? 'vim' : undefined,
+            keyMap: B.get ('user', 'admin') ? 'vim' : 'default',
             lineWrapping: true,
             mode: 'markdown',
             value: B.get ('message', 'body') || '',
@@ -2184,7 +2178,7 @@ views.files = function () {
                      }, [
                         tooltip ? views.tooltip (tooltip) : '',
                         ['div', {class: 'flex items-center', style: style ({gap: '0.5rem'})}, [
-                           iconAndName (file.name),
+                           ['span', {class: views.projectColor (file.name, true)}, iconAndName (file.name)],
                            (pending || []).some (function (k) {return k.indexOf (file.name) !== -1;}) ? ['span', {style: style ({transform: 'scale(0.75)'})}, views.spinny (active ? 'vnearwhite' : 'vlightblue')] : '',
                         ]],
                         ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
@@ -2225,7 +2219,8 @@ views.files = function () {
                var mode = file.mode || 'edit';
 
                var isImage = /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (file.name);
-               var isBinary = isImage || content instanceof Uint8Array;
+               var isPdf = /\.pdf$/i.test (file.name);
+               var isBinary = isImage || isPdf || content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
 
                var fileHeader = ['div', {class: 'flex items-center justify-between mb2'}, [
@@ -2236,7 +2231,7 @@ views.files = function () {
                            padding: '0.5rem 0.5rem 0.5rem 1.25rem',
                         }),
                      }, [
-                        ['span', {class: 'fw6'}, iconAndName (file.name)],
+                        ['span', {class: 'fw6 ' + views.projectColor (file.name, true)}, iconAndName (file.name)],
                         file.actions ? ['button', {
                            'aria-label': 'Rename file',
                            class: 'bg-vhighlightblue bn br2 f6 fw6 ml3 pointer relative vnearwhite',
@@ -2299,6 +2294,20 @@ views.files = function () {
                         onerror: B.ev ('snackbar', 'error', 'There was a problem loading the image'),
                         style: style ({'object-fit': 'contain'}),
                      }],
+                  ]] :
+                  isPdf ? ['div', {class: 'flex-auto relative'}, [
+                     ['object', {
+                        class: 'absolute bn h-100 left-0 top-0 w-100',
+                        data: '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + file.name.split ('/').map (encodeURIComponent).join ('/'),
+                        title: file.name,
+                        type: 'application/pdf',
+                     }, [
+                        ['p', {class: 'vgray'}, 'Your browser cannot display this PDF.'],
+                        ['button', {
+                           class: css.button,
+                           onclick: B.ev ('download', 'file'),
+                        }, 'Download PDF'],
+                     ]],
                   ]] :
                   content === undefined ? ['div', {class: 'flex flex-auto items-center justify-center'}, views.spinny ()] :
                   isBinary ? (function () {
