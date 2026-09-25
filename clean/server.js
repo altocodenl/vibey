@@ -52,10 +52,10 @@ var systemPrompt = fs.readFileSync ('prompt.md', 'utf8');
 // *** MODELS ***
 
 var models = [
-   {provider: 'openai',    model: 'gpt-6',   canonical: 'gpt-6-astra',    window: 1050000},
-   {provider: 'openai',    model: 'gpt-5.6', canonical: 'gpt-5.6-sol',    window: 1050000},
-   {provider: 'openai',    model: 'gpt-4.1', canonical: 'gpt-4.1',        window: 1047576, requireAPIKey: true},
-   {provider: 'anthropic', model: 'opus-4.6', canonical: 'claude-opus-4-6', window: 1000000},
+   {provider: 'openai',    model: 'gpt-6',   canonical: 'gpt-6-astra',    window: 1050000, priceCache: 1,   priceIn: 10, priceOut: 50},
+   {provider: 'openai',    model: 'gpt-5.6', canonical: 'gpt-5.6-sol',    window: 1050000, priceCache: 0.4, priceIn: 4,  priceOut: 20},
+   {provider: 'openai',    model: 'gpt-4.1', canonical: 'gpt-4.1',        window: 1047576, priceCache: 0.5, priceIn: 2,  priceOut: 8, requireAPIKey: true},
+   {provider: 'anthropic', model: 'opus-4.6', canonical: 'claude-opus-4-6', window: 1000000, priceCache: 0.5, priceIn: 5,  priceOut: 25},
 ];
 
 // *** TEST ***
@@ -191,12 +191,9 @@ var getForUser = async function (userId, entity) {
       if (key.match (new RegExp ('^' + entity + ':'))) return key;
    });
 
-   var results = await redis (dale.go (items, function (item) {
+   return await redis (dale.go (items, function (item) {
       return ['hgetall', item];
    }));
-   return dale.fil (results, undefined, function (item) {
-      if (item && item.id) return item;
-   });
 }
 
 // *** COMMANDS ***
@@ -266,6 +263,9 @@ var run = async function (... args) {
 var docker = {};
 
 docker.credentials = async function (id, userId) {
+   // TODO: re-enable shared access grants when access is ready.
+   return {code: 1, error: 'Shared access is temporarily disabled'};
+
    var owner = await redis ('hget', 'project:' + id, 'owner');
    if (owner !== userId) return {code: 1, error: 'Only the project owner can grant access'};
 
@@ -299,7 +299,7 @@ docker.run = async function (id, command, options) {
    // Retry commit up to 50x at ~1ms to handle concurrent git lock contention
    if (commit) {
       originalCommand = command;
-      command += ' || exit $?; n=0; s=0; while [ $n -lt 50 ]; do if [ -n "$(git status --porcelain 2>/dev/null)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && git rev-parse HEAD && s=1 && break; fi; sleep 0.001; n=$((n+1)); done; [ $s = 0 ] && echo || true';
+      command += ' || exit $?; n=0; sha=; while [ $n -lt 50 ]; do if [ -n "$(git status --porcelain 2>/dev/null)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && sha=$(git rev-parse HEAD) && break; fi; sleep 0.001; n=$((n+1)); done; printf "\\nvibey-sha:%s\\n" "$sha"';
       delete options.commit;
    }
 
@@ -313,9 +313,10 @@ docker.run = async function (id, command, options) {
       return docker.run (id.replace ('vibey-project-', ''), originalCommand || command, {... options, commit});
    }
    if (result.code && ! (options && options.catch)) throw result;
-   if (commit && result.stdout) {
-      result.sha = last (result.stdout.split ('\n'), 2) || undefined;
-      result.stdout = result.stdout.replace (/[^\n]{0,}\n$/, '');
+   var marker = commit && result.stdout && result.stdout.match (/\nvibey-sha:([0-9a-f]*)\n$/);
+   if (marker) {
+      result.sha = marker [1] || undefined;
+      result.stdout = result.stdout.slice (0, marker.index);
       if (result.stdout === '') delete result.stdout;
       if (result.sha) await docker.backup (id.replace ('vibey-project-', ''));
    }
@@ -356,15 +357,17 @@ docker.edit = async function (id, path, oldText, newText) {
    newText = Buffer.from (newText);
    var input = Buffer.concat ([Buffer.from (oldText.length + '\n' + newText.length + '\n'), oldText, newText]);
 
-   var script = 'read old_len; read new_len;'
-      + ' dd bs=1 count=$old_len of=/tmp/_old 2>/dev/null;'
-      + ' dd bs=1 count=$new_len of=/tmp/_new 2>/dev/null;'
-      + " awk '"
+   var script = 'tmp=$(mktemp -d) || exit 1;'
+      + ' trap \'rm -rf "$tmp"\' 0;'
+      + ' read old_len; read new_len;'
+      + ' dd bs=1 count=$old_len of="$tmp/old" 2>/dev/null || exit 1;'
+      + ' dd bs=1 count=$new_len of="$tmp/new" 2>/dev/null || exit 1;'
+      + " awk -v tmp=\"$tmp\" '"
       +    'BEGIN {RS = sprintf ("%c", 1)}'
       +    ' function rf(f,   _s, _l) {while ((getline _l < f) > 0) _s = _s (length (_s) ? RS : "") _l; close (f); return _s}'
       +    ' {file = file (NR > 1 ? RS : "") $0}'
       +    ' END {'
-      +       'old = rf("/tmp/_old"); new_ = rf("/tmp/_new"); olen = length (old);'
+      +       'old = rf(tmp "/old"); new_ = rf(tmp "/new"); olen = length (old);'
       +       ' s = file; count = 0;'
       +       ' while ((i = index (s, old)) > 0) {count++; s = substr (s, i + olen)}'
       +       ' if (count == 0) {print "Old text not found" > "/dev/stderr"; exit 1}'
@@ -1035,7 +1038,7 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', ['/project/read', '/project/write', '/project/edit', '/project/run', '/project/message'], async function (rq, rs) {
+   ['post', ['/project/write', '/project/edit', '/project/run', '/project/message'], async function (rq, rs) {
 
       if (stop (rs, ['id', rq.body.id, 'string'])) return;
 
@@ -1083,34 +1086,6 @@ var routes = [
       rs.writeHead (rs.log.code, headers);
       rs.end (cached ? undefined : buffer);
       return cicek.apres (rs);
-   }],
-
-   ['post', '/project/read', async function (rq, rs) {
-
-      if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'path'], 'eachOf', teishi.test.equal],
-         ['path', rq.body.path, 'string'],
-      ])) return;
-
-      var file = await docker.read (rq.body.id, rq.body.path);
-      if (file.code) {
-         if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404);
-         clog ({priority: 'important', type: 'Read file error', error: formatError (file)});
-         return reply (rs, 500);
-      }
-      if (file.code === 0) delete file.code;
-
-      var stdout = file.stdout || Buffer.alloc (0);
-      var binary = stdout.slice (0, 512).indexOf (0) !== -1;
-      if (binary) {
-         // cicek doesn't support sending buffers
-         rs.log.code = 200;
-         rs.log.responseBody = stdout.length;
-         rs.writeHead (200, {'content-type': mime.lookup (rq.body.path) || 'application/octet-stream', 'x-binary': '1'});
-         rs.end (stdout);
-         return cicek.apres (rs);
-      }
-      reply (rs, 200, stdout.toString ('utf8'), {}, rq.body.path);
    }],
 
    ['post', '/project/write', async function (rq, rs) {
@@ -1216,6 +1191,22 @@ var routes = [
          }],
       ])) return;
 
+      var aiModel = dale.stopNot (models, undefined, function (m) {
+         if (rq.body.to === 'ai-' + m.model) return m;
+      });
+      var aiFlavor = aiModel ? aiModel.provider : undefined;
+      var credentials = aiModel
+         ? JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}')
+         : {};
+      var creds = credentials [aiFlavor] || {};
+      var auth = aiModel && (aiModel.requireAPIKey
+         ? (creds.apiKey ? 'apiKey' : undefined)
+         : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined);
+
+      if (aiModel && ! auth) return reply (rs, 400, {
+         error: aiModel.model + ' requires ' + aiFlavor + (aiModel.requireAPIKey ? ' API key credentials' : ' account or API key credentials'),
+      });
+
       var id = crypto.randomUUID ();
 
       var message = [
@@ -1248,6 +1239,7 @@ var routes = [
          'id ' + responseId,
          'pending 1',
          't-start ' + tStart,
+         ...(aiModel ? ['credential ' + auth] : []),
          'to ' + id,
          'əəə body ' + responseId,
          '',
@@ -1372,8 +1364,6 @@ var routes = [
          return;
       }
 
-      var aiModel = dale.stopNot (models, undefined, function (m) {if (rq.body.to === 'ai-' + m.model) return m});
-      var aiFlavor = aiModel ? aiModel.provider : undefined;
       for (var turn = 0; ; turn++) {
          var chat = await docker.read (rq.body.id, rq.body.file);
          if (chat.code) throw chat;
@@ -1436,38 +1426,6 @@ var routes = [
          }
          else await startMessage (rq.body.to, responseId);
 
-         var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
-
-         if (aiFlavor === 'anthropic') var command = 'claude -p --model ' + aiModel.canonical + ' --output-format stream-json --verbose --dangerously-skip-permissions'
-         if (aiFlavor === 'openai')    var command = 'codex exec --json -m "' + aiModel.canonical + '" --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check';
-
-         if (aiFlavor === 'openai') {
-            if (! credentials.openai?.account) throw new Error ('No OpenAI credential');
-            var codexAuth = JSON.stringify ({auth_mode: 'chatgpt', last_refresh: new Date ().toISOString (), tokens: {access_token: credentials.openai.account.access, refresh_token: credentials.openai.account.refresh, id_token: credentials.openai.account.idToken || '', account_id: credentials.openai.account.accountId || ''}});
-            var result = await docker.write (rq.body.id, '/home/vibey/.codex/auth.json', codexAuth, 'noCommit');
-            if (result.code) throw result;
-         }
-
-         if (aiFlavor === 'anthropic') {
-            if (! credentials.anthropic?.account) throw new Error ('No Anthropic credential');
-            var claudeAuth = JSON.stringify ({claudeAiOauth: {
-               accessToken:  credentials.anthropic.account.access,
-               clientId:     Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString (),
-               expiresAt:    credentials.anthropic.account.expires,
-               refreshToken: credentials.anthropic.account.refresh,
-            }});
-            var result = await docker.write (rq.body.id, '/home/vibey/.claude/.credentials.json', claudeAuth, 'noCommit');
-            if (result.code) throw result;
-         }
-
-         var dockerArgs = ['exec', '-i'];
-         if (aiFlavor === 'anthropic') {
-            dockerArgs.push ('-e', 'CLAUDE_CONFIG_DIR=/home/vibey/.claude');
-            dockerArgs.push ('-e', 'CLAUDE_CODE_OAUTH_TOKEN=' + credentials.anthropic.account.access);
-         }
-         if (aiFlavor === 'openai') dockerArgs.push ('-e', 'CODEX_HOME=/home/vibey/.codex');
-         dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', groupedCommand (command + (aiFlavor === 'openai' ? ' -' : '')));
-
          var buffer = '', aiStderr = '';
          var lastFullText = '';
 
@@ -1521,7 +1479,7 @@ var routes = [
          var prompt = (transcript + '\n').replace (
             /^əəə head ([0-9a-f-]{36})\n[\s\S]*?^əəə body \1\n/gim,
             function (head) {
-               return head.replace (/^(pending|t|t-start|t-end|tokens-in|tokens-cache|tokens-out) .*\n/gm, '');
+               return head.replace (/^(pending|t|t-start|t-end|tokens-in|tokens-cache|tokens-out|credential) .*\n/gm, '');
             }
          );
 
@@ -1539,20 +1497,90 @@ var routes = [
 
          prompt += '\nCurrent chat file: ' + JSON.stringify (rq.body.file) + '\n';
 
-         var aiResult = await run ('docker', ... dockerArgs, {
-            catch: true,
-            input: prompt,
-            onSpawn: watchCancellation,
-            stderr: function (chunk) {
-               aiStderr += chunk;
-            },
-            stdout: function (chunk) {
-               buffer += chunk;
-               var lines = buffer.split ('\n');
-               buffer = lines.pop ();
-               processLines (lines);
-            },
-         });
+         var temp = await docker.run (rq.body.id, 'umask 077; mktemp -d /home/vibey/.vibey-ai.XXXXXXXXXX', {catch: true});
+         if (temp.code) throw temp;
+         var configDir = temp.stdout.trim ();
+
+         try {
+            var dockerArgs = ['exec', '-i'];
+            var command;
+
+            if (aiFlavor === 'openai') {
+               var codexAuth = JSON.stringify (auth === 'apiKey'
+                  ? {auth_mode: 'apikey', OPENAI_API_KEY: creds.apiKey}
+                  : {
+                     auth_mode: 'chatgpt',
+                     last_refresh: new Date ().toISOString (),
+                     tokens: {
+                        access_token: creds.account.access,
+                        refresh_token: creds.account.refresh,
+                        id_token: creds.account.idToken || '',
+                        account_id: creds.account.accountId || '',
+                     },
+                  });
+               var result = await docker.write (rq.body.id, configDir + '/auth.json', codexAuth, 'noCommit');
+               if (result.code) throw result;
+
+               dockerArgs.push ('-e', 'CODEX_HOME=' + configDir);
+               command = 'codex exec --json -m ' + Path.quote (aiModel.canonical)
+                  + ' --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -';
+            }
+
+            if (aiFlavor === 'anthropic') {
+               if (auth === 'account') {
+                  var claudeAuth = JSON.stringify ({claudeAiOauth: {
+                     accessToken: creds.account.access,
+                     clientId: Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString (),
+                     expiresAt: creds.account.expires,
+                     refreshToken: creds.account.refresh,
+                  }});
+                  var result = await docker.write (rq.body.id, configDir + '/.credentials.json', claudeAuth, 'noCommit');
+                  if (result.code) throw result;
+               }
+
+               var credentialPath = configDir + '/credential';
+               var result = await docker.write (
+                  rq.body.id, credentialPath,
+                  auth === 'apiKey' ? creds.apiKey : creds.account.access,
+                  'noCommit'
+               );
+               if (result.code) throw result;
+
+               dockerArgs.push ('-e', 'CLAUDE_CONFIG_DIR=' + configDir);
+               command = 'unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;'
+                  + ' credential=$(cat ' + Path.quote (credentialPath) + ') || exit 1;'
+                  + ' export ' + (auth === 'apiKey' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN') + '="$credential";'
+                  + ' unset credential;'
+                  + ' exec claude -p --model ' + Path.quote (aiModel.canonical)
+                  + ' --output-format stream-json --verbose --dangerously-skip-permissions';
+            }
+
+            dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', groupedCommand (command));
+
+            var aiResult = await run ('docker', ... dockerArgs, {
+               catch: true,
+               input: prompt,
+               onSpawn: watchCancellation,
+               stderr: function (chunk) {
+                  aiStderr += chunk;
+               },
+               stdout: function (chunk) {
+                  buffer += chunk;
+                  var lines = buffer.split ('\n');
+                  buffer = lines.pop ();
+                  processLines (lines);
+               },
+            });
+         }
+         finally {
+            try {
+               var cleanup = await docker.run (rq.body.id, 'rm -rf -- ' + Path.quote (configDir), {catch: true});
+               if (cleanup.code) throw cleanup;
+            }
+            catch (error) {
+               clog ({priority: 'important', type: 'AI credentials cleanup error', error: formatError (error), responseId});
+            }
+         }
 
          if (buffer) processLines ([buffer]);
 
@@ -1699,6 +1727,7 @@ var routes = [
                'id ' + responseId,
                'pending 1',
                't-start ' + tStart,
+               ...(from === rq.body.to ? ['credential ' + auth] : []),
             ].join ('\n');
             var result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + head + '\nto ' + to + '\n' + oldBody);
             if (result.code) throw result;

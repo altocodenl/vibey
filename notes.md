@@ -1,5 +1,82 @@
 # Vibey development notes
 
+## 2026-09-25
+
+These notes shall be published in vibey online as the vibey dev journal.
+
+Architectural decision for the future: each vibey server will have its own subdomain, so all routing is through https.
+
+Again, thinking that civ2 perfects that feeling of doing the next brushstroke while looking at the consequences of the previous one.
+
+Ways to slow down while still doing agentic coding:
+- read your diffs
+- write in your own voice
+- change the style of the code
+- understand the data flow with your eyes closed
+
+How to make the old vibey and the new coexist for migrating?
+- If on separate servers, need subdomains for secure traffic transferring.
+- If on the same server, containers, images and data volumes shouldn't touch each other.
+- They must coexist to ensure a smooth migration path for users.
+- Different servers looks way easier. Let's do that.
+
+Dedicateds are around 100-200 eur/mo, divided by cores they are 10-12 eur/mo per core. It's very close or equivalent to the cost of an engine (VPS with one core). So, there's no point at these prices to 1) offer a segment of a dedicated server; 2) offer temporary creator account from dedicated servers (except at the very beginning, while we get engines in).
+
+Access design:
+- Put it in vibey/access.md (not access.md)
+- One entry per line
+- Each entry is of the form `who verb (prefix)`, with prefix being optional
+- For now, `who` can be an email address, a token, or a project id.
+- `verb` can be `read`, `write` or `append`.
+- `read` with no prefix means: read access to the entire project. This means: GET files. This requires a dedicated listing files endpoint, because run can be assumed to be all bets are off.
+- `read` with prefix means: access the files matching that (path) prefix.
+- `write` with no prefix means: can do everything, even shell & ai (with own creds), except deleting the project itself.
+- `write` with prefix means: can read, edit and write on that prefix, but cannot send shell or ai messages.
+- `append` (with or without prefix) means: can append to a file, but not with ai/shell. This is only to be accessed programmatically. append use wouldn't list the project. How would you see a project where the moment you append, you cannot even see what you sent because you don't have read permission? This is just for forms in apps, or sending logs.
+Implementation changes:
+- List files endpoint (let's also use it for normal users)
+- Put accessBy:<projectId> and accessTo:<userId>, so we can reference from two edges. projects that have access to other projects don't need an entry, since their access path is internal (via interpreted command).
+- The moment a user logs in for the first time, the accessBy and accessTo entries that had an email are transformed to user ids.
+- Clean up old accessBy and accessTo if access entries are removed
+
+Cron design:
+- Just use normal cron entries, let AI translate/encode
+- Store it in vibey/cron.md
+- Sync it with the actual cron file in the project when you run `vibey cron`
+
+Trying to solve one problem, another one is solved. This means we're on the right direction: to avoid a race between keys passed to the CLI (and printing credentials in the logs), we now have stateless calls to codex and cc.
+
+TODO now:
+- Test api key, account keys and money gauges
+- Deploy new version
+
+- TODO
+   - mobile ui
+   - access
+      - shell calling another project (read/write/edit/run/chat). This would allow all cross-project ops. Also: interpret at the vibey level: since commands go through the host, you don't need credentials. You know that that command is running inside project Y, and if it refers project X, check if X allows access to Y. If it does, interpret the command as a special tool call across projects. Done!
+      - read/write access to another user: improve code
+      - email hooks
+      - api hooks
+      - tests
+   - chat
+      - Upload images, allow download to project or to local
+      - enable an agent calling another agent
+      - cron file
+      - tests
+   - file
+      - show local images embedded in docs
+      - tabs
+      - open sqlite files
+      - stream large files (split them in pages)
+      - edit text file through diffs (edits) rather than whole file write (faster)
+      - client tests
+   - project
+      - autobackup
+      - client tests
+      - skip docker.exec to have a slash command time by 10x
+
+gpt6: "The strongest idea is making AI a participant in a durable workspace rather than making the workspace subordinate to AI. That distinction feels valuable."
+
 ## 2026-09-24
 
 Basic access flow:
@@ -40,6 +117,20 @@ Next:
       - client tests
       - skip docker.exec to have a slash command time by 10x
 
+gpt6:
+```
+What surprises me most is how much this behaves like a desktop application built around a remote filesystem, rather than a conventional web app.
+
+- Files are the application’s data model. Chats are Markdown files with structured message boundaries; client extensions are project files. The UI mostly interprets files rather than manipulating database entities.
+
+- The server exposes filesystem capabilities, not just domain APIs. Listing files runs find; renaming runs mv; reading uses cat through Docker. Project containers are effectively the backend storage and execution environment.
+
+- The event system is doing the framework’s job. B.call and responders connect navigation, fetching, rendering, and side effects. That’s compact, but the actual execution flow is distributed: setting a filename triggers a read, which triggers a change, which can rebuild the editor.
+
+- There are two parallel state systems. Lightweight metadata lives in B.store; heavyweight content and editor instances live in globals. Sensible for performance, but change file becomes a manual invalidation signal even when the store’s file value hasn’t changed.
+
+- Projects can modify the application itself. Globally evaluating extend-client.js makes each project potentially its own customized client. Reloading when leaving that project is a remarkably simple way to discard those modifications—though it makes project code a significant trust boundary.
+```
 
 ## 2026-09-23
 

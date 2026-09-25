@@ -194,7 +194,7 @@ B.mrespond ([
 
    // *** SNACKBAR ***
 
-   ['snackbar', '*', function (x, message) {
+   ['snackbar', '*', function (x, message, keep) {
       var type = x.path [0];
 
       var snackbar = B.get ('snackbar');
@@ -205,7 +205,7 @@ B.mrespond ([
       if (type === 'clear') return;
 
       var timeout = setTimeout (function () {
-         B.call (x, 'rem', [], 'snackbar');
+         if (! keep) B.call (x, 'rem', [], 'snackbar')
       }, 4000);
 
       B.call (x, 'set', 'snackbar', {type: type, message: message, timeout: timeout});
@@ -351,7 +351,7 @@ B.mrespond ([
       })) return;
 
       B.call (x, 'set', 'extendClient', project);
-      B.call (x, 'post', '/project/read', {id: project, path: 'extend-client.js'}, function (x, error, rs) {
+      B.call (x, 'get', '/project/' + project + '/file/extend-client.js', function (x, error, rs) {
          var hash = window.location.hash.slice (2).split ('/');
          if (B.get ('extendClient') !== project || hash [0] !== 'files' || hash [1] !== project) return;
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading extend-client.js');
@@ -413,11 +413,26 @@ B.mrespond ([
    ['remove', 'project', function (x, project) {
       if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
 
-      B.call (x, 'snackbar', 'yellow', 'Deleting project...');
+      B.call (x, 'snackbar', 'yellow', 'Deleting project...', 'keep');
       B.call (x, 'delete', 'project/' + project.id, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete project');
          B.call (x, 'load', 'projects');
          B.call (x, 'snackbar', 'ok', 'Project deleted');
+      });
+   }],
+
+   ['download', 'project', function (x, project) {
+      B.call (x, 'snackbar', 'yellow', 'Preparing download...', 'keep');
+      B.call (x, 'post', '/project/run', {id: project.id, read: true, command: 'cd /project && python3 -m zipfile -c /dev/stdout . | base64 -w 0'}, function (x, error, rs) {
+         if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to download project');
+         var bytes = Uint8Array.from (atob (rs.body.stdout), function (c) {return c.charCodeAt (0)});
+         var stamp = new Date ().toISOString ().slice (0, 19).replace (/[-:]/g, '').replace ('T', '-');
+         var link = document.createElement ('a');
+         link.download = 'vibey-backup-' + stamp + '-' + project.name + '.zip';
+         link.href = URL.createObjectURL (new Blob ([bytes], {type: 'application/zip'}));
+         link.click ();
+         URL.revokeObjectURL (link.href);
+         B.call (x, 'snackbar', 'clear');
       });
    }],
 
@@ -673,19 +688,20 @@ B.mrespond ([
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
-         var headers = {'content-type': 'application/json'};
-         if (B.get ('user', 'csrf')) headers ['x-csrf'] = B.get ('user', 'csrf');
-         var rs = await fetch ('/project/read', {
-            body: JSON.stringify ({id: project.id, path: name}),
-            headers: headers,
-            method: 'POST',
-         });
+         var rs = await fetch ('/project/' + project.id + '/file/' + encodeURIComponent (name));
          if (! rs.ok) throw rs;
-         var binary = rs.headers.get ('x-binary');
-         var newContent = binary ? new Uint8Array (await rs.arrayBuffer ()) : await rs.text ();
+         var newContent = new Uint8Array (await rs.arrayBuffer ());
+         if (newContent.indexOf (0) === -1) {
+            try {
+               newContent = new TextDecoder ('utf-8', {fatal: true, ignoreBOM: true}).decode (newContent);
+            }
+            catch (error) {
+               // Invalid UTF-8: keep the original bytes for the binary view.
+            }
+         }
          if (B.get ('project') !== project.id || B.get ('file', 'name') !== name) return;
          content = newContent;
-         if (/^chat\/.+\.md$/.test (name) && ! (B.get ('message', 'to') || '').trim ()) {
+         if (type (content) === 'string' && /^chat\/.+\.md$/.test (name) && ! (B.get ('message', 'to') || '').trim ()) {
             var entries = content.split (/^əəə head [0-9a-f-]{36}\n/im).slice (1).reverse ();
             var recipient = dale.stopNot (entries, undefined, function (entry) {
                var body = entry.match (/^əəə body [0-9a-f-]{36}\n/im);
@@ -695,7 +711,10 @@ B.mrespond ([
                if (! from || /^(ai-|shell$|systemPrompt$|main\.md$)/.test (from [1])) return;
                var to = head.match (/^to (.+)$/m);
                to = to ? to [1].trim () : '';
-               return /^(ai-|shell$)/.test (to) ? to : 'all';
+               if (to === 'shell') return to;
+               return dale.stopNot (models, undefined, function (m) {
+                  if (to === 'ai-' + m.model && modelCredential (m, B.get ('user', 'credentials'))) return to;
+               }) || 'all';
             }) || 'all';
             B.call (x, 'set', ['message', 'to'], recipient);
          }
@@ -718,7 +737,7 @@ B.mrespond ([
 
       var link = document.createElement ('a');
       link.download = file.name.split ('/').pop ();
-      link.href = '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + file.name.split ('/').map (encodeURIComponent).join ('/');
+      link.href = '/project/' + B.get ('project') + '/file/' + encodeURIComponent (file.name);
       document.body.appendChild (link);
       link.click ();
       link.remove ();
@@ -978,7 +997,7 @@ B.mrespond ([
    ['cancel', 'message', function (x, id) {
       var project = B.get ('project');
       var name = B.get ('file', 'name');
-      if (! project || ! name || typeof content !== 'string') return;
+      if (! project || ! name || type (content) !== 'string') return;
       if (B.get ('cancelling', id)) return;
 
       var head = content.match (new RegExp (
@@ -1067,7 +1086,7 @@ B.mrespond ([
             }, function (x, error, rs) {
                inFlight = false;
                if (error || B.get ('pending', 'requests', key) !== interval) return;
-               if (B.get ('project') !== project || B.get ('file', 'name') !== name || typeof content !== 'string') return;
+               if (B.get ('project') !== project || B.get ('file', 'name') !== name || type (content) !== 'string') return;
 
                var head = content.match (new RegExp ('^əəə head ' + id + '\\n', 'im'));
                if (! head) return;
@@ -1103,6 +1122,13 @@ B.mrespond ([
       if (! body.trim ()) return;
 
       to = (to || '').trim () || 'all';
+
+      var model = dale.stopNot (models, undefined, function (m) {
+         if (to === 'ai-' + m.model) return m;
+      });
+      if (model && ! modelCredential (model, B.get ('user', 'credentials'))) {
+         return B.call (x, 'snackbar', 'warning', 'Open settings to add ' + model.provider + (model.requireAPIKey ? ' API key credentials' : ' credentials'));
+      }
 
       B.call (x, 'post', '/project/message', {
          body: body,
@@ -1230,6 +1256,7 @@ css.style = [
    // *** CHAT ***
 
    ['.chat-recipient-options', {display: 'none'}],
+   ['.chat-draft-content:has(.chat-credentials-warning) > .chat-draft-editor', {visibility: 'hidden'}],
    ['.chat-recipient:focus-within .chat-recipient-options', {display: 'block'}],
    ['.chat-recipient-options button:focus, .chat-recipient-options button:only-child', {
       'background-color': css.colors.vhighlightblue,
@@ -1314,7 +1341,8 @@ views.main = function () {
                }),
 
                // Account and logout
-               B.view (['user', 'email'], function (email) {
+               B.view ([['user', 'email'], ['search', 'project']], function (email, search) {
+                  if (view === 'projects' && search !== undefined) return ['span'];
                   var logout = ['button', {
                      class: css.button + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3'),
                      style: view === 'files' ? style ({padding: '0.5rem 0.875rem'}) : undefined,
@@ -1365,10 +1393,18 @@ views.main = function () {
                warning: 'bg-yellow black',
             } [snackbar.type] || 'bg-dark-gray white';
 
+            var spinnies = snackbar.type !== 'yellow' ? '' : ['span', {
+               class: 'dib nowrap',
+               style: style ({transform: 'scale(0.75)'}),
+            }, dale.go (dale.times (3), function () {return views.spinny ('white')})];
+
             if (snackbar) return ['div', {
                class: 'bottom-0 fixed left-0 pa3 pa4-ns right-0 z-999',
                onclick: B.ev ('snackbar', 'clear'),
-            }, ['div', {class: 'br3 center fw5 lh-copy mw7 pa3 ph4-ns shadow-4 tc ' + snackbarClass}, snackbar.message || '']];
+            }, ['div', {
+               class: 'br3 center flex fw5 items-center justify-center lh-copy mw7 pa3 ph4-ns shadow-4 tc ' + snackbarClass,
+               style: style ({gap: '1rem'}),
+            }, [spinnies, snackbar.message || '', spinnies]]];
          }) (),
       ]];
    });
@@ -1714,6 +1750,17 @@ views.projects = function () {
                                     gap: '0.5rem',
                                  }),
                               }, [
+                                 ['span', {
+                                    class: 'flex items-center justify-center pointer',
+                                    onclick: B.ev ('download', 'project', project),
+                                    style: style ({
+                                       'border-radius': '0.5rem',
+                                       'font-size': '1.25rem',
+                                       height: '2.5rem',
+                                       width: '2.5rem',
+                                    }),
+                                    title: 'Download',
+                                 }, ['i', {class: 'bi bi-download'}]],
                                  ['span', {
                                     class: 'flex items-center justify-center pointer',
                                     onclick: B.ev ('set', ['edit', 'project'], {
@@ -2290,7 +2337,7 @@ views.files = function () {
                      ['img', {
                         alt: file.name,
                         class: 'absolute h-100 left-0 top-0 w-100',
-                        src: '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + file.name.split ('/').map (encodeURIComponent).join ('/'),
+                        src: '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + encodeURIComponent (file.name),
                         onerror: B.ev ('snackbar', 'error', 'There was a problem loading the image'),
                         style: style ({'object-fit': 'contain'}),
                      }],
@@ -2298,7 +2345,7 @@ views.files = function () {
                   isPdf ? ['div', {class: 'flex-auto relative'}, [
                      ['object', {
                         class: 'absolute bn h-100 left-0 top-0 w-100',
-                        data: '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + file.name.split ('/').map (encodeURIComponent).join ('/'),
+                        data: '/project/' + encodeURIComponent (B.get ('project')) + '/file/' + encodeURIComponent (file.name),
                         title: file.name,
                         type: 'application/pdf',
                      }, [
@@ -2718,6 +2765,14 @@ views.files = function () {
 
 // *** CHAT ***
 
+var modelCredential = function (model, credentials) {
+   if (! model) return;
+   var creds = (credentials || {}) [model.provider] || {};
+   return model.requireAPIKey
+      ? (creds.apiKey ? 'apiKey' : undefined)
+      : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined;
+}
+
 views.chat = function () {
    var matchesQuery = function (message, query, userId) {
       var body = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
@@ -2944,14 +2999,22 @@ views.chat = function () {
                var model = dale.stopNot (models, undefined, function (m) {
                   if (from === 'ai-' + m.model) return m;
                });
-               var usageLabel = '';
-               if (end && model && model.window && ! /^pending 1$/m.test (head)) {
+               var usageLabel = '', costLabel = '';
+               if (end && model && ! /^pending 1$/m.test (head)) {
                   var tokensIn = head.match (/^tokens-in (\d+)$/m);
                   var tokensCache = head.match (/^tokens-cache (\d+)$/m);
                   var tokensOut = head.match (/^tokens-out (\d+)$/m);
                   if (tokensIn && tokensCache && tokensOut) {
                      var total = Number (tokensIn [1]) + Number (tokensCache [1]) + Number (tokensOut [1]);
-                     usageLabel = (total / model.window * 100).toFixed (1) + '% context';
+                     if (model.window) usageLabel = (total / model.window * 100).toFixed (1) + '% context';
+                     if (/^credential apiKey$/m.test (head)) {
+                        var cost = (
+                           Number (tokensIn [1]) * model.priceIn
+                           + Number (tokensCache [1]) * model.priceCache
+                           + Number (tokensOut [1]) * model.priceOut
+                        ) / 1000000;
+                        if (isFinite (cost) && cost >= 0) costLabel = '≈ $' + cost.toFixed (3);
+                     }
                   }
                }
                if (start && end) {
@@ -2963,10 +3026,10 @@ views.chat = function () {
                var expandKey = ['expand', B.get ('project'), file.name, messageIndexes [messageId.toLowerCase ()]];
                var truncatedBody;
                if (originalLength > 10000) {
-                  var firstEnd = body.lastIndexOf ('\n', 5000);
-                  var lastStart = body.indexOf ('\n', body.length - 5000);
-                  if (firstEnd === -1) firstEnd = 5000;
-                  if (lastStart === -1) lastStart = body.length - 5000;
+                  var firstEnd = body.lastIndexOf ('\n', 50);
+                  var lastStart = body.indexOf ('\n', body.length - 50);
+                  if (firstEnd === -1) firstEnd = 50;
+                  if (lastStart === -1) lastStart = body.length - 50;
                   var omitted = body.slice (firstEnd, lastStart).split ('\n').length - 1;
                   truncatedBody = body.slice (0, firstEnd) + '\n\n(omitting ' + omitted + ' lines)\n\n' + body.slice (lastStart + 1);
                }
@@ -2979,37 +3042,6 @@ views.chat = function () {
                   return ['LITERAL', marked.parse (b).replace (/<a href="(?!https?:\/\/)([^"]*)">/g, '<a href="#/files/' + B.get ('project') + '/$1">')];
                };
                var isToolResult = shell && parseToolResult (truncatedBody || body);
-               var pane = ['div', {
-                  class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' bl border-box br3 bt chat-message lh-copy mw-100' + (isToolResult ? '' : ' ph3 pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
-                  opaque: true,
-                  style: style ({
-                     'border-width': '0.25rem',
-                     'font-size': from === userId ? '1.125rem' : undefined,
-                     'min-width': 0,
-                     'overflow-wrap': 'anywhere',
-                     width: 'fit-content',
-                  }),
-               }, [
-                  originalLength > 10000 ? B.view (expandKey, function (expanded) {
-                     return ['div', [
-                        renderBody (expanded ? body : truncatedBody),
-                        ['div', {
-                           class: 'f6 pointer pv2 underline vgray',
-                           onclick: B.ev ('set', expandKey, expanded ? undefined : true),
-                        }, expanded ? 'Collapse' : 'Expand (' + Math.ceil (originalLength / 1000) + 'k)'],
-                     ]];
-                  }) : renderBody (body),
-                  /^pending 1$/m.test (head) ? ['div', {
-                     'aria-label': 'Response in progress',
-                     class: 'pv2',
-                     role: 'status',
-                  }, dale.go (dale.times (3), function () {
-                     return views.spinny (views.projectColor (messageIndexes [messageId.toLowerCase ()], true));
-                  })] : '',
-                  cancelled ? ['div', {
-                     class: 'f7' + (isToolResult ? ' ph3' : '') + ' pv2',
-                  }, '(cancelled ' + ago (cancelled [1]) + ')'] : ['span'],
-               ]];
                return ['div', {
                   class: 'border-box items-start mb4 mw-100 pv3 relative w-100',
                   style: style ({
@@ -3041,7 +3073,37 @@ views.chat = function () {
                         }, cancelling ? 'Stopping...' : '■ Stop'];
                      }) : ['span'],
                   ]],
-                  pane,
+                  ['div', {
+                     class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' bl border-box br3 bt chat-message lh-copy mw-100' + (isToolResult ? '' : ' ph3 pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
+                     opaque: true,
+                     style: style ({
+                        'border-width': '0.25rem',
+                        'font-size': from === userId ? '1.125rem' : undefined,
+                        'min-width': 0,
+                        'overflow-wrap': 'anywhere',
+                        width: 'fit-content',
+                     }),
+                  }, [
+                     originalLength > 10000 ? B.view (expandKey, function (expanded) {
+                        return ['div', {opaque: true}, [
+                           renderBody (expanded ? body : truncatedBody),
+                           ['div', {
+                              class: 'f6 pointer pv2 underline vgray',
+                              onclick: B.ev ('set', expandKey, expanded ? undefined : true),
+                           }, expanded ? 'Collapse' : 'Expand (' + Math.ceil (originalLength / 1000) + 'k)'],
+                        ]];
+                     }) : renderBody (body),
+                     /^pending 1$/m.test (head) ? ['div', {
+                        'aria-label': 'Response in progress',
+                        class: 'pv2',
+                        role: 'status',
+                     }, dale.go (dale.times (3), function () {
+                        return views.spinny (views.projectColor (messageIndexes [messageId.toLowerCase ()], true));
+                     })] : '',
+                     cancelled ? ['div', {
+                        class: 'f7' + (isToolResult ? ' ph3' : '') + ' pv2',
+                     }, '(cancelled ' + ago (cancelled [1]) + ')'] : ['span'],
+                  ]],
                   ['div', {
                      class: 'code f6 flex flex-column fw7 justify-between lh-solid self-stretch',
                      style: style ({
@@ -3054,6 +3116,10 @@ views.chat = function () {
                         ['div', {class: 'br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true)}, fromLabel],
                         tokenLabel ? ['div', {class: 'br2 dib lh-copy mt2 ph2 pv1 vlightblue'}, tokenLabel] : '',
                         usageLabel ? ['div', {class: 'br2 dib lh-copy mt2 ph2 pv1 vlightblue'}, usageLabel] : '',
+                        costLabel ? ['div', {
+                           class: 'br2 dib lh-copy mt2 ph2 pv1 vgreen',
+                           title: 'Estimated API cost in USD, using configured model prices.',
+                        }, costLabel] : '',
                      ]],
                      ['div', {class: 'br2 dib ph2 pv1 ' + views.projectColor (timeLabel, true)}, timeLabel],
                   ]],
@@ -3129,7 +3195,7 @@ views.chat = function () {
                height: '20%',
             }),
          }, [
-            B.view ('message', function (message) {
+            B.view ([['message'], ['user', 'credentials']], function (message, credentials) {
                message = message || {};
                var recipient = message.to || '';
                return ['div', {
@@ -3158,8 +3224,7 @@ views.chat = function () {
                         style: style ({bottom: '100%', 'z-index': 10}),
                      }, dale.fil (['all', 'shell'].concat (function () {
                         var aiOptions = dale.fil (models, undefined, function (m) {
-                           var creds = (B.get ('user', 'credentials') || {}) [m.provider] || {};
-                           if (creds.account || creds.apiKey) return 'ai-' + m.model;
+                           if (modelCredential (m, credentials)) return 'ai-' + m.model;
                         });
                         return aiOptions.length ? aiOptions : ['ai'];
                      } ()), undefined, function (to) {
@@ -3170,13 +3235,7 @@ views.chat = function () {
                            onclick: B.ev ('set', ['message', 'to'], to) + ' if (editor) editor.focus ();',
                         }, to];
                      })],
-                     ! dale.fil (models, undefined, function (m) {
-                        var creds = (B.get ('user', 'credentials') || {}) [m.provider] || {};
-                        if (creds.account || creds.apiKey) return true;
-                     }).length && /^ai/i.test (recipient) ? ['div', {
-                        class: 'absolute f7 fw6 gold',
-                        style: style ({bottom: '100%', 'margin-bottom': '0.25rem'}),
-                     }, 'Open settings to add an AI provider'] : '',
+
                   ]],
                   ['button', {
                      class: 'bg-vgreen black bn br2 f5 flex-shrink-0 fw7 ph3 pv2 pointer relative',
@@ -3186,15 +3245,48 @@ views.chat = function () {
                ]];
             }),
             ['div', {
-               class: 'flex-auto relative',
+               class: 'chat-draft-content flex-auto relative',
                style: style ({'min-height': 0}),
             }, [
-               views.tooltip ('M'),
                ['div', {
-                  class: 'absolute absolute--fill overflow-hidden',
-                  id: 'chat-editor',
-                  opaque: true,
-               }],
+                  class: 'absolute absolute--fill chat-draft-editor',
+               }, [
+                  views.tooltip ('M'),
+                  ['div', {
+                     class: 'absolute absolute--fill overflow-hidden',
+                     id: 'chat-editor',
+                     opaque: true,
+                  }],
+               ]],
+               B.view ([['message', 'to'], ['user', 'credentials']], function (recipient, credentials) {
+                  recipient = (recipient || '').trim ();
+                  var model = dale.stopNot (models, undefined, function (m) {
+                     if (recipient === 'ai-' + m.model) return m;
+                  });
+                  var needsCredentials = /^ai/i.test (recipient) && (model
+                     ? ! modelCredential (model, credentials)
+                     : ! dale.fil (models, undefined, function (m) {
+                        if (modelCredential (m, credentials)) return true;
+                     }).length);
+
+                  return ['div', {
+                     class: 'absolute absolute--fill flex items-center justify-center overflow-auto pa2 tc' + (needsCredentials ? ' chat-credentials-warning' : ''),
+                     style: style ({
+                        display: needsCredentials ? 'flex' : 'none',
+                        gap: '0.5rem',
+                     }),
+                     role: 'status',
+                  }, needsCredentials ? [
+                     ['p', {class: 'f7 gold ma0'}, model
+                        ? 'Add ' + model.provider + (model.requireAPIKey ? ' API key.' : ' credentials.')
+                        : 'Add an AI provider to chat.'],
+                     ['button', {
+                        class: 'bg-vgreen black bn br2 f7 flex-shrink-0 ph2 pv1 pointer',
+                        onclick: B.ev ('set', ['settings', 'show'], true),
+                        type: 'button',
+                     }, 'Open settings'],
+                  ] : []];
+               }),
             ]],
          ]],
       ]];
