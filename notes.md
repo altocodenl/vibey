@@ -1,5 +1,16 @@
 # Vibey development notes
 
+## 2026-09-26
+
+Launch deploy checklist:
+- New deploy.sh
+   - Change email from 0 to 1 in config
+   - Set baseUrl to app.buildwithvibey.com
+- Network restrictions preventing projects from reaching sensitive host/internal services.
+- Create subdomain
+- Update nginx config
+- Expose 5353 only to the proxy
+
 ## 2026-09-25
 
 These notes shall be published in vibey online as the vibey dev journal.

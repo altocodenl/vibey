@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile.vibey-host
     image: vibey-host:latest
     ports:
-      - "5353:5353"
+      - "127.0.0.1:5353:5353"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - vibey-host:/app/data
@@ -17,12 +17,21 @@ services:
       - email
 
   vibey-project:
+    networks:
+      - projects
     build:
       context: .
       dockerfile: Dockerfile.vibey-project
     image: vibey-project:latest
     deploy:
       replicas: 0
+
+networks:
+  projects:
+    name: vibey-projects
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
 
 volumes:
   vibey-host:

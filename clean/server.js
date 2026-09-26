@@ -305,7 +305,7 @@ docker.run = async function (id, command, options) {
 
    var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, {... options, 'catch': true});
    if (result.code === 1 && result.stderr && result.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
-      var recreate = await run ('docker', 'run', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
+      var recreate = await run ('docker', 'run', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
       if (recreate.code) {
          var restart = await run ('docker', 'start', id, {catch: true});
          if (restart.code) return result;
@@ -987,7 +987,7 @@ var routes = [
 
       var containerId = 'vibey-project-' + project.id;
 
-      await run ('docker', 'run', '-v', containerId + ':/project', '--name', containerId, '-d', 'vibey-project');
+      await run ('docker', 'run', '--network', 'vibey-projects', '-v', containerId + ':/project', '--name', containerId, '-d', 'vibey-project');
 
       await docker.run (project.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local', {catch: true});
 
