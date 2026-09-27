@@ -1,5 +1,31 @@
 # Vibey development notes
 
+## 2026-09-27
+
+To a great extent, OSes seem to be package managers.
+
+1953 UTC: it's on
+```
+ Image vibey-project:latest Built
+ Image vibey-host:latest Built
+ Volume vibey-host Creating
+ Network vibey-projects Creating
+ Volume vibey-host Creating
+ Network vibey-projects Creating
+ Network vibey_default Creating
+ Network vibey_default Creating
+ Volume vibey-host Created
+ Volume vibey-host Created
+ Network vibey-projects Created
+ Network vibey-projects Created
+ Network vibey_default Created
+ Network vibey_default Created
+ Container vibey-host Creating
+ Container vibey-host Created
+ Container vibey-host Starting
+ Container vibey-host Started
+```
+
 ## 2026-09-26
 
 Launch deploy checklist:

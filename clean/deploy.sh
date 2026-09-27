@@ -11,15 +11,15 @@ if [[ "${2:-}" != "confirm" && "${3:-}" != "confirm" && "${4:-}" != "confirm" ]]
    exit 1
 fi
 
-HOST="root@136.243.174.166"
-FOLDER="/root/vibey/clean"
+HOST="acprod"
+TARGET_FOLDER="/root/vibey"
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-ssh "$HOST" "mkdir -p '$FOLDER'"
-rsync -av --exclude node_modules --exclude .git ./ "$HOST:$FOLDER/"
+ssh "$HOST" "mkdir -p '$TARGET_FOLDER'"
+rsync -av --exclude node_modules --exclude .git ./ "$HOST:$TARGET_FOLDER/"
 
-ssh "$HOST" "bash -s -- '$FOLDER'" <<'REMOTE'
+ssh "$HOST" "bash -s -- '$TARGET_FOLDER'" <<'REMOTE'
 set -euo pipefail
 cd "$1"
 
