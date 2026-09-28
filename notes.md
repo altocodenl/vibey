@@ -1,5 +1,94 @@
 # Vibey development notes
 
+## 2026-09-28
+
+Idea: auto formatting on public .mds, so you can just read them.
+
+What would give zero interruption for projects when deploying the host:
+```
+1. Don't stop projects on shutdown. Make docker.cleanup dev-only, or remove it from the SIGTERM path. The project containers are separate from the host, so they can outlive it.
+2. Detach the command from the host. Right now the command lives inside a docker exec session owned by the host, and killing that client breaks the output stream. Instead, launch the command inside the project container, detached (for example setsid nohup ... > /tmp/vibey-out-<id> 2>&1 &). Also write an exit-code file when it finishes. The host then tails the output file.
+3. Reconnect on startup. When the host boots, scan for messages with pending 1. If the command's process is still alive, resume tailing and finish the message. If it's gone, mark the message done or interrupted.
+
+How it works:
+- Start: the host launches the command under setsid with stdin, stdout and stderr detached from the exec session. The host's docker exec returns as soon as the pid file exists. The command's output goes to /tmp/vibey-output-<id>, and line 2 of the pid file records the chat file, so a new host knows which message to update.
+- Follow: the follower is just another docker exec owned by the host. It runs tail -c +1 -f on the output file. streamEdit replaces the whole body each time, so a re-attached follower replays the file from the start, and the host doesn't need to track an offset. The host is still the only thing that writes to the chat.
+- Cancel: the cancellation check moves into the follower loop. It uses awk on the message head, replacing the node polling loop that ran a docker exec every 100ms. If you cancel while the host is down, the next follower kills the command on its first check.
+- Host shutdown: the follower dies without exit code 0 or 3, so shell.follow leaves the files alone and doesn't mark the message done. On boot, the master calls shell.reattach.
+- Project containers: on SIGTERM in cloud mode, they're no longer stopped. Local mode keeps the cleanup.
+
+Things I noticed but kept out to stay minimal:
+- Zombies: a finished detached command becomes a zombie under sleep infinity, because nothing in the container reaps it. The follower treats a zombie as finished, so it still works, but zombies pile up until the container restarts. Adding --init to the two docker run calls (server.js:309, server.js:992) fixes this for new containers.
+- Cancelling sudo commands: if the command runs through sudo, kill -KILL -- -$pid as user vibey fails with EPERM. The current code has the same problem. Using sudo kill would fix it.
+- PID reuse: there's no guard against the recorded PID being reused by another process. That only matters for very long gaps.
+- Worker crashes: if a worker crashes without the master restarting, its commands keep running, but nobody follows them until the next restart.
+```
+And updating the projects could be done by running commands from the host on deploy.
+
+Sources of gotoB usage bugs:
+   1) things that should be opaque (literals, elements controlled by codemirror) are not marked as opaque;
+   2) there are calls to B.view done outside of another call to b.view (when accumulating views as variables, for example);
+   3) a reactive view not returning a single html element as its outermost output.
+
+Missing features for demos:
+- travel plan: write access to user, agent calling agent, see images in docs
+- customer proposal: read access to one file to one user, build proposal with AI (add pivs to the chat), email forwarding
+- sunday brunch: public page, append to chat with token from public page, upload images in chat
+
+Missing features in order of nowness, for the demos:
+- Access: read & write
+- Images in docs
+- Files in chats
+
+For current users, missing features in order of nowness:
+- Access: read & write, also for inter-project
+- Autobackup
+
+- TODO
+   - tests in local mode
+   - mobile ui
+   - devops
+      - no downtime on project during deploy
+      - notification project to see alerts
+   - access
+      - shell calling another project (read/write/edit/run/chat). This would allow all cross-project ops. Also: interpret at the vibey level: since commands go through the host, you don't need credentials. You know that that command is running inside project Y, and if it refers project X, check if X allows access to Y. If it does, interpret the command as a special tool call across projects. Done!
+      - read/write access to another user: improve code
+      - email hooks
+      - api hooks
+      - tests
+   - chat
+      - stretch anthropic session
+      - Upload images, allow download to project or to local
+      - enable an agent calling another agent
+      - cron file
+      - tests
+   - file
+      - show local images embedded in docs
+      - tabs
+      - open sqlite files
+      - stream large files (split them in pages)
+      - edit text file through diffs (edits) rather than whole file write (faster)
+      - client tests
+   - project
+      - autobackup
+      - client tests
+      - skip docker.exec to have a slash command time by 10x
+
+Some notes on Alexander - The process of creating life:
+- "It may also be said that this vision of living process is, or if true may turn out to be, in the end, of the greatest importance for the future of mankind."
+- "At first sight it would almost seem absurd to claim that every living process may be recognized, or measured in its degree of efficacy, according to the depth of its capacity to produce deep feeling. Yet I believe this is so."
+- "the task of finding the most structure-enhancing step available is therefore, in practice, extremely hard."
+- "Each obsrver is able to judge the whole, to see and experience the whole, by payin gattention to the question: Is the emerrging building increasing *my own* wholeness? (...) Is it becoming like the soul?"
+- "But less obscurely expressed, the extent (...) can be steered by the extent to which it has deep feeling in it, deep feeling that we experience."
+- "when the builder consistently uses the emerging feeling of the whole as the origin of his insight"
+- "Roughly this, I am almost certain, is what traditional builders did. They paid attention to the *feeling* of the emerging structure"
+- "For us, in our era (...) The word "feeling" has been contaminated. It is confused with emotions - with feelings (in the plural) (...) which confuse rather than help because they make us ask ourselves, *which* kind of feeling should I follow? The feeling I am talking about is unitary. It is feeling in the singular, which comes from the whole."
+- "Real feeling, true feeling, is the *experience* of the whole. Being guided by the whole, and being guided by feeling, are therefore nearly synonymous."
+- "*In any living process, or any process of design or making, the way forward, the next step which is most structure-enhancing, is that step which most intensifies the feeling of the emerging whole.*"
+- "Although extraordinary, if judged by the standards of 20th-century positivism, this process is nevertheless sober and exact."
+
+Grant access: `B.call ('post', '/creator/grant', {grant: true, email: '<email>'});`
+
 ## 2026-09-27
 
 To a great extent, OSes seem to be package managers.

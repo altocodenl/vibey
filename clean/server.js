@@ -55,6 +55,7 @@ var models = [
    {provider: 'openai',    model: 'gpt-6',   canonical: 'gpt-6-astra',    window: 1050000, priceCache: 1,   priceIn: 10, priceOut: 50},
    {provider: 'openai',    model: 'gpt-5.6', canonical: 'gpt-5.6-sol',    window: 1050000, priceCache: 0.4, priceIn: 4,  priceOut: 20},
    {provider: 'openai',    model: 'gpt-4.1', canonical: 'gpt-4.1',        window: 1047576, priceCache: 0.5, priceIn: 2,  priceOut: 8, requireAPIKey: true},
+   {provider: 'anthropic', model: 'opus-5.5', canonical: 'claude-opus-5-5', window: 1000000, priceCache: 0.2, priceIn: 4,  priceOut: 20},
    {provider: 'anthropic', model: 'opus-4.6', canonical: 'claude-opus-4-6', window: 1000000, priceCache: 0.5, priceIn: 5,  priceOut: 25},
 ];
 
@@ -196,6 +197,18 @@ var getForUser = async function (userId, entity) {
    }));
 }
 
+var projectAccessCleanup = async function (id) {
+   var members = await redis ('smembers', 'accessBy:' + id);
+   return [
+      ... dale.go (members, function (member) {
+         var [verb, who, ... prefix] = member.split (':');
+         var suffix = prefix.length ? ':' + prefix.join (':') : '';
+         return ['srem', 'accessTo:' + who, verb + ':' + id + suffix];
+      }),
+      ['del', 'accessBy:' + id]
+   ];
+};
+
 // *** COMMANDS ***
 
 var run = async function (... args) {
@@ -262,29 +275,67 @@ var run = async function (... args) {
 
 var docker = {};
 
-docker.credentials = async function (id, userId) {
-   // TODO: re-enable shared access grants when access is ready.
-   return {code: 1, error: 'Shared access is temporarily disabled'};
-
-   var owner = await redis ('hget', 'project:' + id, 'owner');
-   if (owner !== userId) return {code: 1, error: 'Only the project owner can grant access'};
-
-   var file = await docker.read (id, '/project/access.md');
+docker.credentials = async function (id) {
+   var file = await docker.read (id, '/project/vibey/access.md');
    if (file.code) return file;
 
-   var emails = [], lines = file.stdout.toString ('utf8').split (/\r?\n/);
-   for (var line of lines) {
+   var invalidEntry;
+   var entries = dale.fil (file.stdout.toString ('utf8').split (/\r?\n/), undefined, function (line) {
       line = line.trim ();
-      if (! line || line.startsWith ('#')) continue;
-      var match = /^read\/write\s+([^\s@]+@[^\s@]+\.[^\s@]+)$/i.exec (line);
-      if (! match) return {code: 1, error: 'Invalid access.md line: ' + line};
-      emails.push (match [1].toLowerCase ());
-   }
-   emails = [... new Set (emails)];
-   if (emails.length) await redis (dale.go (emails, function (email) {
-      return ['sadd', 'access:' + email, 'project:' + id];
+      if (! line || line.startsWith ('#')) return;
+      var match = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line);
+      if (! match || ! validEmail.test (match [1])) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
+
+      var prefix = match [3] || '';
+      if (
+         prefix.startsWith ('/') ||
+         /[\\\x00-\x1f\x7f]/.test (prefix) ||
+         prefix.includes ('//') ||
+         dale.stop (prefix.split ('/'), true, function (part) {
+            return part === '.' || part === '..';
+         })
+      ) return invalidEntry = {error: 'Invalid vibey/access.md prefix at line: ' + line};
+
+      return {email: match [1].toLowerCase (), verb: match [2], prefix};
+   });
+
+   if (invalidEntry) return {code: 1, error: invalidEntry.error};
+
+   var emails = dale.keys (dale.obj (entries, function (entry) {
+      return [entry.email, true];
    }));
-   return {code: 0, stdout: 'Access granted to: ' + (emails.join (', ') || '(none)') + '\n'};
+
+   var users = await dale.async (emails, async function (email) {
+      var userId = await redis ('get', 'email:' + email);
+      // Keep invitations keyed by email until the account is verified.
+      if (userId && await redis ('ttl', 'user:' + userId) === -1) return userId;
+      return email;
+   });
+
+   var recipients = dale.obj (emails, function (email, k) {
+      return [email, users [k]];
+   });
+   var members = dale.go (entries, function (entry) {
+      return entry.verb + ':' + recipients [entry.email] + (entry.prefix ? ':' + entry.prefix : '');
+   });
+
+   var previous = await redis ('smembers', 'accessBy:' + id);
+   await redis ([
+      ... dale.go (previous, function (member) {
+         var [verb, who, ... prefix] = member.split (':');
+         var suffix = prefix.length ? ':' + prefix.join (':') : '';
+         return inc (members, member) ? [] : ['srem', 'accessTo:' + who, verb + ':' + id + suffix];
+      }),
+      ['del', 'accessBy:' + id],
+      members.length ? ['sadd', 'accessBy:' + id, ... members] : [],
+      ... dale.go (members, function (member) {
+         var [verb, who, ... prefix] = member.split (':');
+         var suffix = prefix.length ? ':' + prefix.join (':') : '';
+         return ['sadd', 'accessTo:' + who, verb + ':' + id + suffix];
+      })
+   ]);
+
+   return {code: 0, stdout: 'Access synced for: ' + (emails.join (', ') || '(none)') + '\n'};
 };
 
 Path.quote = function (path) {
@@ -673,19 +724,20 @@ var routes = [
    // *** AUTH ***
 
    ['get', '/auth/user', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 200, {mode: 'local'});
-
       var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
+      credentials = dale.obj (credentials, function (types, provider) {
+         return [provider, dale.obj (types, function (credential, name) {
+            return [name, true];
+         })];
+      });
+
+      if (! CONFIG.cloud) return reply (rs, 200, {creator: true, credentials, mode: 'local'});
 
       reply (rs, 200, {
          admin: rq.user.email === CONFIG.admin ? true : undefined,
          count: parseInt (rq.user.count),
          creator: rq.user.email === CONFIG.admin || !! rq.user.creator,
-         credentials: dale.obj (credentials, function (types, provider) {
-            return [provider, dale.obj (types, function (credential, name) {
-               return [name, true];
-            })];
-         }),
+         credentials,
          csrf: rq.user.csrf,
          email: rq.user.email,
          id: rq.user.id,
@@ -799,12 +851,25 @@ var routes = [
          // Remove the TTL for email & user entries in case this is the first successful verify for this user
          ['persist', 'user:' + userId],
          ['persist', 'email:' + user.email],
+         ... await (async function () {
+            var projects = await redis ('smembers', 'accessTo:' + email);
+            return dale.go (projects, function (member) {
+               var [verb, id, ... prefix] = member.split (':');
+               var suffix = prefix.length ? ':' + prefix.join (':') : '';
+               return [
+                  ['srem', 'accessBy:' + id, verb + ':' + email + suffix],
+                  ['sadd', 'accessBy:' + id, verb + ':' + userId + suffix],
+                  ['sadd', 'accessTo:' + userId, member],
+                  ['srem', 'accessTo:' + email, member]
+               ];
+            }).flat ();
+         }) (),
       ]);
 
       reply (rs, 200, {
          admin: user.email === CONFIG.admin ? true : undefined,
          count: parseInt (user.count),
-         creator: !! user.creator,
+         creator: user.email === CONFIG.admin || !! user.creator,
          csrf,
          email: user.email,
          mode: 'cloud',
@@ -862,7 +927,30 @@ var routes = [
          await run ('docker', 'volume', 'rm', containerId);
       }, {concurrent: 5})
 
-      await redis ('del', ... ['user:' + rq.user.id, 'email:' + rq.user.email, 'owner:' + rq.user.id, ... keys]);
+      await redis ([
+         ['del', 'user:' + rq.user.id, 'email:' + rq.user.email, 'owner:' + rq.user.id, ... keys],
+         ... await (async function () {
+            var projects = dale.fil (keys, undefined, function (key) {
+               if (key.match (/^project:/)) return key.replace ('project:', '');
+            });
+            var commands = await dale.async (projects, projectAccessCleanup);
+            return commands.flat ();
+         }) (),
+         ... await (async function () {
+            var commands = await dale.async ([rq.user.id, rq.user.email], async function (who) {
+               var members = await redis ('smembers', 'accessTo:' + who);
+               return [
+                  ... dale.go (members, function (member) {
+                     var [verb, id, ... prefix] = member.split (':');
+                     var suffix = prefix.length ? ':' + prefix.join (':') : '';
+                     return ['srem', 'accessBy:' + id, verb + ':' + who + suffix];
+                  }),
+                  ['del', 'accessTo:' + who]
+               ];
+            });
+            return commands.flat ();
+         }) ()
+      ]);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, false, {
          httponly: true,
@@ -1131,7 +1219,7 @@ var routes = [
       ])) return;
 
       var result = rq.body.command.trim () === 'vibey credentials'
-         ? await docker.credentials (rq.body.id, rq.user.id)
+         ? await docker.credentials (rq.body.id)
          : await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
       if (result.code === 0) delete result.code;
 
@@ -1328,7 +1416,7 @@ var routes = [
          reply (rs, 200, {id: id, responseId: responseId});
 
          if (rq.body.body.trim () === 'vibey credentials') {
-            var credentialsResult = await docker.credentials (rq.body.id, rq.user.id);
+            var credentialsResult = await docker.credentials (rq.body.id);
             output += credentialsResult.stdout || credentialsResult.error || 'Could not sync access\n';
             streamEdit ();
          }
@@ -1669,7 +1757,7 @@ var routes = [
                if (call.op === 'write') return await docker.write (rq.body.id, call.path, call.content);
                if (call.op === 'edit') return await docker.edit (rq.body.id, call.path, call.oldText, call.newText);
                if (call.op === 'run' && call.command.trim () === 'vibey credentials') {
-                  var result = await docker.credentials (rq.body.id, rq.user.id);
+                  var result = await docker.credentials (rq.body.id);
                   if (onOutput) onOutput (result.stdout || result.error || '');
                   return result;
                }
@@ -1766,6 +1854,8 @@ var routes = [
       });
       if (! match) return reply (rs, 404);
 
+      if (match.owner !== rq.user.id) return reply (rs, 403, {error: 'Only the project owner can delete the project'});
+
       var containerId = 'vibey-project-' + rq.data.params.id;
 
       var noSuchContainer = function (result) {
@@ -1782,7 +1872,8 @@ var routes = [
 
       await redis ([
          ['del',  'project:' + rq.data.params.id],
-         ['srem', 'owner:' + rq.user.id, 'project:' + rq.data.params.id]
+         ['srem', 'owner:' + rq.user.id, 'project:' + rq.data.params.id],
+         ... await projectAccessCleanup (rq.data.params.id)
       ]);
 
       reply (rs, 200);

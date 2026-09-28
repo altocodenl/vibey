@@ -145,9 +145,15 @@ if (mode === 'server') {
 
          suites.auth = [
             ['Get /auth/user without session', 'get', '/auth/user', '*', function (s, rq, rs) {
+               if (CONFIG.cloud) return assert ([
+                  ['code', rs.code, 403, teishi.test.equal],
+                  ['body', rs.body, {error: 'No session'}, teishi.test.equal],
+               ]);
                return assert ([
-                  ['code', rs.code, CONFIG.cloud ? 403 : 200, teishi.test.equal],
-                  ['body', rs.body, CONFIG.cloud ? {error: 'No session'} : {mode: 'local'}, teishi.test.equal],
+                  ['code', rs.code, 200, teishi.test.equal],
+                  ['body.mode', rs.body.mode, 'local', teishi.test.equal],
+                  ['body.creator', rs.body.creator, true, teishi.test.equal],
+                  ['body.credentials', rs.body.credentials, 'object'],
                ]);
             }],
             dale.go (['/creator/grant', '/auth/login'], function (path, k) {
@@ -168,7 +174,7 @@ if (mode === 'server') {
                   }),
                ];
 
-               if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, 404, assertBody ({error: 'Not in cloud mode'})];
+               if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, {}, 404, assertBody ({error: 'Not in cloud mode'})];
             }),
             CONFIG.cloud ? [
                ['Login', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
@@ -324,7 +330,13 @@ if (mode === 'server') {
             ] : [],
             ! CONFIG.cloud ? [
                ['Logout', 'post', '/auth/logout', {}, 404, assertBody ({error: 'Not in cloud mode'})],
-               ['Get user in local mode', 'get', '/auth/user', 200, assertBody ({mode: 'local'})],
+               ['Get user in local mode', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert ([
+                     ['body.mode', rs.body.mode, 'local', teishi.test.equal],
+                     ['body.creator', rs.body.creator, true, teishi.test.equal],
+                     ['body.credentials', rs.body.credentials, 'object'],
+                  ]);
+               }],
                ['List sessions', 'get', '/auth/list', 404, assertBody ({error: 'Not in cloud mode'})],
             ] : [],
          ];

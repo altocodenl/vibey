@@ -31,6 +31,7 @@ if (! /^email enable [01][ \t]*$/m.test (config) || ! /^baseURL .+$/m.test (conf
    throw new Error ('Expected email enable and baseURL entries in config.4tx');
 }
 config = config.replace (/^email enable [01][ \t]*$/m, 'email enable 1');
+config = config.replace (/^cloud 0$/m, 'cloud 1');
 config = config.replace (/^baseURL .+$/m, 'baseURL https://app.buildwithvibey.com');
 fs.writeFileSync ('config.4tx', config);
 NODE

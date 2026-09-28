@@ -104,6 +104,12 @@ redis db <number>
 ### Redis
 
 ```
+accessBy:<projectId> 1 <verb>:<userId|email>[:<prefix>] // set of recipients; verb is read or write
+                     2 <verb>:<userId|email>[:<prefix>]
+                     ...
+accessTo:<userId|email> 1 <verb>:<projectId>[:<prefix>] // set of shared projects; prefix is optional
+                        2 <verb>:<projectId>[:<prefix>]
+                        ...
 credentials:<userId> data <JSON> // {provider: {account: {access, expires, refresh, ...}, apiKey: "<key>"}}
 email:<email> <userId>
 lock:edit:<projectId>:<path> <integer> // per-file edit lock, expires 10s
@@ -145,7 +151,7 @@ userCount <integer>
 
 Except for `GET /auth/user`, all other auth routes will return a 404 in local mode.
 
-- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, credentials: <object>, csrf: <token>, email: <email>, id: <user id>, mode: 'cloud'}` in cloud mode and `{mode: 'local'}` in local mode. `credentials` lists stored providers and credential types as presence flags (for example, `anthropic.account: true`), never credential values or tokens.
+- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, credentials: <object>, csrf: <token>, email: <email>, id: <user id>, mode: 'cloud'}` in cloud mode and `{creator: true, credentials: <object>, mode: 'local'}` in local mode. `creator` is always `true` for the admin user. `credentials` lists stored providers and credential types as presence flags (for example, `anthropic.account: true`), never credential values or tokens.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet. Sends a login link by email.
 - **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.

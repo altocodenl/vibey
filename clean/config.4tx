@@ -1,7 +1,7 @@
 admin info@altocode.nl
 baseURL http://localhost:5353
 backup enable 0
-cloud 1
+cloud 0
 cookie expires 604800
        name vibey
 email enable 0

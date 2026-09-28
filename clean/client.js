@@ -1341,7 +1341,7 @@ views.main = function () {
                }),
 
                // Account and logout
-               B.view ([['user', 'email'], ['search', 'project']], function (email, search) {
+               B.view ([['user', 'mode'], ['user', 'email'], ['search', 'project']], function (mode, email, search) {
                   if (view === 'projects' && search !== undefined) return ['span'];
                   var logout = ['button', {
                      class: css.button + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3'),
@@ -1370,7 +1370,7 @@ views.main = function () {
                            style: style ({'overflow-wrap': 'anywhere'}),
                         }, email || 'local user'],
                      ]],
-                     logout,
+                     mode !== 'local' ? logout : '',
                   ]];
                })
             ]];
