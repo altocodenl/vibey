@@ -4,7 +4,7 @@ ENV TZ=UTC
 
 RUN apk add --no-cache python3 git curl bash findutils sudo util-linux ripgrep
 
-RUN npm install -g @openai/codex@0.155.1 @anthropic-ai/claude-code@2.1.277
+RUN npm install -g @openai/codex@0.159.0 @anthropic-ai/claude-code@2.1.284
 
 RUN adduser -D -h /home/vibey vibey && echo 'vibey ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 

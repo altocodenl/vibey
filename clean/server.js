@@ -309,7 +309,7 @@ var run = async function (... args) {
 
 var docker = {};
 
-docker.credentials = async function (id) {
+docker.access = async function (id) {
    var file = await docker.read (id, '/project/vibey/access.md');
    if (file.code) return file;
 
@@ -1294,8 +1294,8 @@ var routes = [
       // The client's read flag is not an authorization boundary.
       if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
 
-      var result = rq.body.command.trim () === 'vibey credentials'
-         ? await docker.credentials (rq.body.id)
+      var result = rq.body.command.trim () === 'vibey access'
+         ? await docker.access (rq.body.id)
          : await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
       if (result.code === 0) delete result.code;
 
@@ -1331,7 +1331,9 @@ var routes = [
       var nextHead = rest.match (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im);
       var message = head [0] + (nextHead ? rest.slice (0, nextHead.index).replace (/\n$/, '') : rest);
       if (! message.match (new RegExp ('^əəə body ' + rq.body.messageId + '\\n', 'im'))) return reply (rs, 404);
-      reply (rs, 200, message, {'content-type': 'text/plain; charset=utf-8'});
+      var next = [], heads = /^əəə head ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/gim, match;
+      while ((match = heads.exec (rest))) next.push (match [1]);
+      reply (rs, 200, {message: message, next: next});
    }],
 
    ['post', '/project/message', async function (rq, rs) {
@@ -1367,6 +1369,38 @@ var routes = [
       var auth = aiModel && (aiModel.requireAPIKey
          ? (creds.apiKey ? 'apiKey' : undefined)
          : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined);
+
+      if (auth === 'account' && Date.now () >= creds.account.expires) {
+         var refreshBody = {
+            client_id: aiFlavor === 'anthropic' ? Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString () : 'app_EMoamEEZ73f0CkXaXp7hrann',
+            grant_type: 'refresh_token',
+            refresh_token: creds.account.refresh,
+         };
+         try {
+            var tokenData = await new Promise (function (resolve, reject) {
+               hitit.one ({}, {
+                  https:   true,
+                  host:    aiFlavor === 'anthropic' ? 'console.anthropic.com' : 'auth.openai.com',
+                  path:    aiFlavor === 'anthropic' ? '/v1/oauth/token' : '/oauth/token',
+                  method:  'post',
+                  headers: aiFlavor === 'anthropic' ? {} : {'content-type': 'application/x-www-form-urlencoded'},
+                  body:    aiFlavor === 'anthropic' ? refreshBody : new URLSearchParams (refreshBody).toString (),
+                  code:    200,
+               }, function (error, rdata) {
+                  if (error) return reject (error);
+                  resolve (rdata.body);
+               });
+            });
+         }
+         catch (error) {
+            return reply (rs, 400, {error: aiFlavor + ' account token refresh failed, please reconnect: ' + JSON.stringify (error.body || error.error)});
+         }
+         creds.account.access = tokenData.access_token;
+         creds.account.expires = Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000;
+         if (tokenData.refresh_token) creds.account.refresh = tokenData.refresh_token;
+         if (tokenData.id_token) creds.account.idToken = tokenData.id_token;
+         await redis ('hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials));
+      }
 
       if (aiModel && ! auth) return reply (rs, 400, {
          error: aiModel.model + ' requires ' + aiFlavor + (aiModel.requireAPIKey ? ' API key credentials' : ' account or API key credentials'),
@@ -1423,7 +1457,7 @@ var routes = [
          );
       };
 
-      var watchCancellation = function (proc) {
+      var watchCancellation = function (proc, executionProjectId = rq.body.id) {
          var messageId = responseId;
          var pidFile = processFile (messageId);
          var checking = false, ended = false;
@@ -1439,7 +1473,7 @@ var routes = [
                   '^əəə head ' + messageId + '\n(?:(?!əəə (?:head|body) )[^\n]*\n)*cancelled .+$', 'im'
                ).test (chat.stdout.toString ('utf8'))) return;
                cancelled = true;
-               var result = await docker.run (rq.body.id, 'bash -c ' + Path.quote (
+               var result = await docker.run (executionProjectId, 'bash -c ' + Path.quote (
                   'read -r pid < ' + Path.quote (pidFile)
                   + ' && kill -KILL -- "-$pid"'
                ), {catch: true});
@@ -1492,9 +1526,9 @@ var routes = [
          if (result.code) return reply (rs, 400, result);
          reply (rs, 200, {id: id, responseId: responseId});
 
-         if (rq.body.body.trim () === 'vibey credentials') {
-            var credentialsResult = await docker.credentials (rq.body.id);
-            output += credentialsResult.stdout || credentialsResult.error || 'Could not sync access\n';
+         if (rq.body.body.trim () === 'vibey access') {
+            var accessResult = await docker.access (rq.body.id);
+            output += accessResult.stdout || accessResult.error || 'Could not sync access\n';
             streamEdit ();
          }
          else await docker.run (rq.body.id, groupedCommand (rq.body.body), {catch: true, onSpawn: watchCancellation, stdout: function (chunk) {
@@ -1529,10 +1563,12 @@ var routes = [
          return;
       }
 
+      var toolDone;
       for (var turn = 0; ; turn++) {
          var chat = await docker.read (rq.body.id, rq.body.file);
          if (chat.code) throw chat;
          var transcript = chat.stdout.toString ('utf8');
+         if (toolDone) transcript = transcript.replace (toolDone [0], toolDone [1]);
          var entries = transcript.split (/^əəə head /im).slice (1);
          var lastMain = undefined, hasSystemPrompt = false;
          dale.go (entries, function (entry, index) {
@@ -1589,7 +1625,10 @@ var routes = [
             if (result.code) return reply (rs, 400, result);
             reply (rs, 200, {id: id, responseId: responseId});
          }
-         else await startMessage (rq.body.to, responseId);
+         else {
+            await startMessage (rq.body.to, responseId);
+            await docker.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
+         }
 
          var buffer = '', aiStderr = '';
          var lastFullText = '';
@@ -1791,8 +1830,9 @@ var routes = [
             if (! start) return;
 
             var lines = text.slice (start.index).split ('\n');
-            var op = /^tool-call: (read|write|edit|run)$/.exec (lines [0]);
-            if (! op) return {error: 'Expected tool-call: read|write|edit|run'};
+            var op = /^tool-call: (read|write|edit|run)(?: ([^\s:]+))?$/.exec (lines [0]);
+            if (! op) return {error: 'Expected tool-call: read|write|edit|run [projectId]'};
+            var projectId = op [2] || rq.body.id;
             op = op [1];
 
             var description = lines [1];
@@ -1806,7 +1846,7 @@ var routes = [
             var value = lines [2].slice (prefix.length);
             if (! value.trim ()) return {error: key + ' must not be empty'};
 
-            var call = {op: op, description: description};
+            var call = {op: op, description: description, projectId: projectId};
             call [key] = value;
             if (op === 'read' || op === 'run') return call;
 
@@ -1830,17 +1870,37 @@ var routes = [
          var makeToolCall = async function (call, onOutput) {
             if (call.error) return {code: 1, error: call.error};
             try {
-               if (call.op === 'read') return await docker.read (rq.body.id, call.path);
-               if (call.op === 'write') return await docker.write (rq.body.id, call.path, call.content);
-               if (call.op === 'edit') return await docker.edit (rq.body.id, call.path, call.oldText, call.newText);
-               if (call.op === 'run' && call.command.trim () === 'vibey credentials') {
-                  var result = await docker.credentials (rq.body.id);
+               var target = call.projectId;
+               if (target !== rq.body.id) {
+                  if (call.op !== 'run' && ! validProjectPath (call.path)) {
+                     return {code: 1, error: 'Invalid path'};
+                  }
+                  var access = await docker.read (target, '/project/vibey/access.md');
+                  var allowed = ! access.code && dale.stop (
+                     access.stdout.toString ('utf8').split (/\r?\n/), true,
+                     function (line) {
+                        var grant = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line.trim ());
+                        if (! grant || grant [1] !== 'project:' + rq.body.id) return;
+                        if (grant [2] !== 'write' && call.op !== 'read') return;
+                        var prefix = grant [3] || '';
+                        if (! validProjectPath (prefix)) return;
+                        return ! prefix || (call.op !== 'run' && call.path.startsWith (prefix));
+                     }
+                  );
+                  if (! allowed) return {code: 1, error: 'Access denied'};
+               }
+
+               if (call.op === 'read') return await docker.read (target, call.path);
+               if (call.op === 'write') return await docker.write (target, call.path, call.content);
+               if (call.op === 'edit') return await docker.edit (target, call.path, call.oldText, call.newText);
+               if (call.op === 'run' && call.command.trim () === 'vibey access') {
+                  var result = await docker.access (target);
                   if (onOutput) onOutput (result.stdout || result.error || '');
                   return result;
                }
-               if (call.op === 'run') return await docker.run (rq.body.id, groupedCommand (call.command), {
+               if (call.op === 'run') return await docker.run (target, groupedCommand (call.command), {
                   catch: true,
-                  onSpawn: watchCancellation,
+                  onSpawn: function (proc) {watchCancellation (proc, target)},
                   stdout: onOutput,
                   stderr: onOutput,
                });
@@ -1872,11 +1932,6 @@ var routes = [
          await editQueue;
          if (editError) throw editError;
 
-         result = await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
-         if (result.code) throw result;
-         redis ('hset', 'project:' + rq.body.id, 'last', now ());
-         if (! toolCall) break;
-
          // Reuse the stream writer only after the previous message's edits have finished.
          var startMessage = async function (from, to, body) {
             responseId = crypto.randomUUID ();
@@ -1899,7 +1954,14 @@ var routes = [
             return head;
          };
 
-         var toolHead = await startMessage ('shell', responseId, toolCallText + '\n\nResult:\n');
+         // Append the successor before finishing this message, so pollers never see a finished chain end early.
+         if (toolCall) var toolHead = await startMessage ('shell', responseId, toolCallText + '\n\nResult:\n');
+
+         result = await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
+         if (result.code) throw result;
+         redis ('hset', 'project:' + rq.body.id, 'last', now ());
+         if (! toolCall) break;
+
          var toolResult = turn >= 49 ? {code: 1, error: 'Tool-call limit reached (50 AI responses).'} : await makeToolCall (toolCall, function (chunk) {
             output += chunk.toString ('utf8');
             streamEdit ();
@@ -1915,10 +1977,12 @@ var routes = [
          streamEdit ();
          await editQueue;
          if (editError) throw editError;
-         result = await docker.edit (rq.body.id, rq.body.file, toolHead, toolHead.replace ('\npending 1\n', '\nt-end ' + now () + '\n'));
-         if (result.code) throw result;
+         // Finished once the next AI message is appended (or now, if this is the last turn).
+         toolDone = [toolHead, toolHead.replace ('\npending 1\n', '\nt-end ' + now () + '\n')];
+         if (turn < 49) continue;
+         await docker.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
          redis ('hset', 'project:' + rq.body.id, 'last', now ());
-         if (turn >= 49) break;
+         break;
       }
 
    }],
@@ -2016,34 +2080,41 @@ var routes = [
       }
       catch (e) {}
 
-      var tokenURL = rq.data.params.provider === 'anthropic' ? 'https://console.anthropic.com/v1/oauth/token' : 'https://auth.openai.com/oauth/token';
       var clientId = rq.data.params.provider === 'anthropic' ? Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString () : 'app_EMoamEEZ73f0CkXaXp7hrann';
       var redirectURI = rq.data.params.provider === 'anthropic' ? 'https://console.anthropic.com/oauth/code/callback' : 'http://localhost:1455/auth/callback';
 
-      var isAnthropic = rq.data.params.provider === 'anthropic';
-
-      var response = await fetch (tokenURL, {
-         method: 'POST',
-         headers: {'Content-Type': isAnthropic ? 'application/json' : 'application/x-www-form-urlencoded'},
-         body: isAnthropic ? JSON.stringify ({
-            client_id: clientId,
-            code: code,
-            code_verifier: pending.verifier,
-            grant_type: 'authorization_code',
-            redirect_uri: redirectURI,
-            state: rq.body.code.split ('#') [1],
-         }) : new URLSearchParams ({
-            client_id: clientId,
-            code: code,
-            code_verifier: pending.verifier,
-            grant_type: 'authorization_code',
-            redirect_uri: redirectURI,
-         }),
-      });
-
-      if (! response.ok) return reply (rs, 400, {error: 'Token exchange failed: ' + await response.text ()});
-
-      var tokenData = await response.json ();
+      try {
+         var tokenData = await new Promise (function (resolve, reject) {
+            hitit.one ({}, {
+               https:   true,
+               host:    rq.data.params.provider === 'anthropic' ? 'console.anthropic.com' : 'auth.openai.com',
+               path:    rq.data.params.provider === 'anthropic' ? '/v1/oauth/token' : '/oauth/token',
+               method:  'post',
+               headers: rq.data.params.provider === 'anthropic' ? {} : {'content-type': 'application/x-www-form-urlencoded'},
+               body:    rq.data.params.provider === 'anthropic' ? {
+                  client_id: clientId,
+                  code: code,
+                  code_verifier: pending.verifier,
+                  grant_type: 'authorization_code',
+                  redirect_uri: redirectURI,
+                  state: rq.body.code.split ('#') [1],
+               } : new URLSearchParams ({
+                  client_id: clientId,
+                  code: code,
+                  code_verifier: pending.verifier,
+                  grant_type: 'authorization_code',
+                  redirect_uri: redirectURI,
+               }).toString (),
+               code:    200,
+            }, function (error, rdata) {
+               if (error) return reject (error);
+               resolve (rdata.body);
+            });
+         });
+      }
+      catch (error) {
+         return reply (rs, 400, {error: 'Token exchange failed: ' + JSON.stringify (error.body || error.error)});
+      }
 
       var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
       if (! credentials [rq.data.params.provider]) credentials [rq.data.params.provider] = {};
@@ -2108,9 +2179,9 @@ var routes = [
    ['get', '/test', async function (rq, rs) {
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
-      await test.cleanup (docker, redis);
+      await test.cleanup (redis, run);
       test.run (CONFIG) ('all', async function (error, rdata) {
-         if (! error) await test.cleanup (docker, redis);
+         if (! error) await test.cleanup (redis, run);
          reply (rs, 200, cell.JSToText (error ? {error} : rdata));
       }, {cookie: rq.headers.cookie, csrf: rq.user.csrf}, redis, run);
    }],
@@ -2124,7 +2195,7 @@ var routes = [
    ['post', '/test/cleanup', async function (rq, rs) {
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
 
-      await test.cleanup (docker, redis);
+      await test.cleanup (redis, run);
 
       reply (rs, 200);
 

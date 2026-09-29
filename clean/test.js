@@ -60,7 +60,7 @@ if (mode === 'server') {
    module.exports = {};
 
    // We export this so we can use it also after client tests, otherwise we'd just call it after the server tests automatically.
-   module.exports.cleanup = async function (docker, redis) {
+   module.exports.cleanup = async function (redis, run) {
       var keys = await redis ('keys', '*');
       var emails = dale.fil (keys, undefined, function (key) {
          // Cleanup is contingent on all test users using `example.com` as their email's domain, and on no real users using this domain.
@@ -68,6 +68,12 @@ if (mode === 'server') {
          if (! key.match (/example\.com$/)) return;
          if (key.match (/^email:/)) return key;
       });
+      // Grants to invited emails that never signed up are keyed by email rather than user ID.
+      var invites = dale.fil (keys, undefined, function (key) {
+         if (key.match (/^accessTo:.+example\.com$/)) return key;
+      });
+
+      if (invites.length) await redis ('del', ... invites);
 
       if (emails.length === 0) return;
 
@@ -79,19 +85,22 @@ if (mode === 'server') {
 
       await redis ('del', ... [
          ... dale.go (emails, (email) => [email, 'rateLimit:login:' + email.replace ('email:', '')]).flat (),
-         ... dale.go (userIds, (userId) => ['user:' + userId, 'owner:' + userId]).flat (),
+         ... dale.go (userIds, (userId) => ['user:' + userId, 'owner:' + userId, 'accessTo:' + userId]).flat (),
+         ... dale.fil (resources, undefined, function (resource) {
+            if (resource.match (/^project:/)) return resource.replace ('project:', 'accessBy:');
+         }),
          ... resources,
       ]);
 
-      var projectIds = dale.fil (resources, undefined, function (resource) {
-         if (resource.match (/^project:/)) return resource.replace ('project:', '');
+      var containerIds = dale.fil (resources, undefined, function (resource) {
+         if (resource.match (/^project:/)) return resource.replace ('project:', 'vibey-project-');
       });
 
-      if (projectIds.length === 0) return;
+      if (containerIds.length === 0) return;
 
-      await run ('docker', 'stop',         ... projectIds, {catch: true});
-      await run ('docker', 'rm',           ... projectIds, {catch: true});
-      await run ('docker', 'volume', 'rm', ... projectIds, {catch: true});
+      await run ('docker', 'stop',         ... containerIds, {catch: true});
+      await run ('docker', 'rm',           ... containerIds, {catch: true});
+      await run ('docker', 'volume', 'rm', ... containerIds, {catch: true});
    }
 
    module.exports.run = function (CONFIG) {
@@ -649,7 +658,10 @@ if (mode === 'server') {
                   projectId: s.projectId,
                };
             }, 200, function (s, rq, rs) {
-               return assertBody (s.chatContent.slice (1)) (s, rq, rs);
+               return assert ([
+                  ['message', rs.body.message, s.chatContent.slice (1), teishi.test.equal],
+                  ['next', rs.body.next, [], teishi.test.equal],
+               ]);
             }],
             ['Read message with invalid id', 'put', '/project/message', function (s) {
                return {
@@ -707,7 +719,10 @@ if (mode === 'server') {
                   projectId: s.projectId,
                };
             }, 200, function (s, rq, rs) {
-               return assertBody (s.chatContent.slice (1)) (s, rq, rs);
+               return assert ([
+                  ['message', rs.body.message, s.chatContent.slice (1), teishi.test.equal],
+                  ['next', rs.body.next, [s.replyId], teishi.test.equal],
+               ]);
             }],
             ['Read reply by uppercase id', 'put', '/project/message', function (s) {
                return {
@@ -717,8 +732,9 @@ if (mode === 'server') {
                };
             }, 200, function (s, rq, rs) {
                return assert ([
-                  ['reply head', rs.body.indexOf ('əəə head ' + s.replyId + '\n'), 0, teishi.test.equal],
-                  ['reply body', rs.body.endsWith ('əəə body ' + s.replyId + '\n' + Buffer.from ('Hello back!').toString ('base64')), true, teishi.test.equal],
+                  ['reply head', rs.body.message.indexOf ('əəə head ' + s.replyId + '\n'), 0, teishi.test.equal],
+                  ['reply body', rs.body.message.endsWith ('əəə body ' + s.replyId + '\n' + Buffer.from ('Hello back!').toString ('base64')), true, teishi.test.equal],
+                  ['next', rs.body.next, [], teishi.test.equal],
                ]);
             }],
 
@@ -796,6 +812,212 @@ if (mode === 'server') {
             ] : [],
             CONFIG.cloud ? ['Delete account', 'post', '/auth/delete', {}, 200] : [],
          ];
+
+         // *** ACCESS ***
+
+         var accessLogin = function (who) {
+            return [
+               ['Login as access ' + who, 'post', '/auth/login', {email: 'access-' + who + '@example.com'}, 200, function (s, rq, rs) {
+                  s.accessLoginLink = rs.body.loginLink;
+                  return true;
+               }],
+               ['Verify access ' + who, 'get', function (s) {return '/auth/verify/' + s.accessLoginLink}, 200, function (s, rq, rs) {
+                  s.accessUsers = s.accessUsers || {};
+                  s.accessUsers [who] = {
+                     cookie: getCookie (rs.headers),
+                     'x-csrf': rs.body.csrf,
+                  };
+                  Object.assign (s.headers, s.accessUsers [who]);
+                  return true;
+               }],
+            ];
+         }
+
+         var accessAs = function (who) {
+            return ['Switch to access ' + who, 'get', '/', 200, function (s) {
+               Object.assign (s.headers, s.accessUsers [who]);
+               return true;
+            }];
+         }
+
+         var accessFile = function (path) {
+            return function (s) {
+               return '/project/' + s.accessProjectId + '/file/' + encodeURIComponent (path);
+            };
+         }
+
+         var accessWrite = function (path, content, code) {
+            return ['Write ' + path + ' expecting ' + code, 'post', '/project/write', function (s) {
+               return {id: s.accessProjectId, path, content};
+            }, code];
+         }
+
+         var accessSync = ['Sync access', 'post', '/project/run', function (s) {
+            return {id: s.accessProjectId, command: 'vibey access'};
+         }, 200, function (s, rq, rs) {
+            return assert ([
+               ['sync error', rs.body.error, undefined, teishi.test.equal],
+               ['sync output', rs.body.stdout, /^Access synced for:/, teishi.test.match],
+            ]);
+         }];
+
+         suites.access = CONFIG.cloud ? [
+            ['Grant A creator status', 'post', '/creator/grant', {email: 'access-a@example.com', grant: true}, 200, adminHeaders],
+            accessLogin ('a'),
+            accessLogin ('b'),
+            accessAs ('a'),
+            ['A creates shared project', 'post', '/project', {name: 'access test'}, 200, function (s, rq, rs) {
+               s.accessProjectId = rs.body.id;
+               return assert (['project id', s.accessProjectId, 'string']);
+            }],
+            accessWrite ('outside.txt', 'original', 200),
+            accessWrite ('chat/inside.txt', 'original', 200),
+            accessWrite ('chatty/outside.txt', 'original', 200),
+            ['A creates message', 'post', '/project/message', function (s) {
+               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Shared message'};
+            }, 200, function (s, rq, rs) {
+               s.accessMessageId = rs.body.id;
+               return assert (['message id', s.accessMessageId, 'string']);
+            }],
+            accessWrite ('vibey/access.md', 'access-b@example.com read\naccess-c@example.com write\n', 200),
+            accessSync,
+
+            // B already existed when the grants were synced.
+            accessAs ('b'),
+            ['B sees shared project', 'get', '/projects', 200, function (s, rq, rs) {
+               return assert (['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal]);
+            }],
+            ['B lists files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 200, function (s, rq, rs) {
+               return assert (['outside file visible', inc (dale.go (rs.body, function (f) {return f.name}), 'outside.txt'), true, teishi.test.equal]);
+            }],
+            ['B reads file', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
+            ['B reads message', 'put', '/project/message', function (s) {
+               return {projectId: s.accessProjectId, file: 'chat/thread.md', messageId: s.accessMessageId};
+            }, 200, function (s, rq, rs) {
+               return assert ([
+                  ['message', rs.body.message, 'string'],
+                  function () {return ['message body', rs.body.message.endsWith ('Shared message'), true, teishi.test.equal]},
+                  ['next messages', rs.body.next, [], teishi.test.equal],
+               ]);
+            }],
+            accessWrite ('outside.txt', 'forbidden', 404),
+            ['B cannot upload', 'post', '/project/write', function (s) {
+               return {multipart: [
+                  {name: 'id', value: s.accessProjectId},
+                  {name: 'path', value: 'outside.txt'},
+                  {name: 'file', filename: 'upload', value: 'forbidden'},
+               ]};
+            }, 404],
+            ['B cannot edit', 'post', '/project/edit', function (s) {
+               return {id: s.accessProjectId, path: 'outside.txt', oldText: 'original', newText: 'forbidden'};
+            }, 404],
+            ['B cannot send messages', 'post', '/project/message', function (s) {
+               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Forbidden'};
+            }, 404],
+            dale.go ([false, true], function (read) {
+               return ['B cannot run commands with read=' + read, 'post', '/project/run', function (s) {
+                  return {id: s.accessProjectId, command: 'printf forbidden > outside.txt', read};
+               }, 404];
+            }),
+            ['B mutations left file unchanged', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
+
+            // C signs up after being invited: verification must transfer the grant.
+            accessLogin ('c'),
+            ['C sees shared project', 'get', '/projects', 200, function (s, rq, rs) {
+               return assert (['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal]);
+            }],
+            accessWrite ('outside.txt', 'written by C', 200),
+            ['C edits file', 'post', '/project/edit', function (s) {
+               return {id: s.accessProjectId, path: 'outside.txt', oldText: 'written', newText: 'edited'};
+            }, 200],
+            ['C reads edited file', 'get', accessFile ('outside.txt'), 200, assertBody ('edited by C')],
+            ['C uploads file', 'post', '/project/write', function (s) {
+               return {multipart: [
+                  {name: 'id', value: s.accessProjectId},
+                  {name: 'path', value: 'upload.txt'},
+                  {name: 'file', filename: 'upload', value: 'uploaded by C'},
+               ]};
+            }, 200],
+            ['C reads uploaded file', 'get', accessFile ('upload.txt'), 200, assertBody ('uploaded by C')],
+            ['C sends message', 'post', '/project/message', function (s) {
+               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Hello from C'};
+            }, 200],
+            ['C runs command', 'post', '/project/run', function (s) {
+               return {id: s.accessProjectId, command: 'printf "command by C" > outside.txt'};
+            }, 200],
+            ['C command changed file', 'get', accessFile ('outside.txt'), 200, assertBody ('command by C')],
+            ['C cannot rename project', 'put', '/project', function (s) {
+               return {id: s.accessProjectId, name: 'not the owner'};
+            }, 404],
+            ['C cannot delete project', 'delete', function (s) {return '/project/' + s.accessProjectId}, 403],
+
+            // Replace C's whole-project grant with a prefix-scoped grant.
+            accessAs ('a'),
+            accessWrite ('vibey/access.md', 'access-b@example.com read\naccess-c@example.com write chat/\n', 200),
+            accessSync,
+            accessAs ('c'),
+            ['C lists only scoped files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
+            }],
+            ['C reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('original')],
+            accessWrite ('chat/inside.txt', 'scoped write', 200),
+            ['C edits scoped file', 'post', '/project/edit', function (s) {
+               return {id: s.accessProjectId, path: 'chat/inside.txt', oldText: 'write', newText: 'edit'};
+            }, 200],
+            ['C reads scoped edit', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
+            ['C sends scoped message', 'post', '/project/message', function (s) {
+               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Still allowed'};
+            }, 200],
+            dale.go (['outside.txt', 'chatty/outside.txt'], function (path) {
+               return [
+                  ['C cannot read ' + path, 'get', accessFile (path), 404],
+                  accessWrite (path, 'forbidden', 404),
+                  ['C cannot edit ' + path, 'post', '/project/edit', function (s) {
+                     return {id: s.accessProjectId, path, oldText: '[EOF]', newText: 'forbidden'};
+                  }, 404],
+               ];
+            }),
+            ['C cannot send out-of-scope message', 'post', '/project/message', function (s) {
+               return {id: s.accessProjectId, file: 'outside.txt', to: 'all', body: 'Forbidden'};
+            }, 404],
+            dale.go ([false, true], function (read) {
+               return ['Scoped C cannot run commands with read=' + read, 'post', '/project/run', function (s) {
+                  return {id: s.accessProjectId, command: 'printf forbidden > outside.txt', read};
+               }, 404];
+            }),
+            dale.go (['shell', 'ai-gpt-6'], function (to) {
+               return ['Scoped C cannot message ' + to, 'post', '/project/message', function (s) {
+                  return {id: s.accessProjectId, file: 'chat/thread.md', to, body: 'printf forbidden'};
+               }, 404];
+            }),
+
+            accessAs ('b'),
+            ['B retains whole-project read; denied writes had no effect', 'get', accessFile ('outside.txt'), 200, assertBody ('command by C')],
+            ['Prefix lookalike file unchanged', 'get', accessFile ('chatty/outside.txt'), 200, assertBody ('original')],
+            accessAs ('a'),
+            accessWrite ('vibey/access.md', 'access-b@example.com read chat/\naccess-c@example.com write chat/\n', 200),
+            accessSync,
+            accessAs ('b'),
+            ['B lists only scoped files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
+            }],
+            ['B reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
+            ['B cannot read outside scope', 'get', accessFile ('outside.txt'), 404],
+            ['B cannot read prefix lookalike', 'get', accessFile ('chatty/outside.txt'), 404],
+            accessAs ('a'),
+            ['A retains write outside prefix', 'post', '/project/edit', function (s) {
+               return {id: s.accessProjectId, path: 'outside.txt', oldText: 'command by C', newText: 'owner still writes'};
+            }, 200],
+            ['A deletes shared project', 'delete', function (s) {return '/project/' + s.accessProjectId}, 200],
+            accessAs ('b'),
+            ['B no longer sees project', 'get', '/projects', 200, assertBody ([])],
+            ['Delete B', 'post', '/auth/delete', {}, 200],
+            accessAs ('c'),
+            ['C no longer sees project', 'get', '/projects', 200, assertBody ([])],
+            ['Delete C', 'post', '/auth/delete', {}, 200],
+            accessAs ('a'),
+            ['Delete A', 'post', '/auth/delete', {}, 200],
+         ] : [];
 
          suites.all = Object.values (suites);
 

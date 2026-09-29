@@ -1,5 +1,55 @@
 # Vibey development notes
 
+## 2026-09-29
+
+Dogfooding: have a notifications project that posts important alerts there. Have the monitoring inside, with fallback to local files.
+
+Design of the access tests:
+- The name of the suite should be `access`; cloud only.
+- User A creates a project and shares with B (already exists, as read), and C (doesn't exist, as write).
+- User B can do read stuff, not write.
+- User C can do write stuff, full on.
+- Later, add a prefix to C, make sure that C cannot write elsewhere, or run commands.
+
+https://www.jwz.org/doc/unity-of-interface.html
+"If one must pick one thing as being the core concept and greatest strength of the ``web browser'' as we know it today, it is this:
+> The same interface for the same task, regardless of how the service is implemented on the other end."
+
+"The important thing to keep in mind when trying stuff like this is that at some level, ``chat'' is a concept, like ``document retrieval'' or ``message handling,'' and what you're trying to do is build a useful tool on top of those protocols that can interoperate with other tools that also happen to speak those protocols."
+
+Cross-project access: the originating process is the principal. Assume no redis entries for the project: you just read access of the target on the fly. The only thing you miss is listing all projects to which this project has access, but that's a small price, at least for now.
+
+We are now refreshing the entire chat when there are pending calls, not for the pending calls, but to get what comes afterwards. How to avoid refreshing: when querying a message X, also get a list of ids of messages that follow it, so you can insert other pending messages in.
+
+- TODO
+   - tests in local mode
+   - mobile ui
+   - devops
+      - no downtime on project during deploy
+      - notification project to see alerts
+   - access
+      - token/api hooks
+      - email hooks
+      - tests
+   - chat
+      - stretch anthropic session
+      - Upload images, allow download to project or to local
+      - enable an agent calling another agent
+      - cron file
+      - tests
+   - file
+      - show local images embedded in docs
+      - tabs
+      - open sqlite files
+      - stream large files (split them in pages)
+      - edit text file through diffs (edits) rather than whole file write (faster)
+      - client tests
+   - project
+      - autobackup
+      - client tests
+      - skip docker.exec to have a slash command time by 10x
+
+
 ## 2026-09-28
 
 Idea: auto formatting on public .mds, so you can just read them.

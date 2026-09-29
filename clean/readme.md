@@ -140,9 +140,9 @@ user:<id> count <integer>
 userCount <integer>
 ```
 
-### Sharing
+### Access
 
-Set grants in `/project/vibey/access.md`, then run `vibey credentials` to sync them:
+Set grants in `/project/vibey/access.md`, then run `vibey access` to sync them:
 
 ```
 alice@example.com read
@@ -153,7 +153,9 @@ Each line is `<email> <read|write> [prefix]`. Blank lines and lines starting wit
 
 Prefixes and requested paths must be relative, without backslashes, control characters, doubled slashes or `.`/`..` segments. Symlinks are followed, not confined to the grant's prefix.
 
-Syncing replaces the project's grants, removing entries no longer present. Invalid entries abort the sync. Grants for unverified recipients remain keyed by email until login verification transfers them to the user ID. Deleting a project or account cleans up its sharing records.
+Tool calls can target another project: `tool-call: read <projectId>` (also write, edit and run). The target's `vibey/access.md` must grant `project:<originId> <read|write> [prefix]`. These process grants are checked on every call. Run requires whole-project write access. Omitting the ID targets the current project.
+
+Syncing replaces the project's grants, removing entries no longer present. Invalid entries abort the sync. Grants for unverified recipients remain keyed by email until login verification transfers them to the user ID.
 
 ### API
 
@@ -181,14 +183,14 @@ File reads and message reads require read access to their path. File writes, edi
 - **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants. Each project appears once.
 - **Create project**: `POST /project`: expects `{name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters. Returns 403 if the user is not a creator, 409 if an owned or shared project already has that name. Assigning an occupied slot removes that slot only from a project owned by the caller.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters. Returns 404 if the project is missing or not owned by the caller, 409 if another owned or shared project has the new name. Assigning an occupied slot removes that slot only from another project owned by the caller.
+- **Remove project**: `DELETE /project/<projectId>`: requires ownership. Returns 404 if the project is missing or inaccessible, 403 if it is shared with the caller but not owned by them.
 - **List files**: `GET /project/<projectId>/files`: returns `[{name: <relativePath>, size: <bytes>, mtime: <milliseconds since Unix epoch>}]`, sorted by name. Excludes `.git` contents and invalid paths; includes only files covered by the user's read or write grants, or all valid files for the owner. Returns 404 if the project is missing or inaccessible, and 500 if listing fails.
-- **Serve file**: `GET /project/<projectId>/file/<path>`: serves a file from `/project` through `docker.read`, with its MIME type or `application/octet-stream`. Returns 404 if access is denied or the file is missing, 400 for invalid paths, and 500 for other read errors. Symlinks are followed. Uses `cicek.cache` for ETags and 304 responses, with `Cache-Control: private, no-cache`. Sends `nosniff` and a sandbox CSP for safe previews.
+- **Get file**: `GET /project/<projectId>/file/<path>`: serves a file from `/project` through `docker.read`, with its MIME type or `application/octet-stream`. Returns 404 if access is denied or the file is missing, 400 for invalid paths, and 500 for other read errors. Symlinks are followed. Uses `cicek.cache` for ETags and 304 responses, with `Cache-Control: private, no-cache`. Sends `nosniff` and a sandbox CSP for safe previews.
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>}` or multipart fields `id`, `path` and a single file in the `file` field. Writes content to the file. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once, except for the reserved value `'[EOF]'`, which appends `newText` to the end of the file. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
-- **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>, read: <boolean|undefined>}`. Runs the command inside the project's container. Requires whole-project write access even when `read` is true. The `read` flag only prevents updating the project's `last` timestamp. The special command `vibey credentials` syncs sharing grants.
-- **Send message**: `POST /project/message`: expects `{id: <projectId>, file: <fileName>, base64: <boolean|undefined>, body: <text|base64>, to: <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID>}`. Appends a message with server-generated UUID, timestamp and sender, creating the file and parent folders if needed. Rejects complete header/body marker lines in `body`. Returns `{id: <messageUUID>, responseId: <messageUUID>}` for shell messages, otherwise `{id: <messageUUID>}`; 400 if validation or persistence fails.
-- **Read message**: `PUT /project/message`: expects `{projectId: <projectId>, file: <fileName>, messageId: <messageUUID>}`. Returns the message as text, including its head and body markers. Returns 404 if access is denied, the path is invalid, the file is missing, or the message is not found; 400 for invalid body fields.
-- **Remove project**: `DELETE /project/<projectId>`: requires ownership. Returns 404 if the project is missing or inaccessible, 403 if it is shared with the caller but not owned by them.
+- **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>, read: <boolean|undefined>}`. Runs the command inside the project's container. Requires whole-project write access even when `read` is true. The `read` flag only prevents updating the project's `last` timestamp. The special command `vibey access` syncs sharing grants.
+- **Send message**: `POST /project/message`: expects `{id: <projectId>, file: <fileName>, base64: <boolean|undefined>, body: <text|base64>, to: <all|shell|ai-<model>|messageUUID>}`. Appends a message with server-generated UUID, timestamp and sender, creating the file and parent folders if needed. Rejects complete header/body marker lines in `body`. Returns `{id: <messageUUID>, responseId: <messageUUID>}` for shell and AI messages, otherwise `{id: <messageUUID>}`; 400 if validation or persistence fails. During AI runs, each response or tool message is appended before the previous one is marked finished, so a pending chain never appears finished between steps.
+- **Read message**: `PUT /project/message`: expects `{projectId: <projectId>, file: <fileName>, messageId: <messageUUID>}`. Returns `{message: <text>, next: [<messageUUID>, ...]}`: the message including its head and body markers, and the ids of the messages after it, in file order. Clients use `next` to append new messages without rereading the whole file. Returns 404 if access is denied, the path is invalid, the file is missing, or the message is not found; 400 for invalid body fields.
 
 #### Credentials
 
@@ -289,7 +291,7 @@ File reads and message reads require read access to their path. File writes, edi
 - `change file.name`: reads the selected file and scrolls its entry into the center of the left pane. Runs at low priority.
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
-- `list files`: lists readable project files through `GET /project/<projectId>/files`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then calls `load clientExtension` and reads the selected file.
+- `list files <noRead>`: lists readable project files through `GET /project/<projectId>/files`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then calls `load clientExtension` and, unless `noRead` is set, reads the selected file.
 - `read file`: clears the global `content` and emits `change file`. For images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`) and PDFs (case-insensitive), returns without fetching content; the view loads them directly through `GET /project/<projectId>/file/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it and refreshes the list after the write succeeds; otherwise, updates the global `content` if the file is still selected.
 - `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list and closes the creation modal. The successful write triggers the list refresh.
@@ -305,11 +307,12 @@ File reads and message reads require read access to their path. File writes, edi
 
 #### Chat
 
-- `cancel message <id>`: replaces `pending 1` in the message header with `cancelled <ISO timestamp>` and `pending 0` through `POST /project/edit`. Sets `cancelling.<id>` while saving and clears it afterward. On success, rereads the selected chat; on failure, shows a snackbar. The server checks for cancellation every 100ms while an AI, shell message or run tool process is active and kills its process group when cancelled.
+- `cancel message <id>`: replaces `pending 1` in the message header with `cancelled <ISO timestamp>` and `pending 0` through `POST /project/edit`. Sets `message.cancelling.<id>` while saving and clears it afterward. On success, rereads the selected chat; on failure, shows a snackbar. The server checks for cancellation every 100ms while an AI, shell message or run tool process is active and kills its process group when cancelled.
 - `scroll chat <direction>`: scrolls the visible chat by message, up for negative values and down otherwise. Aligns a partially visible message before advancing to the adjacent one.
 - `change content|file|project|view`: finds chat messages with `pending 1` in their headers and sets `pending.messages` to their `projectId/file/messageId` keys. Clears the list outside a loaded chat.
-- `change pending.messages`: starts a 100ms polling interval for each new key and clears intervals for keys no longer pending. Calls `PUT /project/message`, skipping ticks while a request is in flight. Checks project/file and interval before replacing only that message in local `content`, then emits `change content`. Refreshes the file list when the updated message is no longer pending; does not write to the server or recreate the draft editor directly.
-- `change content|file`: uses `match: B.changeResponder` and priority `-1001` to scroll the first `.messages` element to its `scrollHeight` after rendering.
+- `change pending.messages`: starts a 100ms polling interval for each new key and clears intervals for keys no longer pending. Calls `PUT /project/message`, skipping ticks while a request or its follow-up appends are in flight. Checks project/file and interval before replacing only that message in local `content`, then emits `change content`. Fetches each id in `next` that is not yet in `content` through the same endpoint and appends it in order, so new pending messages start their own polling. When the updated message is no longer pending, refreshes the file list without rereading the chat (`list files` with `noRead`); does not write to the server or recreate the draft editor directly.
+- `change content|file` (priority `1001`): before views redraw, stores in `message.atBottom` (via `mset`, without a change event) whether the first `.messages` element is within 100px of its bottom. Measuring before rendering keeps large appends, such as tool-call messages, from breaking the stick-to-bottom behaviour.
+- `change content|file` (priority `-1001`): after rendering, scrolls the first `.messages` element to its `scrollHeight` if `message.atBottom` is set.
 - `create message <to> <name> <body>`: posts to `POST /project/message`, trimming the recipient and defaulting it to `all` when blank. Ignores blank messages. On success, if the same project and file are selected, clears the draft if unchanged and refreshes the file list and chat. Preserves the draft on failure.
 
 ### Client state
@@ -324,15 +327,14 @@ editor <CodeMirror instance>
 Store:
 
 ```
-cancelling <messageId> <true|undefined> // Whether a cancellation edit is being saved
 edit file newName "<new name>"
           oldName "<original name>"
      project id <id>
              name "<project name>"
              slot <integer|numeric string|"null"|undefined> // "null" is the edit selector's None option
-expand <projectId> <filename> <messageIndex> <true|undefined> // Chat message expansion; index is the zero-padded display number (e.g. "0001"), not UUID. true shows the full body; undefined collapses bodies over 100 characters to roughly the first and last 50 characters. Toggled by Expand/Collapse.
+expand <projectId> <filename> <messageIndex> <true|undefined> // Chat message expansion; index is the zero-padded display number (e.g. "0001"), not UUID. Only bodies over 10,000 characters are collapsible: true shows the full body; undefined keeps the lines around the first and last 50 characters with an "(omitting N lines)" marker. Toggled by Expand (Nk)/Collapse.
 extendClient <projectId|undefined> // Project whose client extension started loading
-file actions <0|1> // Whether the filename pill shows Rename and Download; collapsed by default
+file actions <false|true> // Whether the filename pill shows Rename and Download; collapsed by default
      mode <edit|view>
      name "..."
 files 1 mtime <integer> // Modification time in milliseconds since Unix epoch
@@ -340,9 +342,11 @@ files 1 mtime <integer> // Modification time in milliseconds since Unix epoch
         size <integer> // File size in bytes
       ...
 hover project <project> // The project (or free project slot) being hovered on
-key command <0|1> // if set, the command key is pressed
-message body <text> // Current chat draft, initially empty
-        to <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID> // Recipient; restored from chat when blank, defaults to all
+key command <true|undefined> // if set, the command key is pressed
+message atBottom <false|true> // Whether the chat was within 100px of the bottom before the latest content/file change; set with mset, so it does not trigger a change event
+        body <text> // Current chat draft, initially empty
+        cancelling <messageId> <true|undefined> // Whether a cancellation edit is being saved
+        to <all|shell|ai|ai-<model>|messageUUID> // Recipient; restored from chat when blank, defaults to all. Options list only ai-<model> entries with usable credentials, or a bare ai when there are none
 new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>
@@ -368,15 +372,15 @@ search content count <integer> // Number of text-editor matches; 0 for an empty 
                query <text> // Shared content search input, initially empty; literal, case-insensitive text-editor search; filters message bodies, senders (own ID as "you") and destinations with smartcase (uppercase in query makes matching case-sensitive)
        file <text|undefined> // Filters filenames using String.match (input is interpreted as a regex)
        project <text|undefined> // Filters project names using String.match; undefined shows the spiral, a defined value shows the list
-settings show <0|1> // Whether the settings panel is visible
+settings show <false|true> // Whether the settings panel is visible
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
          type "<notification type>" // Usually ok, warning, or error
-test enabled <0|1> // Whether test mode is enabled
+test enabled <true|undefined> // Whether test mode is enabled
      loginLink // Login link for testing
 upload done <integer> // Successfully uploaded files; upload exists only while uploading
        total <integer> // Total files in the upload
-user admin <false|true>
+user admin <true|undefined>
      count <integer>
      creator <false|true>
      creatorRequest <pending|sent|undefined> // Creator access request state
@@ -385,9 +389,9 @@ user admin <false|true>
                 openai account <true|undefined>
                        apiKey <true|undefined>
      csrf "<CSRF token>"
-     email "<email entered in the login form>"
+     email "<email>" // Entered in the login form; set from the server once logged in
      id <userId>
-     loginLinkRequested <0|1> // Whether the login link was already sent
+     loginLinkRequested <true|undefined> // Whether the login link was already sent
      mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
 view "<view name>"
 ```

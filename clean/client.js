@@ -642,7 +642,7 @@ B.mrespond ([
       if (B.get ('edit', 'file') !== undefined) c ('#edit-file-input').focus ();
    }],
 
-   ['list', 'files', function (x) {
+   ['list', 'files', function (x, noRead) {
       // If no projects loaded yet, retry in 10ms.
       if (! B.get ('projects')) return setTimeout (function () {
          if (! B.get ('files')) B.call (x, 'list', 'files');
@@ -660,7 +660,7 @@ B.mrespond ([
          B.call (x, 'set', 'files', rs.body);
 
          B.call (x, 'load', 'clientExtension');
-         B.call (x, 'read', 'file');
+         if (! noRead) B.call (x, 'read', 'file');
       });
    }],
 
@@ -983,21 +983,21 @@ B.mrespond ([
       var project = B.get ('project');
       var name = B.get ('file', 'name');
       if (! project || ! name || type (content) !== 'string') return;
-      if (B.get ('cancelling', id)) return;
+      if (B.get ('message', 'cancelling', id)) return;
 
       var head = content.match (new RegExp (
          '^əəə head ' + id + '\\n[\\s\\S]*?^əəə body ' + id + '\\n', 'im'
       ));
       if (! head || ! /^pending 1$/m.test (head [0])) return;
 
-      B.call (x, 'set', ['cancelling', id], true);
+      B.call (x, 'set', ['message', 'cancelling', id], true);
       B.call (x, 'post', '/project/edit', {
          id: project,
          newText: head [0].replace (/^pending 1$/m, 'cancelled ' + new Date ().toISOString () + '\npending 0'),
          oldText: head [0],
          path: name,
       }, function (x, error) {
-         B.call (x, 'rem', 'cancelling', id);
+         B.call (x, 'rem', ['message', 'cancelling'], id);
          if (error) return B.call (x, 'snackbar', 'error', 'Could not stop the message; it may have already finished');
          if (B.get ('project') !== project || B.get ('file', 'name') !== name) return;
          B.call (x, 'read', 'file');
@@ -1049,6 +1049,29 @@ B.mrespond ([
 
    ['change', ['pending', 'messages'], function (x) {
       var pending = B.get ('pending', 'messages') || [];
+      // Appends messages missing from content, in order; skips ids that are already present.
+      var appendMessages = function (x, project, name, ids, cb) {
+         var stale = function () {
+            return B.get ('project') !== project || B.get ('file', 'name') !== name || type (content) !== 'string';
+         };
+         var present = function (id) {
+            return new RegExp ('^əəə head ' + id + '\\n', 'im').test (content);
+         };
+         if (! ids.length || stale ()) return cb ();
+         if (present (ids [0])) return appendMessages (x, project, name, ids.slice (1), cb);
+         B.call (x, 'put', '/project/message', {
+            file: name,
+            messageId: ids [0],
+            projectId: project,
+         }, function (x, error, rs) {
+            if (error || stale ()) return cb ();
+            if (! present (ids [0])) {
+               content += '\n' + rs.body.message;
+               B.call (x, 'change', 'content');
+            }
+            appendMessages (x, project, name, ids.slice (1), cb);
+         });
+      };
       dale.go (pending, function (key) {
          if (B.get ('pending', 'requests', key) !== undefined) return;
          var parts = key.split ('/');
@@ -1069,22 +1092,25 @@ B.mrespond ([
                messageId: id,
                projectId: project,
             }, function (x, error, rs) {
-               inFlight = false;
-               if (error || B.get ('pending', 'requests', key) !== interval) return;
-               if (B.get ('project') !== project || B.get ('file', 'name') !== name || type (content) !== 'string') return;
+               if (error || B.get ('pending', 'requests', key) !== interval) return inFlight = false;
+               if (B.get ('project') !== project || B.get ('file', 'name') !== name || type (content) !== 'string') return inFlight = false;
 
                var head = content.match (new RegExp ('^əəə head ' + id + '\\n', 'im'));
-               if (! head) return;
+               if (! head) return inFlight = false;
                var rest = content.slice (head.index + head [0].length);
                var nextHead = rest.match (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im);
                var end = nextHead ? head.index + head [0].length + nextHead.index - 1 : content.length;
-               var updated = content.slice (0, head.index) + rs.body + content.slice (end);
-               if (updated === content) return;
-               var body = rs.body.match (/^əəə body [0-9a-f-]{36}\n/im);
-               var finished = body && ! /^pending 1$/m.test (rs.body.slice (0, body.index));
-               content = updated;
-               B.call (x, 'change', 'content');
-               if (finished) B.call (x, 'list', 'files');
+               var updated = content.slice (0, head.index) + rs.body.message + content.slice (end);
+               if (updated !== content) {
+                  var body = rs.body.message.match (/^əəə body [0-9a-f-]{36}\n/im);
+                  var finished = body && ! /^pending 1$/m.test (rs.body.message.slice (0, body.index));
+                  content = updated;
+                  B.call (x, 'change', 'content');
+                  if (finished) B.call (x, 'list', 'files', true);
+               }
+               appendMessages (x, project, name, rs.body.next, function () {
+                  inFlight = false;
+               });
             });
          }, 100);
          B.call (x, 'set', ['pending', 'requests', key], interval);
@@ -1096,9 +1122,15 @@ B.mrespond ([
       });
    }],
 
+   // Before views redraw: remember whether the chat was at the bottom, since large appends (tool calls) grow it by more than the threshold.
+   ['change', [/^(content|file)$/], {match: B.changeResponder, priority: 1001}, function (x) {
+      var messages = c ('.messages') [0];
+      B.call (x, 'mset', ['message', 'atBottom'], ! messages || messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100);
+   }],
+
    ['change', [/^(content|file)$/], {match: B.changeResponder, priority: -1001}, function (x) {
       var messages = c ('.messages') [0];
-      if (messages && messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100) messages.scrollTop = messages.scrollHeight;
+      if (messages && B.get ('message', 'atBottom')) messages.scrollTop = messages.scrollHeight;
    }],
 
    ['create', 'message', function (x, to, name, body) {
@@ -3048,7 +3080,7 @@ views.chat = function () {
                   ['pre', {class: 'code f6 fw7 lh-solid ma0 pl3'}, [
                      replyTo ? ['span', {class: views.projectColor (messageIndexes [replyTo [1].toLowerCase ()], true)}, (messageIndexes [replyTo [1].toLowerCase ()] || '????') + '\n |- '] : '',
                      ['span', {class: 'br2 dib ph2 pv1 ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true)}, messageIndexes [messageId.toLowerCase ()]],
-                     /^pending 1$/m.test (head) ? B.view (['cancelling', messageId], function (cancelling) {
+                     /^pending 1$/m.test (head) ? B.view (['message', 'cancelling', messageId], function (cancelling) {
                         return ['button', {
                            'aria-label': 'Stop message ' + messageIndexes [messageId.toLowerCase ()],
                            class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
