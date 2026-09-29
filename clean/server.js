@@ -185,8 +185,11 @@ var redis = function (command) {
 var getForUser = async function (userId, entity) {
    var keys = await redis ('smembers', 'owner:' + userId);
    if (entity === 'project') {
-      var email = await redis ('hget', 'user:' + userId, 'email');
-      if (email) keys = [... new Set (keys.concat (await redis ('smembers', 'access:' + email.toLowerCase ())))];
+      var grants = await redis ('smembers', 'accessTo:' + userId);
+      keys = [... new Set (keys.concat (dale.fil (grants, undefined, function (grant) {
+         var [verb, id] = grant.split (':');
+         if (verb === 'read' || verb === 'write') return 'project:' + id;
+      })))];
    }
    var items = dale.fil (keys, undefined, function (key) {
       if (key.match (new RegExp ('^' + entity + ':'))) return key;
@@ -196,6 +199,37 @@ var getForUser = async function (userId, entity) {
       return ['hgetall', item];
    }));
 }
+
+var validProjectPath = function (path) {
+   return type (path) === 'string' &&
+      ! path.startsWith ('/') &&
+      ! /[\\\x00-\x1f\x7f]/.test (path) &&
+      ! path.includes ('//') &&
+      ! dale.stop (path.split ('/'), true, function (part) {
+         return part === '.' || part === '..';
+      });
+};
+
+var allowOp = async function (userId, projectId, op, prefix) {
+   if (op !== 'read' && op !== 'write') return false;
+   if (prefix !== undefined && ! validProjectPath (prefix)) return false;
+
+   var [owner, grants] = await redis ([
+      ['hget', 'project:' + projectId, 'owner'],
+      ['smembers', 'accessTo:' + userId]
+   ]);
+   if (! owner) return false;
+   if (owner === userId) return true;
+
+   return !! dale.stop (grants, true, function (grant) {
+      var [verb, id, ... parts] = grant.split (':');
+      if (id !== projectId) return;
+      if (verb !== 'write' && verb !== op) return;
+
+      var scope = parts.join (':');
+      return ! scope || (type (prefix) === 'string' && prefix.startsWith (scope));
+   });
+};
 
 var projectAccessCleanup = async function (id) {
    var members = await redis ('smembers', 'accessBy:' + id);
@@ -214,7 +248,7 @@ var projectAccessCleanup = async function (id) {
 var run = async function (... args) {
 
    if (type (last (args)) === 'object') {
-      var command = teishi.copy (args).slice (0, -1);
+      var command = teishi.copy (args.slice (0, -1));
       var options = last (args);
    }
    else var command = teishi.copy (args), options = {};
@@ -287,14 +321,7 @@ docker.credentials = async function (id) {
       if (! match || ! validEmail.test (match [1])) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
 
       var prefix = match [3] || '';
-      if (
-         prefix.startsWith ('/') ||
-         /[\\\x00-\x1f\x7f]/.test (prefix) ||
-         prefix.includes ('//') ||
-         dale.stop (prefix.split ('/'), true, function (part) {
-            return part === '.' || part === '..';
-         })
-      ) return invalidEntry = {error: 'Invalid vibey/access.md prefix at line: ' + line};
+      if (! validProjectPath (prefix)) return invalidEntry = {error: 'Invalid vibey/access.md prefix at line: ' + line};
 
       return {email: match [1].toLowerCase (), verb: match [2], prefix};
    });
@@ -1062,6 +1089,7 @@ var routes = [
       if (rq.body.slot) project.slot = rq.body.slot;
 
       var slotConflict = ! rq.body.slot ? undefined : dale.stopNot (projects, undefined, function (project) {
+         if (project.owner !== rq.user.id) return;
          if (parseInt (project.slot) === rq.body.slot) return project;
       });
 
@@ -1100,7 +1128,7 @@ var routes = [
       var match = dale.stopNot (projects, undefined, function (project) {
          if (project.id === rq.body.id) return project;
       });
-      if (! match) return reply (rs, 404);
+      if (! match || match.owner !== rq.user.id) return reply (rs, 404);
       var conflict = dale.stopNot (projects, undefined, function (project) {
          if (project.id === rq.body.id) return;
          if (project.name === rq.body.name) return project;
@@ -1108,6 +1136,7 @@ var routes = [
       if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
 
       var slotConflict = dale.stopNot (projects, undefined, function (project) {
+         if (project.owner !== rq.user.id) return;
          if (project.id === rq.body.id) return;
          if (parseInt (project.slot) === rq.body.slot) return project;
       });
@@ -1128,28 +1157,59 @@ var routes = [
 
    ['post', ['/project/write', '/project/edit', '/project/run', '/project/message'], async function (rq, rs) {
 
-      if (stop (rs, ['id', rq.body.id, 'string'])) return;
+      if (rq.url === '/project/write' && rq.data.fields) rq.body = rq.data.fields;
 
-      var projects = await getForUser (rq.user.id, 'project');
-      var match = dale.stopNot (projects, undefined, function (project) {
-         if (project.id === rq.body.id) return project;
-      });
-      if (! match) return reply (rs, 404);
+      if (stop (rs, ['id', rq.body.id, 'string'])) return;
 
       rs.next ();
    }],
 
+   ['get', '/project/:id/files', async function (rq, rs) {
+      var id = rq.data.params.id;
+      var [owner, grants] = await redis ([
+         ['hget', 'project:' + id, 'owner'],
+         ['smembers', 'accessTo:' + rq.user.id]
+      ]);
+      if (! owner) return reply (rs, 404);
+
+      // Load permissions once, rather than querying Redis for every file.
+      var scopes = owner === rq.user.id ? [''] : dale.fil (grants, undefined, function (grant) {
+         var [verb, projectId, ... parts] = grant.split (':');
+         if (projectId === id && (verb === 'read' || verb === 'write')) return parts.join (':');
+      });
+      if (! scopes.length) return reply (rs, 404);
+
+      var result = await docker.run (id, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
+      if (result.code) return reply (rs, 500, {error: 'Could not list files'});
+
+      var files = dale.fil ((result.stdout || '').toString ().split ('\0'), undefined, function (line) {
+         if (! line) return;
+         var first = line.indexOf (' ');
+         var second = line.indexOf (' ', first + 1);
+         var name = line.slice (second + 1);
+         if (! validProjectPath (name)) return;
+         if (! dale.stop (scopes, true, function (scope) {
+            return name.startsWith (scope);
+         })) return;
+
+         return {
+            name,
+            size: parseInt (line.slice (0, first)),
+            mtime: Math.round (parseFloat (line.slice (first + 1, second)) * 1000)
+         };
+      });
+      files.sort (function (a, b) {
+         return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+      });
+      return reply (rs, 200, files);
+   }],
+
    ['get', /^\/project\/([^/]+)\/file\/(.+)$/, async function (rq, rs) {
       var id = rq.data.params [0], path = rq.data.params [1];
-      var projects = await getForUser (rq.user.id, 'project');
-      var match = dale.stopNot (projects, undefined, function (project) {
-         if (project.id === id) return project;
-      });
-      if (! match) return reply (rs, 404);
-
-      if (path.indexOf ('\0') !== -1 || path [0] === '/' || inc (path.split ('/'), '..')) {
+      if (! validProjectPath (path)) {
          return reply (rs, 400, {error: 'Invalid path'});
       }
+      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404);
 
       var file = await docker.read (id, '/project/' + path);
       if (file.code) {
@@ -1178,14 +1238,25 @@ var routes = [
 
    ['post', '/project/write', async function (rq, rs) {
 
+      var multipart = !! rq.data.files;
+
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'path', 'content', 'base64'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), multipart ? ['id', 'path'] : ['id', 'path', 'content'], 'eachOf', teishi.test.equal],
          ['path', rq.body.path, 'string'],
-         ['content', rq.body.content, 'string'],
-         ['base64', rq.body.base64, ['boolean', 'undefined'], 'oneOf'],
       ])) return;
 
-      var content = rq.body.base64 ? Buffer.from (rq.body.content, 'base64') : rq.body.content;
+      if (stop (rs, multipart ? [
+         ['keys of files', dale.keys (rq.data.files), ['file'], teishi.test.equal],
+         ['file', rq.data.files.file, 'string'],
+      ] : [
+         ['content', rq.body.content, 'string'],
+      ])) return;
+
+      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.path)) return reply (rs, 404);
+
+      var content = multipart
+         ? await fs.promises.readFile (rq.data.files.file)
+         : rq.body.content;
 
       var result = await docker.write (rq.body.id, rq.body.path, content);
       if (result.code === 0) delete result.code;
@@ -1203,6 +1274,8 @@ var routes = [
          ['newText', rq.body.newText, 'string'],
       ])) return;
 
+      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.path)) return reply (rs, 404);
+
       var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
       if (result.code === 0) delete result.code;
 
@@ -1217,6 +1290,9 @@ var routes = [
          ['command', rq.body.command, 'string'],
          ['read', rq.body.read, ['boolean', 'undefined'], 'oneOf']
       ])) return;
+
+      // The client's read flag is not an authorization boundary.
+      if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
 
       var result = rq.body.command.trim () === 'vibey credentials'
          ? await docker.credentials (rq.body.id)
@@ -1236,11 +1312,7 @@ var routes = [
          ['messageId', rq.body.messageId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match],
       ])) return;
 
-      var projects = await getForUser (rq.user.id, 'project');
-      var match = dale.stopNot (projects, undefined, function (project) {
-         if (project.id === rq.body.projectId) return project;
-      });
-      if (! match) return reply (rs, 404);
+      if (! await allowOp (rq.user.id, rq.body.projectId, 'read', rq.body.file)) return reply (rs, 404);
 
       var result = await docker.read (rq.body.projectId, rq.body.file);
       if (result.code) {
@@ -1278,6 +1350,11 @@ var routes = [
             return ['to must be all, shell, ' + aiTargets.join (', ') + ', or a message UUID'];
          }],
       ])) return;
+
+      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.file)) return reply (rs, 404);
+      if (rq.body.to === 'shell' || rq.body.to.match (/^ai-/)) {
+         if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
+      }
 
       var aiModel = dale.stopNot (models, undefined, function (m) {
          if (rq.body.to === 'ai-' + m.model) return m;
@@ -2109,7 +2186,7 @@ cicek.apres = function (rs) {
       ms: Date.now () - rs.log.startTime,
       ip: rs.log.origin,
       length: {
-         rq: rs.log.requestBody === ''         ? 0 : JSON.stringify (rs.log.requestBody).length,
+         rq: rs.log.requestBody === undefined || rs.log.requestBody === '' ? 0 : JSON.stringify (rs.log.requestBody).length,
          rs: rs.log.responseBody === undefined ? 0 : (type (rs.log.responseBody) !== 'integer' ? JSON.stringify (rs.log.responseBody).length : rs.log.responseBody)
       },
       userId: ! CONFIG.cloud ? undefined : (rs.request.user ? rs.request.user.id : 'anonymous')

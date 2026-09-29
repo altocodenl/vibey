@@ -9,6 +9,9 @@ if (mode === 'server') {
    var dale   = require ('dale');
    var teishi = require ('teishi');
    var hitit  = require ('hitit');
+   var fs     = require ('fs');
+   var os     = require ('os');
+   var path   = require ('path');
    var {inc, last, type} = teishi;
 
    dale.async = async function (input, fun, options) {
@@ -495,14 +498,33 @@ if (mode === 'server') {
                ]);
             }],
             ['Read back empty file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/empty.md')}, 200, assertBody ('')],
-            ['Write file with base64', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.txt', content: Buffer.from ('hello base64').toString ('base64'), base64: true}}, 200, function (s, rq, rs) {
+            ['Reject base64 file write', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.txt', content: 'aGVsbG8=', base64: true}}, 400],
+            ['Write text file with multipart', 'post', '/project/write', function (s) {
+               return {multipart: [
+                  {name: 'id', value: s.projectId},
+                  {name: 'path', value: 'doc/binary.txt'},
+                  {name: 'file', filename: 'upload', value: 'hello multipart'},
+               ]};
+            }, 200, function (s, rq, rs) {
                return assert ([
                   ['sha', rs.body.sha, 'string'],
                   function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
                ]);
             }],
-            ['Read back base64-written file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/binary.txt')}, 200, assertBody ('hello base64')],
-            ['Write binary file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.bin', content: Buffer.from ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]).toString ('base64'), base64: true}}, 200, function (s, rq, rs) {
+            ['Read back multipart-written file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/binary.txt')}, 200, assertBody ('hello multipart')],
+            ['Write binary file with multipart', 'post', '/project/write', function (s) {
+               // Hitit requires a file path to send arbitrary binary bytes unchanged.
+               s.uploadDir = fs.mkdtempSync (path.join (os.tmpdir (), 'vibey-upload-'));
+               var file = path.join (s.uploadDir, 'upload.bin');
+               fs.writeFileSync (file, Buffer.from ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]));
+               return {multipart: [
+                  {name: 'id', value: s.projectId},
+                  {name: 'path', value: 'doc/binary.bin'},
+                  {name: 'file', path: file, contentType: 'application/octet-stream'},
+               ]};
+            }, 200, function (s, rq, rs) {
+               fs.rmSync (s.uploadDir, {recursive: true, force: true});
+               delete s.uploadDir;
                return assert ([
                   ['sha', rs.body.sha, 'string'],
                   function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
@@ -547,6 +569,48 @@ if (mode === 'server') {
             ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
                return s.assertCommit (rs.body.stdout, 8, "Run 'echo foo > doc/another.md && cat doc/another.md'");
             }],
+
+            ['Upload multipart file', 'post', '/project/write', function (s) {
+               return {multipart: [
+                  {name: 'id', value: s.projectId},
+                  {name: 'path', value: 'doc/upload test.txt'},
+                  {name: 'file', filename: 'upload', value: 'hello multipart\nこんにちは\0'},
+               ]};
+            }, 200, function (s, rq, rs) {
+               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
+            }],
+            ['Read multipart upload', 'get', function (s) {
+               return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/upload test.txt');
+            }, 200, assertBody ('hello multipart\nこんにちは\0')],
+            ['Upload empty multipart file', 'post', '/project/write', function (s) {
+               return {multipart: [
+                  {name: 'id', value: s.projectId},
+                  {name: 'path', value: 'doc/upload test.txt'},
+                  {name: 'file', filename: 'upload', value: ''},
+               ]};
+            }, 200],
+            ['Read empty multipart upload', 'get', function (s) {
+               return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/upload test.txt');
+            }, 200, assertBody ('')],
+            dale.go ([
+               ['missing file', []],
+               ['wrong file field', [{name: 'other', filename: 'upload', value: 'hello'}]],
+               ['duplicate files', [
+                  {name: 'file', filename: 'upload1', value: 'hello'},
+                  {name: 'file', filename: 'upload2', value: 'hello'},
+               ]],
+               ['unexpected body field', [
+                  {name: 'content', value: 'hello'},
+                  {name: 'file', filename: 'upload', value: 'hello'},
+               ]],
+            ], function (test) {
+               return ['Reject multipart ' + test [0], 'post', '/project/write', function (s) {
+                  return {multipart: [
+                     {name: 'id', value: s.projectId},
+                     {name: 'path', value: 'doc/upload test.txt'},
+                  ].concat (test [1])};
+               }, 400];
+            }),
 
             ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, function (s, rq, rs) {
                return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
@@ -659,7 +723,7 @@ if (mode === 'server') {
             }],
 
             ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
-               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\n', teishi.test.equal])) return false;
+               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\nupload test.txt\n', teishi.test.equal])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   next ();
@@ -674,7 +738,7 @@ if (mode === 'server') {
                }) ();
             }],
             ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
-               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\n', teishi.test.equal])) return false;
+               if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\nupload test.txt\n', teishi.test.equal])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   await run ('docker', 'rm', 'vibey-project-' + s.projectId);

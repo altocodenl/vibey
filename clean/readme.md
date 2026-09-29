@@ -140,6 +140,21 @@ user:<id> count <integer>
 userCount <integer>
 ```
 
+### Sharing
+
+Set grants in `/project/vibey/access.md`, then run `vibey credentials` to sync them:
+
+```
+alice@example.com read
+bob@example.com write chat/
+```
+
+Each line is `<email> <read|write> [prefix]`. Blank lines and lines starting with `#` are ignored. Emails are lowercased. Omitting the prefix grants whole-project access; otherwise, paths are matched by literal prefix. `write` includes `read`. Owners retain full access.
+
+Prefixes and requested paths must be relative, without backslashes, control characters, doubled slashes or `.`/`..` segments. Symlinks are followed, not confined to the grant's prefix.
+
+Syncing replaces the project's grants, removing entries no longer present. Invalid entries abort the sync. Grants for unverified recipients remain keyed by email until login verification transfers them to the user ID. Deleting a project or account cleans up its sharing records.
+
 ### API
 
 #### Public
@@ -160,17 +175,20 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 
 #### Project
 
+File reads and message reads require read access to their path. File writes, edits and messages require write access to their path. Shell commands and messages addressed to shell or AI additionally require whole-project write access. Denied access returns 404, except deletion of an accessible project by a non-owner returns 403.
+
 - **Request creator access**: `POST /creator/request`: expects `{}`. Returns 409 if the user is already a creator. In local mode, this route returns a 404.
-- **Get projects**: `GET /projects`.
-- **Create project**: `POST /project`: expects `{name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters. Returns 403 if the user is not a creator, 409 if the current user already has a project with that name. Assigning an occupied slot removes that slot from the project previously occupying it.
-- **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters. Returns 404 if project is not found, 409 if the current user has another project with the new name. Assigning an occupied slot removes that slot from the project previously occupying it.
-- **Serve file**: `GET /project/<projectId>/file/<path>`: serves a file from `/project` through `docker.read`, with its MIME type or `application/octet-stream`. Requires project ownership. Returns 404 if the project is not owned by the user or the file is missing, 400 for absolute paths, null bytes or `..` segments, and 500 for other read errors. Symlinks are followed. Uses `cicek.cache` for ETags and 304 responses, with `Cache-Control: private, no-cache`. Sends `nosniff` and a sandbox CSP for safe previews.
-- **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>, base64: <boolean|undefined>}`. Writes content to the file. If `base64` is `true`, decodes `content` from base64 before writing. If operation concludes with a non-zero code, returns 400 instead of 200.
+- **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants. Each project appears once.
+- **Create project**: `POST /project`: expects `{name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters. Returns 403 if the user is not a creator, 409 if an owned or shared project already has that name. Assigning an occupied slot removes that slot only from a project owned by the caller.
+- **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters. Returns 404 if the project is missing or not owned by the caller, 409 if another owned or shared project has the new name. Assigning an occupied slot removes that slot only from another project owned by the caller.
+- **List files**: `GET /project/<projectId>/files`: returns `[{name: <relativePath>, size: <bytes>, mtime: <milliseconds since Unix epoch>}]`, sorted by name. Excludes `.git` contents and invalid paths; includes only files covered by the user's read or write grants, or all valid files for the owner. Returns 404 if the project is missing or inaccessible, and 500 if listing fails.
+- **Serve file**: `GET /project/<projectId>/file/<path>`: serves a file from `/project` through `docker.read`, with its MIME type or `application/octet-stream`. Returns 404 if access is denied or the file is missing, 400 for invalid paths, and 500 for other read errors. Symlinks are followed. Uses `cicek.cache` for ETags and 304 responses, with `Cache-Control: private, no-cache`. Sends `nosniff` and a sandbox CSP for safe previews.
+- **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>}` or multipart fields `id`, `path` and a single file in the `file` field. Writes content to the file. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once, except for the reserved value `'[EOF]'`, which appends `newText` to the end of the file. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
-- **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>, read: <boolean|undefined>}`. Runs the command inside the project's container. If `read` is true, does not update the project's `last` timestamp.
+- **Run command**: `POST /project/run`: expects `{id: <projectId>, command: <string>, read: <boolean|undefined>}`. Runs the command inside the project's container. Requires whole-project write access even when `read` is true. The `read` flag only prevents updating the project's `last` timestamp. The special command `vibey credentials` syncs sharing grants.
 - **Send message**: `POST /project/message`: expects `{id: <projectId>, file: <fileName>, base64: <boolean|undefined>, body: <text|base64>, to: <all|shell|ai-gpt-6|ai-opus-4.6|messageUUID>}`. Appends a message with server-generated UUID, timestamp and sender, creating the file and parent folders if needed. Rejects complete header/body marker lines in `body`. Returns `{id: <messageUUID>, responseId: <messageUUID>}` for shell messages, otherwise `{id: <messageUUID>}`; 400 if validation or persistence fails.
-- **Read message**: `PUT /project/message`: expects `{projectId: <projectId>, file: <fileName>, messageId: <messageUUID>}`. Returns the message as text, including its head and body markers. Returns 404 if the project is not owned by the user, the file is missing, or the message is not found; 400 for invalid input.
-- **Remove project**: `DELETE /project/<projectId>`
+- **Read message**: `PUT /project/message`: expects `{projectId: <projectId>, file: <fileName>, messageId: <messageUUID>}`. Returns the message as text, including its head and body markers. Returns 404 if access is denied, the path is invalid, the file is missing, or the message is not found; 400 for invalid body fields.
+- **Remove project**: `DELETE /project/<projectId>`: requires ownership. Returns 404 if the project is missing or inaccessible, 403 if it is shared with the caller but not owned by them.
 
 #### Credentials
 
@@ -271,14 +289,14 @@ Except for `GET /auth/user`, all other auth routes will return a 404 in local mo
 - `change file.name`: reads the selected file and scrolls its entry into the center of the left pane. Runs at low priority.
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
-- `list files`: lists project files through `POST /project/run`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then calls `load clientExtension` and reads the selected file.
+- `list files`: lists readable project files through `GET /project/<projectId>/files`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then calls `load clientExtension` and reads the selected file.
 - `read file`: clears the global `content` and emits `change file`. For images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`) and PDFs (case-insensitive), returns without fetching content; the view loads them directly through `GET /project/<projectId>/file/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
-- `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it; otherwise, updates the global `content` if the file is still selected.
-- `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list, closes the creation modal and refreshes the list.
+- `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it and refreshes the list after the write succeeds; otherwise, updates the global `content` if the file is still selected.
+- `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list and closes the creation modal. The successful write triggers the list refresh.
 - `remove file <name>`: asks for confirmation, then deletes the file through `POST /project/run`. Refreshes the list and, if the deleted file was selected, navigates to the project's default file.
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. On success, closes the rename modal, refreshes the list and updates navigation if the renamed file was selected.
 - `download file`: downloads the selected file's server copy through `GET /project/<projectId>/file/<path>`, encoding each file path segment. Uses a temporary anchor with the file's basename as its download name; does not require loaded content.
-- `upload * <files>`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and base64-encoding all file content. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
+- `upload * <files>`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and sending file content as multipart without base64 encoding. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
 - `change projects|project|file|settings`: recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings for admins, line wrapping and JavaScript/Python/Markdown modes; file editor changes call `write file` immediately, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
 - `change search.content.query`: calls `highlight content`.
 - `change view`: calls `highlight content` at low priority, after rendering.

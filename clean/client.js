@@ -654,20 +654,10 @@ B.mrespond ([
       if (! project) return B.call (x, 'navigate', 'projects');
 
       if (! B.get ('files')) B.call (x, 'mset', 'files', []); // Set it to an empty array to prevent multiple in-flight calls.
-      B.call (x, 'post', '/project/run', {id: project.id, read: true, command: "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %p\\n' | sort -t/ -k3"}, function (x, error, rs) {
+      B.call (x, 'get', '/project/' + project.id + '/files', function (x, error, rs) {
          if (B.get ('project') !== project.id) return;
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
-         var files = dale.fil ((rs.body.stdout || '').split ('\n'), undefined, function (line) {
-            if (! line) return;
-            var first = line.indexOf (' ');
-            var second = line.indexOf (' ', first + 1);
-            return {
-               mtime: Math.round (parseFloat (line.slice (first + 1, second)) * 1000),
-               name: line.slice (second + 1).replace ('/project/', ''),
-               size: parseInt (line.slice (0, first)),
-            };
-         });
-         B.call (x, 'set', 'files', files);
+         B.call (x, 'set', 'files', rs.body);
 
          B.call (x, 'load', 'clientExtension');
          B.call (x, 'read', 'file');
@@ -749,7 +739,10 @@ B.mrespond ([
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
          if (B.get ('project') !== project) return;
 
-         if (New) B.call (x, 'navigate', 'files/' + project + '/' + name);
+         if (New) {
+            B.call (x, 'navigate', 'files/' + project + '/' + name);
+            B.call (x, 'list', 'files');
+         }
          if (! New && B.get ('file', 'name') === name) content = newContent;
 
          dale.go (B.get ('files') || [], function (file, index) {
@@ -775,7 +768,6 @@ B.mrespond ([
       if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project'), + '/' + encodeURIComponent (name));
 
       B.call (x, 'rem', 'new', 'file');
-      B.call (x, 'list', 'files');
    }],
 
    ['remove', 'file', function (x, name) {
@@ -851,28 +843,21 @@ B.mrespond ([
       }
 
       dale.go (files, function (file) {
-         var reader = new FileReader ();
-         reader.onload = function () {
-            var name = file.webkitRelativePath || file.name;
-            var body = {
-               base64: true,
-               content: '',
-               id: projectId,
-               path: name,
-            };
-            var bytes = new Uint8Array (reader.result);
-            dale.go (bytes, function (b) {
-               body.content += String.fromCharCode (b);
-            });
-            body.content = btoa (body.content);
-            B.call (x, 'post', '/project/write', body, function (x, error) {
-               complete (error, name);
-            });
-         }
-         reader.onerror = reader.onabort = function () {
-            complete (true, file.webkitRelativePath || file.name);
-         }
-         reader.readAsArrayBuffer (file);
+         var name = file.webkitRelativePath || file.name;
+         var body = new FormData ();
+         body.append ('id', projectId);
+         body.append ('path', name);
+         body.append ('file', file, 'upload');
+
+         fetch ('/project/write', {
+            method: 'POST',
+            headers: {'x-csrf': B.get ('user', 'csrf')},
+            body: body,
+         }).then (function (rs) {
+            complete (! rs.ok, name);
+         }, function () {
+            complete (true, name);
+         });
       });
    }],
 
