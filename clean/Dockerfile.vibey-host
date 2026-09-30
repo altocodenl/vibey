@@ -16,8 +16,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --production
 
-COPY server.js cell.js prompt.md config.4tx secret.4tx client.js test.js ./
-RUN echo 'module.exports = {}' > secret.js
-COPY secret.js* ./
+COPY server.js cell.js prompt.md config.4tx client.js test.js ./
+RUN echo 'module.exports = {}' > secret.js && touch secret.4tx
+COPY secret.js* secret.4tx* ./
 
 CMD ["sh", "-c", "redis-server --daemonize yes --dir /app/data --appendonly yes && exec mon -p /tmp/mon.pid 'node server.js' --log /tmp/vibey.log"]

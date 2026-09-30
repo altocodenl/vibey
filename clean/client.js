@@ -338,7 +338,7 @@ B.mrespond ([
    }],
 
    ['change', 'project', function (x) {
-      B.call (x, 'rem', [], 'files');
+      B.call (x, 'rem', [], ['files', 'projectSize']);
    }],
 
    ['load', 'clientExtension', function (x) {
@@ -658,6 +658,19 @@ B.mrespond ([
          if (B.get ('project') !== project.id) return;
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          B.call (x, 'set', 'files', rs.body);
+
+         B.call (x, 'post', '/project/run', {
+            id: project.id,
+            read: true,
+            command: 'du -sk /project',
+         }, function (x, error, rs) {
+            if (B.get ('project') !== project.id || error || rs.body.code) return;
+            var match = /^\s*(\d+)\s/.exec (rs.body.stdout || '');
+            if (match) B.call (x, 'set', 'projectSize', {
+               id: project.id,
+               bytes: Number (match [1]) * 1024,
+            });
+         });
 
          B.call (x, 'load', 'clientExtension');
          if (! noRead) B.call (x, 'read', 'file');
@@ -2116,7 +2129,7 @@ views.files = function () {
                'background-color': css.colors.vnavy,
                'border-radius': '1.125rem',
                color: css.colors.vnearwhite,
-               'font-family': 'Consolas, monaco, monospace',
+               'font-family': 'Menlo, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace',
                height: '100%',
             }],
             ['.CodeMirror-lines', {
@@ -2186,6 +2199,11 @@ views.files = function () {
                onclick: B.ev ('navigate', 'projects'),
             }, ['‹', views.tooltip ('B', 'below')]],
             ['span', {class: 'f4 fw7'}, project.name],
+            B.view ('projectSize', function (projectSize) {
+               return projectSize && projectSize.id === project.id
+                  ? ['span', {class: 'f6 ml2'}, size (projectSize.bytes)]
+                  : ['span'];
+            }),
          ]],
          ['div', {
             style: style ({

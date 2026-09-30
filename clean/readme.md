@@ -255,7 +255,7 @@ File reads and message reads require read access to their path. File writes, edi
   - Escape: closes the creation modal.
   - Command+S: opens and focuses search.
 - `change projects`: rereads the hash to validate navigation against the refreshed project list.
-- `change project`: clears `files` so the newly selected project's file list can be loaded.
+- `change project`: clears `files` and `projectSize` so the newly selected project's file list and disk usage can be loaded.
 - `load clientExtension`: checks the loaded file list for root-level `extend-client.js`. If present and the hash still points to the selected project, stores its project ID in `extendClient`, reads the script via `GET /project/<projectId>/file/extend-client.js`, and evaluates it in global scope with access to `B`, `views`, etc. Skips loading when `extendClient` is already set and ignores responses if the marker or destination project has changed. Loading and evaluation errors show a snackbar. Only use trusted project code: extensions run with full app privileges. Refresh the page inside the project to activate extension changes. Leaving the project reloads the page even if loading or evaluation failed. Logout clears the marker but does not undo already-running extension code.
 - `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
 - `create project`: creates a new project using the trimmed name at `new.project.name` and optional `new.project.slot` via `POST /project`. On success, clears the creation modal and project search, temporarily adds the project to `projects`, navigates to its `main.md` and reloads projects.
@@ -291,7 +291,7 @@ File reads and message reads require read access to their path. File writes, edi
 - `change file.name`: reads the selected file and scrolls its entry into the center of the left pane. Runs at low priority.
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
-- `list files <noRead>`: lists readable project files through `GET /project/<projectId>/files`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. Then calls `load clientExtension` and, unless `noRead` is set, reads the selected file.
+- `list files <noRead>`: lists readable project files through `GET /project/<projectId>/files`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. After a successful listing, also runs `du -sk /project` through `POST /project/run` with `read: true`, converting KiB to bytes in `projectSize`. This measures disk usage including `.git`; `views.files` displays it beside the project title using the same `size()` formatter as file sizes. Failed or denied size requests are silently ignored; command execution requires whole-project write access. Then calls `load clientExtension` and, unless `noRead` is set, reads the selected file.
 - `read file`: clears the global `content` and emits `change file`. For images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`) and PDFs (case-insensitive), returns without fetching content; the view loads them directly through `GET /project/<projectId>/file/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it and refreshes the list after the write succeeds; otherwise, updates the global `content` if the file is still selected.
 - `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list and closes the creation modal. The successful write triggers the list refresh.
@@ -360,6 +360,8 @@ pkce apiKey <provider|undefined> // When set, shows the API key modal for the pr
 pending messages <array of "projectId/file/messageId"> // Pending messages in the current chat; initially empty
         requests <map of "projectId/file/messageId" to interval ID> // Active 100ms polling intervals; initially empty
 project <projectId|undefined> // The current project selected
+projectSize bytes <integer> // Disk usage including .git, displayed beside the project title
+            id <projectId> // Project whose disk usage was measured
 projects 1 created <date>
            id <id>
            last <date>

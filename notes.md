@@ -1,5 +1,99 @@
 # Vibey development notes
 
+## 2026-09-30
+
+An idea that came again to my head and feels like it's super useful: timey. A time series service. The core ideas:
+- A variable is simply an unique name.
+- An entry is time (utc ms from epoch), a numeric value (for event counts, it can just be 1, for other things it can be more) and optional tags (a set of non-repeating text entries).
+- It makes the most sense to write it to a relational db, like sqlite or postgres.
+- Older entries can be moved to a compact text notation, where ms are stored as offsets.
+- Older entries can be rehydrated on bigger queries, or just queried from disk.
+- The caching logic for historical calls can keep the project maintainers profitably busy for a long time, but the basic functionality of having in db and offloading to disk (with optional rehydration) is a small core and can be super useful.
+- A flow and a stock variable are the same, a stock variable is just a sum over a flow.
+- Small web service with its own dashboard. Set a password in config before running (won't allow without it). Also add an append key on first startup.
+- Endpoints:
+   - POST /entry
+      {variable: '...', t: <integer>|undefined, value: <integer>, tags: ['...', ...]|undefined}
+   - GET /query (urlencoded) and POST /query
+      {variable: '...'|<undefined>, from: <integer>|undefined, to: <integer>|undefined, tags: ['...', ...]|undefined (behaves as an OR), op: undefined|count|sum|avg}
+
+Offering a managed postgres with reasonable defaults and automatic upgrades makes great sense as an app. You'd just put it in an engine. It doesn't have to be a dedicated engine, really, since it is dockerized inside a project. This would be an app as a project, rather than an app inside a project. Could we do it really inside a project, assuming that the defaults won't trip with other things in there? Basically, the app as a .sh? Having it inside a project allows you to do other things with the data, instead of relying on a default interface we provide, or having to export dumps.
+
+The command could be `vibey install postgres`, interpreted by the host. This could be the mechanism for apps, eventually, in a registry.
+
+There will be a lot of "waf" we'll need to do at the run command level in vibey host, eventually.
+
+This is starting to feel more like discovery than invention.
+
+Cross-project can lift apps to install! The registry is just someone's project that allows a part of it to be public!
+
+vibey install altocode/timey
+- copy a .zip from a project, unzip it, run a .sh, set the app as an app as a vibey file (shows append key)
+
+vibey install postgres
+- copy a .zip from a project. unzip it. run a .sh, autoset a new random password, bind to localhost only, set the app as an app as a vibey file (reveals password if clicked, client can send raw queries to the db)
+
+an app is a *file* with a certain structure, that is interpreted like an app by the client and the server. what does it have?
+- scripts
+   - start
+   - stop
+   - status (scans for pid, gets status)
+   - other (make backup)
+- config (incl password)
+- views (these should be different files, I think)
+
+how to make views run commands in the shell? That'd be the bomb. No need for APIs then. It's what I already have in the vibey client with respect to vibey host.
+
+there have to be usernames, and names for projects that can be accessed. So you can have stable names for things. That's very important. ids are not friendly.
+
+Yes, usernames! On user creation, we take the first part of your email: if available, it binds that username. If not, we take your email minus the domain, with the @ replaced by a -. If that's also not available, we add a -[number] (finding the first available one).
+
+Then, this allows for a public page: app.buildwithvibey.com/u/<username>
+And for a project page: app.buildwithvibey.com/p/<username>/<projectName>
+
+We can allow for a special encoding of project names: spaces become dashes; if there are dashes in the project name, we use another character. So that normal characters and spaces look readable.
+
+This allows the registry of apps to be simply a reference to a username + project name. Having usernames and project names we can control means that we can update them if we need to. It gives habitability, changeability. It gives you controllable dispatch with meaningful names. And eventually, you can point your /u/username to a certain page (perhaps a .md) that is then your homepage. Probably under a different domain, to avoid the vibey cookies being usable from arbitrary code.
+
+Disallow usernames and project names to be uuids, so you can also use uuid reference (for either user, project or both) as a stable reference (if you change usernames or project names). Like IP vs DNS.
+
+The fact that by default, changing an engine wouldn't change the links (because you can move a project from one engine to another) is a very big deal.
+
+Having the apps & services (dbs) run inside the project, rather than outside as artifacts, is also a multiplier.
+
+going to the original idea for ac;tools: id is already provided, just has to be forwarded to apps; same goes for files; apps can provide the db; stats can be timey; logs are files, we can add an app for querying and rotating. Queues could also be an app. And finally, notifications can be a mechanism of putting things into a file that represents your own inbox, or a team's inbox.
+
+If apps can send commands to a new, temp chat, they can get results. It's basically a call without a chat, or rather, the chat being inside the files of the app, which are by default hidden.
+
+Vibey is not an app. It is a space. The space can have apps, but it is not just the apps.
+
+Unexpected TODOs:
+- add usernames
+- PUT /auth/user
+   - vi mode needs to be a personal setting
+   - change username
+- refer to projects by names
+
+gpt6: "
+ - Organize around undertakings, not apps: conversations, files, people, and tools inhabit one durable place.
+ - Ownership without maintenance: genuine control and portability, with infrastructure looked after.
+ - One shared world: humans, AI, scripts, and graphical tools operate on the same objects.
+ - Make using flow into shaping: people adapt their environment incrementally, rather than commission whole applications.
+ - Capabilities that compose: new tools inherit sharing, search, history, and automation.
+ - Personal, but inherently social: places you own and invite others into—not feeds or silos.
+That is considerably more compelling than “everyone gets a server,” “everything is a file,” or “AI can build your apps.” Those are mechanisms. The promise is that ordinary people can inhabit and shape computing, rather than merely subscribe to it."
+
+claude opus 5.5: "
+1. Chat is the shell: humans, AI and the computer act as equal participants in one medium, and agents talk to each other through files.
+2. Everything is a file: chats, apps, access rules and settings can all be inspected, versioned, backed up and searched by both humans and AI.
+3. A project is a real computer that's safe to use: autogit plus backups make a full shell safe to hand out, so users get primitives instead of features.
+4. The host acts as a kernel: every call goes through it, which gives identity-based cross-project access, install commands, and registries that are just public projects.
+5. Transparency over automation: people can see what AI does and extend the system, so they build their own space instead of just consuming one.
+
+The thesis: Unix's model of a shared machine, opened to everyone because AI turns what people want into commands. The biggest open risk is whether non-technical users can actually use it."
+
+"The host acts as a kernel" brought a smile to my face.
+
 ## 2026-09-29
 
 Dogfooding: have a notifications project that posts important alerts there. Have the monitoring inside, with fallback to local files.
@@ -21,6 +115,8 @@ Cross-project access: the originating process is the principal. Assume no redis 
 
 We are now refreshing the entire chat when there are pending calls, not for the pending calls, but to get what comes afterwards. How to avoid refreshing: when querying a message X, also get a list of ids of messages that follow it, so you can insert other pending messages in.
 
+This flexibility in access is only possible because of the ultimate late binding of having vibey host interpreting all calls.
+
 - TODO
    - tests in local mode
    - mobile ui
@@ -32,7 +128,6 @@ We are now refreshing the entire chat when there are pending calls, not for the 
       - email hooks
       - tests
    - chat
-      - stretch anthropic session
       - Upload images, allow download to project or to local
       - enable an agent calling another agent
       - cron file
@@ -48,7 +143,6 @@ We are now refreshing the entire chat when there are pending calls, not for the 
       - autobackup
       - client tests
       - skip docker.exec to have a slash command time by 10x
-
 
 ## 2026-09-28
 

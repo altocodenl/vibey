@@ -1500,7 +1500,7 @@ var routes = [
          proc.once ('exit', stop);
          proc.once ('close', async function () {
             try {
-               await docker.run (rq.body.id, 'rm -f ' + Path.quote (pidFile));
+               await docker.run (executionProjectId, 'rm -f ' + Path.quote (pidFile));
             }
             catch (error) {
                clog ({error: formatError (error), responseId: messageId, type: 'Process cleanup error'});
@@ -1522,16 +1522,33 @@ var routes = [
       };
 
       if (rq.body.to === 'shell') {
+         var shellProject = rq.body.id, shellCommand = rq.body.body;
+         var projectCall = /^\s*vibey project ([^\s:]+)\s+([\s\S]+)$/.exec (shellCommand);
+         if (projectCall) {
+            shellProject = projectCall [1];
+            shellCommand = projectCall [2];
+            if (shellProject !== rq.body.id) {
+               var access = await docker.read (shellProject, '/project/vibey/access.md');
+               var allowed = ! access.code && access.stdout.toString ('utf8').split (/\r?\n/).some (function (line) {
+                  var grant = /^(\S+)\s+write$/.exec (line.trim ());
+                  return grant && grant [1] === 'project:' + rq.body.id;
+               });
+               if (! allowed) return reply (rs, 404);
+            }
+         }
+
          result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
          if (result.code) return reply (rs, 400, result);
          reply (rs, 200, {id: id, responseId: responseId});
 
-         if (rq.body.body.trim () === 'vibey access') {
-            var accessResult = await docker.access (rq.body.id);
+         if (shellCommand.trim () === 'vibey access') {
+            var accessResult = await docker.access (shellProject);
             output += accessResult.stdout || accessResult.error || 'Could not sync access\n';
             streamEdit ();
          }
-         else await docker.run (rq.body.id, groupedCommand (rq.body.body), {catch: true, onSpawn: watchCancellation, stdout: function (chunk) {
+         else await docker.run (shellProject, groupedCommand (shellCommand), {catch: true, onSpawn: function (proc) {
+            watchCancellation (proc, shellProject);
+         }, stdout: function (chunk) {
             output += chunk;
             streamEdit ();
          }, stderr: function (chunk) {
