@@ -1,5 +1,117 @@
 # Vibey development notes
 
+## 2026-10-01
+
+Some notes on Alexander - The process of creating life:
+- "Deep feeling must be the core of living process."
+- "My emphasis on feeling is not meant to say that you or I, the architect or the builder or the user, should *express* our feelings when we are working."
+- "Art as expression (this is not very interesting): artist puts feeling into work. Not this."
+- "Feeling in the work of art (this is essential and important): the work generates feeling in me. This is what must be happening."
+- "Producing a building which *has* feeling is something different."
+- "it is not important whether the architect's feeling goes *toward* the building. *What matters is that the building (...) send profound feeling back towards us.*"
+- "The feeling comes *from the object back to me after it is made*, does not go from me to the object while I am making it. Here the question all the time is: Within the step that I am taking now, can I take the next step in such that way that the evolving work has its deep feeling increased the most?"
+- "as we move forward, *before we take an action*, we can grasp the latent structure as an emotional substance (...) This means we can sense, ahead of time, the quality of the completed whole - even when we cannot yet visualize it."
+- "The final target, then, has the *feeling* which we anticipated much earlier, but often has an unexpected, unfamiliar *geometry*."
+- "The feeling which steers us in this fashion is a vision - but it is *not* an arbitrarily *invented* vision. It is a vision of something we may call the *emotional substance* of the coming work (...) It is therefore reasonably accurate, reliable, and stable. We can get it, and then keep on coming back to it."
+- "Thus, as the geometry develops, the feeling is kept intact, but becomes more and more solid - provided we do not depart from the feeling that existed in us at the beginning."
+
+The core of engine is 1) good default picks for service (hetzner) & engine choices, including dedicated ip; 2) good installation defaults (fail2ban, ufw, autoupgrade); 3) being able to move projects in and out of them without having to ssh into things.
+
+Usernames & project names *are* access!
+
+If the host was addressable as a project, I could have another project that could refer to it. And viceversa, if I had a project for metrics, the host could send them there. But there's a bootstrapping problem here.
+
+Idea for 404 page if I ever need it: views.fourohfour: a big question mark drawn with spinnies, with a button to "take me to safety".
+
+gpt6: "Hosts, registries, metrics services, and installed apps all becoming projects is compelling. It makes the system extensible through its own primitives rather than through a growing catalogue of special cases."
+claude5.5: "The strongest feeling is of the concepts collapsing into each other: hosts become projects, the registry becomes a project, an app
+  becomes a file, and access becomes a name. (...) a warm, self-similar workshop for owning your own computing."
+
+How could I run vibey itself as a vibey app? That'd be the end, if at all possible. Maybe there has to be a bootstrapping layer.
+
+A todo list is a list of latent centers.
+
+- TODO
+   - mobile ui
+   - devops
+      - no downtime on project during deploy
+      - notification project to see alerts
+   - engine
+   - apps
+   - access
+      - public access
+      - token/api hooks
+      - email hooks (token in an email address)
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+      - stream large files (split them in pages)
+   - project
+      - autobackup
+      - skip docker.exec to slash command time by 10x
+   - tests: local mode, client tests: auth, project, files, chat, access
+
+== Pricing
+
+The value proposition is simple:
+
+- Free: you can take vibey and install it locally (for the local version) or on your own server (for the cloud version).
+- Subscription: pay a 10 EUR/month subscription per project creator, plus the cost of any servers you use. Subscription aside, we charge you at cost, so we don't add margin on anything we charge you for.
+
+The subscription cost is what keeps vibey running and growing. We plan to reduce the price of the subscription when we reach 10k subscriptions. Also, 10% of the subscription cost goes straight to support open source software projects that make vibey possible.
+
+==
+
+The list of demos could be long. It could be something that keeps on getting additions, and that you can search. Almost like tutorials.
+
+Missing features for demos:
+- travel plan: agent calling agent
+- customer proposal: email forwarding
+- sunday brunch: public page, append to chat with token from public page
+
+When doing work with a spotty connection, having vibey run in cloud is really helpful: once your message is sent, the agents can work without spotty internet. A considerable advantage over local clients.
+
+How to send diffs for editing? Approach:
+- A new responder `edit file`.
+- The responder has a function that takes the old text and the new text (for the entire file) and returns a list of oldText/newText that will have enough disambiguation to succeed (unless the file changed significantly elsewhere concurrently).
+- Internally, the function uses B.diff to see contiguous chunks of lines that have changed, and adds incremental context from surrounding lines if the old text is not unique.
+- The edits are placed in a queue (inside the state) and they run sequentially against the edit endpoint. Each entry has a project + file, to indicate which one it is.
+- The sequential run is a mere recursive function. No timeouts or setintervals.
+- If an edit fails, an error is printed, the queue is flushed for that file and the user is given the choice of overwriting the entire file with a modal, or switch to the latest version in the server.
+- If the file or project changes, the queue still remains operating.
+- Don't keep a new version of the file except for in file.content. If you navigate away, it's gone.
+
+With running in local mode, agents can load up the interface and test things.
+
+I've been so silly! If you upload media to the chat, you put media directly as a file, and then the chat shows it inline. If you upload a file named X.png on chat/party.md, the media file would then be called chat/party.md-X.png
+
+On access by username + project name:
+- Disallow uuid project name (also in edit). Also disallow two spaces together or a dash next to a space, so you can encode a project name to replace spaces with dashes. Escape each dash as two dashes. The rest goes url encoded. Project names still are unique per user.
+- Add a new endpoint: /p/<username/userId>/<projectName/projectId>, that optionally takes a /file/... after it in the url. If no file, it returns {id: id} of the project (which is used by the client for other requests). Otherwise, it returns the file requested, as if it was passed to the normal file endpoint that takes a single project id. This endpoint must scope the call by auth, returns 404 if not authorized (as we already do in the other endpoints).
+- The new route can check for existence without checking for auth, then send below to the existing route which can do its auth check
+- New url in the client to show projects: #/p/<username/userid>/<projectname/projectid>. When navigating through files, <file path> is appended. localPath should also use these urls.
+- Everything else in the client refers to projects by id under the hood.
+
+Is it me or this is hitting the motherlode of the web?
+
+It is blowing my mind that after the simplification of the path, if you have #/, you are looking at the file with the client. You remove the #/ and you get the file itself, if you have access.
+
+Vibey is already at 8k of code, including tests. I wonder if I could make it converge in 16k. Engines, apps, more ai providers, and still converge to a small system.
+
+Done:
+- Show images when viewing doc if linking to a local image
+- Full screen mode
+- Finish server tests for access
+- Send incremental edits
+- Upload media in chat
+- Access refactor
+   - PUT /auth/user (settings: vi mode)
+   - Create & update username
+   - Access projects by username & project name
+
 ## 2026-09-30
 
 An idea that came again to my head and feels like it's super useful: timey. A time series service. The core ideas:
@@ -61,7 +173,7 @@ The fact that by default, changing an engine wouldn't change the links (because 
 
 Having the apps & services (dbs) run inside the project, rather than outside as artifacts, is also a multiplier.
 
-going to the original idea for ac;tools: id is already provided, just has to be forwarded to apps; same goes for files; apps can provide the db; stats can be timey; logs are files, we can add an app for querying and rotating. Queues could also be an app. And finally, notifications can be a mechanism of putting things into a file that represents your own inbox, or a team's inbox.
+going to the original idea for ac;tools: id is already provided, just has to be forwarded to apps; same goes for files; apps can provide the db; stats can be timey; logs are files, we can add an app for querying and rotating. Queues could also be an app (kuey). And finally, notifications can be a mechanism of putting things into a file that represents your own inbox, or a team's inbox.
 
 If apps can send commands to a new, temp chat, they can get results. It's basically a call without a chat, or rather, the chat being inside the files of the app, which are by default hidden.
 
@@ -125,7 +237,7 @@ This flexibility in access is only possible because of the ultimate late binding
       - notification project to see alerts
    - access
       - token/api hooks
-      - email hooks
+      - email hooks (token in an email address)
       - tests
    - chat
       - Upload images, allow download to project or to local

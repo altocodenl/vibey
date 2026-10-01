@@ -210,6 +210,11 @@ var validProjectPath = function (path) {
       });
 };
 
+// Project names appear in URLs as /p/<user>/<name>, with each space as `-` and each dash as `--`. A name can't be a UUID (a UUID in that slot is a project id), can't have two spaces in a row or a space next to a dash (those would decode ambiguously), and can't have `/` or `?` (the server decodes the whole URL before routing).
+var validProjectName = function (name) {
+   return ! /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test (name) && ! / {2}| -|- |[/?]/.test (name);
+};
+
 var allowOp = async function (userId, projectId, op, prefix) {
    if (op !== 'read' && op !== 'write') return false;
    if (prefix !== undefined && ! validProjectPath (prefix)) return false;
@@ -316,7 +321,8 @@ docker.access = async function (id) {
    var invalidEntry;
    var entries = dale.fil (file.stdout.toString ('utf8').split (/\r?\n/), undefined, function (line) {
       line = line.trim ();
-      if (! line || line.startsWith ('#')) return;
+      // Project grants (`project:<originId> ...`) are read on every cross-project call, not synced.
+      if (! line || line.startsWith ('#') || line.startsWith ('project:')) return;
       var match = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line);
       if (! match || ! validEmail.test (match [1])) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
 
@@ -622,6 +628,134 @@ var sendmail = function (options) {
 
 // *** ROUTES ***
 
+// The not-found page, served with 404s for file requests: a question mark drawn with spinnies (the client's animated |/-\\ characters) and a link back to the projects.
+var fourohfour = lith.g ([
+   ['!DOCTYPE HTML'],
+   ['html', [
+      ['head', [
+         ['meta', {name: 'viewport', content: 'width=device-width,initial-scale=1'}],
+         ['meta', {charset: 'utf-8'}],
+         ['title', 'Not found - vibey'],
+         ['style', [
+            ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
+            ['.safety', {
+               'background-color': '#4a69bd',
+               'border-radius': '0.5rem',
+               color: '#f5f7ff',
+               'font-family': 'sans-serif',
+               'font-weight': '600',
+               'margin-top': '4rem',
+               padding: '0.75rem 1.5rem',
+               'text-decoration': 'none',
+            }],
+            ['body', {
+               'align-items': 'center',
+               'background-color': '#0f1530',
+               color: '#c084fc',
+               display: 'flex',
+               'flex-direction': 'column',
+               'justify-content': 'center',
+               margin: 0,
+               'min-height': '100vh',
+            }],
+            ['.cell', {
+               display: 'inline-block',
+               'font-family': 'monospace',
+               'font-size': '2rem',
+               'font-weight': 'bold',
+               'line-height': '1',
+               'text-align': 'center',
+               width: '2ch',
+            }],
+            ['.logo', {
+               'background-color': '#1a1a2e',
+               'border-radius': '1.125rem',
+               'box-sizing': 'border-box',
+               display: 'block',
+               height: '6.75rem',
+               left: '1.5rem',
+               padding: '1.125rem',
+               position: 'fixed',
+               top: 'calc(1.5rem - 2vh)',
+               width: '7.59375rem',
+            }],
+            ['.spinny:before', {
+               animation: 'spinny 0.8s steps(1) infinite',
+               content: '"|"',
+            }],
+         ]],
+      ]],
+      ['body', [
+         // The vibey logo, placed as on the projects view; like the button, it takes you to the projects.
+         ['a', {href: (CONFIG.baseURL || '') + '/#/projects'}, ['img', {alt: 'vibey', class: 'logo', src: (CONFIG.baseURL || '') + '/favicon.svg'}]],
+         ['div', {'aria-label': 'Not found', role: 'img'}, dale.go ([
+            '.#####.',
+            '##...##',
+            '##...##',
+            '.....##',
+            '....##.',
+            '...##..',
+            '..##...',
+            '..##...',
+            '..##...',
+            '.......',
+            '.......',
+            '..##...',
+            '.####..',
+            '..##...',
+         ], function (row) {
+            return ['div', dale.go (row.split (''), function (cell) {
+               return cell === '#' ? ['span', {class: 'cell spinny'}] : ['span', {class: 'cell'}, '\u00a0'];
+            })];
+         })],
+         ['a', {class: 'safety', href: (CONFIG.baseURL || '') + '/#/projects'}, 'Take me to safety'],
+      ]],
+   ]],
+]);
+
+var setUsername = async function (id, value, generate) {
+   var candidates, fallback, number = 0;
+   if (generate) {
+      var normalize = function (text) {
+         text = text.toLowerCase ().replace (/[^a-z0-9]+/g, '-').replace (/^-+|-+$/g, '') || 'user';
+         return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (text) ? text + '-1' : text;
+      };
+      var parts = value.split ('@');
+      fallback = normalize (parts [0] + '-' + parts [1].replace (/\.[^.]+$/, ''));
+      candidates = [normalize (parts [0]), fallback];
+   }
+
+   while (true) {
+      var username = generate
+         ? candidates.length ? candidates.shift () : fallback + '-' + (++number)
+         : value;
+
+      var result = await redis ('eval', `
+         local user = KEYS[1]
+         local id, name = ARGV[1], ARGV[2]
+         if redis.call('EXISTS', user) == 0 then return -1 end
+         local key = 'username:' .. name
+         local owner = redis.call('GET', key)
+         if owner and owner ~= id
+            and redis.call('HGET', 'user:' .. owner, 'username') == name then
+            return 0
+         end
+         local old = redis.call('HGET', user, 'username')
+         if old and old ~= name
+            and redis.call('GET', 'username:' .. old) == id then
+            redis.call('DEL', 'username:' .. old)
+         end
+         redis.call('SET', key, id)
+         redis.call('HSET', user, 'username', name)
+         local ttl = redis.call('PTTL', user)
+         if ttl >= 0 then redis.call('PEXPIRE', key, ttl) end
+         return 1
+      `, 1, 'user:' + id, id, username);
+
+      if (! generate || result !== 0) return result;
+   }
+};
+
 var routes = [
 
    // *** GATEKEEPER ***
@@ -751,14 +885,20 @@ var routes = [
    // *** AUTH ***
 
    ['get', '/auth/user', async function (rq, rs) {
-      var credentials = JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}');
+      var [user, credentials] = await redis ([
+         ['hmget', 'user:' + rq.user.id, 'settings', 'username'],
+         ['hget', 'credentials:' + rq.user.id, 'data'],
+      ]);
+      var settings = JSON.parse (user [0] || '{}');
+      var username = user [1] || undefined;
+      credentials = JSON.parse (credentials || '{}');
       credentials = dale.obj (credentials, function (types, provider) {
          return [provider, dale.obj (types, function (credential, name) {
             return [name, true];
          })];
       });
 
-      if (! CONFIG.cloud) return reply (rs, 200, {creator: true, credentials, mode: 'local'});
+      if (! CONFIG.cloud) return reply (rs, 200, {creator: true, credentials, mode: 'local', settings, username});
 
       reply (rs, 200, {
          admin: rq.user.email === CONFIG.admin ? true : undefined,
@@ -769,6 +909,44 @@ var routes = [
          email: rq.user.email,
          id: rq.user.id,
          mode: 'cloud',
+         settings,
+         username,
+      });
+   }],
+
+   ['put', '/auth/user', async function (rq, rs) {
+      if (stop (rs, [
+         ['body', rq.body, 'object'],
+         function () {return [
+            ['keys of body', dale.keys (rq.body), ['settings', 'username'], 'eachOf', teishi.test.equal],
+            ['settings', rq.body.settings, ['object', 'undefined'], 'oneOf'],
+            ['username', rq.body.username, ['string', 'undefined'], 'oneOf'],
+            function () {return rq.body.settings === undefined ? [] : [
+               ['keys of settings', dale.keys (rq.body.settings), 'vi', 'eachOf', teishi.test.equal],
+               ['settings.vi', rq.body.settings.vi, ['boolean', 'undefined'], 'oneOf'],
+            ]}
+         ]}
+      ])) return;
+
+      if (rq.body.settings === undefined && rq.body.username === undefined) {
+         return reply (rs, 400, {error: 'Provide settings or username'});
+      }
+      if (rq.body.username !== undefined) {
+         if (! /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test (rq.body.username)
+            || /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (rq.body.username)) {
+            return reply (rs, 400, {error: 'Invalid username'});
+         }
+         // Local mode has no signup flow.
+         if (! CONFIG.cloud) await redis ('hsetnx', 'user:local', 'id', 'local');
+         var result = await setUsername (rq.user.id, rq.body.username);
+         if (result === 0) return reply (rs, 409, {error: 'Username already taken'});
+      }
+      if (rq.body.settings !== undefined) {
+         await redis ('hset', 'user:' + rq.user.id, 'settings', JSON.stringify (rq.body.settings));
+      }
+      reply (rs, 200, {
+         settings: rq.body.settings,
+         username: rq.body.username,
       });
    }],
 
@@ -815,11 +993,13 @@ var routes = [
             ['setex', 'loginLink:' + loginLink, 60 * 5, rq.body.email],
             ['setex', 'loginLinkR:' + rq.body.email, 60 * 5, loginLink]
          ]);
+         await setUsername (userId, rq.body.email, true);
       }
       else {
          // For the unlikely case that a new user requests a second link.
-         var [ttl] = await redis ([
+         var [ttl, username] = await redis ([
             ['ttl', 'user:' + userId],
+            ['hget', 'user:' + userId, 'username'],
             oldLoginLink ? ['del', 'loginLink:' + oldLoginLink] : [],
             ['setex', 'loginLink:' + loginLink, 60 * 5, rq.body.email],
             ['setex', 'loginLinkR:' + rq.body.email, 60 * 5, loginLink]
@@ -827,6 +1007,7 @@ var routes = [
          if (ttl > 0) await redis ([
             ['expire', 'email:' + rq.body.email, 300],
             ['expire', 'user:'  + userId,        300],
+            username ? ['expire', 'username:' + username, 300] : [],
          ]);
       }
 
@@ -858,7 +1039,10 @@ var routes = [
       var userId = await redis ('get', 'email:' + email);
       if (! userId) return reply (rs, 403, {error: 'No user bound to the email'});
 
-      var user = await redis ('hgetall', 'user:' + userId);
+      var [user, credentials] = await redis ([
+         ['hgetall', 'user:' + userId],
+         ['hget', 'credentials:' + userId, 'data'],
+      ]);
 
       var csrf      = crypto.randomBytes (32).toString ('hex');
       var sessionId = crypto.randomBytes (32).toString ('hex');
@@ -878,6 +1062,7 @@ var routes = [
          // Remove the TTL for email & user entries in case this is the first successful verify for this user
          ['persist', 'user:' + userId],
          ['persist', 'email:' + user.email],
+         user.username ? ['persist', 'username:' + user.username] : [],
          ... await (async function () {
             var projects = await redis ('smembers', 'accessTo:' + email);
             return dale.go (projects, function (member) {
@@ -893,13 +1078,23 @@ var routes = [
          }) (),
       ]);
 
+      credentials = dale.obj (JSON.parse (credentials || '{}'), function (types, provider) {
+         return [provider, dale.obj (types, function (credential, name) {
+            return [name, true];
+         })];
+      });
+
       reply (rs, 200, {
          admin: user.email === CONFIG.admin ? true : undefined,
          count: parseInt (user.count),
          creator: user.email === CONFIG.admin || !! user.creator,
+         credentials,
          csrf,
          email: user.email,
+         id: userId,
          mode: 'cloud',
+         settings: JSON.parse (user.settings || '{}'),
+         username: user.username,
       }, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, sessionId, {
          expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10),
          httponly: true,
@@ -1044,6 +1239,7 @@ var routes = [
                id: userId,
             }],
          ]);
+         await setUsername (userId, rq.body.email, true);
       }
 
       reply (rs, 200);
@@ -1070,6 +1266,8 @@ var routes = [
             return ['length of name', rq.body.name.length, {min: 2}, teishi.test.range];
          }
       ])) return;
+
+      if (! validProjectName (rq.body.name)) return reply (rs, 400, {error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'});
 
       if (! rq.user.creator && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Please request creator access'});
 
@@ -1124,6 +1322,8 @@ var routes = [
          }
       ])) return;
 
+      if (! validProjectName (rq.body.name)) return reply (rs, 400, {error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'});
+
       var projects = await getForUser (rq.user.id, 'project');
       var match = dale.stopNot (projects, undefined, function (project) {
          if (project.id === rq.body.id) return project;
@@ -1162,6 +1362,57 @@ var routes = [
       if (stop (rs, ['id', rq.body.id, 'string'])) return;
 
       rs.next ();
+   }],
+
+   // /p/<username or user id>/<encoded project name or project id>[/<path>] resolves the user and project (which exist or not regardless of access), then rewrites the URL to /project/<id> or /project/<id>/file/<path>, whose routes below check access.
+   ['get', /^\/p\/([^/]+)\/([^/]+)(?:\/(.+))?$/, async function (rq, rs) {
+      var user = rq.data.params [0], project = rq.data.params [1], path = rq.data.params [2];
+      var uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+      var userId = user;
+      if (! uuid.test (user)) {
+         userId = await redis ('get', 'username:' + user);
+         // The username key can outlive a rename; the user hash has the current one.
+         if (! userId || await redis ('hget', 'user:' + userId, 'username') !== user) return path === undefined ? reply (rs, 404) : reply (rs, 404, fourohfour, 'html');
+      }
+
+      var projectId;
+      if (uuid.test (project)) {
+         if (await redis ('hget', 'project:' + project, 'owner') === userId) projectId = project;
+      }
+      else {
+         var name = project.replace (/--?/g, function (dashes) {
+            return dashes === '--' ? '-' : ' ';
+         });
+         var keys = dale.fil (await redis ('smembers', 'owner:' + userId), undefined, function (key) {
+            if (/^project:/.test (key)) return key;
+         });
+         var names = keys.length ? await redis (dale.go (keys, function (key) {
+            return ['hget', key, 'name'];
+         })) : [];
+         projectId = dale.stopNot (names, undefined, function (candidate, index) {
+            if (candidate === name) return keys [index].replace (/^project:/, '');
+         });
+      }
+      if (! projectId) return path === undefined ? reply (rs, 404) : reply (rs, 404, fourohfour, 'html');
+
+      rq.url = '/project/' + projectId + (path === undefined ? '' : '/file/' + path);
+      rs.next ();
+   }],
+
+   ['get', '/project/:id', async function (rq, rs) {
+      var id = rq.data.params.id;
+      var [owner, grants] = await redis ([
+         ['hget', 'project:' + id, 'owner'],
+         ['smembers', 'accessTo:' + rq.user.id]
+      ]);
+      if (! owner) return reply (rs, 404);
+      // Any read or write grant on the project counts, whatever its path scope.
+      if (owner !== rq.user.id && ! dale.stop (grants, true, function (grant) {
+         var [verb, projectId] = grant.split (':');
+         return projectId === id && (verb === 'read' || verb === 'write');
+      })) return reply (rs, 404);
+      reply (rs, 200, {id: id});
    }],
 
    ['get', '/project/:id/files', async function (rq, rs) {
@@ -1209,11 +1460,11 @@ var routes = [
       if (! validProjectPath (path)) {
          return reply (rs, 400, {error: 'Invalid path'});
       }
-      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404);
+      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404, fourohfour, 'html');
 
       var file = await docker.read (id, '/project/' + path);
       if (file.code) {
-         if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404);
+         if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404, fourohfour, 'html');
          clog ({priority: 'important', type: 'Read file error', error: formatError (file)});
          return reply (rs, 500);
       }
@@ -1338,18 +1589,34 @@ var routes = [
 
    ['post', '/project/message', async function (rq, rs) {
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'id', 'to'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'id', 'name', 'to'], 'eachOf', teishi.test.equal],
          ['base64', rq.body.base64, ['boolean', 'undefined'], 'oneOf'],
          ['file', rq.body.file, 'string'],
          ['id', rq.body.id, 'string'],
          ['body', rq.body.body, 'string'],
          ['body without marker lines', rq.body.body, /^(?![\s\S]*(^|\n)əəə (head|body))/, teishi.test.match],
+         ['body', rq.body.body, undefined, function () {
+            if (! rq.body.base64 || /^[A-Za-z0-9+/]*={0,2}$/.test (rq.body.body)) return true;
+            return ['body must be base64 when base64 is set'];
+         }],
+         ['name', rq.body.name, ['string', 'undefined'], 'oneOf'],
+         ['name', rq.body.name, undefined, function () {
+            if (rq.body.name === undefined) return true;
+            if (! rq.body.base64) return ['name requires base64'];
+            if (/^[^/\n]+$/.test (rq.body.name)) return true;
+            return ['name must be a file name without slashes or newlines'];
+         }],
          ['to', rq.body.to, 'string'],
          ['to', rq.body.to, undefined, function () {
             var aiTargets = dale.go (models, function (m) {return 'ai-' + m.model});
             if (teishi.inc (['all', 'shell'].concat (aiTargets), rq.body.to)) return true;
             if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test (rq.body.to)) return true;
             return ['to must be all, shell, ' + aiTargets.join (', ') + ', or a message UUID'];
+         }],
+         // Files go to people, not to the shell or AI.
+         ['to', rq.body.to, undefined, function () {
+            if (! rq.body.base64 || rq.body.to === 'all' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test (rq.body.to)) return true;
+            return ['base64 messages must be sent to all or a message UUID'];
          }],
       ])) return;
 
@@ -1408,16 +1675,17 @@ var routes = [
 
       var id = crypto.randomUUID ();
 
-      var message = [
+      var message = dale.fil ([
          'əəə head ' + id,
-         rq.body.base64 ? 'base64 1' : '',
+         rq.body.base64 ? 'base64 1' : undefined,
          'from ' + rq.user.id,
          'id ' + id,
+         rq.body.name !== undefined ? 'name ' + rq.body.name : undefined,
          't ' + now (),
          'to ' + rq.body.to,
          'əəə body ' + id,
          rq.body.body,
-      ].join ('\n');
+      ], undefined, function (line) {return line}).join ('\n');
 
       var result = await docker.run (rq.body.id, 'mkdir -p ' + Path.quote (Path.dirname (rq.body.file)) + ' && touch ' + Path.quote (rq.body.file), {catch: true});
       if (result.code) return reply (rs, 400, {code: result.code, error: result.stderr});
@@ -1711,6 +1979,8 @@ var routes = [
                // Preserve the separator newline without counting it as body text.
                var separator = body.endsWith ('\n') ? '\n' : '';
                if (separator) body = body.slice (0, -1);
+               // File messages are opaque to the model: replace the base64 with its decoded size.
+               if (/^base64 1$/m.test (header)) return header + '[BASE64 FILE: ' + (body.length * 3 / 4 - body.match (/=*$/) [0].length) + ' BYTES OMITTED]' + separator;
                if (body.length <= 10000) return match;
                return header + body.slice (0, 5000) + '\n[TRIMMED ' + (body.length - 10000) + ' CHARS]\n' + body.slice (-5000) + separator;
             }

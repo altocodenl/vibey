@@ -155,6 +155,91 @@ if (mode === 'server') {
 
          // *** AUTH ***
 
+         // Create an account, check its generated username, then restore the main session.
+         var usernameAccount = function (email, username, grant) {
+            return [
+               grant ? ['Create username fixture through creator grant', 'post', '/creator/grant', {email, grant: true}, 200, adminHeaders] : [],
+               ['Login username fixture ' + email, 'post', '/auth/login', {email}, 200, function (s, rq, rs) {
+                  s.usernameLoginLink = rs.body.loginLink;
+                  s.usernameMainSession = {cookie: s.headers.cookie, csrf: s.headers ['x-csrf']};
+                  return true;
+               }],
+               ['Verify username fixture ' + email, 'get', function (s) {
+                  return '/auth/verify/' + s.usernameLoginLink;
+               }, 200, function (s, rq, rs) {
+                  if (! assert (['username', rs.body.username, username, teishi.test.equal])) return false;
+                  s.headers.cookie = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  if (! s.usernameSessions) s.usernameSessions = {};
+                  s.usernameSessions [email] = {cookie: s.headers.cookie, csrf: rs.body.csrf};
+                  return true;
+               }],
+               ['Read username fixture ' + email, 'get', '/auth/user', 200, function (s, rq, rs) {
+                  s.headers.cookie = s.usernameMainSession.cookie;
+                  s.headers ['x-csrf'] = s.usernameMainSession.csrf;
+                  return assert (['username', rs.body.username, username, teishi.test.equal]);
+               }],
+            ];
+         };
+
+         var deleteUsernameAccount = function (email) {
+            return [
+               ['Select username fixture ' + email, 'get', '/', 200, function (s, rq, rs) {
+                  s.headers.cookie = s.usernameSessions [email].cookie;
+                  s.headers ['x-csrf'] = s.usernameSessions [email].csrf;
+                  return true;
+               }],
+               ['Delete username fixture ' + email, 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
+                  s.headers.cookie = s.usernameMainSession.cookie;
+                  s.headers ['x-csrf'] = s.usernameMainSession.csrf;
+                  return true;
+               }],
+            ];
+         };
+
+         var authSettings = [
+            dale.go ([{}, {vi: true}, {vi: false}, {}], function (settings, index) {
+               return [
+                  ['Set settings #' + index, 'put', '/auth/user', {settings}, 200, assertBody ({settings})],
+                  ['Read settings #' + index, 'get', '/auth/user', 200, function (s, rq, rs) {
+                     return assert (['settings', rs.body.settings, settings, teishi.test.equal]);
+                  }],
+               ];
+            }),
+            ['Set settings before invalid requests', 'put', '/auth/user', {settings: {vi: true}}, 200, assertBody ({settings: {vi: true}})],
+            dale.go ([
+               {},
+               {settings: null},
+               {settings: []},
+               {settings: 'vi'},
+               {settings: true},
+               {settings: 1},
+               {settings: {}, extra: true},
+               {settings: {extra: true}},
+               {settings: {vi: false, extra: true}},
+               {settings: {vi: null}},
+               {settings: {vi: 0}},
+               {settings: {vi: 1}},
+               {settings: {vi: 'true'}},
+               {settings: {vi: 'false'}},
+               {settings: {vi: []}},
+               {settings: {vi: {}}},
+            ], function (body, index) {
+               return ['Reject invalid settings #' + index, 'put', '/auth/user', body, 400];
+            }),
+            CONFIG.cloud ? [
+               ['Set settings without session', 'put', '/auth/user', {settings: {}}, 403, assertBody ({error: 'No session'}), {cookie: ''}],
+               ['Set settings with invalid CSRF', 'put', '/auth/user', {settings: {}}, 403, assertBody ({error: 'Invalid csrf token'}), {'x-csrf': 'invalid'}],
+            ] : [],
+            ['Rejected updates preserve settings', 'get', '/auth/user', 200, function (s, rq, rs) {
+               return assert (['settings', rs.body.settings, {vi: true}, teishi.test.equal]);
+            }],
+            ['Clear settings', 'put', '/auth/user', {settings: {}}, 200, assertBody ({settings: {}})],
+            ['Read cleared settings', 'get', '/auth/user', 200, function (s, rq, rs) {
+               return assert (['settings', rs.body.settings, {}, teishi.test.equal]);
+            }],
+         ];
+
          suites.auth = [
             ['Get /auth/user without session', 'get', '/auth/user', '*', function (s, rq, rs) {
                if (CONFIG.cloud) return assert ([
@@ -216,8 +301,116 @@ if (mode === 'server') {
                      ['body.credentials', rs.body.credentials, {}, teishi.test.equal],
                      ['body.csrf', rs.body.csrf, s.headers ['x-csrf'], teishi.test.equal],
                      ['body.email', rs.body.email, 'hello@example.com', teishi.test.equal],
+                     ['body.settings', rs.body.settings, {}, teishi.test.equal],
+                     ['body.username', rs.body.username, 'hello', teishi.test.equal],
                   ]);
                }],
+               // Both creation paths allocate usernames; collisions use the first available suffix.
+               usernameAccount ('hello@example.net', 'hello-example'),
+               usernameAccount ('hello@example.org', 'hello-example-1'),
+               usernameAccount ('hello@example.io', 'hello-example-2', true),
+               usernameAccount ('hello+tag@example.com', 'hello-tag'),
+               ['Set username without changing settings', 'put', '/auth/user', {username: 'hello-renamed'}, 200, assertBody ({username: 'hello-renamed'})],
+               ['Read renamed user', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert ([
+                     ['username', rs.body.username, 'hello-renamed', teishi.test.equal],
+                     ['settings', rs.body.settings, {}, teishi.test.equal],
+                  ]);
+               }],
+               ['Set same username', 'put', '/auth/user', {username: 'hello-renamed'}, 200, assertBody ({username: 'hello-renamed'})],
+               ['Set username and settings', 'put', '/auth/user', {username: 'hello-renamed', settings: {vi: true}}, 200, assertBody ({username: 'hello-renamed', settings: {vi: true}})],
+               ['Reject occupied username', 'put', '/auth/user', {username: 'hello-example'}, 409, assertBody ({error: 'Username already taken'})],
+               ['Reject occupied username from creator grant', 'put', '/auth/user', {username: 'hello-example-2'}, 409, assertBody ({error: 'Username already taken'})],
+               ['Reject conflict before changing settings', 'put', '/auth/user', {username: 'hello-example', settings: {vi: false}}, 409, assertBody ({error: 'Username already taken'})],
+               dale.go ([
+                  null, true, 123, [], {},
+                  '', 'Hello', 'hello world', 'hello_world', 'hello@example.com',
+                  '-hello', 'hello-', 'hello--world', 'hello/world',
+                  'c79f2829-1086-43f2-b477-88abbcdbda11',
+               ], function (username, index) {
+                  return ['Reject invalid username #' + index, 'put', '/auth/user', {username}, 400];
+               }),
+               ['Reject invalid settings before changing username', 'put', '/auth/user', {username: 'should-not-be-saved', settings: {vi: null}}, 400],
+               ['Rejected updates preserve username and settings', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert ([
+                     ['username', rs.body.username, 'hello-renamed', teishi.test.equal],
+                     ['settings', rs.body.settings, {vi: true}, teishi.test.equal],
+                  ]);
+               }],
+               ['Settings-only update', 'put', '/auth/user', {settings: {}}, 200, assertBody ({settings: {}})],
+               ['Settings-only update preserves username', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert (['username', rs.body.username, 'hello-renamed', teishi.test.equal]);
+               }],
+               // Renaming releases the old name; deleting an account allows reclaiming its name.
+               usernameAccount ('hello@example.dev', 'hello'),
+               ['Old username now belongs to another account', 'put', '/auth/user', {username: 'hello'}, 409, assertBody ({error: 'Username already taken'})],
+               deleteUsernameAccount ('hello@example.dev'),
+               ['Reclaim username after account deletion', 'put', '/auth/user', {username: 'hello'}, 200, assertBody ({username: 'hello'})],
+               deleteUsernameAccount ('hello@example.org'),
+               usernameAccount ('hello@example.app', 'hello-example-1'),
+               deleteUsernameAccount ('hello@example.app'),
+               deleteUsernameAccount ('hello@example.net'),
+               deleteUsernameAccount ('hello@example.io'),
+               deleteUsernameAccount ('hello+tag@example.com'),
+               ['Create unverified username fixture', 'post', '/auth/login', {email: 'username-expiry@example.com'}, 200, function (s, rq, rs, next) {
+                  (async function () {
+                     var id = await redis ('get', 'email:username-expiry@example.com');
+                     s.usernameExpiryId = id;
+                     var [owner, userTTL, nameTTL] = await redis ([
+                        ['get', 'username:username-expiry'],
+                        ['pttl', 'user:' + id],
+                        ['pttl', 'username:username-expiry'],
+                     ]);
+                     if (! assert ([
+                        ['username owner', owner, id, teishi.test.equal],
+                        ['user has expiry', userTTL > 0, true, teishi.test.equal],
+                        ['username shares user expiry', nameTTL > 0 && Math.abs (userTTL - nameTTL) < 100, true, teishi.test.equal],
+                     ])) return next (new Error (validationError));
+                     await redis ([
+                        ['pexpire', 'user:' + id, 60000],
+                        ['pexpire', 'email:username-expiry@example.com', 60000],
+                        ['pexpire', 'username:username-expiry', 60000],
+                     ]);
+                     next (null, rs);
+                  }) ().catch (next);
+               }],
+               ['Another login renews username expiry', 'post', '/auth/login', {email: 'username-expiry@example.com'}, 200, function (s, rq, rs, next) {
+                  (async function () {
+                     var [userTTL, nameTTL] = await redis ([
+                        ['pttl', 'user:' + s.usernameExpiryId],
+                        ['pttl', 'username:username-expiry'],
+                     ]);
+                     if (! assert ([
+                        ['user expiry renewed', userTTL > 290000, true, teishi.test.equal],
+                        ['username expiry renewed', nameTTL > 290000 && Math.abs (userTTL - nameTTL) < 100, true, teishi.test.equal],
+                     ])) return next (new Error (validationError));
+                     // Accelerate the matching expiries instead of waiting five minutes.
+                     var deadline = Date.now () + 50;
+                     await redis ([
+                        ['pexpireat', 'user:' + s.usernameExpiryId, deadline],
+                        ['pexpireat', 'email:username-expiry@example.com', deadline],
+                        ['pexpireat', 'username:username-expiry', deadline],
+                     ]);
+                     await new Promise (function (resolve) {setTimeout (resolve, 100)});
+                     var remaining = await redis ([
+                        ['exists', 'user:' + s.usernameExpiryId],
+                        ['exists', 'email:username-expiry@example.com'],
+                        ['exists', 'username:username-expiry'],
+                     ]);
+                     if (! assert (['expired user, email and username', remaining, [0, 0, 0], teishi.test.equal])) return next (new Error (validationError));
+                     next (null, rs);
+                  }) ().catch (next);
+               }],
+               usernameAccount ('username-expiry@example.com', 'username-expiry'),
+               ['Verified username has no expiry', 'get', '/', 200, function (s, rq, rs, next) {
+                  (async function () {
+                     var ttl = await redis ('pttl', 'username:username-expiry');
+                     if (! assert (['username expiry', ttl, -1, teishi.test.equal])) return next (new Error (validationError));
+                     next (null, rs);
+                  }) ().catch (next);
+               }],
+               deleteUsernameAccount ('username-expiry@example.com'),
+               authSettings,
                ['Logout', 'post', '/auth/logout', {}, 200, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
@@ -232,7 +425,7 @@ if (mode === 'server') {
                   if (! assert (['body', rs.body, {error: 'Rate limited'}, teishi.test.equal])) return false;
                   (async function () {
                      await redis ('del', 'rateLimit:login:hello@example.com');
-                     next ();
+                     next (null, rs);
                   }) ();
                }],
                dale.go (dale.times (4), function (v) {
@@ -303,7 +496,7 @@ if (mode === 'server') {
                ['Expire a session', 'get', '/', 200, function (s, rq, rs, next) {
                   (async function () {
                      await redis ('hset', 'session:' + s.sessions [1].cookie.match (/"[0-9a-f]+"/) [0].replace (/"/g, ''), 'expires', new Date ().toISOString ());
-                     next ();
+                     next (null, rs);
                   }) ();
                }],
                ['List sessions (one expired)', 'get', '/auth/list', 200, function (s, rq, rs) {
@@ -350,6 +543,7 @@ if (mode === 'server') {
                   ]);
                }],
                ['List sessions', 'get', '/auth/list', 404, assertBody ({error: 'Not in cloud mode'})],
+               authSettings,
             ] : [],
          ];
 
@@ -394,6 +588,21 @@ if (mode === 'server') {
             ['Rename nonexistent project', 'put', '/project', {id: 'nonexistent', name: 'whatever'}, 404],
             ['Rename project (noop)', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
             ['Rename project to existing name', 'put', '/project', function (s) {return {id: s.projectId, name: 'second'}}, 409, assertBody ({error: 'There is already a project with that name'})],
+            // Names must stay encodable in /p/<user>/<name> URLs.
+            dale.go ([
+               ['a UUID', '0b1f6c2e-8d3a-4f5b-9c7d-1e2f3a4b5c6d'],
+               ['an uppercase UUID', '0B1F6C2E-8D3A-4F5B-9C7D-1E2F3A4B5C6D'],
+               ['two spaces in a row', 'el  norte'],
+               ['a space before a dash', 'el -norte'],
+               ['a dash before a space', 'el- norte'],
+               ['a slash', 'el/norte'],
+               ['a question mark', 'el norte?'],
+            ], function (entry) {
+               return [
+                  ['Create project with ' + entry [0], 'post', '/project', {name: entry [1]}, 400, assertBody ({error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'})],
+                  ['Rename project to ' + entry [0], 'put', '/project', function (s) {return {id: s.projectId, name: entry [1]}}, 400, assertBody ({error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'})],
+               ];
+            }),
             ['Rename project and set slot', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!', slot: 4}}, 200],
             ['List projects after setting slot', 'get', '/projects', 200, function (s, rq, rs) {
                return assert ([
@@ -572,7 +781,7 @@ if (mode === 'server') {
 
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
             ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
@@ -632,7 +841,7 @@ if (mode === 'server') {
                if (! assertBody ('first message\nsecond message\n') (s, rq, rs)) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
 
@@ -690,7 +899,11 @@ if (mode === 'server') {
                   projectId: s.projectId,
                };
             }, 404],
-            ['Post base64 reply to existing message', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: Buffer.from ('Hello back!').toString ('base64'), to: s.messageId}}, 200, function (s, rq, rs) {
+            ['Reject name without base64', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', body: 'hi', name: 'a.png', to: 'all'}}, 400],
+            ['Reject name with a slash', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: 'aGk=', name: 'a/b.png', to: 'all'}}, 400],
+            ['Reject invalid base64 body', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: 'not base64!', to: 'all'}}, 400],
+            ['Reject base64 message to shell', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: 'aGk=', to: 'shell'}}, 400],
+            ['Post base64 reply to existing message', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: Buffer.from ('Hello back!').toString ('base64'), name: 'hello.txt', to: s.messageId}}, 200, function (s, rq, rs) {
                s.replyId = rs.body.id;
                return assert ([
                   ['reply id', rs.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match],
@@ -703,12 +916,14 @@ if (mode === 'server') {
                   ['original message preserved', rs.body.slice (0, s.chatContent.length), s.chatContent, teishi.test.equal],
                   ['reply head', appended.indexOf ('\nəəə head ' + s.replyId + '\n'), 0, teishi.test.equal],
                   ['base64 header', appended, /\nbase64 1\n/, teishi.test.match],
+                  ['name header', appended, /\nname hello\.txt\n/, teishi.test.match],
                   ['reply id header', appended.indexOf ('\nid ' + s.replyId + '\n') !== -1, true, teishi.test.equal],
                   ['reply recipient and body', appended.endsWith ('\nto ' + s.messageId + '\nəəə body ' + s.replyId + '\n' + Buffer.from ('Hello back!').toString ('base64')), true, teishi.test.equal],
+                  ['no blank header lines', /\n\n/.test (appended), false, teishi.test.equal],
                ])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
 
@@ -742,7 +957,7 @@ if (mode === 'server') {
                if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\nupload test.txt\n', teishi.test.equal])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
             ['Read file after container has been turned off', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 200, assertBody ('# el norte\n\n')],
@@ -750,7 +965,7 @@ if (mode === 'server') {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   await run ('docker', 'rm', 'vibey-project-' + s.projectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
             ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
@@ -758,7 +973,7 @@ if (mode === 'server') {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   await run ('docker', 'rm', 'vibey-project-' + s.projectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
             ['Read file after container has been removed', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 200, assertBody ('# el norte\n\n')],
@@ -766,7 +981,7 @@ if (mode === 'server') {
                s.thirdProjectId = rs.body.id;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.thirdProjectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
             ['Delete project with a stopped container', 'delete', function (s) {return '/project/' + s.thirdProjectId}, 200],
@@ -775,7 +990,7 @@ if (mode === 'server') {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.fourthProjectId);
                   await run ('docker', 'rm', 'vibey-project-' + s.fourthProjectId);
-                  next ();
+                  next (null, rs);
                }) ();
             }],
             ['Delete project with a removed container', 'delete', function (s) {return '/project/' + s.fourthProjectId}, 200],
@@ -846,6 +1061,11 @@ if (mode === 'server') {
             };
          }
 
+         // The shared project through its name-based URL: A's generated username and the encoded name of `access test`.
+         var accessNamedFile = function (path) {
+            return '/p/access-a/access-test/' + encodeURIComponent (path);
+         }
+
          var accessWrite = function (path, content, code) {
             return ['Write ' + path + ' expecting ' + code, 'post', '/project/write', function (s) {
                return {id: s.accessProjectId, path, content};
@@ -860,6 +1080,41 @@ if (mode === 'server') {
                ['sync output', rs.body.stdout, /^Access synced for:/, teishi.test.match],
             ]);
          }];
+
+         // Shell messages reply before the command runs; poll the response message until its header has `t-end`.
+         var accessWait = ['Wait for shell command', 'get', '/', 200, function (s, rq, rs, next) {
+            var started = Date.now ();
+            var check = async function () {
+               var response = await fetch ('http://localhost:' + CONFIG.port + '/project/message', {
+                  body: JSON.stringify ({file: 'chat/thread.md', messageId: s.accessResponseId, projectId: s.accessProjectId}),
+                  headers: {... s.headers, 'content-type': 'application/json'},
+                  method: 'PUT',
+               });
+               var body = response.ok ? await response.json () : {};
+               if (/^t-end /m.test (body.message || '')) return next (null, rs);
+               if (Date.now () - started > 10000) return next ({code: 0, error: 'Shell response ' + s.accessResponseId + ' did not finish', request: rq});
+               setTimeout (check, 1);
+            }
+            check ();
+         }];
+
+         // Sends `vibey project <id> <command>` to the shell from the shared project's chat; `target` is 'target' or 'origin'.
+         var accessShell = function (tag, target, command, code) {
+            return ['Cross-project shell ' + tag + ' expecting ' + code, 'post', '/project/message', function (s) {
+               var id = target === 'target' ? s.accessTargetId : s.accessProjectId;
+               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'shell', body: 'vibey project ' + id + ' ' + command};
+            }, code, function (s, rq, rs) {
+               if (code === 200) s.accessResponseId = rs.body.responseId;
+               return true;
+            }];
+         }
+
+         // Grants the shared project `verb` on the target, next to a user grant so the sync must skip the project line.
+         var targetAccess = function (verb) {
+            return ['Grant origin ' + verb + ' on target', 'post', '/project/write', function (s) {
+               return {id: s.accessTargetId, path: 'vibey/access.md', content: 'access-b@example.com read\nproject:' + s.accessProjectId + ' ' + verb + '\n'};
+            }, 200];
+         }
 
          suites.access = CONFIG.cloud ? [
             ['Grant A creator status', 'post', '/creator/grant', {email: 'access-a@example.com', grant: true}, 200, adminHeaders],
@@ -879,8 +1134,42 @@ if (mode === 'server') {
                s.accessMessageId = rs.body.id;
                return assert (['message id', s.accessMessageId, 'string']);
             }],
-            accessWrite ('vibey/access.md', 'access-b@example.com read\naccess-c@example.com write\n', 200),
+            // The project grant must be skipped by the sync rather than abort it.
+            accessWrite ('vibey/access.md', 'access-b@example.com read\nproject:00000000-0000-0000-0000-000000000000 write\naccess-c@example.com write\n', 200),
             accessSync,
+
+            // Name-based URLs: /p/<username or user id>/<encoded project name or project id>[/<path>].
+            ['A reads own id and username', 'get', '/auth/user', 200, function (s, rq, rs) {
+               s.accessOwnerId = rs.body.id;
+               return assert (['username', rs.body.username, 'access-a', teishi.test.equal]);
+            }],
+            ['A resolves project by username and name', 'get', '/p/access-a/access-test', 200, function (s, rq, rs) {
+               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
+            }],
+            ['A resolves project by user id and project id', 'get', function (s) {return '/p/' + s.accessOwnerId + '/' + s.accessProjectId}, 200, function (s, rq, rs) {
+               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
+            }],
+            ['A resolves project by username and project id', 'get', function (s) {return '/p/access-a/' + s.accessProjectId}, 200, function (s, rq, rs) {
+               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
+            }],
+            ['A resolves project by user id and name', 'get', function (s) {return '/p/' + s.accessOwnerId + '/access-test'}, 200, function (s, rq, rs) {
+               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
+            }],
+            ['A reads file through name-based URL', 'get', accessNamedFile ('outside.txt'), 200, assertBody ('original')],
+            ['A reads nested file through name-based URL', 'get', accessNamedFile ('chat/inside.txt'), 200, assertBody ('original')],
+            ['Name-based URL for missing file', 'get', accessNamedFile ('missing.txt'), 404],
+            ['Unknown username', 'get', '/p/no-such-user/access-test', 404],
+            ['Unknown project name', 'get', '/p/access-a/no-such-project', 404],
+            ['A creates project with a dash', 'post', '/project', {name: 'x-y z'}, 200, function (s, rq, rs) {
+               s.accessDashId = rs.body.id;
+               return assert (['project id', s.accessDashId, 'string']);
+            }],
+            ['Double dash decodes to a dash', 'get', '/p/access-a/x--y-z', 200, function (s, rq, rs) {
+               return assert (['id', rs.body.id, s.accessDashId, teishi.test.equal]);
+            }],
+            ['Single dash decodes to a space', 'get', '/p/access-a/x-y-z', 404],
+            ['A deletes project with a dash', 'delete', function (s) {return '/project/' + s.accessDashId}, 200],
+            ['Deleted project no longer resolves', 'get', '/p/access-a/x--y-z', 404],
 
             // B already existed when the grants were synced.
             accessAs ('b'),
@@ -891,6 +1180,15 @@ if (mode === 'server') {
                return assert (['outside file visible', inc (dale.go (rs.body, function (f) {return f.name}), 'outside.txt'), true, teishi.test.equal]);
             }],
             ['B reads file', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
+            ['B resolves shared project by name', 'get', '/p/access-a/access-test', 200, function (s, rq, rs) {
+               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
+            }],
+            ['B reads file through name-based URL', 'get', accessNamedFile ('outside.txt'), 200, assertBody ('original')],
+            ['B reads own id', 'get', '/auth/user', 200, function (s, rq, rs) {
+               s.accessReaderId = rs.body.id;
+               return assert (['id', s.accessReaderId, 'string']);
+            }],
+            ['Project id under a user who does not own it', 'get', function (s) {return '/p/' + s.accessReaderId + '/' + s.accessProjectId}, 404],
             ['B reads message', 'put', '/project/message', function (s) {
                return {projectId: s.accessProjectId, file: 'chat/thread.md', messageId: s.accessMessageId};
             }, 200, function (s, rq, rs) {
@@ -960,6 +1258,11 @@ if (mode === 'server') {
                return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
             }],
             ['C reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('original')],
+            ['Scoped C resolves project by name', 'get', '/p/access-a/access-test', 200, function (s, rq, rs) {
+               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
+            }],
+            ['Scoped C reads scoped file through name-based URL', 'get', accessNamedFile ('chat/inside.txt'), 200, assertBody ('original')],
+            ['Scoped C cannot read outside scope through name-based URL', 'get', accessNamedFile ('outside.txt'), 404],
             accessWrite ('chat/inside.txt', 'scoped write', 200),
             ['C edits scoped file', 'post', '/project/edit', function (s) {
                return {id: s.accessProjectId, path: 'chat/inside.txt', oldText: 'write', newText: 'edit'};
@@ -1008,6 +1311,90 @@ if (mode === 'server') {
             ['A retains write outside prefix', 'post', '/project/edit', function (s) {
                return {id: s.accessProjectId, path: 'outside.txt', oldText: 'command by C', newText: 'owner still writes'};
             }, 200],
+
+            // Invalid entries abort the sync without touching existing grants.
+            dale.go ([
+               ['invalid email', 'not-an-email read\n'],
+               ['unknown verb', 'access-b@example.com admin\n'],
+               ['parent prefix', 'access-b@example.com read ../x\n'],
+               ['absolute prefix', 'access-b@example.com read /chat/\n'],
+               ['doubled slash prefix', 'access-b@example.com read chat//\n'],
+            ], function (entry) {
+               return [
+                  accessWrite ('vibey/access.md', 'access-c@example.com write chat/\n' + entry [1], 200),
+                  ['Sync with ' + entry [0] + ' fails', 'post', '/project/run', function (s) {
+                     return {id: s.accessProjectId, command: 'vibey access'};
+                  }, 200, function (s, rq, rs) {
+                     return assert (['sync error', rs.body.error, /^Invalid vibey\/access\.md (line|prefix)/, teishi.test.match]);
+                  }],
+               ];
+            }),
+            accessAs ('b'),
+            ['B keeps scoped read after failed syncs', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
+
+            // Comments, blank lines and email case don't affect the sync. Syncing replaces grants, so B would lose access if its line were skipped.
+            accessAs ('a'),
+            accessWrite ('vibey/access.md', '# Shared with the team\n\nACCESS-B@Example.com read chat/\naccess-c@example.com write chat/\n', 200),
+            accessSync,
+            accessAs ('b'),
+            ['B keeps access through comment, blank line and uppercase email', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
+
+            // A read prefix also scopes messages.
+            accessAs ('a'),
+            ['A posts message outside B scope', 'post', '/project/message', function (s) {
+               return {id: s.accessProjectId, file: 'notes/thread.md', to: 'all', body: 'Not for B'};
+            }, 200, function (s, rq, rs) {
+               s.accessNotesMessageId = rs.body.id;
+               return assert (['message id', s.accessNotesMessageId, 'string']);
+            }],
+            accessAs ('b'),
+            ['B cannot read message outside scope', 'put', '/project/message', function (s) {
+               return {projectId: s.accessProjectId, file: 'notes/thread.md', messageId: s.accessNotesMessageId};
+            }, 404],
+
+            // Cross-project shell commands: `vibey project <targetId> <command>`, authorized by `project:<originId> write` in the target's access.md.
+            accessAs ('a'),
+            ['A creates target project', 'post', '/project', {name: 'access target'}, 200, function (s, rq, rs) {
+               s.accessTargetId = rs.body.id;
+               return assert (['target id', s.accessTargetId, 'string']);
+            }],
+            accessShell ('without target access.md', 'target', 'printf denied > cross.txt', 404),
+            targetAccess ('read'),
+            accessShell ('with read grant', 'target', 'printf denied > cross.txt', 404),
+            targetAccess ('write chat/'),
+            accessShell ('with prefixed write grant', 'target', 'printf denied > cross.txt', 404),
+            targetAccess ('write'),
+            accessShell ('syncs target access', 'target', 'vibey access', 200),
+            accessWait,
+            accessShell ('runs command in target', 'target', 'printf cross > cross.txt', 200),
+            accessWait,
+            accessShell ('targeting the origin', 'origin', 'printf self > self.txt', 200),
+            accessWait,
+            ['Target has cross-project output', 'get', function (s) {return '/project/' + s.accessTargetId + '/file/cross.txt'}, 200, assertBody ('cross')],
+            ['Origin unaffected by cross-project command', 'get', accessFile ('cross.txt'), 404],
+            ['Origin has self-targeted output', 'get', accessFile ('self.txt'), 200, assertBody ('self')],
+            accessAs ('b'),
+            ['B sees target after cross-project sync', 'get', '/projects', 200, function (s, rq, rs) {
+               return assert (['includes target', inc (dale.go (rs.body, function (p) {return p.id}), s.accessTargetId), true, teishi.test.equal]);
+            }],
+            accessAs ('a'),
+            ['A revokes project grant without syncing', 'post', '/project/write', function (s) {
+               return {id: s.accessTargetId, path: 'vibey/access.md', content: 'access-b@example.com read\n'};
+            }, 200],
+            accessShell ('after revocation', 'target', 'printf denied > cross.txt', 404),
+            ['Target file unchanged by denied commands', 'get', function (s) {return '/project/' + s.accessTargetId + '/file/cross.txt'}, 200, assertBody ('cross')],
+            ['A deletes target project', 'delete', function (s) {return '/project/' + s.accessTargetId}, 200],
+
+            // Removing a user's line entirely revokes their access on the next sync.
+            accessWrite ('vibey/access.md', 'access-c@example.com write chat/\n', 200),
+            accessSync,
+            accessAs ('b'),
+            ['B no longer sees revoked project', 'get', '/projects', 200, assertBody ([])],
+            ['B cannot list revoked project files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 404],
+            ['B cannot read revoked file', 'get', accessFile ('chat/inside.txt'), 404],
+            ['B cannot resolve revoked project', 'get', '/p/access-a/access-test', 404],
+            ['B cannot read revoked file through name-based URL', 'get', accessNamedFile ('chat/inside.txt'), 404],
+            accessAs ('a'),
             ['A deletes shared project', 'delete', function (s) {return '/project/' + s.accessProjectId}, 200],
             accessAs ('b'),
             ['B no longer sees project', 'get', '/projects', 200, assertBody ([])],
@@ -1222,7 +1609,9 @@ if (mode === 'client') {
       }, function () {
          return assert ([
             ['view', B.get ('view'), 'files', teishi.test.equal],
-            ['project', B.get ('project'), 'test project', teishi.test.equal],
+            ['project', dale.stopNot (B.get ('projects'), undefined, function (project) {
+               if (project.id === B.get ('project', 'id')) return project.name;
+            }), 'test project', teishi.test.equal],
          ]);
       }],
       ['Back to projects', function (next) {
