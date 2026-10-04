@@ -218,10 +218,12 @@ var validProjectName = function (name) {
 var allowOp = async function (userId, projectId, op, prefix) {
    if (op !== 'read' && op !== 'write') return false;
    if (prefix !== undefined && ! validProjectPath (prefix)) return false;
+   // access.md names who the project is shared with; requests without a session can't read it.
+   if (userId === 'PUBLIC' && prefix === 'vibey/access.md') return false;
 
    var [owner, grants] = await redis ([
       ['hget', 'project:' + projectId, 'owner'],
-      ['smembers', 'accessTo:' + userId]
+      ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
    ]);
    if (! owner) return false;
    if (owner === userId) return true;
@@ -324,12 +326,13 @@ docker.access = async function (id) {
       // Project grants (`project:<originId> ...`) are read on every cross-project call, not synced.
       if (! line || line.startsWith ('#') || line.startsWith ('project:')) return;
       var match = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line);
-      if (! match || ! validEmail.test (match [1])) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
+      if (! match || (match [1] !== 'PUBLIC' && ! validEmail.test (match [1]))) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
+      if (match [1] === 'PUBLIC' && match [2] !== 'read') return invalidEntry = {error: 'PUBLIC can only be granted read at line: ' + line};
 
       var prefix = match [3] || '';
       if (! validProjectPath (prefix)) return invalidEntry = {error: 'Invalid vibey/access.md prefix at line: ' + line};
 
-      return {email: match [1].toLowerCase (), verb: match [2], prefix};
+      return {email: match [1] === 'PUBLIC' ? 'PUBLIC' : match [1].toLowerCase (), verb: match [2], prefix};
    });
 
    if (invalidEntry) return {code: 1, error: invalidEntry.error};
@@ -412,6 +415,88 @@ docker.read = async function (id, path) {
    var result = await docker.run (id, 'cat ' + Path.quote (path), {catch: true, stdout: function (chunk) {chunks.push (chunk)}});
    return result.code ? {code: result.code, error: result.stderr} : {stdout: Buffer.concat (chunks)};
 }
+
+docker.video = async function (rq, rs, id, path) {
+   var quoted = Path.quote (path);
+   var stat = await docker.run (id, 'test -f ' + quoted + ' || exit 44; wc -c < ' + quoted, {catch: true});
+   if (rs.destroyed) return;
+   if (stat.code === 44) return reply (rs, 404, fourohfour, 'html');
+   if (stat.code) return reply (rs, 500);
+   var size = Number (stat.stdout), start = 0, end = size - 1, code = 200;
+   if (! Number.isSafeInteger (size) || size < 0) return reply (rs, 500);
+   var headers = {
+      'content-type': 'video/mp4',
+      'accept-ranges': 'bytes',
+      'cache-control': 'private, no-cache',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "sandbox; default-src 'none'; media-src 'self'; style-src 'unsafe-inline'",
+   };
+   // No validators: If-Range always falls back to the full representation.
+   var range = ! rq.headers ['if-range'] && /^bytes=(\d*)-(\d*)$/.exec (rq.headers.range || '');
+   if (range && (range [1] || range [2])) {
+      var first = range [1] ? Number (range [1]) : undefined;
+      var last = range [2] ? Number (range [2]) : undefined;
+      var invalid = ! size
+         || (first !== undefined && ! Number.isSafeInteger (first))
+         || (last !== undefined && ! Number.isSafeInteger (last));
+      if (first === undefined) {
+         start = Math.max (0, size - last);
+         invalid = invalid || last === 0;
+      }
+      else {
+         start = first;
+         if (last !== undefined) end = Math.min (last, end);
+         invalid = invalid || start >= size || end < start;
+      }
+      if (invalid) return reply (rs, 416, '', {...headers, 'content-range': 'bytes */' + size});
+      code = 206;
+      headers ['content-range'] = 'bytes ' + start + '-' + end + '/' + size;
+   }
+   var length = size ? end - start + 1 : 0, sent = 0, failed = false;
+   headers ['content-length'] = length;
+   var script = [
+      'if (Number (process.argv [3]) < 0) process.exit (0);',
+      'var stream = require ("fs").createReadStream (process.argv [1], {start: Number (process.argv [2]), end: Number (process.argv [3])});',
+      'stream.on ("error", function () {process.exit (1)});',
+      'process.stdout.on ("error", function () {process.exit (1)});',
+      'stream.pipe (process.stdout);',
+   ].join ('\n');
+   var proc = child.spawn ('docker', [
+      'exec', 'vibey-project-' + id, 'node', '-e', script, path, String (start), String (end),
+   ]);
+   var begin = function () {
+      rs.log.code = code;
+      rs.log.responseBody = length;
+      rs.log.responseHeaders = headers;
+      rs.writeHead (code, headers);
+   };
+   var fail = function () {
+      if (failed || rs.destroyed) return;
+      failed = true;
+      proc.stdout.unpipe (rs);
+      if (rs.headersSent) rs.destroy ();
+      else reply (rs, 500);
+   };
+   proc.stderr.resume ();
+   proc.on ('error', fail);
+   proc.stdout.on ('error', fail);
+   proc.stdout.on ('data', function (chunk) {
+      sent += chunk.length;
+      if (! failed && ! rs.destroyed && ! rs.headersSent) begin ();
+   });
+   proc.stdout.pipe (rs, {end: false});
+   rs.on ('close', function () {
+      proc.stdout.unpipe (rs);
+      proc.stdout.destroy ();
+      proc.kill ();
+   });
+   proc.on ('close', function (exitCode) {
+      if (failed || rs.destroyed) return;
+      if (exitCode !== 0 || sent !== length) return fail ();
+      if (! rs.headersSent) begin ();
+      rs.end (function () {cicek.apres (rs)});
+   });
+};
 
 docker.write = async function (id, path, content, noCommit) {
    var command = 'mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > ' + Path.quote (path);
@@ -790,6 +875,7 @@ var routes = [
          rq.test = true;
       }
 
+      // Project read routes are public; requests without a session are checked against PUBLIC grants.
       var publicPath = dale.stop ([
          ['get', '/'],
          ['get', /^\/assets\/.+/],
@@ -798,6 +884,10 @@ var routes = [
          ['post', '/error'],
          ['post', '/auth/login'],
          ['get', /^\/auth\/verify\//],
+         ['get', '/projects'],
+         ['get', /^\/p\//],
+         ['get', /^\/project\/[^/]+(?:\/files|\/file\/.+)?$/],
+         ['put', '/project/message'],
       ], true, function (endpoint) {
          if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
          return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
@@ -1246,12 +1336,29 @@ var routes = [
    }],
 
    ['get', '/projects', async function (rq, rs) {
-      reply (rs, 200, dale.go ((await getForUser (rq.user.id, 'project')).sort (function (a, b) {
+      var userId = rq.user ? rq.user.id : 'PUBLIC';
+      var projects = rq.user ? await getForUser (userId, 'project') : [];
+      var listed = dale.obj (projects, function (project) {
+         return [project.id, true];
+      });
+      projects = projects.concat (dale.fil (await getForUser ('PUBLIC', 'project'), undefined, function (project) {
+         if (! listed [project.id]) return {...project, public: true};
+      }));
+
+      var usernames = projects.length ? await redis (dale.go (projects, function (project) {
+         return ['hget', 'user:' + project.owner, 'username'];
+      })) : [];
+      dale.go (projects, function (project, k) {
+         project.ownerUsername = usernames [k] || undefined;
+      });
+
+      reply (rs, 200, dale.go (projects.sort (function (a, b) {
          return new Date (b.last) - new Date (a.last);
       }), function (project) {
          return {
             ...project,
-            slot: project.slot ? parseInt (project.slot) : undefined
+            // Slots belong to the owner's wheel.
+            slot: project.slot && project.owner === userId ? parseInt (project.slot) : undefined
          }
       }));
    }],
@@ -1402,13 +1509,14 @@ var routes = [
 
    ['get', '/project/:id', async function (rq, rs) {
       var id = rq.data.params.id;
+      var userId = rq.user ? rq.user.id : 'PUBLIC';
       var [owner, grants] = await redis ([
          ['hget', 'project:' + id, 'owner'],
-         ['smembers', 'accessTo:' + rq.user.id]
+         ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
       ]);
       if (! owner) return reply (rs, 404);
       // Any read or write grant on the project counts, whatever its path scope.
-      if (owner !== rq.user.id && ! dale.stop (grants, true, function (grant) {
+      if (owner !== userId && ! dale.stop (grants, true, function (grant) {
          var [verb, projectId] = grant.split (':');
          return projectId === id && (verb === 'read' || verb === 'write');
       })) return reply (rs, 404);
@@ -1417,14 +1525,15 @@ var routes = [
 
    ['get', '/project/:id/files', async function (rq, rs) {
       var id = rq.data.params.id;
+      var userId = rq.user ? rq.user.id : 'PUBLIC';
       var [owner, grants] = await redis ([
          ['hget', 'project:' + id, 'owner'],
-         ['smembers', 'accessTo:' + rq.user.id]
+         ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
       ]);
       if (! owner) return reply (rs, 404);
 
       // Load permissions once, rather than querying Redis for every file.
-      var scopes = owner === rq.user.id ? [''] : dale.fil (grants, undefined, function (grant) {
+      var scopes = owner === userId ? [''] : dale.fil (grants, undefined, function (grant) {
          var [verb, projectId, ... parts] = grant.split (':');
          if (projectId === id && (verb === 'read' || verb === 'write')) return parts.join (':');
       });
@@ -1439,6 +1548,7 @@ var routes = [
          var second = line.indexOf (' ', first + 1);
          var name = line.slice (second + 1);
          if (! validProjectPath (name)) return;
+         if (! rq.user && name === 'vibey/access.md') return;
          if (! dale.stop (scopes, true, function (scope) {
             return name.startsWith (scope);
          })) return;
@@ -1460,7 +1570,9 @@ var routes = [
       if (! validProjectPath (path)) {
          return reply (rs, 400, {error: 'Invalid path'});
       }
-      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404, fourohfour, 'html');
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', id, 'read', path)) return reply (rs, 404, fourohfour, 'html');
+
+      if (/\.mp4$/i.test (path)) return docker.video (rq, rs, id, '/project/' + path);
 
       var file = await docker.read (id, '/project/' + path);
       if (file.code) {
@@ -1563,7 +1675,7 @@ var routes = [
          ['messageId', rq.body.messageId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match],
       ])) return;
 
-      if (! await allowOp (rq.user.id, rq.body.projectId, 'read', rq.body.file)) return reply (rs, 404);
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.body.projectId, 'read', rq.body.file)) return reply (rs, 404);
 
       var result = await docker.read (rq.body.projectId, rq.body.file);
       if (result.code) {
@@ -1917,10 +2029,26 @@ var routes = [
 
          var buffer = '', aiStderr = '';
          var lastFullText = '';
+         var codexProc, codexError, codexItem, codexDone = false;
+         var codexSend = function (message) {
+            codexProc.stdin.write (JSON.stringify (message) + '\n');
+         };
+         var codexStop = function (error) {
+            if (error) codexError = error;
+            codexProc.stdin.end ();
+         };
 
          var processLines = function (lines) {
             var parseChunk = aiFlavor === 'anthropic' ? function (line) {
                var event = JSON.parse (line);
+               if (event.type === 'stream_event' && event.event) {
+                  var partial = event.event;
+                  if (partial.type === 'message_start') lastFullText = '';
+                  if (partial.type === 'content_block_delta' && partial.delta.type === 'text_delta') {
+                     lastFullText += partial.delta.text;
+                     return partial.delta.text;
+                  }
+               }
                if (event.type === 'result' && event.usage) {
                   usage = {
                      cache: event.usage.cache_read_input_tokens || 0,
@@ -1943,24 +2071,58 @@ var routes = [
                }
             } : function (line) {
                var event = JSON.parse (line);
-               if (event.type === 'turn.completed' && event.usage) {
+               var params = event.params || {};
+               if (event.error) return codexStop (event.error.message || JSON.stringify (event.error));
+               if (event.method && event.id !== undefined) return codexSend ({
+                  id: event.id,
+                  error: {code: -32601, message: 'Unsupported client request: ' + event.method},
+               });
+               if (event.id === 1) {
+                  codexSend ({method: 'initialized'});
+                  return codexSend ({
+                     id: 2, method: 'thread/start',
+                     params: {
+                        model: aiModel.canonical, cwd: '/project',
+                        approvalPolicy: 'never', sandbox: 'danger-full-access', ephemeral: true,
+                     },
+                  });
+               }
+               if (event.id === 2) return codexSend ({
+                  id: 3, method: 'turn/start',
+                  params: {
+                     threadId: event.result.thread.id,
+                     input: [{type: 'text', text: prompt, text_elements: []}],
+                  },
+               });
+               if (event.method === 'thread/tokenUsage/updated') {
+                  var tokens = params.tokenUsage.total;
                   usage = {
-                     cache: event.usage.cached_input_tokens || 0,
-                     fresh: event.usage.input_tokens - (event.usage.cached_input_tokens || 0),
-                     output: event.usage.output_tokens,
+                     cache: tokens.cachedInputTokens || 0,
+                     fresh: tokens.inputTokens - (tokens.cachedInputTokens || 0),
+                     output: tokens.outputTokens,
                   };
                }
-               if (event.type === 'item.completed' && event.item && event.item.type === 'agent_message') return event.item.text;
+               if (event.method === 'turn/completed') {
+                  codexDone = true;
+                  return codexStop (params.turn.status === 'completed' ? undefined
+                     : (params.turn.error && params.turn.error.message) || 'Codex turn ' + params.turn.status);
+               }
+               if (event.method === 'item/agentMessage/delta' && params.delta) {
+                  var separator = codexItem !== params.itemId && output ? '\n\n' : '';
+                  codexItem = params.itemId;
+                  return separator + params.delta;
+               }
             };
             dale.go (lines, function (line) {
                if (! line) return;
                try {
                   var chunk = parseChunk (line);
                   if (! chunk) return;
-                  output += (aiFlavor === 'openai' && output ? '\n\n' : '') + chunk;
+                  output += chunk;
                   streamEdit ();
                } catch (e) {
                   clog ({priority: 'important', type: 'AI stream parse error', error: formatError (e), responseId});
+                  if (aiFlavor === 'openai') codexStop ('Invalid Codex app-server response');
                }
             });
          }
@@ -2013,8 +2175,7 @@ var routes = [
                if (result.code) throw result;
 
                dockerArgs.push ('-e', 'CODEX_HOME=' + configDir);
-               command = 'codex exec --json -m ' + Path.quote (aiModel.canonical)
-                  + ' --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -';
+               command = 'exec codex app-server --stdio -c ' + Path.quote ('sandbox_mode="danger-full-access"');
             }
 
             if (aiFlavor === 'anthropic') {
@@ -2043,15 +2204,29 @@ var routes = [
                   + ' export ' + (auth === 'apiKey' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN') + '="$credential";'
                   + ' unset credential;'
                   + ' exec claude -p --model ' + Path.quote (aiModel.canonical)
-                  + ' --output-format stream-json --verbose --dangerously-skip-permissions';
+                  + ' --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions';
             }
 
             dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', groupedCommand (command));
 
             var aiResult = await run ('docker', ... dockerArgs, {
                catch: true,
-               input: prompt,
-               onSpawn: watchCancellation,
+               input: aiFlavor === 'openai' ? undefined : prompt,
+               onSpawn: function (proc) {
+                  watchCancellation (proc);
+                  if (aiFlavor !== 'openai') return;
+                  codexProc = proc;
+                  proc.stdin.on ('error', function (error) {
+                     codexError = 'Codex stdin error: ' + error.message;
+                  });
+                  codexSend ({
+                     id: 1, method: 'initialize',
+                     params: {
+                        clientInfo: {name: 'vibey', version: '1.0.0'},
+                        capabilities: null,
+                     },
+                  });
+               },
                stderr: function (chunk) {
                   aiStderr += chunk;
                },
@@ -2080,12 +2255,17 @@ var routes = [
             return;
          }
 
+         if (aiFlavor === 'openai' && ! aiResult.code && ! aiResult.signal && (codexError || ! codexDone)) {
+            codexError = codexError || 'Codex exited before completing the turn';
+            aiResult.code = 1;
+         }
+
          if (aiResult.code === -1) {
             output += (output ? '\n\n' : '') + 'AI process failed to start: ' + aiResult.error;
             streamEdit ();
          }
          else if (aiResult.code || aiResult.signal) {
-            var error = aiResult.signal ? 'AI process terminated by signal ' + aiResult.signal : 'AI process exited with code ' + aiResult.code;
+            var error = codexError || (aiResult.signal ? 'AI process terminated by signal ' + aiResult.signal : 'AI process exited with code ' + aiResult.code);
             output += (output ? '\n\n' : '') + error;
             streamEdit ();
          }
@@ -2214,7 +2394,11 @@ var routes = [
                toolCallText = toolCallLines.join ('\n');
             }
          }
-         if (aiStderr) output += '\n\n' + aiStderr;
+         aiStderr = aiStderr.split ('\n').filter (function (line) {
+            var plain = line.replace (/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+            return ! /codex_models_manager::manager:\s+failed to refresh available models: request timed out\s*$/.test (plain);
+         }).join ('\n');
+         if (aiStderr.trim ()) output += '\n\n' + aiStderr;
          streamEdit ();
          await editQueue;
          if (editError) throw editError;
@@ -2498,7 +2682,7 @@ dale.go (['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT', 'SIGUSR1', 'SIGUSR2', 'SIGPI
       clog ({type: 'Signal received', priority: 'important', signal: signal});
       if (inc (['SIGTERM', 'SIGINT'], signal)) {
          exiting = true;
-         if (cicek.isMaster) docker.cleanup ();
+         if (cicek.isMaster && new URL (CONFIG.baseURL).hostname === 'localhost') docker.cleanup ();
       }
    });
 });

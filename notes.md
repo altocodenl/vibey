@@ -1,5 +1,69 @@
 # Vibey development notes
 
+## 2026-10-04
+
+Git disk usage is ballooning after an hour of editing a single, small document. We need to cut down on the overhead by joining consecutive commits on a single file at a minute granularity. I could think of how that could go wrong, though. Another option is to have a "clear history" button, which simply wipes the .git folder and starts with a fresh commit. That'd also have the feature of not letting anyone you share the project with to see your back and forths, or when you worked on it.
+
+cleanup:
+```
+cd /project && rm -rf .git && git init -b main && git config user.name vibey && git config user.email vibey@local && git add -A && git commit -m "Fresh start" && git gc
+```
+
+see how much you'd free:
+```
+(cd /project && tmp=$(mktemp -d) && trap 'rm -rf "$tmp"' EXIT && git init -q -b main "$tmp" && export GIT_DIR="$tmp/.git" GIT_WORK_TREE=/project && git add -A && git -c user.name=vibey -c user.email=vibey@local commit --allow-empty -qm "Estimate" && git gc --quiet && du -sk /project/.git "$tmp/.git" | awk 'NR == 1 {before = $1} NR == 2 {printf "%.0f\n", (before - $1) * 1024}')
+```
+
+Main issues right now that are not in todos:
+- mp4 not playing and not streaming
+- clear history from project
+- sometimes, command doesn't refresh after an ai call
+- burst of output from ai, rather than paused
+
+What do I need to dogfood vibey?
+- Automatic backups (replaces vi).
+- Public access (blog, perhaps github).
+- Notification project (???)
+
+- TODO
+   - mobile ui
+   - devops
+      - notification project to see alerts
+   - engine
+   - apps
+   - access
+      - token/api hooks
+      - email hooks (token in an email address)
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+   - project
+      - autobackup
+      - skip docker.exec to slash command time by 10x
+   - tests: local mode, client tests: auth, project, files, chat, access
+
+Public sharing opens something unexpected: being able to open vibey, the actual vibey client, and seeing *all* public projects from everybody. The wheel would be empty (and you'd have nowhere to put things in slots), but you could have the dna list of projects. Although they would clash in their names, unless we prepend them with usernames. Which we could also do when sharing a private project. But then, we'd need to paginate projects! It could work, though. Private users would be spammed with all public projects too, unless there's a flag for saying "hide public projects". But this makes a strong case for accessTo:PUBLIC.
+
+I could have public altocode projects, for example with a status page, or of course the blog. But these are projects and they are publicly accessible. It is a list of points of access. I'm just beginning to see the implications. All of this because of `accessTo:PUBLIC`
+
+Done:
+- mp4 not playing and not streaming
+- ai now streams
+- clear history from project
+- low project downtime on project during deploy (no rebuild)
+- public access
+
+gpt6 had the brilliant idea of firing a node process in the vibey-project to stream a video. It just works.
+
+mp4 not playing and not streaming; ai now streams; clear history from project; low project downtime on project during deploy (no rebuild); public access
+
+## 2026-10-03
+
+The creator account shouldn't be for creating projects. It should be for creating *engines*. Servers. You can grant creator access within an engine to other users. Think of it as a family plan, or a company plan: you pay for the possibility of creating servers that others can use. Whoever controls the engines also has the ultimate ownership of the data.
+
 ## 2026-10-01
 
 Some notes on Alexander - The process of creating life:

@@ -61,14 +61,15 @@ Every single successful tool call that modifies the files creates a commit autom
 
 ## Project access
 
-When the project owner asks you to grant access to an email address, read `vibey/access.md` first. If it does not exist, create it. Otherwise preserve existing entries and add the requested address only if absent.
+When the project owner asks you to grant access to an email address, or to make the project (or part of it) public, read `vibey/access.md` first, using Vibey tool calls for every step. If it does not exist, create it. Otherwise preserve existing entries and add the requested line only if absent.
 
 ```
 alice@example.com read
 bob@example.com write chat/
+PUBLIC read docs/
 ```
 
-Each line is `<email> <read|write> [prefix]`. Blank lines, lines starting with `#` and project grants (`project:<originId> <read|write> [prefix]`) are ignored by `vibey access`; project grants take effect without syncing. Emails are lowercased. Omitting the prefix grants whole-project access; otherwise, paths are matched by literal prefix. `write` includes `read`. Owners retain full access.
+Each line is `<email|PUBLIC> <read|write> [prefix]`. `PUBLIC` gives everyone, including people who aren't logged in, read access, and lists the project for everyone; it only supports `read`. Blank lines, lines starting with `#` and project grants (`project:<originId> <read|write> [prefix]`) are ignored by `vibey access`; project grants take effect without syncing. Emails are lowercased. Omitting the prefix grants whole-project access; otherwise, paths are matched by literal prefix. `write` includes `read`. Owners retain full access.
 
 Prefixes and requested paths must be relative, without backslashes, control characters, doubled slashes or `.`/`..` segments. Symlinks are followed, not confined to the grant's prefix.
 
@@ -82,4 +83,6 @@ After saving the file successfully, invoke this exact standalone Vibey tool call
  command: vibey access
 ```
 
-There's no need to call `vibey access` if you just granted access to a project; just do it when granting access to users.
+`vibey access` is not a program in the container: it only works as this Vibey tool call. Running it through any other shell fails with `vibey: not found`, and changing the file without syncing leaves the previous grants in place.
+
+There's no need to call `vibey access` if you just granted access to a project; just do it when granting access to users or to `PUBLIC`.

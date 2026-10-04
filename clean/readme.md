@@ -104,10 +104,10 @@ redis db <number>
 ### Redis
 
 ```
-accessBy:<projectId> 1 <verb>:<userId|email>[:<prefix>] // set of recipients; verb is read or write
+accessBy:<projectId> 1 <verb>:<userId|email|PUBLIC>[:<prefix>] // set of recipients; verb is read or write (only read for PUBLIC)
                      2 <verb>:<userId|email>[:<prefix>]
                      ...
-accessTo:<userId|email> 1 <verb>:<projectId>[:<prefix>] // set of shared projects; prefix is optional
+accessTo:<userId|email|PUBLIC> 1 <verb>:<projectId>[:<prefix>] // set of shared projects; prefix is optional
                         2 <verb>:<projectId>[:<prefix>]
                         ...
 credentials:<userId> data <JSON> // {provider: {account: {access, expires, refresh, ...}, apiKey: "<key>"}}
@@ -150,9 +150,12 @@ Set grants in `/project/vibey/access.md`, then run `vibey access` to sync them:
 ```
 alice@example.com read
 bob@example.com write chat/
+PUBLIC read docs/
 ```
 
-Each line is `<email> <read|write> [prefix]`. Blank lines, lines starting with `#` and project grants (lines starting with `project:`, see below) are ignored by the sync. Emails are lowercased. Omitting the prefix grants whole-project access; otherwise, paths are matched by literal prefix. `write` includes `read`. Owners retain full access.
+Each line is `<email|PUBLIC> <read|write> [prefix]`. Blank lines, lines starting with `#` and project grants (lines starting with `project:`, see below) are ignored by the sync. Emails are lowercased. Omitting the prefix grants whole-project access; otherwise, paths are matched by literal prefix. `write` includes `read`. Owners retain full access.
+
+`PUBLIC` grants read access to everyone, including requests without a session, and only supports `read`. Projects with a `PUBLIC` grant, whatever its prefix, are listed for everyone. Requests without a session can't list or read `vibey/access.md`.
 
 Prefixes and requested paths must be relative, without backslashes, control characters, doubled slashes or `.`/`..` segments. Symlinks are followed, not confined to the grant's prefix.
 
@@ -166,6 +169,7 @@ Syncing replaces the project's grants, removing entries no longer present. Inval
 
 - **Static**: `GET /`.
 - **Post error**: `POST /error`: accepts any body.
+- **Project reads**: **Get projects**, **Resolve project by name**, **Get project**, **List files**, **Get file** and **Read message** don't require a session; requests without one are checked against `PUBLIC` grants. Like the other public routes, they skip the CSRF check.
 
 #### Auth
 
@@ -181,16 +185,16 @@ Except for `GET /auth/user` and `PUT /auth/user`, all other auth routes will ret
 
 #### Project
 
-File reads and message reads require read access to their path. File writes, edits and messages require write access to their path. Shell commands and messages addressed to shell or AI additionally require whole-project write access. Denied access returns 404, except deletion of an accessible project by a non-owner returns 403.
+File reads and message reads require read access to their path, which `PUBLIC` grants give to every caller. File writes, edits and messages require write access to their path. Shell commands and messages addressed to shell or AI additionally require whole-project write access. Denied access returns 404, except deletion of an accessible project by a non-owner returns 403.
 
 - **Request creator access**: `POST /creator/request`: expects `{}`. Returns 409 if the user is already a creator. In local mode, this route returns a 404.
-- **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants. Each project appears once.
+- **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants, plus every project with a `PUBLIC` grant. Projects listed only through `PUBLIC` have `public: true`. Each project appears once. `slot` is only returned for projects the caller owns. Each project includes its owner's username as `ownerUsername`. Without a session, returns only the projects with a `PUBLIC` grant.
 - **Create project**: `POST /project`: expects `{name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters, and must stay encodable in `/p/` URLs (see **Resolve project by name**): a name can't be a UUID (in any case), contain `/` or `?`, have two spaces in a row, or have a space next to a dash; these return 400. Returns 403 if the user is not a creator, 409 if an owned or shared project already has that name. Assigning an occupied slot removes that slot only from a project owned by the caller.
 - **Rename project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <1–5|undefined>}`. Names must contain at least two characters, and must stay encodable in `/p/` URLs (see **Resolve project by name**): a name can't be a UUID (in any case), contain `/` or `?`, have two spaces in a row, or have a space next to a dash; these return 400. Existing projects keep a name that breaks these rules until renamed. Returns 404 if the project is missing or not owned by the caller, 409 if another owned or shared project has the new name. Assigning an occupied slot removes that slot only from another project owned by the caller.
 - **Remove project**: `DELETE /project/<projectId>`: requires ownership. Returns 404 if the project is missing or inaccessible, 403 if it is shared with the caller but not owned by them.
 - **Get project**: `GET /project/<projectId>`: returns `{id: <projectId>}` if the caller owns the project or has any read or write grant on it, whatever its path prefix. Returns 404 if the project is missing or inaccessible.
 - **Resolve project by name**: `GET /p/<username or userId>/<projectName or projectId>[/<path>]`: finds the project among those owned by that user, then rewrites the URL to `/project/<projectId>` or `/project/<projectId>/file/<path>` and passes the request on (`rs.next`), so access is checked by those routes and the response is theirs. A UUID in either slot is taken as an id; otherwise the user slot is a username and the project slot an encoded name: each space is written as `-` and each dash as `--` (so `x-y z` is `x--y-z`), and anything else is percent-encoded. Resolution ignores access: a missing user or project returns 404 here, an inaccessible one returns 404 from the route it's passed to, so both look the same. A 404 for a file, here (with a path) or from **Get file**, returns the not-found page as HTML: a question mark drawn with spinnies and a `Take me to safety` link to the projects.
-- **List files**: `GET /project/<projectId>/files`: returns `[{name: <relativePath>, size: <bytes>, mtime: <milliseconds since Unix epoch>}]`, sorted by name. Excludes `.git` contents and invalid paths; includes only files covered by the user's read or write grants, or all valid files for the owner. Returns 404 if the project is missing or inaccessible, and 500 if listing fails.
+- **List files**: `GET /project/<projectId>/files`: returns `[{name: <relativePath>, size: <bytes>, mtime: <milliseconds since Unix epoch>}]`, sorted by name. Excludes `.git` contents and invalid paths; includes only files covered by the user's read or write grants (including `PUBLIC` ones), or all valid files for the owner. Without a session, excludes `vibey/access.md`. Returns 404 if the project is missing or inaccessible, and 500 if listing fails.
 - **Get file**: `GET /project/<projectId>/file/<path>`: serves a file from `/project` through `docker.read`, with its MIME type or `application/octet-stream`. Returns 404 if access is denied or the file is missing, 400 for invalid paths, and 500 for other read errors. Symlinks are followed. Uses `cicek.cache` for ETags and 304 responses, with `Cache-Control: private, no-cache`. Sends `nosniff` and a sandbox CSP for safe previews.
 - **Write file**: `POST /project/write`: expects `{id: <projectId>, path: <path>, content: <string>}` or multipart fields `id`, `path` and a single file in the `file` field. Writes content to the file. If operation concludes with a non-zero code, returns 400 instead of 200.
 - **Edit file**: `POST /project/edit`: expects `{id: <projectId>, path: <path>, oldText: <string>, newText: <string>}`. Replaces `oldText` with `newText` in the file. `oldText` must match exactly once, except for the reserved value `'[EOF]'`, which appends `newText` to the end of the file. Returns 400 if `oldText` is absent, matches multiple times, or the edit otherwise fails. If operation concludes with a non-zero code, returns 400 instead of 200.
@@ -238,10 +242,10 @@ File reads and message reads require read access to their path. File writes, edi
 #### Auth
 
 - `report error <error>`: posts an error to the server via `POST /error`.
-- `load user`: if the hash contains a verification link, calls `read hash` directly. Otherwise, fetches user information from `GET /auth/user`. On success, sets `user` to the response body, loads projects and calls `read hash`. On 403, sets cloud mode and redirects to login; other errors show a snackbar.
+- `load user`: if the hash contains a verification link, calls `read hash` directly. Otherwise, fetches user information from `GET /auth/user`. On success, sets `user` to the response body, loads projects and calls `read hash`. On 403, sets `user` to `{anonymous: true, mode: 'cloud'}` and loads projects, which shows the projects with a `PUBLIC` grant; other errors show a snackbar.
 - `login <email>`: trims and lowercases the email, then sends a login link via `POST /auth/login`. On success, sets `user.loginLinkRequested` and, when `test` is truthy, stores the returned link at `test.loginLink`.
 - `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, stores the user info, loads projects, and navigates to projects. On error, shows a snackbar and navigates to login.
-- `logout`: logs out via `POST /auth/logout`. Resets user state and navigates to login.
+- `logout`: logs out via `POST /auth/logout`. Resets user state to anonymous and navigates to login.
 - `update user <body>`: sends `body` (`{settings: <object>}` and/or `{username: <string>}`) through `PUT /auth/user`. On success, sets each key of the response under `user` (e.g. `user.settings`, `user.username`), showing an `ok` snackbar (`Username changed to <username>`) when the username differs from the current one; on failure, keeps the current values and shows the server's error (such as an invalid or taken username) in a snackbar, or `Could not update user`. In the right settings pane, the Username form calls it with `{username}` on submit, and the `vi mode` checkbox below the AI providers with the complete settings object as `{settings}`.
 - `change user.settings`: updates the current editor's key map without recreating it. Uses Vim bindings when `user.settings.vi` is true, otherwise default bindings.
 
@@ -265,7 +269,7 @@ File reads and message reads require read access to their path. File writes, edi
   - Command+S: opens and focuses search.
 - `change projects`: rereads the hash to validate navigation against the refreshed project list.
 - `change project.id`: clears `files` and `project.size` so the newly selected project's file list and disk usage can be loaded.
-- `load clientExtension`: checks the loaded file list for root-level `extend-client.js`. If present and the files view is still showing the selected project, stores its project ID in `extendClient`, reads the script via `GET /project/<projectId>/file/extend-client.js`, and evaluates it in global scope with access to `B`, `views`, etc. Skips loading when `extendClient` is already set and ignores responses if the marker or destination project has changed. Loading and evaluation errors show a snackbar. Only use trusted project code: extensions run with full app privileges. Refresh the page inside the project to activate extension changes. Leaving the project reloads the page even if loading or evaluation failed. Logout clears the marker but does not undo already-running extension code.
+- `load clientExtension`: skips projects with `public: true`, so their code never runs in the visitor's session. Otherwise checks the loaded file list for root-level `extend-client.js`. If present and the files view is still showing the selected project, stores its project ID in `extendClient`, reads the script via `GET /project/<projectId>/file/extend-client.js`, and evaluates it in global scope with access to `B`, `views`, etc. Skips loading when `extendClient` is already set and ignores responses if the marker or destination project has changed. Loading and evaluation errors show a snackbar. Only use trusted project code: extensions run with full app privileges. Refresh the page inside the project to activate extension changes. Leaving the project reloads the page even if loading or evaluation failed. Logout clears the marker but does not undo already-running extension code.
 - `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
 - `create project`: creates a new project using the trimmed name at `new.project.name` and optional `new.project.slot` via `POST /project`. On success, clears the creation modal and project search, temporarily adds the project to `projects`, navigates to its `main.md` and reloads projects.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
@@ -289,9 +293,9 @@ File reads and message reads require read access to their path. File writes, edi
   - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning.
   - Command+R: in creation, opens folder upload.
   - Command+S: outside creation, focuses search.
-  - Command+/: focuses the visible content search input.
+  - Command+/: toggles content search in chat and text editors; opening focuses and selects the input.
   - Enter/Shift+Enter in text search: selects the next/previous match, wrapping around.
-  - Escape in text search: clears the query and highlights.
+  - Escape in text search: clears the query and highlights, and returns focus to the editor at its cursor.
   - Command+U: outside creation, deletes the selected file; in creation, opens file upload.
   - Command+X: closes the creation modal.
   - Command+Y: outside creation, opens rename if a file is selected and rename is not already open.
@@ -301,17 +305,18 @@ File reads and message reads require read access to their path. File writes, edi
 - `change file.name`: reads the selected file and scrolls its entry into the center of the left pane. Runs at low priority.
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
-- `list files <noRead>`: lists readable project files through `GET /project/<projectId>/files`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. After a successful listing, also runs `du -sk /project` through `POST /project/run` with `read: true`, converting KiB to bytes in `project.size.bytes`. This measures disk usage including `.git`; `views.files` displays it beside the project title using the same `size()` formatter as file sizes. Failed or denied size requests are silently ignored; command execution requires whole-project write access. Then calls `load clientExtension` and, unless `noRead` is set, reads the selected file.
+- `list files <noRead>`: lists readable project files through `GET /project/<projectId>/files`, excluding `.git`, and sets `files` with each file's name, size and modification time. Waits for projects to load and ignores responses for a project that is no longer selected. After a successful listing, also runs `du -sk /project` through `POST /project/run` with `read: true`, converting KiB to bytes in `project.size.bytes`. This measures disk usage including `.git`; `views.files` displays it as a `size: <size>` pill beside the project title, using the same `size()` formatter as file sizes. The same command then estimates what `clear history` would free: it commits the worktree into a temporary repository (via `GIT_DIR`/`GIT_WORK_TREE`, leaving `/project/.git` untouched), runs `git gc` on it, and prints the difference between both `.git` sizes in bytes, stored (floored at 0) in `project.size.history`. When nonzero, `views.files` shows a `clear history (<size>)` pill after the project size. Failed or denied size requests are silently ignored; command execution requires whole-project write access, and anonymous users skip it. Then calls `load clientExtension` and, unless `noRead` is set, reads the selected file.
 - `read file`: clears the global `content` and emits `change file`. If `fileEdits` contains pending edits for this project/file, returns without fetching potentially stale server content; the edit queue resumes the read when that file's edits finish, provided it is still selected and `content` is undefined. For images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`) and PDFs (case-insensitive), returns without fetching content; the view loads them directly through `GET /project/<projectId>/file/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
 - `edit file <name> <newContent>`: compares global `content` with the full editor text using an internal chunking function. Splits into lines while preserving line endings, uses `B.diff` to group contiguous additions/deletions, and expands each chunk with unchanged lines above/below until its `oldText` is unique. Each chunk's context accounts for preceding chunks. A shared sentinel works around gotoB dropping leading additions during backtracking; remove it once gotoB uses `x > 0 || D > 0` instead of `x > 0`. A diff timeout shows a snackbar without enqueueing edits. Appends chunks with captured project/file identifiers to `fileEdits` and immediately advances `content` to the editor text. An initially empty queue starts a recursive, callback-driven drain, keeping the in-flight entry at the head and sending one request at a time through `POST /project/edit`; no timers or separate saving flag. Empty originals and originals exactly `[EOF]` use unconditional `POST /project/write` entries instead. The queue survives project/file navigation. On failure, logs the error and removes all queued edits for the failed project/file, retaining other files' edits. If that document is still selected and loaded in the file editor, a native confirmation offers overwriting with its current editor text or discarding edits and loading the server version. Otherwise, shows an error snackbar and rereads the failed file only if it is still selected. Successful requests remove the head and continue draining; deferred reads resume when their file has no remaining edits.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it and refreshes the list after the write succeeds; otherwise, updates the global `content` if the file is still selected.
 - `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list and closes the creation modal. The successful write triggers the list refresh.
+- `clear history`: asks for confirmation, then replaces the project's git history with a single commit through `POST /project/run` with `read: true`: deletes `/project/.git`, reinitializes it on `main` with the `vibey` user, commits all files as `Fresh start` and runs `git gc`. Files are unchanged; past versions, and when they were made, are gone for everyone with access. On success, subtracts `project.size.history` from `project.size.bytes` and clears `project.size.history` (hiding the pill), if the project is still selected, and shows a snackbar.
 - `remove file <name>`: asks for confirmation, then deletes the file through `POST /project/run`. Refreshes the list and, if the deleted file was selected, navigates to the project's default file.
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. On success, closes the rename modal, refreshes the list and updates navigation if the renamed file was selected.
 - `download file`: downloads the selected file's server copy through `GET /project/<projectId>/file/<path>`, encoding each file path segment. Uses a temporary anchor with the file's basename as its download name; does not require loaded content.
 - `upload file|folder <files> [options]`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and sending file content as multipart without base64 encoding. `options.prefix` writes each file as prefix + file name instead; `options.cb` is called with the written names by index (undefined for failures) instead of refreshing the list and navigating. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
 - `change projects|project|file|settings`: recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view. Enables Vim bindings when `user.settings.vi` is true, line wrapping and JavaScript/Python/Markdown modes; file editors are read-only while `content` is undefined, and loaded file editor changes call `edit file` with the filename and full editor text, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
-- `change search.content.query`: calls `highlight content`.
+- `change search.content.query`: calls `highlight content`; opening search in the files view focuses and selects the input after rendering.
 - `change view`: calls `highlight content` at low priority, after rendering.
 - `change file.full`: enters browser full screen on `document.documentElement` when `file.full` is set, and exits it when unset. Also matches changes to `file` as a whole, so leaving the files view exits full screen. Does nothing if the browser is already in the matching state. Browsers only allow entering full screen from a click or key press; B.call runs synchronously inside those handlers, so the icon and Command+\ qualify. A refused request is ignored and only the in-page layout changes.
 - `highlight content`: highlights literal, case-insensitive matches for `search.content.query`, sets `search.content.count` and resets `search.content.current` to 0. Clears both integers when the query is empty or no text editor is active.
@@ -383,18 +388,21 @@ pending messages <array of "projectId/file/messageId"> // Pending messages in th
         requests <map of "projectId/file/messageId" to interval ID> // Active 100ms polling intervals; initially empty
 project id <projectId|undefined> // The current project selected
         size bytes <integer> // Disk usage including .git, displayed beside the project title; cleared when `project.id` changes
+             history <integer> // Bytes that `clear history` would free; shows the clear history pill when nonzero
 projects 1 created <date>
            id <id>
            last <date>
            name "..."
            owner <userId>
+           ownerUsername <username|undefined> // The owner's username; the list shows projects owned by someone else as username/name
+           public <true|undefined> // Listed only because it has a PUBLIC grant; hidden from logged-in users' projects view and slot shortcuts, and never runs its client extension
            slot <integer|undefined>
          ...
 search content count <integer> // Number of text-editor matches; 0 for an empty query or no active text editor
                current <integer> // 1-based selected match; 0 when no match is selected; resets when highlighting is rebuilt
-               query <text> // Shared content search input, initially empty; literal, case-insensitive text-editor search; filters message bodies (file messages by their name), senders (own ID as "you") and destinations with smartcase (uppercase in query makes matching case-sensitive)
+               query <text|undefined> // Undefined hides search; empty string shows it unfiltered. Toggled by Search or Command+/. Literal, case-insensitive text-editor search; smartcase filtering of message bodies, filenames, senders and destinations
        file <text|undefined> // Filters filenames using String.match (input is interpreted as a regex)
-       project <text|undefined> // Filters project names using String.match; undefined shows the spiral, a defined value shows the list
+       project <text|undefined> // Filters project names using String.match; undefined shows the spiral, a defined value shows the list. Anonymous users always see the list
 settings show <false|true> // Whether the settings panel is visible
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
@@ -404,6 +412,7 @@ test enabled <true|undefined> // Whether test mode is enabled
 upload done <integer> // Successfully uploaded files, or files sent as chat messages; upload exists only while uploading
        total <integer> // Total files in the upload
 user admin <true|undefined>
+     anonymous <true|undefined> // Cloud mode without a session: the projects view shows the list of public projects, and the header shows Login instead of Logout and hides Settings
      settings vi <boolean|undefined> // Vim bindings for file and chat editors; unset means off
      count <integer>
      creator <false|true>

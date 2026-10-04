@@ -1385,6 +1385,91 @@ if (mode === 'server') {
             ['Target file unchanged by denied commands', 'get', function (s) {return '/project/' + s.accessTargetId + '/file/cross.txt'}, 200, assertBody ('cross')],
             ['A deletes target project', 'delete', function (s) {return '/project/' + s.accessTargetId}, 200],
 
+            // PUBLIC grants: one project public as a whole, another only under chat/.
+            ['A creates full public project', 'post', '/project', {name: 'public full', slot: 2}, 200, function (s, rq, rs) {
+               s.publicFullId = rs.body.id;
+               return true;
+            }],
+            ['A creates partial public project', 'post', '/project', {name: 'public partial'}, 200, function (s, rq, rs) {
+               s.publicPartialId = rs.body.id;
+               return true;
+            }],
+            dale.go ([
+               ['publicFullId', 'notes.md', 'Notes'],
+               ['publicFullId', 'src/app.js', 'console.log ("app");'],
+               ['publicFullId', 'vibey/access.md', 'PUBLIC read\n'],
+               ['publicPartialId', 'chat/one.txt', 'one'],
+               ['publicPartialId', 'chat/two.txt', 'two'],
+               ['publicPartialId', 'vibey/access.md', 'PUBLIC read chat/\n'],
+            ], function (file) {
+               return ['A writes ' + file [1] + ' to ' + file [0], 'post', '/project/write', function (s) {
+                  return {id: s [file [0]], path: file [1], content: file [2]};
+               }, 200];
+            }),
+            dale.go (['publicFullId', 'publicPartialId'], function (key) {
+               return ['Sync access for ' + key, 'post', '/project/run', function (s) {
+                  return {id: s [key], command: 'vibey access'};
+               }, 200, function (s, rq, rs) {
+                  return assert (['sync error', rs.body.error, undefined, teishi.test.equal]);
+               }];
+            }),
+            ['A sees own public projects unflagged, with slot', 'get', '/projects', 200, function (s, rq, rs) {
+               var full = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.publicFullId) return p});
+               var partial = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.publicPartialId) return p});
+               return assert ([
+                  ['full public', full.public, undefined, teishi.test.equal],
+                  ['partial public', partial.public, undefined, teishi.test.equal],
+                  ['full slot', full.slot, 2, teishi.test.equal],
+                  ['partial slot', partial.slot, undefined, teishi.test.equal],
+               ]);
+            }],
+            ['Switch to anonymous', 'get', '/', 200, function (s) {
+               delete s.headers.cookie;
+               delete s.headers ['x-csrf'];
+               return true;
+            }],
+            ['Anonymous lists public projects without slots', 'get', '/projects', 200, function (s, rq, rs) {
+               var listed = dale.fil (rs.body, undefined, function (p) {
+                  if (p.id === s.publicFullId || p.id === s.publicPartialId) return p;
+               });
+               return assert ([
+                  ['both listed', listed.length, 2, teishi.test.equal],
+                  ['public', dale.go (listed, function (p) {return p.public}), [true, true], teishi.test.equal],
+                  ['slots', dale.go (listed, function (p) {return p.slot}), [undefined, undefined], teishi.test.equal],
+               ]);
+            }],
+            ['Anonymous lists full public project files', 'get', function (s) {return '/project/' + s.publicFullId + '/files'}, 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['main.md', 'notes.md', 'src/app.js'], teishi.test.equal]);
+            }],
+            ['Anonymous lists partial public project files', 'get', function (s) {return '/project/' + s.publicPartialId + '/files'}, 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/one.txt', 'chat/two.txt'], teishi.test.equal]);
+            }],
+            ['Anonymous reads full public project file', 'get', function (s) {return '/project/' + s.publicFullId + '/file/notes.md'}, 200, assertBody ('Notes')],
+            ['Anonymous reads partial public project file', 'get', function (s) {return '/project/' + s.publicPartialId + '/file/chat/one.txt'}, 200, assertBody ('one')],
+            ['Anonymous cannot read outside partial public prefix', 'get', function (s) {return '/project/' + s.publicPartialId + '/file/main.md'}, 404],
+            ['Anonymous cannot read access.md', 'get', function (s) {return '/project/' + s.publicFullId + '/file/vibey/access.md'}, 404],
+            ['Anonymous cannot write', 'post', '/project/write', function (s) {
+               return {id: s.publicFullId, path: 'notes.md', content: 'forbidden'};
+            }, 403],
+            accessAs ('b'),
+            ['B sees public projects without slots', 'get', '/projects', 200, function (s, rq, rs) {
+               var listed = dale.fil (rs.body, undefined, function (p) {
+                  if (p.id === s.publicFullId || p.id === s.publicPartialId) return p;
+               });
+               return assert ([
+                  ['both listed', listed.length, 2, teishi.test.equal],
+                  ['public', dale.go (listed, function (p) {return p.public}), [true, true], teishi.test.equal],
+                  ['slots', dale.go (listed, function (p) {return p.slot}), [undefined, undefined], teishi.test.equal],
+               ]);
+            }],
+            ['B reads full public project file', 'get', function (s) {return '/project/' + s.publicFullId + '/file/notes.md'}, 200, assertBody ('Notes')],
+            ['B cannot write to public project', 'post', '/project/write', function (s) {
+               return {id: s.publicFullId, path: 'notes.md', content: 'forbidden'};
+            }, 404],
+            accessAs ('a'),
+            ['A deletes full public project', 'delete', function (s) {return '/project/' + s.publicFullId}, 200],
+            ['A deletes partial public project', 'delete', function (s) {return '/project/' + s.publicPartialId}, 200],
+
             // Removing a user's line entirely revokes their access on the next sync.
             accessWrite ('vibey/access.md', 'access-c@example.com write chat/\n', 200),
             accessSync,

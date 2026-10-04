@@ -135,7 +135,7 @@ B.mrespond ([
 
    ['navigate', '*', function (x) {
       // Code navigates to files/<projectId>[/<file>]; the URL shows it as p/<owner>/<project>[/<file>].
-      var match = x.path [0].match (/^files\/([^/]+)(?:\/(.+))?$/);
+      var match = x.path [0].match (/^files\/([^/]+)(?:\/(.*))?$/);
       if (match) x.path = [projectUrl (match [1], match [2] && decodeURIComponent (match [2]))];
       var hash = '#/' + x.path;
       if (window.location.hash === hash) return B.call (x, 'read', 'hash');
@@ -164,7 +164,6 @@ B.mrespond ([
       if (hash [0] === 'verify' && hash [1]) return B.call (x, 'verify', hash [1]);
 
       if (B.get ('user', 'mode') === 'cloud') {
-         if (inc (loggedViews, hash [0]) && ! B.get ('user', 'csrf')) return B.call (x, 'navigate', 'login');
          if (inc (authViews,   hash [0]) &&   B.get ('user', 'csrf')) return B.call (x, 'navigate', 'projects');
       }
       else {
@@ -208,7 +207,7 @@ B.mrespond ([
 
          if (! file && defaultFile !== '') return B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (defaultFile));
 
-         if (files && ! dale.stop (files, true, function (f) {
+         if (files && files.length && ! dale.stop (files, true, function (f) {
             if (f.name === file) return fileExists = true;
          })) return B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (defaultFile));
 
@@ -258,7 +257,7 @@ B.mrespond ([
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error) clog (error.responseText);
          if (error && error.status === 403 && x.path [0].indexOf ('/auth/') !== 0) {
-            B.call (x, 'set', [], {user: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
+            B.call (x, 'set', [], {user: {anonymous: true, mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
             B.call (x, 'navigate', 'login');
             return;
          }
@@ -309,8 +308,9 @@ B.mrespond ([
          if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
          if (error && error.status === 403) {
-            B.call (x, 'set', ['user', 'mode'], 'cloud');
-            return B.call (x, 'navigate', 'login');
+            B.call (x, 'set', 'user', {anonymous: true, mode: 'cloud'});
+            // Without a session, the projects shared with PUBLIC are shown; loading them reads the hash.
+            return B.call (x, 'load', 'projects');
          }
 
          B.call (x, 'set', 'user', rs.body);
@@ -349,7 +349,7 @@ B.mrespond ([
 
    ['logout', [], function (x) {
       B.call (x, 'post', '/auth/logout', {}, function (x, error) {
-         B.call (x, 'set', [], {user: {mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
+         B.call (x, 'set', [], {user: {anonymous: true, mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
          B.call (x, 'navigate', 'login');
       });
    }],
@@ -382,6 +382,11 @@ B.mrespond ([
    ['load', 'clientExtension', function (x) {
       var project = B.get ('project', 'id');
       if (B.get ('extendClient') || B.get ('view') !== 'files') return;
+
+      // A project that's only listed because it's public doesn't run code in the visitor's session.
+      if (dale.stop (B.get ('projects') || [], true, function (p) {
+         return p.id === project && p.public;
+      })) return;
 
       if (! dale.stop (B.get ('files') || [], true, function (file) {
          return file.name === 'extend-client.js';
@@ -486,7 +491,7 @@ B.mrespond ([
          }
          if (B.get ('search', 'project') !== undefined && projects) {
             var filteredProjects = dale.fil (projects, undefined, function (project) {
-               if (project.name.match (B.get ('search', 'project'))) return project;
+               if (! project.public && project.name.match (B.get ('search', 'project'))) return project;
             });
             project = filteredProjects [parseInt (ev.key) - 1];
          }
@@ -563,20 +568,19 @@ B.mrespond ([
          }
       }
 
-      if (ev.metaKey && ev.key === '/') {
-         var contentSearch = c ('#search-text') || c ('#search-messages');
-         if (contentSearch) {
-            ev.preventDefault ();
-            contentSearch.focus ();
-            return;
-         }
-      }
+      if (ev.metaKey && ev.key === '/') return B.call (x, 'set', ['search', 'content', 'query'], B.get ('search', 'content', 'query') === undefined ? '' : undefined);
 
       if (ev.target && ev.target.id === 'search-text' && ! ev.isComposing) {
          if (ev.key === 'Escape') {
             ev.preventDefault ();
             ev.target.value = '';
-            return B.call (x, 'set', ['search', 'content', 'query'], '');
+            var position = editor && editor.getCursor ('to');
+            B.call (x, 'set', ['search', 'content', 'query'], '');
+            if (position) {
+               editor.setCursor (position);
+               editor.focus ();
+            }
+            return;
          }
          if (ev.key === 'Enter') {
             ev.preventDefault ();
@@ -696,14 +700,18 @@ B.mrespond ([
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          B.call (x, 'set', 'files', rs.body);
 
-         B.call (x, 'post', '/project/run', {
+         // Second line: bytes that clearing history would free, measured against a fresh single-commit repository.
+         // Without a session, this would be a 403, which sends the user to login.
+         if (! B.get ('user', 'anonymous')) B.call (x, 'post', '/project/run', {
             id: project.id,
             read: true,
-            command: 'du -sk /project',
+            command: "du -sk /project && (cd /project && tmp=$(mktemp -d) && trap 'rm -rf \"$tmp\"' EXIT && git init -q -b main \"$tmp\" && export GIT_DIR=\"$tmp/.git\" GIT_WORK_TREE=/project && git add -A && git -c user.name=vibey -c user.email=vibey@local commit --allow-empty -qm Estimate && git gc --quiet && du -sk /project/.git \"$tmp/.git\" | awk 'NR == 1 {before = $1} NR == 2 {printf \"%.0f\\n\", (before - $1) * 1024}')",
          }, function (x, error, rs) {
             if (B.get ('project', 'id') !== project.id || error || rs.body.code) return;
-            var match = /^\s*(\d+)\s/.exec (rs.body.stdout || '');
-            if (match) B.call (x, 'set', ['project', 'size', 'bytes'], Number (match [1]) * 1024);
+            var match = /^\s*(\d+)\s[^\n]*\n(-?\d+)/.exec (rs.body.stdout || '');
+            if (! match) return;
+            B.call (x, 'set', ['project', 'size', 'bytes'], Number (match [1]) * 1024);
+            B.call (x, 'set', ['project', 'size', 'history'], Math.max (0, Number (match [2])));
          });
 
          B.call (x, 'load', 'clientExtension');
@@ -726,7 +734,7 @@ B.mrespond ([
          return edit.project === project.id && edit.file === name;
       })) return;
 
-      if (/\.(avif|bmp|gif|jpe?g|png|webp|pdf)$/i.test (name)) return;
+      if (/\.(avif|bmp|gif|jpe?g|png|webp|pdf|mp4)$/i.test (name)) return;
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
@@ -927,6 +935,22 @@ B.mrespond ([
       B.call (x, 'rem', 'new', 'file');
    }],
 
+   ['clear', 'history', function (x) {
+      if (! confirm ('Clear the history of this project? Past versions will be gone; current files stay. This cannot be undone.')) return;
+
+      var id = B.get ('project', 'id'), projectSize = B.get ('project', 'size') || {};
+      B.call (x, 'snackbar', 'yellow', 'Clearing history...', 'keep');
+      B.call (x, 'post', '/project/run', {
+         id: id,
+         read: true,
+         command: 'cd /project && rm -rf .git && git init -q -b main && git config user.name vibey && git config user.email vibey@local && git add -A && git commit -qm "Fresh start" && git gc --quiet',
+      }, function (x, error, rs) {
+         if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to clear history');
+         if (B.get ('project', 'id') === id) B.call (x, 'set', ['project', 'size'], {bytes: Math.max (0, (projectSize.bytes || 0) - (projectSize.history || 0))});
+         B.call (x, 'snackbar', 'ok', 'History cleared');
+      });
+   }],
+
    ['remove', 'file', function (x, name) {
       if (! confirm ('Delete file "' + name + '"? This cannot be undone.')) return;
 
@@ -1048,7 +1072,7 @@ B.mrespond ([
 
       if (c ('#file-editor')) {
          editor = CodeMirror (c ('#file-editor'), {
-            readOnly: content === undefined,
+            readOnly: content === undefined || !! B.get ('user', 'anonymous'),
             keyMap: B.get ('user', 'settings', 'vi') ? 'vim' : 'default',
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
@@ -1083,6 +1107,15 @@ B.mrespond ([
 
    ['change', ['search', 'content', 'query'], function (x) {
       B.call (x, 'highlight', 'content');
+   }],
+
+   ['change', ['search', 'content', 'query'], {priority: -1001}, function (x, query, previous) {
+      if (B.get ('view') !== 'files' || query === undefined || previous !== undefined) return;
+      var input = c ('input[aria-label="Search messages"], input[aria-label="Search text"]') [0];
+      if (input) {
+         input.focus ();
+         input.select ();
+      }
    }],
 
    ['change', 'view', {priority: -1001}, function (x) {
@@ -1541,19 +1574,40 @@ css.style = [
 var views = {};
 
 views.tooltip = function (tooltip, placement) {
+   var position = {
+      above: {
+         bottom: '100%',
+         left: '50%',
+         transform: 'translateX(-50%)',
+      },
+      below: {
+         left: '50%',
+         top: '100%',
+         transform: 'translateX(-50%)',
+      },
+      corner: {
+         left: '0.75rem',
+         top: 0,
+         transform: 'translateY(-50%)',
+      },
+      right: {
+         right: '0.5rem',
+         top: '50%',
+         transform: 'translateY(-50%)',
+      },
+   } [placement || 'above'];
    return B.view (['key', 'command'], function (command) {
       if (! command) return ['span'];
       return ['span', {
-         class: 'absolute bg-vblue fw7 nowrap white',
+         class: 'absolute bg-vpurple fw7 nowrap tooltip vdeepnavy',
          style: style ({
-            'border-radius': 5,
-            'font-size': '0.72rem',
-            left: '0.625rem',
-            padding: '0.125rem 0.5rem',
+            ...position,
+            'border-radius': 6,
+            'box-shadow': '0 0 0.75rem ' + css.colors.vpurple,
+            'font-size': '0.9rem',
+            padding: '0.15625rem 0.625rem',
             'pointer-events': 'none',
-            top: placement === 'below' ? '100%' : '-1.75rem',
-            transform: 'translateX(-50%)',
-            'z-index': 10
+            'z-index': '10'
          }),
       }, tooltip];
    });
@@ -1585,8 +1639,8 @@ views.main = function () {
             }, [
 
                // Settings
-               B.view ([['settings', 'show'], ['view']], function (showSettings, view) {
-                  if (view !== 'files') return ['span'];
+               B.view ([['settings', 'show'], ['view'], ['user', 'anonymous']], function (showSettings, view, anonymous) {
+                  if (view !== 'files' || anonymous) return ['span'];
                   return ['button', {
                      class: css.button + ' bg-mid-gray f6 relative',
                      style: style ({padding: '0.5rem 0.875rem'}),
@@ -1599,18 +1653,19 @@ views.main = function () {
                }),
 
                // Account and logout
-               B.view ([['user', 'mode'], ['user', 'email'], ['search', 'project']], function (mode, email, search) {
+               B.view ([['user', 'mode'], ['user', 'email'], ['user', 'anonymous'], ['search', 'project']], function (mode, email, anonymous, search) {
                   if (view === 'projects' && search !== undefined) return ['span'];
                   var logout = ['button', {
-                     class: css.button + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3'),
+                     // Without a session, the projects list covers the header; this keeps Login clickable.
+                     class: css.button + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3') + (anonymous ? ' relative z-1' : ''),
                      style: view === 'files' ? style ({padding: '0.5rem 0.875rem'}) : undefined,
-                     onclick: B.ev ('logout', []),
+                     onclick: anonymous ? B.ev ('navigate', 'login') : B.ev ('logout', []),
                      title: email || '',
                   }, [
                      ['i', {class: 'bi bi-person-walking mr1'}],
-                     'Logout'
+                     anonymous ? 'Login' : 'Logout'
                   ]];
-                  if (view !== 'projects') return logout;
+                  if (view !== 'projects' || anonymous) return logout;
                   return ['div', {
                      class: 'bg-vmidnight border-box flex flex-column vnearwhite',
                      style: style ({
@@ -1791,8 +1846,8 @@ views.projects = function () {
    var barWidth  = barHeight * slotWidth / slotHeight;
    var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
 
-   return B.view ([['projects'], ['user', 'email'], ['search', 'project'], ['user', 'creator']], function (projects, email, search, creator) {
-      var columnWidth = search !== undefined ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
+   return B.view ([['projects'], ['user', 'email'], ['search', 'project'], ['user', 'creator'], ['user', 'anonymous']], function (projects, email, search, creator, anonymous) {
+      var columnWidth = search !== undefined || anonymous ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
       var emailHue = dale.go ((email || '').split (''), function (c) { return c.charCodeAt (0); }).reduce (function (a, b) { return a + b; }, 0) % 360;
 
       if (! projects) return ['div', {
@@ -1838,6 +1893,8 @@ views.projects = function () {
 
          // Spiral slots or project list
          B.view (['search', 'project'], function (search) {
+            // Without a session there's no spiral, only the list of public projects.
+            if (search === undefined && anonymous) search = '';
             return ['div', {class: 'relative' + (search !== undefined ? ' self-start' : ''), style: style ({
                height: search === undefined ? vw (containerHeight + 48 + 48) : 'auto',
                width: search === undefined ? vw (containerWidth) : '100vw',
@@ -1940,7 +1997,7 @@ views.projects = function () {
                         'padding-top': '16vh',
                      }),
                   }, [
-                     ['div', {
+                     anonymous ? '' : ['div', {
                         class: 'border-box center fixed flex left-0 right-0 w-100',
                         style: style ({
                            gap: '0.75rem',
@@ -1948,7 +2005,7 @@ views.projects = function () {
                            'min-height': '3rem',
                            padding: '2vh 15vw',
                            top: '2vh',
-                           'z-index': 1,
+                           'z-index': '1',
                         }),
                      }, [
                         ['div', {
@@ -1974,7 +2031,7 @@ views.projects = function () {
                         var cardWidth = 70 / phi;
                         var cycle = 8;
                         var filteredProjects = dale.fil (projects, undefined, function (project) {
-                           if (project.name.match (search)) return project;
+                           if ((anonymous || ! project.public) && project.name.match (search)) return project;
                         });
                         return dale.go (filteredProjects, function (project, index) {
                            var offset = 15 + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
@@ -1993,7 +2050,8 @@ views.projects = function () {
                            }, [
                               index < 5 ? views.tooltip (index + 1) : '',
                               ['span', {class: 'flex flex-column justify-center'}, [
-                                 ['span', {class: 'f4 fw6'}, project.name],
+                                 // Projects owned by someone else show as username/name.
+                                 ['span', {class: 'f4 fw6'}, (project.ownerUsername && project.owner !== (B.get ('user', 'id') || 'local') ? project.ownerUsername + '/' : '') + project.name],
                                  ['span', {
                                     style: style ({
                                        'font-size': '70%',
@@ -2001,7 +2059,8 @@ views.projects = function () {
                                     }),
                                  }, project.last ? ago (project.last) : ''],
                               ]],
-                              ['div', {
+                              // An empty span keeps the card's layout when there are no actions.
+                              anonymous ? ['span'] : ['div', {
                                  class: 'flex items-center',
                                  onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
                                  style: style ({
@@ -2299,7 +2358,7 @@ var localPaths = function (html, folder) {
    return html.replace (/<img\b/gi, '<img class="mw-100" style="' + fit + '"').replace (/(<a\b[^>]*?\bhref="((?![a-z][a-z0-9+.-]*:|\/|#)[^"]*\.(avif|bmp|gif|jpe?g|m4a|mov|mp3|mp4|ogg|png|wav|webm|webp))"[^>]*>)([\s\S]*?)<\/a>/gi, function (match, open, href, extension, text) {
       // Players go after the link, so clicking their controls doesn't follow it.
       if (/^(m4a|mp3|ogg|wav)$/i.test (extension)) return match + '<audio class="db mt2 mw-100" controls src="' + href + '"></audio>';
-      if (/^(mov|mp4|webm)$/i.test (extension)) return match + '<video class="db mt2 mw-100" controls src="' + href + '" style="' + fit + '"></video>';
+      if (/^(mov|mp4|webm)$/i.test (extension)) return match + '<video autoplay class="db mt2 mw-100" controls loop src="' + href + '" style="' + fit + '"></video>';
       return open + text + '<img alt="' + text.replace (/<[^>]*>/g, '').replace (/"/g, '&quot;') + '" class="db mt2 mw-100" src="' + href + '" style="' + fit + '"></a>';
    }).replace (/(<(a|audio|img|video)\b[^>]*?\b(?:href|src)=")(?![a-z][a-z0-9+.-]*:|\/|#)([^"]*)"/gi, function (match, prefix, tag, src) {
       var parts = folder ? folder.split ('/') : [];
@@ -2444,6 +2503,7 @@ views.files = function () {
          // In full screen, the right pane covers the window; the left pane stays rendered underneath.
          B.view (['file', 'full'], function (full) {
             return ['style', full ? [
+               ['#panes > :first-child .tooltip', {display: 'none'}],
                // Offsets match the outer container's padding, so the project color still frames the pane.
                ['#panes > :last-child', {
                   bottom: 0,
@@ -2460,10 +2520,25 @@ views.files = function () {
                onclick: B.ev ('navigate', 'projects'),
             }, ['‹', views.tooltip ('B', 'below')]],
             ['span', {class: 'f4 fw7'}, project.name],
-            B.view (['project', 'size', 'bytes'], function (bytes) {
-               return bytes
-                  ? ['span', {class: 'f6 ml2'}, size (bytes)]
-                  : ['span'];
+            B.view (['project', 'size'], function (projectSize) {
+               projectSize = projectSize || {};
+               return ['span', {class: 'flex items-center'}, [
+                  projectSize.bytes ? ['span', {
+                     class: 'bg-vhighlightblue br-pill f7 fw6 ml2 vnearwhite',
+                     style: style ({
+                        padding: '0.25rem 0.75rem',
+                     }),
+                  }, 'size: ' + size (projectSize.bytes)] : '',
+                  projectSize.history ? ['button', {
+                     class: 'bg-vhighlightblue bn br-pill f7 fw6 ml2 pointer vnearwhite',
+                     onclick: B.ev ('clear', 'history'),
+                     style: style ({
+                        padding: '0.25rem 0.75rem',
+                     }),
+                     title: 'Remove all past versions of this project',
+                     type: 'button',
+                  }, 'clear history (frees ' + size (projectSize.history) + ')'] : '',
+               ]];
             }),
          ]]}),
          ['div', {
@@ -2484,7 +2559,7 @@ views.files = function () {
                      class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vnearwhite',
                      onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file']),
                      style: style ({padding: '0.75rem'}),
-                  }, [views.tooltip ('E'), '+ New']],
+                  }, [views.tooltip ('E', 'below'), '+ New']],
                   B.view (['file', 'name'], function (name) {
                      return ['button', {
                         'aria-label': 'Delete current file',
@@ -2496,7 +2571,7 @@ views.files = function () {
                            'padding-top': '0.75rem',
                         }),
                         title: 'Delete current file',
-                     }, [views.tooltip ('U'), '×']];
+                     }, [views.tooltip ('U', 'below'), '×']];
                   }),
                ]],
                B.view ([['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file']], function (files, current, pending, search) {
@@ -2520,7 +2595,7 @@ views.files = function () {
                            padding: '0.5rem 0.625rem',
                         }),
                      }, [
-                        tooltip ? views.tooltip (tooltip) : '',
+                        tooltip ? views.tooltip (tooltip, 'right') : '',
                         ['div', {class: 'flex items-center', style: style ({gap: '0.5rem'})}, [
                            ['span', {class: views.projectColor (file.name, true)}, iconAndName (file.name)],
                            (pending || []).some (function (k) {return k.indexOf (file.name) !== -1;}) ? ['span', {style: style ({transform: 'scale(0.75)'})}, views.spinny (active ? 'vnearwhite' : 'vlightblue')] : '',
@@ -2530,7 +2605,7 @@ views.files = function () {
                   })];
                }),
                ['div', {class: 'flex-shrink-0 mt3 relative w-100'}, [
-                  views.tooltip ('S'),
+                  views.tooltip ('S', 'corner'),
                   ['i', {
                      class: 'absolute bi bi-search vmidblue',
                      style: style ({
@@ -2560,11 +2635,13 @@ views.files = function () {
 
                var isChat = !! file.name.match (/^chat\/.+\.md$/);
 
-               var mode = file.mode || 'edit';
+               // Without a session, files are read-only: markdown is always rendered.
+               var mode = B.get ('user', 'anonymous') ? 'view' : file.mode || 'edit';
 
                var isImage = /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (file.name);
                var isPdf = /\.pdf$/i.test (file.name);
-               var isBinary = isImage || isPdf || content instanceof Uint8Array;
+               var isVideo = /\.mp4$/i.test (file.name);
+               var isBinary = isImage || isPdf || isVideo || content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
 
                var fileHeader = ['div', {class: 'flex items-center justify-between mb2'}, [
@@ -2606,7 +2683,7 @@ views.files = function () {
                         }, ['i', {class: 'bi bi-chevron-' + (file.actions ? 'left' : 'right')}]],
                      ]],
                      ['div', {class: 'flex items-center'}, [
-                        ! isChat && isMd ? ['div', {class: 'flex'}, [
+                        ! isChat && isMd && ! B.get ('user', 'anonymous') ? ['div', {class: 'flex'}, [
                            ['span', {
                               class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
                               onclick: B.ev ('set', ['file', 'mode'], 'view'),
@@ -2622,13 +2699,24 @@ views.files = function () {
                               }),
                            }, [mode !== 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
                         ]] : ['div'],
+                        isChat || (! isBinary && (! isMd || mode === 'edit')) ? B.view (['search', 'content', 'query'], function (query) {
+                           return ['button', {
+                              class: 'bn br2 f6 fw6 ml2 pointer relative ' + (query !== undefined ? 'bg-vhighlightblue vnearwhite' : 'bg-transparent vgray'),
+                              'aria-expanded': query !== undefined ? 'true' : 'false',
+                              style: style ({padding: '0.25rem 0.75rem'}),
+                              onclick: B.ev ('set', ['search', 'content', 'query'], query === undefined ? '' : undefined),
+                              title: isChat ? 'Search messages' : 'Search text',
+                              type: 'button',
+                           }, [views.tooltip ('/', 'below'), ['i', {class: 'bi bi-search mr1'}], 'Search']];
+                        }) : '',
                         ['button', {
                            'aria-label': file.full ? 'Exit full screen' : 'Full screen',
-                           class: 'bg-transparent bn br-pill ml2 pointer pv1 relative vnearwhite',
+                           class: 'bn br2 f6 fw6 ml2 pointer relative ' + (file.full ? 'bg-vhighlightblue vnearwhite' : 'bg-transparent vgray'),
+                           style: style ({padding: '0.25rem 0.75rem'}),
                            onclick: B.ev ('set', ['file', 'full'], ! file.full),
                            title: file.full ? 'Exit full screen' : 'Full screen',
                            type: 'button',
-                        }, [views.tooltip ('\\'), ['i', {class: 'bi bi-' + (file.full ? 'fullscreen-exit' : 'fullscreen')}]]],
+                        }, [views.tooltip ('\\', 'below'), ['i', {class: 'bi bi-' + (file.full ? 'fullscreen-exit' : 'fullscreen') + ' mr1'}], 'Full']],
                      ]],
                   ]];
 
@@ -2639,6 +2727,19 @@ views.files = function () {
 
                return ['div', {class: 'flex flex-auto flex-column'}, [
                   fileHeader,
+                  isVideo ? ['div', {class: 'flex-auto relative'}, [
+                     ['video', {
+                        autoplay: true,
+                        class: 'absolute h-100 left-0 top-0 w-100',
+                        controls: true,
+                        loop: true,
+                        playsinline: true,
+                        preload: 'metadata',
+                        src: '/project/' + encodeURIComponent (B.get ('project', 'id')) + '/file/' + encodeURIComponent (file.name),
+                        onerror: B.ev ('snackbar', 'error', 'There was a problem loading the video'),
+                        style: style ({'object-fit': 'contain'}),
+                     }],
+                  ]] :
                   isImage ? ['div', {class: 'flex-auto relative'}, [
                      ['img', {
                         alt: file.name,
@@ -2681,7 +2782,8 @@ views.files = function () {
                         id: 'file-editor',
                         opaque: true,
                      }],
-                  ! isBinary && (! isMd || mode === 'edit') ? ['div', {class: 'flex-shrink-0 mt3 relative w-100'}, [
+                  ! isBinary && (! isMd || mode === 'edit') ? B.view (['search', 'content', 'query'], function (query) {
+                     return query === undefined ? ['div'] : ['div', {class: 'flex-shrink-0 mt3 relative w-100'}, [
                      views.tooltip ('/'),
                      ['i', {
                         class: 'absolute bi bi-search vmidblue',
@@ -2705,7 +2807,7 @@ views.files = function () {
                            'padding-right': '8rem',
                         }),
                         type: 'text',
-                        value: B.get ('search', 'content', 'query') || '',
+                        value: query,
                      }],
                      B.view (['search', 'content'], function (search) {
                         search = search || {};
@@ -2719,7 +2821,8 @@ views.files = function () {
                            }),
                         }, ! search.query ? '' : search.current ? search.current + ' of ' + search.count : search.count + (search.count === 1 ? ' match' : ' matches')];
                      }),
-                  ]] : '',
+                     ]];
+                  }) : '',
                ]];
             })}, function () {return B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
                pkce = pkce || {};
@@ -3408,7 +3511,7 @@ views.chat = function () {
                      var fit = style ({'max-height': 'calc(100cqh - 6rem)'});
                      if (/^image\//.test (mime)) return ['div', [['img', {alt: mediaName, class: 'db mt2 mw-100', src: src, style: fit}], caption]];
                      if (/^audio\//.test (mime)) return ['div', [['audio', {class: 'db mt2 mw-100', controls: true, src: src}], caption]];
-                     if (/^video\//.test (mime)) return ['div', [['video', {class: 'db mt2 mw-100', controls: true, src: src, style: fit}], caption]];
+                     if (/^video\//.test (mime)) return ['div', [['video', {autoplay: true, class: 'db mt2 mw-100', controls: true, loop: true, src: src, style: fit}], caption]];
                      return caption;
                   }
                   if (shell) {
@@ -3525,16 +3628,23 @@ views.chat = function () {
                      }),
                   }, rendered],
                   ['div', {
-                     class: 'absolute left-0 ma1 top-0 z-1',
-                     style: style ({'pointer-events': 'none'}),
+                     class: 'absolute mv1 top-0 z-1',
+                     style: style ({
+                        left: '0.75rem',
+                        'pointer-events': 'none',
+                     }),
                   }, views.tooltip ('O', 'below')],
                   ['div', {
-                     class: 'absolute bottom-0 left-0 ma1 z-1',
-                     style: style ({'pointer-events': 'none'}),
+                     class: 'absolute bottom-0 mv1 z-1',
+                     style: style ({
+                        left: '0.75rem',
+                        'pointer-events': 'none',
+                     }),
                   }, views.tooltip ('I')],
                ]],
-               ['div', {class: 'flex-shrink-0 mv3 relative w-100'}, [
-                  views.tooltip ('/'),
+               B.view (['search', 'content', 'query'], function (query) {
+                  return query === undefined ? ['div'] : ['div', {class: 'flex-shrink-0 mv3 relative w-100'}, [
+                  views.tooltip ('/', 'corner'),
                   ['i', {
                      class: 'absolute bi bi-search vmidblue',
                      style: style ({
@@ -3568,11 +3678,13 @@ views.chat = function () {
                         transform: 'translateY(-50%)',
                      }),
                   }, rendered.length + ' of ' + messages.length + (messages.length === 1 ? ' message' : ' messages')],
-               ]],
+                  ]];
+               }),
             ]];
          }),
          // Draft
-         ['div', {
+         // Without a session, there's no draft to send messages from.
+         B.get ('user', 'anonymous') ? '' : ['div', {
             class: 'flex flex-column flex-shrink-0',
             style: style ({
                'border-top': '0.1875rem solid ' + css.colors.vborderblue,
@@ -3605,7 +3717,7 @@ views.chat = function () {
                      }],
                      ['div', {
                         class: 'absolute ba bg-vdeepnavy border-box br2 chat-recipient-options w-100',
-                        style: style ({bottom: '100%', 'z-index': 10}),
+                        style: style ({bottom: '100%', 'z-index': '10'}),
                      }, dale.fil (['all', 'shell'].concat (function () {
                         var aiOptions = dale.fil (models, undefined, function (m) {
                            if (modelCredential (m, credentials)) return 'ai-' + m.model;
@@ -3649,7 +3761,7 @@ views.chat = function () {
                ['div', {
                   class: 'absolute absolute--fill chat-draft-editor',
                }, [
-                  views.tooltip ('M'),
+                  views.tooltip ('M', 'corner'),
                   ['div', {
                      class: 'absolute absolute--fill overflow-hidden',
                      id: 'chat-editor',

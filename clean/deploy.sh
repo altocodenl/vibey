@@ -13,13 +13,17 @@ fi
 
 HOST="acprod"
 TARGET_FOLDER="/root/vibey"
+REBUILD=0
+for arg in "$@"; do
+   [[ "$arg" != "rebuild" ]] || REBUILD=1
+done
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 ssh "$HOST" "mkdir -p '$TARGET_FOLDER'"
 rsync -av --exclude node_modules --exclude .git ./ "$HOST:$TARGET_FOLDER/"
 
-ssh "$HOST" "bash -s -- '$TARGET_FOLDER'" <<'REMOTE'
+ssh "$HOST" "bash -s -- '$TARGET_FOLDER' '$REBUILD'" <<'REMOTE'
 set -euo pipefail
 cd "$1"
 
@@ -38,5 +42,12 @@ NODE
 
 # Build the project image explicitly, even though its service has zero replicas.
 docker compose build vibey-host vibey-project
+if [[ "$2" == "1" ]]; then
+   mapfile -t projects < <(docker ps -aq --filter 'name=^/vibey-project-')
+   if (( ${#projects[@]} )); then
+      docker stop "${projects[@]}"
+      docker rm "${projects[@]}"
+   fi
+fi
 docker compose up -d
 REMOTE
