@@ -842,7 +842,7 @@ B.mrespond ([
       };
 
       var edits = chunks (content, newContent);
-      if (edits === false) return B.call (x, 'snackbar', 'error', 'Diff timed out');
+      if (edits === false) edits = [{overwrite: true, content: newContent}];
       if (! edits.length) return;
 
       var queue = B.get ('fileEdits');
@@ -862,7 +862,7 @@ B.mrespond ([
       var next = function () {
          var edit = queue [0];
          if (! edit) return;
-         var write = edit.content !== undefined;
+         var write = edit.overwrite;
          var body = {id: edit.project, path: edit.file};
          if (write) body.content = edit.content;
          else {
@@ -879,7 +879,7 @@ B.mrespond ([
                if (selected && content !== undefined && c ('#file-editor') && confirm (
                   'Could not save ' + edit.file + '.\n\nOK: overwrite with your local version.\nCancel: load the server version.'
                )) {
-                  queue.unshift ({project: edit.project, file: edit.file, content: editor.getValue ()});
+                  queue.unshift ({project: edit.project, file: edit.file, overwrite: true, content: editor.getValue ()});
                }
                else {
                   B.call (x, 'snackbar', 'error', 'Could not save ' + edit.project + '/' + edit.file);

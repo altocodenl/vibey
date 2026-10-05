@@ -1,5 +1,17 @@
 # Vibey development notes
 
+## 2026-10-05
+
+Some notes on Alexander - The process of creating life:
+- "this feeling which guides us is our response to the wholeness (...) It is our knowledge of what kind of thing is needed to complete that wholeness"
+- "even though it can be described as a mathematical structure, it is too complex to take in by purely analytical means. In order to get the whole, to grasp it, one must feel it. Its wholeness *can* be felt. Using our feeling as a way of grasping the whole, we can put ourselves in a receptive mode"
+- "This is not an emotional move away from precision. It is, rather, a move *towards* precision."
+- "It is then, the feeling which arises from the work itself. Above all, that which is latent, the structure just below the surface that is "trying" to appear, can be felt."
+- "I judge my success as an architect (...) by the degree to which the work (...) intensifies my feeling when I am there - and, by extension, intensifies the feeling of every other person, too."
+- "That is the essence of living process. It is a movement towards a structure which is precious. And, above all, it is a movement toward a structure which makes use feel our own existence most deeply."
+
+Experiencing tremendous doubt about vibey. Has it become more deadened, because of how much I used agents to build this new version, lately? Have I let it drift?
+
 ## 2026-10-04
 
 Git disk usage is ballooning after an hour of editing a single, small document. We need to cut down on the overhead by joining consecutive commits on a single file at a minute granularity. I could think of how that could go wrong, though. Another option is to have a "clear history" button, which simply wipes the .git folder and starts with a fresh commit. That'd also have the feature of not letting anyone you share the project with to see your back and forths, or when you worked on it.
@@ -57,8 +69,6 @@ Done:
 - public access
 
 gpt6 had the brilliant idea of firing a node process in the vibey-project to stream a video. It just works.
-
-mp4 not playing and not streaming; ai now streams; clear history from project; low project downtime on project during deploy (no rebuild); public access
 
 ## 2026-10-03
 
