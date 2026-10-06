@@ -79,6 +79,14 @@ var shortcut = function (key, ev, x, verb, path, arg) {
    return B.call (x, verb, path, arg);
 }
 
+// The path a new file or chat gets: `.md` is added when the name has no extension, and chats go under `chat/`.
+var newFileName = function (name, type) {
+   name = name.trim ();
+   if (! name.match (/\.[a-z]{2,3}$/i)) name += '.md';
+   if (type === 'chat') name = 'chat/' + name;
+   return name;
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -88,6 +96,34 @@ window.addEventListener ('hashchange', function () {
 // Exiting browser full screen (Escape, or the browser's own controls) also turns off `file.full`.
 document.addEventListener ('fullscreenchange', function () {
    if (! document.fullscreenElement && B.get ('file', 'full')) B.call ('set', ['file', 'full'], false);
+});
+
+// `mobile` is true below tachyons' `-ns` breakpoint (30em) and absent otherwise, so views can branch on `B.get ('mobile')`.
+dale.go (['DOMContentLoaded', 'resize'], function (type) {
+   window.addEventListener (type, function () {
+      var mobile = window.matchMedia ('(min-width: 30em)').matches ? undefined : true;
+      if (mobile === B.get ('mobile')) return;
+      if (mobile) B.call ('set', 'mobile', true);
+      else        B.call ('rem', [], 'mobile');
+   });
+});
+
+// On mobile, a horizontal swipe on the right pane of the files view acts as Command+J (left) or Command+K (right). Swipes that start inside something that scrolls sideways are left to it.
+dale.go (['touchstart', 'touchend'], function (type) {
+   document.addEventListener (type, function (ev) {
+      var touch = ev.changedTouches [0];
+      if (type === 'touchstart') {
+         var scrolls = false;
+         for (var node = ev.target; node && node !== document.body; node = node.parentNode) {
+            if (node.scrollWidth > node.clientWidth && /auto|scroll/.test (getComputedStyle (node).overflowX)) scrolls = true;
+         }
+         return B.call ('mset', 'swipe', scrolls ? undefined : {x: touch.clientX, y: touch.clientY});
+      }
+      var start = B.get ('swipe');
+      if (! start || ! B.get ('mobile') || B.get ('show', 'pane') !== 'right') return;
+      var dx = touch.clientX - start.x, dy = touch.clientY - start.y;
+      if (Math.abs (dx) > 60 && Math.abs (dx) > 2 * Math.abs (dy)) window.dispatchEvent (new KeyboardEvent ('keydown', {key: dx < 0 ? 'j' : 'k', metaKey: true}));
+   }, {capture: true, passive: true});
 });
 
 dale.go (['keydown', 'keyup', 'blur'], function (type) {
@@ -257,7 +293,7 @@ B.mrespond ([
       c.ajax (x.verb, x.path [0], headers, body, function (error, rs) {
          if (error) clog (error.responseText);
          if (error && error.status === 403 && x.path [0].indexOf ('/auth/') !== 0) {
-            B.call (x, 'set', [], {user: {anonymous: true, mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
+            B.call (x, 'set', [], {mobile: B.get ('mobile'), user: {anonymous: true, mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
             B.call (x, 'navigate', 'login');
             return;
          }
@@ -349,7 +385,7 @@ B.mrespond ([
 
    ['logout', [], function (x) {
       B.call (x, 'post', '/auth/logout', {}, function (x, error) {
-         B.call (x, 'set', [], {user: {anonymous: true, mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
+         B.call (x, 'set', [], {mobile: B.get ('mobile'), user: {anonymous: true, mode: 'cloud'}, snackbar: B.get ('snackbar'), test: B.get ('test')});
          B.call (x, 'navigate', 'login');
       });
    }],
@@ -603,8 +639,9 @@ B.mrespond ([
       if (ev.key === 'Enter' && c ('#create-file') && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
       if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'rename', 'file');
 
-      shortcut ('b', ev, x, 'navigate', 'projects');
-      shortcut ('9', ev, x, 'set', ['settings', 'show'], ! B.get ('settings', 'show'));
+      if (B.get ('mobile') && B.get ('show', 'pane') === 'right') shortcut ('b', ev, x, 'rem', 'show', 'pane');
+      else                                                        shortcut ('b', ev, x, 'navigate', 'projects');
+      shortcut ('9', ev, x, 'set', ['show', 'settings'], ! B.get ('show', 'settings'));
       shortcut ('\\', ev, x, 'set', ['file', 'full'], ! B.get ('file', 'full'));
 
       if (B.get ('new', 'file') === undefined) {
@@ -638,10 +675,12 @@ B.mrespond ([
             ev.preventDefault ();
 
             var search = B.get ('search', 'file');
+            var pattern = search && new RegExp (search, search === search.toLowerCase () ? 'i' : '');
             files = dale.fil (files, undefined, function (file) {
-               if (search && ! file.name.match (search)) return;
+               if (pattern && ! file.name.match (pattern)) return;
                return file;
             });
+            if (! files.length) return;
 
             var index = dale.stopNot (files, undefined, function (f, k) {
                if (f.name === current) return k;
@@ -920,12 +959,9 @@ B.mrespond ([
    }],
 
    ['create', 'file', function (x) {
-      var name = B.get ('new', 'file').trim ();
+      if (B.get ('new', 'file').trim ().length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a name');
 
-      if (name.length === 0) return B.call (x, 'snackbar', 'error', 'Please enter a name');
-
-      if (! name.match (/\.[a-z]{2,3}$/i)) name += '.md';
-      if (B.get ('new', 'type') === 'chat') name = 'chat/' + name;
+      var name = newFileName (B.get ('new', 'file'), B.get ('new', 'type'));
 
       B.call (x, 'write', 'file', name, '', 'new');
 
@@ -933,6 +969,7 @@ B.mrespond ([
       if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + encodeURIComponent (name));
 
       B.call (x, 'rem', 'new', 'file');
+      if (B.get ('mobile')) B.call (x, 'set', ['show', 'pane'], 'right');
    }],
 
    ['clear', 'history', function (x) {
@@ -1353,7 +1390,7 @@ B.mrespond ([
    ['create', 'message', function (x, to, name, body) {
       var project = B.get ('project', 'id');
       if (! project || B.get ('file', 'name') !== name) return;
-      if (! body.trim ()) return;
+      if (! (body || '').trim ()) return;
 
       to = (to || '').trim () || 'all';
 
@@ -1630,8 +1667,8 @@ views.main = function () {
          // Header
          (function () {
             if (view === 'login') return;
-            return B.view (['file', 'full'], function (full) {return ['div', {
-               class: full ? 'dn' : 'absolute flex right-0 top-0',
+            return B.view ([['file', 'full'], ['mobile']], function (full, mobile) {return ['div', {
+               class: full || mobile && view === 'files' ? 'dn' : 'absolute flex right-0 top-0',
                style: style ({
                   gap: view === 'files' ? '0.5rem' : '1.5rem',
                   margin: view === 'files' ? '0.75rem 1.5rem 0 0' : 'calc(1.5rem - 2vh) 1.5rem 0 0',
@@ -1639,12 +1676,12 @@ views.main = function () {
             }, [
 
                // Settings
-               B.view ([['settings', 'show'], ['view'], ['user', 'anonymous']], function (showSettings, view, anonymous) {
+               B.view ([['show', 'settings'], ['view'], ['user', 'anonymous']], function (showSettings, view, anonymous) {
                   if (view !== 'files' || anonymous) return ['span'];
                   return ['button', {
                      class: css.button + ' bg-mid-gray f6 relative',
                      style: style ({padding: '0.5rem 0.875rem'}),
-                     onclick: B.ev ('set', ['settings', 'show'], ! B.get ('settings', 'show'))
+                     onclick: B.ev ('set', ['show', 'settings'], ! B.get ('show', 'settings'))
                   }, [
                      views.tooltip ('9', 'below'),
                      ['i', {class: 'bi mr1 ' + (showSettings ? 'bi-check-lg' : 'bi-wrench-adjustable mr1')}],
@@ -1666,6 +1703,18 @@ views.main = function () {
                      anonymous ? 'Login' : 'Logout'
                   ]];
                   if (view !== 'projects' || anonymous) return logout;
+                  if (mobile) return mode === 'local' ? ['span'] : ['button', {
+                     class: css.button + ' bg-vpurple',
+                     onclick: B.ev ('logout', []),
+                     style: style ({
+                        'font-size': '1.75rem',
+                        height: '4rem',
+                        'margin-top': '1rem',
+                        padding: '1rem 1.25rem',
+                        width: '4.25rem',
+                     }),
+                     title: email || '',
+                  }, ['i', {class: 'bi bi-person-walking'}]];
                   return ['div', {
                      class: 'bg-vmidnight border-box flex flex-column vnearwhite',
                      style: style ({
@@ -1765,18 +1814,20 @@ views.modal = function (attributes, contents) {
          background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), repeating-linear-gradient(90deg, rgba(0,0,0,0.3) 0rem, rgba(0,0,0,0.3) 0.125rem, transparent 0.125rem, transparent 0.375rem), ' + css.rgba (css.colors.vgreen, 0.5),
       })
    }, [
-      ['div', {
-         class: 'bg-vdeepnavy',
-         onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
-         style: style ({
-            border: '0.0625rem solid ' + css.colors.vborderblue,
-            'border-radius': '1.125rem',
-            'box-shadow': '0 1.75rem 5rem rgba(0, 0, 0, 0.38)',
-            'min-height': '25vh',
-            padding: '3rem 2.25rem',
-            width: '50vw',
-         }),
-      }, contents]
+      B.view (['mobile'], function (mobile) {
+         return ['div', {
+            class: 'bg-vdeepnavy border-box',
+            onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
+            style: style ({
+               border: '0.0625rem solid ' + css.colors.vborderblue,
+               'border-radius': mobile ? undefined : '1.125rem',
+               'box-shadow': '0 1.75rem 5rem rgba(0, 0, 0, 0.38)',
+               'min-height': '25vh',
+               padding: mobile ? '1.5rem 1rem' : '3rem 2.25rem',
+               width: mobile ? '100%' : '50vw',
+            }),
+         }, contents];
+      }),
    ]];
 }
 
@@ -1802,8 +1853,9 @@ views.projectColor = function (text, textOnly) {
 views.projects = function () {
    var phi = (1 + Math.sqrt (5)) / 2;
    var scale = 140 / 1400;
+   // On mobile, the spiral scales to 85vw, leaving 5vw on each side within the 95vw column.
    var vw = function (n) {
-      return n * scale + 'vw'
+      return n * (B.get ('mobile') ? 85 / containerWidth : scale) + 'vw'
    };
    var baseRadius = 24, slotWidth = 80, slotHeight = 48, slotBorderRadius = 12;
    var angleToRadius = function (t) {return baseRadius * Math.pow (phi, t / (Math.PI / 2))};
@@ -1846,8 +1898,8 @@ views.projects = function () {
    var barWidth  = barHeight * slotWidth / slotHeight;
    var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
 
-   return B.view ([['projects'], ['user', 'email'], ['search', 'project'], ['user', 'creator'], ['user', 'anonymous']], function (projects, email, search, creator, anonymous) {
-      var columnWidth = search !== undefined || anonymous ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
+   return B.view ([['mobile'], ['projects'], ['user', 'email'], ['search', 'project'], ['user', 'creator'], ['user', 'anonymous']], function (mobile, projects, email, search, creator, anonymous) {
+      var columnWidth = mobile ? '95vw' : search !== undefined || anonymous ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
       var emailHue = dale.go ((email || '').split (''), function (c) { return c.charCodeAt (0); }).reduce (function (a, b) { return a + b; }, 0) % 360;
 
       if (! projects) return ['div', {
@@ -1873,21 +1925,22 @@ views.projects = function () {
             }),
          }],
 
-         // Logo
-         ['div', {style: style ({
+         // Logo; on mobile, the size of the logout button and level with it.
+         mobile && (search !== undefined || anonymous) ? '' : ['div', {style: style ({
             left: '1.5rem',
             position: 'fixed',
-            top: 'calc(1.5rem - 2vh)',
+            top: mobile ? 'calc(2.5rem - 2vh)' : 'calc(1.5rem - 2vh)',
          })}, ['img', {
             alt: 'vibey',
-            class: 'db',
+            class: mobile ? 'border-box db' + (anonymous ? '' : ' pointer') : 'db',
+            onclick: mobile && ! anonymous ? B.ev ('set', ['show', 'account'], true) : undefined,
             src: '/favicon.svg',
             style: style ({
                'background-color': css.colors.vmidnight,
-               'border-radius': '1.125rem',
-               height: '6.75rem',
-               padding: '1.125rem',
-               width: '7.59375rem',
+               'border-radius': mobile ? '0.25rem' : '1.125rem',
+               height: mobile ? '4rem' : '6.75rem',
+               padding: mobile ? '0.75rem' : '1.125rem',
+               width: mobile ? '4.25rem' : '7.59375rem',
             }),
          }]],
 
@@ -1896,7 +1949,7 @@ views.projects = function () {
             // Without a session there's no spiral, only the list of public projects.
             if (search === undefined && anonymous) search = '';
             return ['div', {class: 'relative' + (search !== undefined ? ' self-start' : ''), style: style ({
-               height: search === undefined ? vw (containerHeight + 48 + 48) : 'auto',
+               height: search === undefined ? vw (containerHeight + 48 + (mobile ? 72 : 48)) : 'auto',
                width: search === undefined ? vw (containerWidth) : '100vw',
             })}, [
 
@@ -2003,7 +2056,7 @@ views.projects = function () {
                            gap: '0.75rem',
                            height: '14vh',
                            'min-height': '3rem',
-                           padding: '2vh 15vw',
+                           padding: mobile ? '2vh 5vw' : '2vh 15vw',
                            top: '2vh',
                            'z-index': '1',
                         }),
@@ -2016,7 +2069,7 @@ views.projects = function () {
                               'border-radius': '0.75rem',
                               flex: 1,
                            }),
-                        }, [views.tooltip ('B'), ['span', {class: 'fw6 f4'}, '‹ Back to shell']]],
+                        }, [views.tooltip ('B'), ['span', {class: 'fw6 f4'}, mobile ? '‹ Back' : '‹ Back to shell']]],
                         ['div', {
                            class: 'bg-vmidnight flex items-center justify-center pointer relative vgreen',
                            onclick: B.ev ('set', ['new', 'project'], {slot: undefined}),
@@ -2025,16 +2078,18 @@ views.projects = function () {
                               'border-radius': '0.75rem',
                               flex: 1,
                            }),
-                        }, [views.tooltip ('E'), ['span', {class: 'fw6 f4'}, '+ New project']]],
+                        }, [views.tooltip ('E'), ['span', {class: 'fw6 f4'}, mobile ? '+ New' : '+ New project']]],
                      ]],
                      (function () {
-                        var cardWidth = 70 / phi;
+                        var span = mobile ? 90 : 70, start = mobile ? 5 : 15;
+                        var cardWidth = span / phi * (mobile ? 1.15 : 1);
                         var cycle = 8;
+                        var pattern = new RegExp (search, search === search.toLowerCase () ? 'i' : '');
                         var filteredProjects = dale.fil (projects, undefined, function (project) {
-                           if ((anonymous || ! project.public) && project.name.match (search)) return project;
+                           if ((anonymous || ! project.public) && project.name.match (pattern)) return project;
                         });
                         return dale.go (filteredProjects, function (project, index) {
-                           var offset = 15 + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (70 - cardWidth);
+                           var offset = start + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (span - cardWidth);
                            return ['div', {
                               class: 'border-box flex items-center justify-between pointer relative ' + views.projectColor (project.name),
                               onclick: B.ev ('navigate', 'files/' + project.id),
@@ -2117,7 +2172,7 @@ views.projects = function () {
                   onclick: B.ev ('set', ['search', 'project'], ''),
                   style: style ({
                      bottom: search === undefined ? undefined : '2vh',
-                     height: vw (48),
+                     height: vw (mobile ? 72 : 48),
                      left: search === undefined ? 0 : '50%',
                      top: search === undefined ? vw (containerHeight + 32) : undefined,
                      transform: search === undefined ? undefined : 'translateX(-50%)',
@@ -2156,6 +2211,29 @@ views.projects = function () {
                   }],
                ]],
             ]];
+         }),
+
+         B.view (['show', 'account'], function (showAccount) {
+            if (! showAccount || ! mobile || anonymous) return ['div'];
+            return views.modal ({onclick: B.ev ('rem', 'show', 'account')}, [
+               ['div', {
+                  class: 'flex flex-column justify-between',
+                  style: style ({'min-height': 'calc(25vh - 3rem)'}),
+               }, [
+                  ['div', {class: 'f5 lh-copy'}, [
+                     'Logged in as ',
+                     ['span', {
+                        class: 'fw6',
+                        style: style ({'overflow-wrap': 'anywhere'}),
+                     }, email || 'local user'],
+                  ]],
+                  ['button', {
+                     class: css.button + ' bg-vgreen f4 mt3 self-end',
+                     onclick: B.ev ('rem', 'show', 'account'),
+                     type: 'button',
+                  }, 'Sure'],
+               ]],
+            ]);
          }),
 
          // Project creation modal
@@ -2386,28 +2464,31 @@ views.files = function () {
       return styled;
    }
 
-   var paneStyle = style ({
-      'border-radius': '1.125rem',
-      'box-shadow': [
-         '0.75rem 0.75rem 2.25rem ' + css.rgba (css.colors.vblack, 0.45),
-         '-0.75rem -0.75rem 2.25rem ' + css.rgba (css.colors.vwhite, 0.1),
-         '0.1875rem 0.1875rem 0.5625rem ' + css.rgba (css.colors.vblack, 0.3),
-         '-0.1875rem -0.1875rem 0.5625rem ' + css.rgba (css.colors.vwhite, 0.07),
-      ].join (', '),
-      padding: '1.5rem',
-   });
+   // On mobile, panes go edge to edge: no rounded corners or shadow, and less padding.
+   var paneStyle = function (mobile) {
+      return style ({
+         'border-radius': mobile ? undefined : '1.125rem',
+         'box-shadow': mobile ? undefined : [
+            '0.75rem 0.75rem 2.25rem ' + css.rgba (css.colors.vblack, 0.45),
+            '-0.75rem -0.75rem 2.25rem ' + css.rgba (css.colors.vwhite, 0.1),
+            '0.1875rem 0.1875rem 0.5625rem ' + css.rgba (css.colors.vblack, 0.3),
+            '-0.1875rem -0.1875rem 0.5625rem ' + css.rgba (css.colors.vwhite, 0.07),
+         ].join (', '),
+         padding: mobile ? '0.75rem' : '1.5rem',
+      });
+   }
 
    var flipCard = function (frontClass, front, back) {
-      return B.view (['settings', 'show'], function (showSettings) {
+      return B.view ([['mobile'], ['show', 'settings']], function (mobile, showSettings) {
          return ['div', {
             class: 'bg-vdeepnavy bn border-box flex flex-column ' + (showSettings ? 'overflow-auto' : frontClass),
-            style: paneStyle,
+            style: paneStyle (mobile),
          }, showSettings ? [
             ['div', {class: 'flex items-center justify-between mb3'}, [
                ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
                ['span', {
                   class: 'f3 light-blue pointer relative',
-                  onclick: B.ev ('set', ['settings', 'show'], false),
+                  onclick: B.ev (['set', ['show', 'settings'], false], ['rem', 'show', 'pane']),
                }, [views.tooltip ('9', 'below'), '×']],
             ]],
             type (back) === 'function' ? back () : back,
@@ -2415,7 +2496,7 @@ views.files = function () {
       });
    }
 
-   return B.view ([['projects'], ['project', 'id']], function (projects, projectId) {
+   return B.view ([['mobile'], ['projects'], ['project', 'id']], function (mobile, projects, projectId) {
       if (! projects) return ['div', {
          class: 'bg-vmidnight flex flex-wrap items-center justify-center overflow-hidden vh-100',
          style: style ({gap: '2rem'}),
@@ -2428,7 +2509,7 @@ views.files = function () {
       return ['div', {
          class: views.projectColor (project.name) + ' border-box flex flex-column overflow-hidden vh-100',
          style: style ({
-            padding: '0.75rem 1.5rem 0 1.5rem',
+            padding: mobile ? '0' : '0.75rem 1.5rem 0 1.5rem',
          }),
       }, [
          ['style', [
@@ -2514,7 +2595,15 @@ views.files = function () {
                }],
             ] : []];
          }),
-         B.view (['file', 'full'], function (full) {return ['div', {class: full ? 'dn' : 'flex flex-shrink-0 items-center mb2'}, [
+         // On mobile, only one pane shows at a time; both stay rendered, so switching keeps the editor and scroll positions.
+         B.view (['show', 'pane'], function (pane) {
+            return ['style', mobile ? [
+               ['#panes > ' + (pane === 'right' ? ':first-child' : ':last-child'), {
+                  display: 'none',
+               }],
+            ] : []];
+         }),
+         B.view ([['file', 'full'], ['show', 'pane']], function (full, pane) {return ['div', {class: full || mobile && pane === 'right' ? 'dn' : 'flex flex-shrink-0 items-center mb2' + (mobile ? ' ph3 pt2' : '')}, [
             ['span', {
                class: 'f2 fw7 lh-solid mr3 pointer relative',
                onclick: B.ev ('navigate', 'projects'),
@@ -2524,22 +2613,30 @@ views.files = function () {
                projectSize = projectSize || {};
                return ['span', {class: 'flex items-center'}, [
                   projectSize.bytes ? ['span', {
-                     class: 'bg-vhighlightblue br-pill f7 fw6 ml2 vnearwhite',
+                     class: 'fw7 ml2' + (mobile && projectSize.history ? ' pointer' : ''),
+                     onclick: mobile && projectSize.history ? B.ev ('clear', 'history') : undefined,
                      style: style ({
-                        padding: '0.25rem 0.75rem',
+                        'font-size': '0.875rem',
                      }),
-                  }, 'size: ' + size (projectSize.bytes)] : '',
-                  projectSize.history ? ['button', {
-                     class: 'bg-vhighlightblue bn br-pill f7 fw6 ml2 pointer vnearwhite',
+                  }, '(' + size (projectSize.bytes) + ')'] : '',
+                  projectSize.history && ! mobile ? ['button', {
+                     class: 'bg-vorange bn br-pill f7 fw6 ml2 pointer vdeepnavy',
                      onclick: B.ev ('clear', 'history'),
                      style: style ({
                         padding: '0.25rem 0.75rem',
                      }),
                      title: 'Remove all past versions of this project',
                      type: 'button',
-                  }, 'clear history (frees ' + size (projectSize.history) + ')'] : '',
+                  }, 'Clear (' + size (projectSize.history) + ')'] : '',
                ]];
             }),
+            mobile && ! B.get ('user', 'anonymous') ? ['button', {
+               class: css.button + ' bg-mid-gray f6 ml-auto',
+               onclick: B.ev (['set', ['show', 'settings'], true], ['set', ['show', 'pane'], 'right']),
+               style: style ({padding: '0.5rem 0.625rem'}),
+               title: 'Settings',
+               type: 'button',
+            }, ['i', {class: 'bi bi-wrench-adjustable'}]] : '',
          ]]}),
          ['div', {
             id: 'panes',
@@ -2547,7 +2644,7 @@ views.files = function () {
                display: 'grid',
                flex: 1,
                gap: '1.5rem',
-               'grid-template-columns': 'minmax(0, 23.6fr) minmax(0, 76.4fr)',
+               'grid-template-columns': mobile ? 'minmax(0, 1fr)' : 'minmax(0, 23.6fr) minmax(0, 76.4fr)',
                'grid-template-rows': 'minmax(0, 1fr)',
                'min-height': 0,
             }),
@@ -2577,19 +2674,20 @@ views.files = function () {
                B.view ([['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file']], function (files, current, pending, search) {
                   if (! files) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
                   if (! files.length) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, 'No files yet.'];
+                  var pattern = search && new RegExp (search, search === search.toLowerCase () ? 'i' : '');
                   var currentIndex = dale.stopNot (files, undefined, function (f, k) {
                      if (f.name === current) return k;
                   });
                   var prevIndex = currentIndex !== undefined ? (currentIndex === 0 ? files.length - 1 : currentIndex - 1) : undefined;
                   var nextIndex = currentIndex !== undefined ? (currentIndex >= files.length - 1 ? 0 : currentIndex + 1) : undefined;
                   return ['div', {class: 'flex-auto overflow-y-auto'}, dale.fil (files, undefined, function (file, index) {
-                     if (search && ! file.name.match (search)) return;
+                     if (pattern && ! file.name.match (pattern)) return;
                      var active = file.name === current;
                      var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
                      return ['div', {
                         class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
                         id: active ? 'selected-file' : undefined,
-                        onclick: B.ev ('navigate', 'files/' + B.get ('project', 'id') + '/' + file.name),
+                        onclick: B.ev (['navigate', 'files/' + B.get ('project', 'id') + '/' + file.name], ['set', ['show', 'pane'], 'right']),
                         style: style ({
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
                            padding: '0.5rem 0.625rem',
@@ -2630,7 +2728,7 @@ views.files = function () {
                ]],
             ]}, []),
             // Right pane
-            flipCard ('overflow-auto', function () {return B.view ('file', function (file) {
+            flipCard ('overflow-auto', function () {return B.view ([['file'], ['mobile']], function (file, mobile) {
                if (! file) return ['div'];
 
                var isChat = !! file.name.match (/^chat\/.+\.md$/);
@@ -2644,7 +2742,11 @@ views.files = function () {
                var isBinary = isImage || isPdf || isVideo || content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
 
-               var fileHeader = ['div', {class: 'flex items-center justify-between mb2'}, [
+               var fileHeader = ['div', {class: 'flex items-center mb2'}, [
+                     mobile ? ['span', {
+                        class: 'f2 fw7 lh-solid mr2 pointer vnearwhite',
+                        onclick: B.ev ('rem', 'show', 'pane'),
+                     }, '‹'] : '',
                      ['div', {
                         class: 'bg-vhighlightblue br-pill flex items-center vnearwhite',
                         style: style ({
@@ -2682,7 +2784,7 @@ views.files = function () {
                            type: 'button',
                         }, ['i', {class: 'bi bi-chevron-' + (file.actions ? 'left' : 'right')}]],
                      ]],
-                     ['div', {class: 'flex items-center'}, [
+                     ['div', {class: 'flex items-center ml-auto'}, [
                         ! isChat && isMd && ! B.get ('user', 'anonymous') ? ['div', {class: 'flex'}, [
                            ['span', {
                               class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
@@ -3010,8 +3112,8 @@ views.files = function () {
             if (newFile === undefined) return ['div'];
 
             var allowCreation = (function () {
-               var name = (newFile || '').trim ();
-               if (name.length === 0) return 'empty';
+               if ((newFile || '').trim ().length === 0) return 'empty';
+               var name = newFileName (newFile, newType);
                var conflict = dale.stop (files || [], true, function (file) {
                   return file.name === name;
                });
@@ -3142,7 +3244,7 @@ views.files = function () {
                   class: (allowCreation === true ? 'bg-vgreen' : 'bg-vgray') + ' black bn br2 f5 fw7 mt3 pointer pv3 relative w-100',
                   disabled: allowCreation !== true,
                   id: 'create-file',
-                  onclick: B.ev ('create', newType),
+                  onclick: B.ev ('create', 'file'),
                }, [
                   allowCreation === true ? views.tooltip ('E') : '',
                   {
@@ -3310,7 +3412,7 @@ views.chat = function () {
             }),
          }, [
             ['i', {class: 'bi ' + icons [tool.op]}],
-            tool.op,
+            ['span', {class: 'flex-shrink-0'}, tool.op],
             ['span', {
                class: 'f7 fw5 truncate',
                style: style ({
@@ -3403,7 +3505,7 @@ views.chat = function () {
             }],
          ]],
          // Messages
-         B.view ([['search', 'content', 'query'], ['user', 'id'], ['content']], function (query, userId) {
+         B.view ([['mobile'], ['search', 'content', 'query'], ['user', 'id'], ['content']], function (mobile, query, userId) {
             query = query || '';
             var messages = (type (content) === 'string' ? content : '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1);
             messages = dale.fil (messages, undefined, function (message) {
@@ -3527,9 +3629,9 @@ views.chat = function () {
                   style: style ({
                      display: 'grid',
                      gap: '0.75rem',
-                     'grid-template-columns': 'max-content minmax(0, max-content) minmax(min(8rem, 25%), 1fr)',
-                     'margin-left': messageLevels [messageId.toLowerCase ()] ? (messageLevels [messageId.toLowerCase ()] * 2) + 'rem' : undefined,
-                     width: messageLevels [messageId.toLowerCase ()] ? 'calc(100% - ' + (messageLevels [messageId.toLowerCase ()] * 2) + 'rem)' : undefined,
+                     'grid-template-columns': mobile ? 'max-content minmax(0, 1fr) max-content' : 'max-content minmax(0, max-content) minmax(min(8rem, 25%), 1fr)',
+                     'margin-left': messageLevels [messageId.toLowerCase ()] ? (messageLevels [messageId.toLowerCase ()] * (mobile ? 0.5 : 2)) + 'rem' : undefined,
+                     width: messageLevels [messageId.toLowerCase ()] ? 'calc(100% - ' + (messageLevels [messageId.toLowerCase ()] * (mobile ? 0.5 : 2)) + 'rem)' : undefined,
                   }),
                }, [
                   ['div', {
@@ -3565,6 +3667,9 @@ views.chat = function () {
                      style: style ({
                         'border-width': '0.25rem',
                         'font-size': from === userId ? '1.125rem' : undefined,
+                        'grid-column': mobile ? '1 / -1' : undefined,
+                        'margin-left': mobile ? '1rem' : undefined,
+                        'max-width': mobile ? 'calc(100% - 1rem)' : undefined,
                         'min-width': 0,
                         'overflow-wrap': 'anywhere',
                         width: 'fit-content',
@@ -3591,23 +3696,42 @@ views.chat = function () {
                      }, '(cancelled ' + ago (cancelled [1]) + ')'] : ['span'],
                   ]],
                   ['div', {
-                     class: 'code f6 flex flex-column fw7 justify-between lh-solid self-stretch',
+                     class: 'code f6 flex flex-column fw7 lh-solid self-stretch',
                      style: style ({
+                        display: mobile ? 'contents' : undefined,
                         gap: '0.5rem',
                         'min-width': 0,
                         'overflow-wrap': 'anywhere',
                      }),
                   }, [
-                     ['div', {class: 'flex flex-column'}, [
-                        ['div', {class: 'br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true)}, fromLabel],
-                        tokenLabel ? ['div', {class: 'br2 dib lh-copy mt2 ph2 pv1 vlightblue'}, tokenLabel] : '',
-                        usageLabel ? ['div', {class: 'br2 dib lh-copy mt2 ph2 pv1 vlightblue'}, usageLabel] : '',
+                     ['div', {
+                        class: 'br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true),
+                        style: mobile ? style ({'grid-column': '2 / -1', 'grid-row': '1'}) : undefined,
+                     }, fromLabel],
+                     tokenLabel || usageLabel || costLabel ? ['div', {
+                        class: 'flex ' + (mobile ? 'flex-wrap' : 'flex-column'),
+                        style: style ({
+                           'column-gap': '0.5rem',
+                           'grid-column': mobile ? '1 / 3' : undefined,
+                           'grid-row': mobile ? '3' : undefined,
+                           'margin-left': mobile ? '1rem' : undefined,
+                        }),
+                     }, [
+                        tokenLabel ? ['div', {class: 'br2 dib lh-copy ph2 pv1 vlightblue'}, tokenLabel] : '',
+                        usageLabel ? ['div', {class: 'br2 dib lh-copy ph2 pv1 vlightblue'}, usageLabel] : '',
                         costLabel ? ['div', {
-                           class: 'br2 dib lh-copy mt2 ph2 pv1 vgreen',
+                           class: 'br2 dib lh-copy ph2 pv1 vgreen',
                            title: 'Estimated API cost in USD, using configured model prices.',
                         }, costLabel] : '',
-                     ]],
-                     ['div', {class: 'br2 dib ph2 pv1 ' + views.projectColor (timeLabel, true)}, timeLabel],
+                     ]] : '',
+                     ['div', {
+                        class: 'br2 dib ph2 pv1 ' + views.projectColor (timeLabel, true),
+                        style: style ({
+                           'grid-column': mobile ? '3' : undefined,
+                           'grid-row': mobile ? '3' : undefined,
+                           'margin-top': 'auto',
+                        }),
+                     }, timeLabel],
                   ]],
                ]];
             });
@@ -3620,7 +3744,7 @@ views.chat = function () {
                   style: style ({'min-height': 0}),
                }, [
                   ['div', {
-                     class: 'flex-auto messages overflow-y-auto pa3',
+                     class: 'flex-auto messages overflow-y-auto ' + (mobile ? 'pa1' : 'pa3'),
                      style: style ({
                         'container-type': 'size',
                         'min-height': 0,
@@ -3792,7 +3916,7 @@ views.chat = function () {
                         : 'Add an AI provider to chat.'],
                      ['button', {
                         class: 'bg-vgreen black bn br2 f7 flex-shrink-0 ph2 pv1 pointer',
-                        onclick: B.ev ('set', ['settings', 'show'], true),
+                        onclick: B.ev ('set', ['show', 'settings'], true),
                         type: 'button',
                      }, 'Open settings'],
                   ] : []];

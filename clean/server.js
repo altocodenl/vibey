@@ -881,6 +881,8 @@ var routes = [
          ['get', /^\/assets\/.+/],
          ['get', '/client.js'],
          ['get', '/favicon.svg'],
+         ['get', /^\/icon\/icon-(?:180|192|512)\.png$/],
+         ['get', '/manifest.json'],
          ['post', '/error'],
          ['post', '/auth/login'],
          ['get', /^\/auth\/verify\//],
@@ -930,6 +932,9 @@ var routes = [
             CONFIG.baseURL?.match (/\/app\/?$/) ? ['base', {href: '/app/'}] : '',
             ['title', 'vibey'],
             ['link', {rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg'}],
+            ['link', {rel: 'manifest', href: 'manifest.json'}],
+            ['link', {rel: 'apple-touch-icon', href: 'icon/icon-180.png'}],
+            ['meta', {name: 'theme-color', content: '#1a1a2e'}],
             ['link', {rel: 'stylesheet', href: 'assets/bootstrap-icons/font/bootstrap-icons.min.css'}],
             ['link', {rel: 'stylesheet', href: 'assets/codemirror/lib/codemirror.css'}],
             ['link', {rel: 'stylesheet', href: 'assets/normalize.css/normalize.css'}],
@@ -952,7 +957,8 @@ var routes = [
    ])],
 
    ['get', '/assets/*', function (rq, rs) {
-      cicek.file (rq, rs, rq.url.replace ('assets/', ''), ['node_modules']);
+      if (/\.\./.test (rq.url)) return reply (rs, 400, 'No dots (..) allowed');
+      cicek.file (rq, rs, rq.url.replace (/^\/assets\//, ''), ['node_modules']);
    }],
    ['get', '/cell.js', cicek.file],
    ['get', '/client.js', cicek.file],
@@ -962,6 +968,31 @@ var routes = [
          <path fill="#fff" d="M1 1h2v2H1z M2 3h2v2H2z M3 5h2v2H3z M4 7h2v2H4z M5 9h1v1H5z M5 10h2v1H5z M6 11h2v2H6z M8 9h1v1H8z M7 10h2v1H7z M8 7h2v2H8z M9 5h2v2H9z M10 3h2v2H10z M11 1h2v2H11z"/>\
          <path fill="#c084fc" d="M15 1h2v2h-2z M14 3h2v2h-2z M13 5h2v2h-2z M12 7h2v2h-2z M11 9h2v2h-2z M10 11h2v2h-2z"/>\
       </svg>', {'content-type': 'image/svg+xml'});
+   }],
+   ['get', /^\/icon\/icon-(?:180|192|512)\.png$/, cicek.file],
+   ['get', '/manifest.json', function (rq, rs) {
+      reply (rs, 200, JSON.stringify ({
+         background_color: '#1a1a2e',
+         display: 'standalone',
+         icons: [
+            {
+               sizes: '192x192',
+               src: 'icon/icon-192.png',
+               type: 'image/png',
+            },
+            {
+               sizes: '512x512',
+               src: 'icon/icon-512.png',
+               type: 'image/png',
+            },
+         ],
+         id: './',
+         name: 'vibey',
+         scope: './',
+         short_name: 'vibey',
+         start_url: './',
+         theme_color: '#1a1a2e',
+      }), {'content-type': 'application/manifest+json'});
    }],
 
    // *** ERROR REPORTING ***

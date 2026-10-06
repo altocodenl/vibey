@@ -1,5 +1,64 @@
 # Vibey development notes
 
+## 2026-10-06
+
+Main pieces that are still missing:
+- Autobackup to bucket (autobucket)
+- Mobile
+- Apps (mostly for dbs)
+- Engine (so domains can be pointed to it)
+
+The rest are smaller pieces that can be added incrementally.
+
+The demos:
+- the trip: laos and cambodia
+- the quote: john muir gets a landscaping quote
+- sunday brunch: from guest list to recipe to pivs
+
+https://pmarchive.com/guide_to_startups_part4.html
+"VMWare is the most recent company to have done it—VMWare’s product was so profoundly transformative out of the gate that it catalyzed a whole new movement toward operating system virtualization, which turns out to be a monster market."
+
+Let collaborators, AI and apps come to your project, not the other way around. The tools come to your project. What's the name for this?
+
+Pains:
+- Agents forget my context.
+- Agents know too much about me for a specific project.
+- I can't close my computer while agents are working.
+- My data is trapped inside an app I don't control.
+- I cannot change the app to fit the way I want to work.
+- I am copying data from one app to the other.
+- I am constantly switching apps.
+- Sharing means that my collaborators need accounts and subscriptions to every service I use.
+
+On how you're setting yourself up for structural lameness if you need to build everything yourself:
+https://gist.github.com/chitchcock/1281611
+"Our Google+ team took a look at the aftermarket and said: "Gosh, it looks like we need some games. Let's go contract someone to, um, write some games for us." Do you begin to see how incredibly wrong that thinking is now? The problem is that we are trying to predict what people want and deliver it for them."
+
+For generating icons:
+```
+  mkdir -p icon && node -e "process.stdout.write (require ('fs').readFileSync ('server.js', 'utf8').match (/'(<svg[\s\S]*?<\/svg>)'/) [1].replace (/\\\\\n/g, '\n'))" > /tmp/favicon.svg && for s in 180 192 512; do magick -background '#1a1a2e' -density 2400 /tmp/favicon.svg -resize ${s}x${s} -gravity center -extent ${s}x${s} -depth 8 icon/icon-$s.png; done && rm /tmp/favicon.svg
+```
+
+The mobile UI is working! Many small things can be fixed, but it overall works.
+
+- TODO
+   - devops: notification project to see alerts
+   - engine
+   - apps
+   - access
+      - token/api hooks
+      - email hooks (token in an email address)
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+   - project
+      - autobackup
+      - skip docker.exec to slash command time by 10x
+   - tests: local mode, client tests: auth, project, files, chat, access
+
 ## 2026-10-05
 
 Some notes on Alexander - The process of creating life:

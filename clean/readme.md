@@ -222,6 +222,8 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 
 - `hashchange`: calls `read hash` whenever the URL hash changes.
 - `fullscreenchange`: when the browser leaves full screen (Escape, or its own controls) while `file.full` is set, sets `file.full` to false.
+- `DOMContentLoaded`, `resize`: sets `mobile` to true when the screen is narrower than tachyons' `-ns` breakpoint (30em), and removes it otherwise. Skips the update when the value is unchanged. The 403 reset and `logout` preserve `mobile`.
+- `touchstart`, `touchend`: on mobile, with the right pane of the files view showing, a horizontal swipe of more than 60px (and more than twice as wide as tall) dispatches a Command+J (swipe left) or Command+K (swipe right) `keydown`, switching to the next or previous file. Listens in the capture phase so it works over the text editor. Ignores swipes that start inside an element that scrolls sideways (code blocks, tool output).
 - `keydown`, `keyup`, `blur`: forwarded to `B.call` so responders can react to keyboard state (e.g. detecting the Command key).
 - `visibilitychange`: when the tab regains focus and a login link has been requested, polls `GET /auth/user` to check if the user logged in via the link. On success, sets user state, loads projects and navigates to projects.
 - `window.onerror`: reports client errors to the server via `report error`. Ignores ResizeObserver errors.
@@ -279,7 +281,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 #### Files
 
 - `keydown *`: handles shortcuts while in the files view; returns without handling them during uploads. Rename submission shortcuts check for an enabled `#rename-file` button, which the current file rename modal does not provide.
-  - Command+B: returns to projects.
+  - Command+B: on mobile, from the right pane, shows the left pane; otherwise returns to projects.
   - Command+D: when the chat recipient input is present, focuses it and selects its text.
   - Command+Enter: when the chat editor is present, calls `create message` with the current recipient, filename and draft body (the same action as Boom).
   - Command+E: opens file creation; in the creation modal, creates when enabled. In rename, also attempts submission through `#rename-file`.
@@ -290,7 +292,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
   - Command+O: outside creation, scrolls up by chat message when the chat is visible.
   - Command+M: outside creation, focuses the chat editor when present.
   - Command+J: outside creation, selects the next file in the filtered list, wrapping at the end.
-  - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning.
+  - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning. Both do nothing when the filter matches no files. On mobile, swiping left or right on the right pane dispatches them.
   - Command+R: in creation, opens folder upload.
   - Command+S: outside creation, focuses search.
   - Command+/: toggles content search in chat and text editors; opening focuses and selects the input.
@@ -309,7 +311,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `read file`: clears the global `content` and emits `change file`. If `fileEdits` contains pending edits for this project/file, returns without fetching potentially stale server content; the edit queue resumes the read when that file's edits finish, provided it is still selected and `content` is undefined. For images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`) and PDFs (case-insensitive), returns without fetching content; the view loads them directly through `GET /project/<projectId>/file/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or starts with `ai-`, otherwise uses `all`. Ignores responses if the selected project or filename has changed.
 - `edit file <name> <newContent>`: compares global `content` with the full editor text using an internal chunking function. Splits into lines while preserving line endings, uses `B.diff` to group contiguous additions/deletions, and expands each chunk with unchanged lines above/below until its `oldText` is unique. Each chunk's context accounts for preceding chunks. A shared sentinel works around gotoB dropping leading additions during backtracking; remove it once gotoB uses `x > 0 || D > 0` instead of `x > 0`. A diff timeout shows a snackbar without enqueueing edits. Appends chunks with captured project/file identifiers to `fileEdits` and immediately advances `content` to the editor text. An initially empty queue starts a recursive, callback-driven drain, keeping the in-flight entry at the head and sending one request at a time through `POST /project/edit`; no timers or separate saving flag. Empty originals and originals exactly `[EOF]` use unconditional `POST /project/write` entries instead. The queue survives project/file navigation. On failure, logs the error and removes all queued edits for the failed project/file, retaining other files' edits. If that document is still selected and loaded in the file editor, a native confirmation offers overwriting with its current editor text or discarding edits and loading the server version. Otherwise, shows an error snackbar and rereads the failed file only if it is still selected. Successful requests remove the head and continue draining; deferred reads resume when their file has no remaining edits.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it and refreshes the list after the write succeeds; otherwise, updates the global `content` if the file is still selected.
-- `create file`: creates an empty file using the trimmed name at `new.file`, temporarily adds it to the file list and closes the creation modal. The successful write triggers the list refresh.
+- `create file`: creates an empty file from the trimmed name at `new.file`, adding `.md` when it has no extension and the `chat/` prefix when `new.type` is `chat`. Temporarily adds it to the file list, closes the creation modal and, on mobile, shows the right pane. The successful write triggers the list refresh. The modal checks for a name conflict against this same final path, so creating never overwrites an existing file or chat.
 - `clear history`: asks for confirmation, then replaces the project's git history with a single commit through `POST /project/run` with `read: true`: deletes `/project/.git`, reinitializes it on `main` with the `vibey` user, commits all files as `Fresh start` and runs `git gc`. Files are unchanged; past versions, and when they were made, are gone for everyone with access. On success, subtracts `project.size.history` from `project.size.bytes` and clears `project.size.history` (hiding the pill), if the project is still selected, and shows a snackbar.
 - `remove file <name>`: asks for confirmation, then deletes the file through `POST /project/run`. Refreshes the list and, if the deleted file was selected, navigates to the project's default file.
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. On success, closes the rename modal, refreshes the list and updates navigation if the renamed file was selected.
@@ -374,6 +376,7 @@ message atBottom <false|true> // Whether the chat was within 100px of the bottom
         body <text> // Current chat draft, initially empty
         cancelling <messageId> <true|undefined> // Whether a cancellation edit is being saved
         to <all|shell|ai|ai-<model>|messageUUID> // Recipient; restored from chat when blank, defaults to all. Options list only ai-<model> entries with usable credentials, or a bare ai when there are none
+mobile <true|undefined> // Whether the screen is narrower than tachyons' `-ns` breakpoint (30em)
 new file "<file name>" // Name for a new file
     project name "<project name>" // Enables the new project modal
             slot <integer|undefined>
@@ -401,12 +404,15 @@ projects 1 created <date>
 search content count <integer> // Number of text-editor matches; 0 for an empty query or no active text editor
                current <integer> // 1-based selected match; 0 when no match is selected; resets when highlighting is rebuilt
                query <text|undefined> // Undefined hides search; empty string shows it unfiltered. Toggled by Search or Command+/. Literal, case-insensitive text-editor search; smartcase filtering of message bodies, filenames, senders and destinations
-       file <text|undefined> // Filters filenames using String.match (input is interpreted as a regex)
-       project <text|undefined> // Filters project names using String.match; undefined shows the spiral, a defined value shows the list. Anonymous users always see the list
-settings show <false|true> // Whether the settings panel is visible
+       file <text|undefined> // Filters filenames
+       project <text|undefined> // Filters project; undefined shows the spiral, a defined value shows the list. Anonymous users always see the list
+show account <true|undefined> // On mobile, whether the account modal (who you're logged in as) is open in the projects view.
+     pane <left|right|undefined> // On mobile, which pane of the files view is shown; undefined shows the left pane. Clicking a file in the list sets it to right; the ‹ chevron in the file header and Command+B remove it. The right pane hides the project header, so it takes the full height. Ignored on wider screens
+     settings <false|true> // Whether the settings panel is visible
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
          type "<notification type>" // Usually ok, warning, or error
+swipe <{x, y}|undefined> // Where the current touch started; undefined when it started inside something that scrolls sideways. Set with mset, so it does not trigger a change event
 test enabled <true|undefined> // Whether test mode is enabled
      loginLink // Login link for testing
 upload done <integer> // Successfully uploaded files, or files sent as chat messages; upload exists only while uploading
