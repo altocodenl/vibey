@@ -1,5 +1,144 @@
 # Vibey development notes
 
+## 2026-10-07
+
+https://paulgraham.com/start.html
+"And what I discovered was that business was no great mystery. It's not something like physics or medicine that requires extensive study. You just try to get people to pay you for stuff."
+
+"If you can't understand users, however, you should either learn how or find a co-founder who can. That is the single most important issue for technology startups, and the rock that sinks more of them than anything else."
+
+"In nearly every failed startup, the real problem was that customers didn't want the product."
+
+"I learned something valuable from that. It's worth trying very, very hard to make technology easy to use. Hackers are so used to computers that they have no idea how horrifying software seems to normal people. Stephen Hawking's editor told him that every equation he included in his book would cut sales in half. When you work on making technology easier to use, you're riding that curve up instead of down. A 10% improvement in ease of use doesn't just increase your sales 10%. It's more likely to double your sales."
+
+"So if you're developing technology for money, you're probably not going to be developing it for people like you. Indeed, you can use this as a way to generate ideas for startups: what do people who are not like you want from technology?"
+still...
+
+"Henry Ford did it to the car makers that preceded him. If you build the simple, inexpensive option, you'll not only find it easier to sell at first, but you'll also be in the best position to conquer the rest of the market."
+
+"It's very dangerous to let anyone fly under you. If you have the cheapest, easiest product, you'll own the low end. And if you don't, you're in the crosshairs of whoever does."
+
+"Usually you get seed money from individual rich people called "angels." Often they're people who themselves got rich from technology. At the seed stage, investors don't expect you to have an elaborate business plan. Most know that they're supposed to decide quickly. It's not unusual to get a check within a week based on a half-page agreement."
+
+"Usually angels are financially equivalent to founders. They get the same kind of stock and get diluted the same amount in future rounds. How much stock should they get? That depends on how ambitious you feel."
+
+"What I didn't grasp at the time was that the valuation wasn't just the value of the code we'd written so far. It was also the value of our ideas, which turned out to be right, and of all the future work we'd do, which turned out to be a lot."
+
+"But as the founders of Google knew, brand is worth next to nothing in the search business. You can come along at any point and make something better, and users will gradually seep over to you. As if to emphasize the point, Google never did any advertising. They're like dealers; they sell the stuff, but they know better than to use it themselves.
+The competitors Google buried would have done better to spend those millions improving their software. Future startups should learn from that mistake. Unless you're in a market where products are as undifferentiated as cigarettes or vodka or laundry detergent, spending a lot on brand advertising is a sign of breakage."
+
+"Customers loved us. And we loved them, because when you're growing slow by word of mouth, your first batch of users are the ones who were smart enough to find you by themselves. There is nothing more valuable, in the early stages of a startup, than smart users. If you listen to them, they'll tell you exactly how to make a winning product. And not only will they give you this advice for free, they'll pay you."
+
+"That's the key to success as a startup. There is nothing more important than understanding your business. You might think that anyone in a business must, ex officio, understand it. Far from it. Google's secret weapon was simply that they understood search. I was working for Yahoo when Google appeared, and Yahoo didn't understand search."
+
+"An apartment is also the right kind of place for developing software. Cube farms suck for that, as you've probably discovered if you've tried it. Ever notice how much easier it is to hack at home than at work? So why not make work more like home?"
+
+"The key to productivity is for people to come back to work after dinner. Those hours after the phone stops ringing are by far the best for getting work done. Great things happen when a group of employees go out to dinner together, talk over ideas, and then come back to their offices to implement them."
+
+"The most important way to not spend money is by not hiring people. I may be an extremist, but I think hiring people is the worst thing a company can do."o
+
+"But worst of all, they slow you down: instead of sticking your head in someone's office and checking out an idea with them, eight people have to have a meeting about it. So the fewer people you can hire, the better."
+
+"The only reason to hire someone is to do something you'd like to do but can't."
+
+"There are few sources of energy so powerful as a procrastinating grad student."
+
+https://paulgraham.com/bronze.html
+"So why were we afraid? We felt we were good at programming, but we lacked confidence in our ability to do a mysterious, undifferentiated thing we called "business." In fact there is no such thing as "business." There's selling, promotion, figuring out what people want, deciding how much to charge, customer support, paying your bills, getting customers to pay you, getting incorporated, raising money, and so on. And the combination is not as hard as it seems, because some tasks (like raising money and getting incorporated) are an O(1) pain in the ass, whether you're big or small, and others (like selling and promotion) depend more on energy and imagination than any kind of special training.
+
+Artix was like a hyena, content to survive on carrion because we were afraid of the lions. Except the lions turned out not to have any teeth, and the business of putting galleries online barely qualified as carrion."
+
+"That's the essence of a startup: having brilliant people do work that's beneath them. Big companies try to hire the right person for the job. Startups win because they don't—because they take people so smart that they would in a big company be doing "research," and set them to work instead on problems of the most immediate and mundane sort."
+
+"A hacker who has learned what to make, and not just how to make, is extraordinarily powerful. And not just at making money: look what a small group of volunteers has achieved with Firefox."
+
+https://paulgraham.com/startuplessons.html
+"Running a startup is like walking on your hands: it's possible, but it requires extraordinary effort. If an ordinary employee were asked to do the things a startup founder has to, he'd be very indignant. Imagine if you were hired at some big company, and in addition to writing software ten times faster than you'd ever had to before, they expected you to answer support calls, administer the servers, design the web site, cold-call customers, find the company office space, and go out and get everyone lunch.
+
+And to do all this not in the calm, womb-like atmosphere of a big company, but against a backdrop of constant disasters. That's the part that really demands determination. In a startup, there's always some disaster happening. So if you're the least bit inclined to find an excuse to quit, there's always one right there."
+
+Issue:
+- vibey allows people to host code. Code that could take the vibey cookies and use it on behalf of any user landing there, to read or write user's data.
+- Not hosting code is not an option. Letting people do their own auth is also not an option. Vibey needs to provide an auth layer.
+- Proposed solution: have a separate domain, share.buildwithvibey.com, alongside app.buildwithvibey.com
+- When a user lands on a project not their own, whether it is through the app or as a direct link to a file (without the #/) in app.buildwithvibey.com, the server redirects them to the same url, but on share.buildwithvibey.com, before loading the code.
+- During redirect, the server notices if there's a cookie for that user in share.buildwithvibey.com (the share cookies are also readable from app). If there's none, the redirect sets a NEW cookie for share, but that cookie only has basic permissions (read, or write on a given project). This probably hints at share cookies being scoped per project, if the project/resource asked for requires for credentials.
+- After the redirect, the user lands in share.buildwithvibey.com and can interact with the resource given their access level (public, read, or write).
+- Whether the requested resource is a shared project or an app that uses vibey auth to see if a user is logged in or not, the mechanism is the same: a cookie with less privileges, tied to a separate domain.
+
+Claude:
+- Deciding by "not your own project" is the wrong test, because owners run untrusted code.
+- Use a separate domain altogether, instead of a subdomain.
+- Single origin lets one project read another's.
+
+My rejoinders:
+- If we use one separate subdomain per project, and judiciously set properties on cookies (including httponly), we don't really need another domain.
+- With one subdomain per project, we'd have to use the id of the project, to avoid name clashes, or project names that are not valid subdomains.
+- Interesting that we could also shield damage to owners from their own code, or importing code that is untrusted. By using a subdomain for the project, we also limit the blast radius there.
+
+New design:
+- Projects get their own subdomain (this is orthogonal to having a user-content domain) automatically.
+- All requests to a project go through their subdomain.
+- All project subdomains are handled by a single DNS record, all traffic goes to the same backend. The backend can discriminate from which project the request came.
+- When a user requests a resource on a project, if they don't have a cookie for it, there's a redirect to the main vibey domain, to set a project-level cookie.  The cookie just sets a "whoami" (an opaque secret stored in the db), rather than the level of access (which is determined by the server on the fly, per request).
+- The web app simply redirects to the subdomains when opening a project. The main domain does not serve project content without the subdomain.
+- The project subdomain can also be flexible enough to use either ids or subdomains, and it has the form username.projectname (variants like userid.projectname, username.projectid, or userid.projectid or projectid alone are valid).
+- This approach really limits the blast radius in the browser, vis a vis a project.
+- To cap cookie-bombing, allow receiving many cookies, and if too many are set, clear them out with Clear-Site-Data: "cookies"
+
+Problems: wildcard only allows one level of subdomain, not two. And domain characters are really restrictive (a-z, 0-9 and hyphen).
+
+Another problem: renames that leave urls behind. In project renames, I don't foresee much of a problem. The permissions are updated. The real issue is the data left behind if a username changes, then someone else picks it up, and all the client info is still there.
+
+- How to solve it? The only unacceptable thing is the lack of non-unicode chars on projects or usernames. What we can do is:
+   - Usernames: minimum 3 chars, all lowercased, no spaces, if you use non-ascii you cannot use ascii chars (to avoid look alikes). No double dashes.
+   - Projects: for uniqueness purposes, lowercased. Large limit of 500 chars.
+   - Subdomain scheme: username + double dash + project (with the dash/double dash slugging) + dash + first four chars of the project id. The last four chars give the project uniqueness in case of username or project renames.
+   - If the subdomain is a valid subdomain (all ascii, length doesn't go over the limit), it is accepted and used as a default 301. Otherwise, we fallback to a single uuid, that of the project.
+
+Redux:
+- We set a separate domain for serving project data (vibey-p.com).
+- Projects get their own subdomain automatically.
+- All requests to a project go through their subdomain.
+- All project subdomains are handled by a single DNS record with a wildcard, all traffic goes to the same backend. The backend can discriminate from which project the request came.
+- This approach really limits the blast radius in the browser, vis a vis a project. It enforces per project isolation on the browser, in the same way that it already exists at the server level.
+- When a user requests a resource on a project, if they don't have a cookie for it, there's a redirect (302) to the main vibey domain, to set a project-level cookie.  The cookie just sets a "whoami" (an opaque secret stored in the db, that maps to a user id), rather than the level of access (which is determined by the server on the fly, per request).
+- The web app simply redirects to the subdomains when opening a project. The main domain does not serve project content without the subdomain. The subdomain still serves client.js.
+- Any requests from client.js that affect non-project properties (settings, logout) are sent directly to the client.js served in the host.
+- Any project can query for user settings IF the user has a non-public grant on that project: vi mode, which ai providers are there, username.
+- To cap cookie-bombing, allow receiving many cookies in nginx, and if too many are set, clear them out with Clear-Site-Data: "cookies".
+- Username rules: minimum 3 chars, maximum 20, all lowercased, no whitespace, if you use non-ascii characters you cannot use ascii chars (to avoid look alikes). No double dashes allowed.
+- Projects: for uniqueness purposes, lowercased. Large limit of 500 chars.
+- Subdomain scheme: username + double dash + project (with the dash/double dash slugging) + dash + first four chars of the project id. The last four chars give the project uniqueness in case of username or project renames. IF the characters in the username and the project, plus their length, allow for a subdomain, that project has a human readable subdomain. In that case, if the project id is used as a subdomain, it is redirected to the human readable one. IF the username + project doesn't have a valid subdomain, we fall back to the id as the subdomain.
+
+More details:
+- For projects that are not your own where you have write access, track consent to send ai calls from your credentials.
+- Name the auth cookie __Host-vibey. The __Host- prefix forbids a Domain attribute, so sibling subdomains can't overwrite it.
+
+This is surprising geometry.
+
+The vibey host domain is for the projects and settings view. The files (project) view is for running on the project subdomain.
+
+First strokes:
+- Apply rules to usernames.
+- Apply rules to project names.
+
+Let's work it from the data flow:
+- An updated projects view sends the user, when clicking on a project, to <projectId>.<existing domain>
+- We create an endpoint in the server that is GET /auth/project/<projectId> . The endpoint is only for authenticated users. When a user lands there, the endpoint checks if there's a projectSession for this user. projectSessions have the shape projectSession:<projectId>:<userId> and point to a secret. They're also owned by the user (`owner:<userId>`). They then send a 302 to a special header with a returnUrl that was sent.
+- When we get this call in the server, we first check if the user can access it; if the resource (the path within that project, or the root) is public, we serve the request. If not and the user is not logged in, we reject the call. If the user is logged in, we check that they have access, if they're not we reject it. If the user can actually access the resource, we check for a cookie for subdomain. If it's absent and if it's not in the DB, we send a 302 to the GET /auth/project/<projectId> endpoint with the referer header to point back to the original page. Otherwise,  If it's absent but on the DB, we set it. Then we serve the request.
+
+Even clearer:
+- The user is sent to a project resource, which is in a subdomain. The URL can be just the project's itself (root) or of some path inside the project.
+- That endpoint still runs under the same server, who knows which subdomain it got the call on (because of the url). It identifies it through the Host header.
+- If the Host header points to an id, and the lookup on that project id yields a username + project name that can be sluggable, it sends a 302 to the same endpoint but with a different subdomain.
+- If the resource is public, it serves it straight. Otherwise, the cookie for the subdomain is validated against the db. If valid, the user's access to the resource determines whether the request is accepted or rejected.
+- If there is no valid cookie, a 302 is sent to GET /auth/project/<projectId> on the main domain, with the originating url in a returnUrl query parameter. That endpoint requires authentication, checks access, creates or reuses projectSession:<projectId>:<userId>, and redirects to the validated returnUrl with a short-lived, single-use code bound to that project and user.
+- The project endpoint redeems the code, sets its own host-only cookie, and redirects to the resource without the code. Access is checked before serving.
+- When the cookie or db session expires, private requests require authentication again.
+- If the project grants change, requests also fail.
+
+
 ## 2026-10-06
 
 Main pieces that are still missing:
