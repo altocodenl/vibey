@@ -310,6 +310,23 @@ if (mode === 'server') {
                usernameAccount ('hello@example.org', 'hello-example-1'),
                usernameAccount ('hello@example.io', 'hello-example-2', true),
                usernameAccount ('hello+tag@example.com', 'hello-tag'),
+               usernameAccount ('a@example.com', 'a11'),
+               usernameAccount ('ab@example.com', 'ab1', true),
+               usernameAccount ('abc@example.com', 'abc'),
+               deleteUsernameAccount ('a@example.com'),
+               deleteUsernameAccount ('ab@example.com'),
+               deleteUsernameAccount ('abc@example.com'),
+               dale.go ([
+                  ['HELLO-RENAMED', 'hello-renamed'],
+                  ['用户名', '用户名'],
+                  ['用户1', '用户1'],
+                  ['用户-1', '用户-1'],
+                  ['ΑΒΓ', 'αβγ'],
+                  ['α\u0301βγ', 'άβγ'],
+                  ['किरण', 'किरण'],
+               ], function (test) {
+                  return ['Normalize username ' + test [0], 'put', '/auth/user', {username: test [0]}, 200, assertBody ({username: test [1]})];
+               }),
                ['Set username without changing settings', 'put', '/auth/user', {username: 'hello-renamed'}, 200, assertBody ({username: 'hello-renamed'})],
                ['Read renamed user', 'get', '/auth/user', 200, function (s, rq, rs) {
                   return assert ([
@@ -324,11 +341,27 @@ if (mode === 'server') {
                ['Reject conflict before changing settings', 'put', '/auth/user', {username: 'hello-example', settings: {vi: false}}, 409, assertBody ({error: 'Username already taken'})],
                dale.go ([
                   null, true, 123, [], {},
-                  '', 'Hello', 'hello world', 'hello_world', 'hello@example.com',
+                  '', 'hello world', 'hello_world', 'hello@example.com',
                   '-hello', 'hello-', 'hello--world', 'hello/world',
                   'c79f2829-1086-43f2-b477-88abbcdbda11',
                ], function (username, index) {
                   return ['Reject invalid username #' + index, 'put', '/auth/user', {username}, 400];
+               }),
+               dale.go ([
+                  ['ab', 'Username must have at least 3 characters'],
+                  ['a b', 'Username cannot contain whitespace'],
+                  ['ab\n', 'Username cannot contain whitespace'],
+                  ['a用户', 'Username cannot mix ASCII letters with non-ASCII characters'],
+                  ['hello--world', 'Username cannot contain double dashes'],
+                  ['hello_world', 'Username can only contain letters, combining marks, numbers and dashes'],
+                  ['-hello', 'Username must start with a letter or number'],
+                  ['\u0301用户', 'Username must start with a letter or number'],
+                  ['hello-', 'Username cannot end with a dash'],
+                  ['用户-\u0301名', 'A combining mark cannot follow a dash'],
+                  ['c79f2829-1086-43f2-b477-88abbcdbda11', 'Username cannot be a UUID'],
+               ], function (test) {
+                  // Rejection must preserve settings as well as the username.
+                  return ['Reject username ' + test [0], 'put', '/auth/user', {settings: {vi: false}, username: test [0]}, 400, assertBody ({error: test [1]})];
                }),
                ['Reject invalid settings before changing username', 'put', '/auth/user', {username: 'should-not-be-saved', settings: {vi: null}}, 400],
                ['Rejected updates preserve username and settings', 'get', '/auth/user', 200, function (s, rq, rs) {
@@ -562,7 +595,19 @@ if (mode === 'server') {
             ] : [],
             ['List projects before creation', 'get', '/projects', 200, assertBody ([])],
             ['Create project without a name', 'post', '/project', {}, 400, assertBody ({error: 'name should have as type string but instead is undefined with type undefined'})],
-            ['Create project with a short name', 'post', '/project', {name: 'a'}, 400, assertBody ({error: 'length of name should be in range {"min":2} but instead is 1'})],
+            ['Create project with a short name', 'post', '/project', {name: 'a'}, 400, assertBody ({error: 'length of name should be in range {"max":500,"min":2} but instead is 1'})],
+            ['Reject 501-character project name', 'post', '/project', {name: 'A'.repeat (501)}, 400],
+            ['Create project with 500-character name', 'post', '/project', {name: 'A'.repeat (500)}, 200, function (s, rq, rs) {
+               s.longNameProjectId = rs.body.id;
+               return true;
+            }],
+            ['Retain case on creation', 'get', '/projects', 200, function (s, rq, rs) {
+               return assert (['name', rs.body [0].name, 'A'.repeat (500), teishi.test.equal]);
+            }],
+            ['Reject lowercase duplicate of long name', 'post', '/project', {name: 'a'.repeat (500)}, 409, assertBody ({error: 'There is already a project with that name'})],
+            ['Delete long-name fixture', 'delete', function (s) {
+               return '/project/' + s.longNameProjectId;
+            }, 200],
             ['Create project', 'post', '/project', {name: 'el norte'}, 200],
             ['List projects after creation', 'get', '/projects', 200, function (s, rq, rs) {
                if (! assert (['length', rs.body.length, 1, teishi.test.equal])) return false;
@@ -570,6 +615,7 @@ if (mode === 'server') {
                return true;
             }],
             ['Create a second project with the same name', 'post', '/project', {name: 'el norte'}, 409, assertBody ({error: 'There is already a project with that name'})],
+            ['Reject differently cased duplicate', 'post', '/project', {name: 'EL NORTE'}, 409, assertBody ({error: 'There is already a project with that name'})],
             ['Create a second project with another name and a slot', 'post', '/project', {name: 'second', slot: 3}, 200],
             ['List projects after second project creation', 'get', '/projects', 200, function (s, rq, rs) {
                if (! assert (['length', rs.body.length, 2, teishi.test.equal])) return false;
@@ -588,6 +634,35 @@ if (mode === 'server') {
             ['Rename nonexistent project', 'put', '/project', {id: 'nonexistent', name: 'whatever'}, 404],
             ['Rename project (noop)', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
             ['Rename project to existing name', 'put', '/project', function (s) {return {id: s.projectId, name: 'second'}}, 409, assertBody ({error: 'There is already a project with that name'})],
+            ['Reject differently cased rename conflict', 'put', '/project', function (s) {
+               return {
+                  id: s.projectId,
+                  name: 'SECOND',
+               };
+            }, 409, assertBody ({error: 'There is already a project with that name'})],
+            dale.go (['El Norte', 'B'.repeat (500)], function (name) {
+               return [
+                  ['Rename and retain case', 'put', '/project', function (s) {
+                     return {
+                        id: s.projectId,
+                        name,
+                     };
+                  }, 200],
+                  ['Read renamed project', 'get', '/projects', 200, function (s, rq, rs) {
+                     var project = dale.stopNot (rs.body, undefined, function (project) {
+                        if (project.id === s.projectId) return project;
+                     });
+                     return assert (['name', project.name, name, teishi.test.equal]);
+                  }],
+               ];
+            }),
+            ['Reject 501-character rename', 'put', '/project', function (s) {
+               return {
+                  id: s.projectId,
+                  name: 'B'.repeat (501),
+               };
+            }, 400],
+            ['Restore project name', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
             // Names must stay encodable in /p/<user>/<name> URLs.
             dale.go ([
                ['a UUID', '0b1f6c2e-8d3a-4f5b-9c7d-1e2f3a4b5c6d'],

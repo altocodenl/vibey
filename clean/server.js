@@ -195,9 +195,21 @@ var getForUser = async function (userId, entity) {
       if (key.match (new RegExp ('^' + entity + ':'))) return key;
    });
 
-   return await redis (dale.go (items, function (item) {
+   var results = await redis (dale.go (items, function (item) {
       return ['hgetall', item];
    }));
+   if (entity === 'project') {
+      var writable = dale.obj (dale.fil (grants, undefined, function (grant) {
+         var [verb, id] = grant.split (':');
+         if (verb === 'write') return id;
+      }), function (id) {
+         return [id, true];
+      });
+      dale.go (results, function (project) {
+         project.read = project.owner !== userId && ! writable [project.id] ? true : undefined;
+      });
+   }
+   return results;
 }
 
 var validProjectPath = function (path) {
@@ -803,6 +815,7 @@ var setUsername = async function (id, value, generate) {
    if (generate) {
       var normalize = function (text) {
          text = text.toLowerCase ().replace (/[^a-z0-9]+/g, '-').replace (/^-+|-+$/g, '') || 'user';
+         text = text.padEnd (3, '1');
          return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (text) ? text + '-1' : text;
       };
       var parts = value.split ('@');
@@ -1053,10 +1066,26 @@ var routes = [
          return reply (rs, 400, {error: 'Provide settings or username'});
       }
       if (rq.body.username !== undefined) {
-         if (! /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test (rq.body.username)
-            || /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (rq.body.username)) {
-            return reply (rs, 400, {error: 'Invalid username'});
-         }
+         var username = rq.body.username.toLowerCase ().normalize ('NFC');
+         var characters = username.split ('');
+
+         if (characters.length < 3) return reply (rs, 400, {error: 'Username must have at least 3 characters'});
+         if (/\s/u.test (username)) return reply (rs, 400, {error: 'Username cannot contain whitespace'});
+
+         var hasAsciiLetters = /[a-z]/.test (username);
+         var hasNonAscii = characters.some (character => character.charCodeAt (0) >= 128);
+         if (hasAsciiLetters && hasNonAscii) return reply (rs, 400, {error: 'Username cannot mix ASCII letters with non-ASCII characters'});
+
+         if (username.includes ('--')) return reply (rs, 400, {error: 'Username cannot contain double dashes'});
+         if (! /^[\p{L}\p{M}\p{N}-]+$/u.test (username)) return reply (rs, 400, {error: 'Username can only contain letters, combining marks, numbers and dashes'});
+         if (! /^[\p{L}\p{N}]/u.test (username)) return reply (rs, 400, {error: 'Username must start with a letter or number'});
+         if (username.endsWith ('-')) return reply (rs, 400, {error: 'Username cannot end with a dash'});
+         if (/-\p{M}/u.test (username)) return reply (rs, 400, {error: 'A combining mark cannot follow a dash'});
+
+         var isUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (username);
+         if (isUuid) return reply (rs, 400, {error: 'Username cannot be a UUID'});
+
+         rq.body.username = username;
          // Local mode has no signup flow.
          if (! CONFIG.cloud) await redis ('hsetnx', 'user:local', 'id', 'local');
          var result = await setUsername (rq.user.id, rq.body.username);
@@ -1370,10 +1399,11 @@ var routes = [
       var userId = rq.user ? rq.user.id : 'PUBLIC';
       var projects = rq.user ? await getForUser (userId, 'project') : [];
       var listed = dale.obj (projects, function (project) {
-         return [project.id, true];
+         return [project.id, project];
       });
       projects = projects.concat (dale.fil (await getForUser ('PUBLIC', 'project'), undefined, function (project) {
          if (! listed [project.id]) return {...project, public: true};
+         if (! project.read) listed [project.id].read = undefined;
       }));
 
       var usernames = projects.length ? await redis (dale.go (projects, function (project) {
@@ -1388,6 +1418,7 @@ var routes = [
       }), function (project) {
          return {
             ...project,
+            read: ! rq.user || project.read ? true : undefined,
             // Slots belong to the owner's wheel.
             slot: project.slot && project.owner === userId ? parseInt (project.slot) : undefined
          }
@@ -1401,7 +1432,10 @@ var routes = [
          ['name', rq.body.name, 'string'],
          ['slot', rq.body.slot, [1, 2, 3, 4, 5, undefined], 'oneOf', teishi.test.equal],
          function () {
-            return ['length of name', rq.body.name.length, {min: 2}, teishi.test.range];
+            return ['length of name', rq.body.name.length, {
+               max: 500,
+               min: 2,
+            }, teishi.test.range];
          }
       ])) return;
 
@@ -1411,7 +1445,7 @@ var routes = [
 
       var projects = await getForUser (rq.user.id, 'project');
       var conflict = dale.stopNot (projects, undefined, function (project) {
-         if (project.name === rq.body.name) return project;
+         if (project.name.toLowerCase () === rq.body.name.toLowerCase ()) return project;
       });
       if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
 
@@ -1456,7 +1490,10 @@ var routes = [
          ['name', rq.body.name, 'string'],
          ['slot', rq.body.slot, [1, 2, 3, 4, 5, undefined], 'oneOf', teishi.test.equal],
          function () {
-            return ['name', rq.body.name.length, {min: 2}, teishi.test.range];
+            return ['length of name', rq.body.name.length, {
+               max: 500,
+               min: 2,
+            }, teishi.test.range];
          }
       ])) return;
 
@@ -1469,7 +1506,7 @@ var routes = [
       if (! match || match.owner !== rq.user.id) return reply (rs, 404);
       var conflict = dale.stopNot (projects, undefined, function (project) {
          if (project.id === rq.body.id) return;
-         if (project.name === rq.body.name) return project;
+         if (project.name.toLowerCase () === rq.body.name.toLowerCase ()) return project;
       });
       if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
 

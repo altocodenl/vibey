@@ -740,8 +740,8 @@ B.mrespond ([
          B.call (x, 'set', 'files', rs.body);
 
          // Second line: bytes that clearing history would free, measured against a fresh single-commit repository.
-         // Without a session, this would be a 403, which sends the user to login.
-         if (! B.get ('user', 'anonymous')) B.call (x, 'post', '/project/run', {
+         // Read-only projects cannot run commands.
+         if (! project.read) B.call (x, 'post', '/project/run', {
             id: project.id,
             read: true,
             command: "du -sk /project && (cd /project && tmp=$(mktemp -d) && trap 'rm -rf \"$tmp\"' EXIT && git init -q -b main \"$tmp\" && export GIT_DIR=\"$tmp/.git\" GIT_WORK_TREE=/project && git add -A && git -c user.name=vibey -c user.email=vibey@local commit --allow-empty -qm Estimate && git gc --quiet && du -sk /project/.git \"$tmp/.git\" | awk 'NR == 1 {before = $1} NR == 2 {printf \"%.0f\\n\", (before - $1) * 1024}')",
@@ -1108,8 +1108,11 @@ B.mrespond ([
       if (editor) editor.getWrapperElement ().remove ();
 
       if (c ('#file-editor')) {
+         var project = dale.stopNot (B.get ('projects') || [], undefined, function (project) {
+            if (project.id === B.get ('project', 'id')) return project;
+         });
          editor = CodeMirror (c ('#file-editor'), {
-            readOnly: content === undefined || !! B.get ('user', 'anonymous'),
+            readOnly: content === undefined || ! project || !! project.read,
             keyMap: B.get ('user', 'settings', 'vi') ? 'vim' : 'default',
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
@@ -2133,7 +2136,7 @@ views.projects = function () {
                                     }),
                                     title: 'Download',
                                  }, ['i', {class: 'bi bi-download'}]],
-                                 ['span', {
+                                 project.owner !== B.get ('user', 'id') ? '' : ['span', {
                                     class: 'flex items-center justify-center pointer',
                                     onclick: B.ev ('set', ['edit', 'project'], {
                                        id: project.id,
@@ -2148,7 +2151,7 @@ views.projects = function () {
                                     }),
                                     title: 'Rename',
                                  }, ['i', {class: 'bi bi-pencil'}]],
-                                 ['span', {
+                                 project.owner !== B.get ('user', 'id') ? '' : ['span', {
                                     class: 'flex items-center justify-center pointer',
                                     onclick: B.ev ('remove', 'project', project),
                                     style: style ({
@@ -2651,7 +2654,7 @@ views.files = function () {
          }, [
             // Left pane
             flipCard ('overflow-hidden', function () {return [
-               ['div', {class: 'flex flex-shrink-0 mb3'}, [
+               project.read ? '' : ['div', {class: 'flex flex-shrink-0 mb3'}, [
                   ['button', {
                      class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vnearwhite',
                      onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file']),
@@ -2733,8 +2736,8 @@ views.files = function () {
 
                var isChat = !! file.name.match (/^chat\/.+\.md$/);
 
-               // Without a session, files are read-only: markdown is always rendered.
-               var mode = B.get ('user', 'anonymous') ? 'view' : file.mode || 'edit';
+               // In read-only projects, markdown is always rendered.
+               var mode = project.read ? 'view' : file.mode || 'edit';
 
                var isImage = /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (file.name);
                var isPdf = /\.pdf$/i.test (file.name);
@@ -2785,7 +2788,7 @@ views.files = function () {
                         }, ['i', {class: 'bi bi-chevron-' + (file.actions ? 'left' : 'right')}]],
                      ]],
                      ['div', {class: 'flex items-center ml-auto'}, [
-                        ! isChat && isMd && ! B.get ('user', 'anonymous') ? ['div', {class: 'flex'}, [
+                        ! isChat && isMd && ! project.read ? ['div', {class: 'flex'}, [
                            ['span', {
                               class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
                               onclick: B.ev ('set', ['file', 'mode'], 'view'),
@@ -2824,7 +2827,7 @@ views.files = function () {
 
                if (isChat) return ['div', {class: 'flex flex-auto flex-column'}, [
                   fileHeader,
-                  views.chat (),
+                  views.chat (project.read),
                ]];
 
                return ['div', {class: 'flex flex-auto flex-column'}, [
@@ -3323,7 +3326,7 @@ var modelCredential = function (model, credentials) {
       : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined;
 }
 
-views.chat = function () {
+views.chat = function (read) {
    var matchesQuery = function (message, query, userId) {
       var body = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
       if (! body) return false;
@@ -3807,8 +3810,8 @@ views.chat = function () {
             ]];
          }),
          // Draft
-         // Without a session, there's no draft to send messages from.
-         B.get ('user', 'anonymous') ? '' : ['div', {
+         // Hide the draft without a session or write access.
+         read ? '' : ['div', {
             class: 'flex flex-column flex-shrink-0',
             style: style ({
                'border-top': '0.1875rem solid ' + css.colors.vborderblue,
