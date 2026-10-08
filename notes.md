@@ -1,5 +1,88 @@
 # Vibey development notes
 
+## 2026-10-08
+
+claude:
+```
+  The closest precedent: Sandstorm.io
+
+  Look at it closely if you haven't. It had:
+  - per-instance sandboxes ("grains")
+  - an app market
+  - random per-session subdomains, for exactly the reason in today's notes
+  - a powerbox for access across grains
+
+  It was technically beautiful and failed commercially. It was too hard for normal users, and every app had to be ported. Your differences are real:
+  - AI turns what people want into shell commands, so users don't need someone else's ported app.
+  - Chat is the interface.
+  - Apps live inside your project instead of being sealed packages.
+
+  But Sandstorm is the ghost to beat. Glitch, which shut down project hosting in 2025, is another one.
+```
+
+vibey is a way to have your own server, with all of the power it allows you, but without most of the headaches.
+
+AI makes it more valuable to have your own server, because it can run commands for you and write code for you.
+
+But still, the core movement is: rather than having a project scattered across tools (either local or saas), have the project in one place (which is also in the cloud and thus accessible from anywhere) and let the tools come to it.
+
+gpt6: "the project exists independently of the tools used to work on it"
+
+each project needs a space. a space is files, the ability to run code, and a way for humans and ai to see and change these files and run code.
+
+What could you do if you had a server?
+
+There are two sides to engine: one is to send project commands through ssh to a server that has docker; the other is spinning up and provisioning the server itself so that it has sane, secure defaults. Self-hosters would probably usually go with the first half only, since they already have the actual server spinned up and set in a custom way. For the first half, all that vibey needs is a public key set through ssh, and a docker, plus a nixy way of talking to docker. That's it.
+
+Project subdomains design (again):
+- The user is sent to a project resource, which is in a subdomain. The URL can be just the project's itself (root) or of some path inside the project.
+- That endpoint still runs under the same server, who knows which subdomain it got the call on (because of the url). It identifies it through the Host header.
+- If the Host header points to an id, and the lookup on that project id yields a username + project name that can be sluggable, it sends a 302 to the same endpoint but with a different subdomain.
+- If the resource is public, it serves it straight. Otherwise, the cookie for the subdomain is validated against the db. If valid, the user's access to the resource determines whether the request is accepted or rejected.
+- If there is no valid cookie, a 302 is sent to GET /auth/project/<projectId> on the main domain, with the originating url in a returnUrl query parameter. That endpoint requires authentication, checks access, creates or reuses projectSession:<projectId>:<userId>, and redirects to the validated returnUrl with a short-lived, single-use code bound to that project and user.
+- The project endpoint redeems the code, sets its own host-only cookie, and redirects to the resource without the code. Access is checked before serving.
+- When the cookie or db session expires, private requests require authentication again.
+- If the project grants change, requests also fail.
+- Explicit consent, per project where you have write access but are not the owner, to use your own AI credentials.
+
+Changes to what we have:
+- Prefix the cookie name with __Host-, which requires Secure, Path=/, and no Domain attribute, restricting it to its exact hostname and preventing sibling subdomains from planting a parent-domain cookie with that name.
+
+Why would we need anything else?
+- A separate domain to host projects, different than the main one: avoid reputational damage on the main domain, and cookie bombing affecting the host cookies.
+- List the subdomain in the public suffix list: avoid cookie bombing between sibling projects. Cross site is defended by csrf already.
+
+For now, we can go with a single domain, at least to have the POC. And we don't need the PSL. We can do it later, or add limitations for cookie bombing later. What matters now is getting right the core design. Also, a design that mandates two domains or PSL would be quite the hoop for self-hosters in the cloud.
+
+Apparently, the HTTPS challenge part for wildcard domains is tricky:
+```
+  - On the host: certbot writes the certificates to /etc/letsencrypt, nginx reads them, and the deploy hook reloads nginx.
+  - The hooks reach vibey's redis through docker:
+  --manual-auth-hook    'docker exec vibey-host redis-cli SADD acme:x.com "$CERTBOT_VALIDATION"; sleep 2'
+  --manual-cleanup-hook 'docker exec vibey-host redis-cli SREM acme:x.com "$CERTBOT_VALIDATION"'
+  - In compose, the only change is exposing port 53 on the public IP:
+       ports:
+         - "127.0.0.1:5353:5353"
+  +      - "<public ip>:53:53/udp"
+  +      - "<public ip>:53:53/tcp"
+  - In server.js, add a DNS listener on 53 that answers TXT queries for _acme-challenge.<domain> from smembers acme:<domain>. The container runs as root, so binding 53 needs no extra capability.
+```
+
+Let's do this incrementally, marking the sections that are duplicate, until everything works again.
+
+The most interesting endpoint is the one that serves a GET on a project. Well, that and all that serve POSTs on a project. The endpoints to replace are: resolves project by name; list files; get file; write file; edit file; run command; send message; read message. The rest should be served within the scope of the host.
+
+Functionally, let's add a single endpoint, that, locally, does <projid>.<domain>/[file] and serves the file. We don't even have to wire it to the client.
+
+The most interesting endpoints, from the auth perspective, are the two that make the auth dance so that the user doesn't have to log in to every project: the one owned by the project that checks for a project cookie in redis and if not present, redirects the request to the endpoint that is owned by the host that checks the host cookie and sends the request back to the first endpoint with a code, after setting a project cookie.
+
+Good suggestions from claude:
+```
+- A new session per redemption instead of reusing projectSession:<projectId>:<userId>. The cookie holds a secret, so the lookup has to be keyed by that secret, and this way each browser gets its own session. Sessions go into owner:<userId>, so account deletion removes them.
+- Access is checked against the path in returnUrl, not the whole project, so path-scoped grants work.
+```
+
+
 ## 2026-10-07
 
 https://paulgraham.com/start.html
@@ -137,7 +220,6 @@ Even clearer:
 - The project endpoint redeems the code, sets its own host-only cookie, and redirects to the resource without the code. Access is checked before serving.
 - When the cookie or db session expires, private requests require authentication again.
 - If the project grants change, requests also fail.
-
 
 ## 2026-10-06
 

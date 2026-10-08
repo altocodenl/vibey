@@ -15,15 +15,17 @@ email ses accessKeyId ...
           secretAccessKey ...
 */
 
+var CONFIG = cell.textToJS (fs.readFileSync ('config.4tx', 'utf8'));
+
 try {
-   var CONFIG = cell.textToJS (fs.readFileSync ('config.4tx', 'utf8'));
    var SECRET = cell.textToJS (fs.readFileSync ('secret.4tx', 'utf8'));
 }
 catch (error) {
    console.log (error);
-   var CONFIG = {};
    var SECRET = {};
 }
+
+CONFIG.cookie.name = '__Host-' + CONFIG.cookie.name;
 
 // *** SETUP ***
 
@@ -866,7 +868,7 @@ var routes = [
          return rs.next ();
       }
 
-      var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie?.name] ? rq.data.cookie [CONFIG.cookie?.name] : undefined;
+      var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
 
       if (sessionId) {
          var session = await redis ('hgetall', 'session:' + sessionId);
@@ -909,10 +911,11 @@ var routes = [
       });
 
       if (! rq.user && ! publicPath) {
-         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, false, {
+         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
             httponly: true,
             path: '/',
             samesite: 'Lax',
+            secure: true,
          })});
          else           return reply (rs, 403, {error: 'No session'});
       }
@@ -923,7 +926,7 @@ var routes = [
 
       if (rq.user && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
          ['hmset', 'session:' + sessionId, {
-            expires: new Date (Date.now () + CONFIG.cookie?.expires * 1000).toISOString (),
+            expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
             last: JSON.stringify ({
                date: now (),
                ip:   rs.log.origin
@@ -1200,7 +1203,7 @@ var routes = [
       await redis ([
          ['hmset',  'session:' + sessionId, {
             csrf,
-            expires: new Date (Date.now () + CONFIG.cookie?.expires * 1000).toISOString (),
+            expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
             last: JSON.stringify ({
                date: now (),
                ip:   rs.log.origin
@@ -1245,12 +1248,12 @@ var routes = [
          mode: 'cloud',
          settings: JSON.parse (user.settings || '{}'),
          username: user.username,
-      }, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, sessionId, {
+      }, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {
          expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10),
          httponly: true,
          path: '/',
          samesite: 'Lax',
-         secure: CONFIG.baseURL?.match ('localhost') ? undefined : true,
+         secure: true,
       })});
    }],
 
@@ -1273,11 +1276,11 @@ var routes = [
          ['srem', 'owner:' + rq.user.id, 'session:' + rq.user.session]
       ]);
 
-      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, false, {
+      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
          httponly: true,
          path: '/',
          samesite: 'Lax',
-         secure: CONFIG.baseURL?.match ('localhost') ? undefined : true,
+         secure: true,
       })});
    }],
 
@@ -1324,10 +1327,11 @@ var routes = [
          }) ()
       ]);
 
-      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie?.name, false, {
+      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
          httponly: true,
          path: '/',
          samesite: 'Lax',
+         secure: true,
       })});
    }],
 
