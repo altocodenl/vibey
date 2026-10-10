@@ -1,5 +1,49 @@
 # Vibey development notes
 
+## 2026-10-10
+
+Who would find vibey useful? I am thinking of three things:
+
+- Solo or small teams working on a small project.
+- Technical, but not programming teams.
+- Already paying for AI subscriptions, as well as other small saas.
+
+The core insight of vibey is that the tools should come to the project, rather than the project be spreaded into different tools.
+
+Vibey is about creating a market for having teams build projects in their own servers. Not just software, but anything to work with data.
+
+Another killer feature is inbound email. We can use as address of the project (the subdomain) as a subdomain in the email address too (although, if it's complicated, we can use a dash instead of a dot, so we have all emails on vibey-p directly).
+
+Small things to improve:
+- Fix bug that makes the chat editor disappear
+- Ignore vi mode in mobile
+- Delete the text just sent on the chat from the box.
+- Fix bug that eats the last word of the text sent in the box sometimes.
+
+Main pieces left:
+- Subdomains
+- Engine (the half of running it over ssh on BYOE)
+- Emails per project
+- Autobackup
+
+Besides resources that are paid for predictably (like engines), there has to be a budget with cap for backups. It has to be explicit, and predictable. The only problem I see right now is the quick balooning of data usage with autogit. We need a few hours of real flight here.
+
+The concept of "creator" needs to change. Practically speaking, somebody can have an engine and still not be the owner of a project run in it. I could have an engine so some people in my family can create their project; it's none of my business to have it listed, or accessible by me. As the owner of the engine, I could delete it, but not actually see the project.
+
+So a creator is anyone who has access to an engine to create a project. The project view shows the shell if you have one or more engines where you can create projects. The projects have access controlled by the owner, with the exception of deletion by the owner of the engine on which it runs.
+
+We can also perfectly work with BYOE, at least at the beginning. As long as you give us an IP and you give us a private key with which to ssh into the server, vibey can use that server if it has a nixy docker working. The docker host doesn't trust projects much (it doesn't give them anything except for presigned urls for autobackup), so I expect at worst a ddos surface by doing this. The potential is large. I would use it already to test things in an existing server.
+
+Engines with domains is trickier. Vibey needs to control, at least partially, the nginx config. What would work best is that the proxying is done by subdomain: one subdomain on one's own domain, straight to a project. But it might be too restrictive, definitely for static assets.
+
+Engines can be set up in a settings sort of view, or maybe just in the settings page outright. When creating a project, the target engine would be requested. Vibey could also offer an option to use the Host engine, which is the same server that runs the host, and what we de facto do now. That would be for self-hosters, controlled by an option localEngine defaulting to 1.
+
+Now, how would we proxy auth? Let's say you create an app at mydomain.tk , and you don't want to deal with auth. The app could use a certain vibey view, still shown in the own domain, for logging in. That would send the email to the account that requested the login. The user would go log in on that page plus a code, which is proxied through the nginx of the engine to vibey, sets the cookies, and then the nginx sets the same cookies but on mydomain.tk. Then, on every subsequent request, the creds are relayed through nginx. A sort of cookie passthrough. If the user was already logged in into vibey, the cookies wouldn't work because those cookies are not scoped to that domain. However, there could be a button that could show log in with vibey, which, if the user has vibey credentials, could do the initial set up of the relay. So no OTP, just clicking through. This could definitely work.
+
+What about notifications? Outbound email is perhaps an option for your OWN email. A basic notification you set up. With email, there's also a budget and a limit, but this should be dirt cheap.
+
+A certain page in a project should also be a sort of good inbox, to see what's happening. Like a notifications project.
+
 ## 2026-10-08
 
 claude:
@@ -82,6 +126,7 @@ Good suggestions from claude:
 - Access is checked against the path in returnUrl, not the whole project, so path-scoped grants work.
 ```
 
+What really should happen is that the scope of the project cookie should be bound to a certain host cookie.
 
 ## 2026-10-07
 
