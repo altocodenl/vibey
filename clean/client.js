@@ -1524,19 +1524,21 @@ var css = {
    colors: {
       vblack:          '#000000',
       vblue:           '#4a69bd',
-      vbrick:          '#bd5654',
+      vbrick:          '#ff7a75',
       vdeepnavy:       '#0f1530',
+      vgold:           '#ffc83d',
       vgray:           '#9aa4bf',
-      vgreen:          '#27ae60',
+      vgreen:          '#4ade80',
       vlightblue:      '#94b8ff',
       vlightgray:      '#eeeeee',
       vmidnight:       '#1a1a2e',
       vnavy:           '#16213e',
       vnearwhite:      '#f5f7ff',
-      vorange:         '#c87533',
-      vpurple:         '#c084fc',
+      vorange:         '#f59e4c',
+      vpurple:         '#d4a8ff',
       vred:            '#d33e43',
-      vturquoise:      '#1abc9c',
+      vsilver:         '#c8cdd8',
+      vturquoise:      '#3ee0c0',
       vwhite:          '#ffffff',
    },
    input: 'ba bg-vdeepnavy br2 db mb3 outline-0 pa3 placeholder-vgray vborderblue-border vnearwhite w-100',
@@ -1697,7 +1699,7 @@ views.main = function () {
                   if (view === 'projects' && search !== undefined) return ['span'];
                   var logout = ['button', {
                      // Without a session, the projects list covers the header; this keeps Login clickable.
-                     class: css.button + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3') + (anonymous ? ' relative z-1' : ''),
+                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3') + (anonymous ? ' relative z-1' : ''),
                      style: view === 'files' ? style ({padding: '0.5rem 0.875rem'}) : undefined,
                      onclick: anonymous ? B.ev ('navigate', 'login') : B.ev ('logout', []),
                      title: email || '',
@@ -1707,7 +1709,7 @@ views.main = function () {
                   ]];
                   if (view !== 'projects' || anonymous) return logout;
                   if (mobile) return mode === 'local' ? ['span'] : ['button', {
-                     class: css.button + ' bg-vpurple',
+                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple',
                      onclick: B.ev ('logout', []),
                      style: style ({
                         'font-size': '1.75rem',
@@ -1797,7 +1799,7 @@ views.login = function () {
                   value: user.email
                }],
                ['button', {
-                  class: css.join (emailValid ? 'bg-vgreen' : 'bg-mid-gray', css.button, 'db w-100').replace ('bg-vblue', ''),
+                  class: css.join (emailValid ? 'bg-vgreen' : 'bg-mid-gray', emailValid ? css.button.replace ('white', 'vdeepnavy') : css.button, 'db w-100').replace ('bg-vblue', ''),
                   disabled: ! emailValid,
                   onclick: B.ev ('login', user.email),
                }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Let me in') : 'Enter your email'],
@@ -1838,12 +1840,12 @@ views.projectColor = function (text, textOnly) {
 
    var projectColors = [
       {bg: 'bg-vturquoise',   fg: 'vdeepnavy'},
-      {bg: 'bg-green',        fg: 'vdeepnavy'},
-      {bg: 'bg-gold',         fg: 'vdeepnavy'},
-      {bg: 'bg-silver',       fg: 'vdeepnavy'},
+      {bg: 'bg-vgreen',       fg: 'vdeepnavy'},
+      {bg: 'bg-vgold',        fg: 'vdeepnavy'},
+      {bg: 'bg-vsilver',      fg: 'vdeepnavy'},
       {bg: 'bg-vpurple',      fg: 'vdeepnavy'},
       {bg: 'bg-vorange',      fg: 'vdeepnavy'},
-      {bg: 'bg-vbrick',       fg: 'vnearwhite'},
+      {bg: 'bg-vbrick',       fg: 'vdeepnavy'},
    ];
 
    var sum = dale.acc (((text || '') + '').split (''), 0, function (a, b) {
@@ -2231,7 +2233,7 @@ views.projects = function () {
                      }, email || 'local user'],
                   ]],
                   ['button', {
-                     class: css.button + ' bg-vgreen f4 mt3 self-end',
+                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vgreen f4 mt3 self-end',
                      onclick: B.ev ('rem', 'show', 'account'),
                      type: 'button',
                   }, 'Sure'],
@@ -2656,7 +2658,7 @@ views.files = function () {
             flipCard ('overflow-hidden', function () {return [
                project.read ? '' : ['div', {class: 'flex flex-shrink-0 mb3'}, [
                   ['button', {
-                     class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vnearwhite',
+                     class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vdeepnavy',
                      onclick: B.ev (['set', ['new', 'file'], ''], ['set', ['new', 'type'], 'file']),
                      style: style ({padding: '0.75rem'}),
                   }, [views.tooltip ('E', 'below'), '+ New']],
@@ -3641,7 +3643,7 @@ views.chat = function (read) {
                      class: views.projectColor (messageIndexes [messageId.toLowerCase ()]) + ' absolute absolute--fill',
                      style: style ({
                         'border-radius': '0.75rem',
-                        opacity: 0.2,
+                        opacity: 0.12,
                         'pointer-events': 'none',
                      }),
                   }],
