@@ -1,5 +1,9 @@
 # Vibey development notes
 
+## 2026-10-11
+
+gpt6: "Vibey is for the person who has become the human glue holding a project together. They understand the work, know how it should happen, and spend too much time making their tools cooperate."
+
 ## 2026-10-10
 
 Who would find vibey useful? I am thinking of three things:
