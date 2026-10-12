@@ -1,8 +1,75 @@
 # Vibey development notes
 
+## 2026-10-12
+
+Channels for the demo:
+- 1. Show HN.
+- 2. r/selfhosted
+- 3. r/ClaudeAI, r/ChatGPTPro, r/OpenAI (Codex)
+
+Ideas for demos based on existing needs:
+```
+1. Ready to start (bookkeeper, tax preparer) Each client is a project with a checklist. Clients email documents to the project's address, and the AI files each one against the checklist. When a client says "you should have everything now," the reply lists what's still missing. The main thing isn't the reminders. It's that the accountant opens a return only when it's complete, instead of starting, finding a gap and putting it down again. The client can read status.md, which ends "I already sent that" arguments. Evidence: r/taxpros (two threads), r/Bookkeeping, AccountingWeb.
+
+2. Requote without starting over (print shop, small manufacturer) The customer's email and the shop's own Excel price sheet sit in the same project. The AI drafts the quote. When the customer writes "actually, make it 500," it requotes from the same file and shows what changed. The owner checks it and sends it. They never paste the customer's details into another proforma. Evidence: r/CommercialPrinting (one job estimated six times), r/smallbusiness (four proformas per customer).
+
+3. The job file keeps itself (architect, contractor) A supplier emails a PDF price list to the job's project. The AI updates the master budget spreadsheet and flags anything that moved, like "fixture X is up 12%." Today someone saves the PDF to a folder and retypes the prices. Evidence: the r/smallbusiness architect thread. This is the closest match to "the tools come to the project." Alternative: agency weekly client reports (r/PPC, a full day a week), if you'd rather keep a reporting demo.
+```
+
+Changes to fix autogit:
+- Start project containers with --init. Add it to the docker run call in docker.run (the recreate path) and anywhere else containers are created. Right now PID 1 is sleep infinity, which never cleans up exited processes. That's what causes zombie git processes.
+- Stop running git gc on every commit, this parallelism was breaking commits.
+- Hold a per-project lock so gc never runs during the commit loop at line 403.
+- Check the exit code and log or report failures. Today a failed gc leaves no gc.log, so it gets retried forever and nobody notices.
+- Lower the frequency of committing with edits to the same file, or streaming chats (shell/ai).
+
+claude on clickup vs vibey:
+```
+  What Vibey has that ClickUp can't really match
+
+  - Code execution is built in. A ClickUp workspace can't run anything; a Vibey project is a Linux box. That's the "space = files + run code + humans/AI
+    seeing both" idea, and it's what everything else rests on.
+  - The AI actually does the work instead of just suggesting it. It edits files and runs commands, and you can audit and undo it through git.
+  - Your data is plain files. Nothing to migrate out of, so you're not locked in.
+```
+
+- TODO
+   - demos
+   - devops: notification project to see alerts
+   - engine
+      - support engines without provisioning (BYOE)
+      - provision engines
+   - apps
+   - access
+      - email to project
+      - token/api hooks
+      - email hooks (token in an email address)
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+   - project
+      - subdomain per project
+      - fix autogit
+      - autobackup
+      - skip docker.exec to slash command time by 10x
+   - tests: local mode, client tests: auth, project, files, chat, access
+
+TODO now:
+- Fix autogit
+- Subdomain per project
+- Email to project
+- Token/API hooks
+- BYOE
+- Demos
+
 ## 2026-10-11
 
 gpt6: "Vibey is for the person who has become the human glue holding a project together. They understand the work, know how it should happen, and spend too much time making their tools cooperate."
+
+autogit ridiculously bad, booming and broken commits
 
 ## 2026-10-10
 
