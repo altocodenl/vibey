@@ -124,6 +124,31 @@ if (mode === 'server') {
             }
          }
 
+         // Commits run in the background after the request returns; poll git log until it has `length` commits, then check the latest one.
+         var waitForCommits = function (tag, length, name) {
+            return [tag, 'get', '/', 200, function (s, rq, rs, next) {
+               var started = Date.now ();
+               var check = async function () {
+                  var response = await fetch ('http://localhost:' + CONFIG.port + '/project/run', {
+                     body: JSON.stringify ({id: s.projectId, command: 'git log --format=%s', read: true}),
+                     headers: {... s.headers, 'content-type': 'application/json'},
+                     method: 'POST',
+                  });
+                  var subjects = response.ok ? ((await response.json ()).stdout || '').split ('\n').slice (0, -1) : [];
+                  if (subjects.length >= length) {
+                     if (! assert ([
+                        ['commit length', subjects.length, length, teishi.test.equal],
+                        ['last commit name', subjects [0], name, teishi.test.equal]
+                     ])) return next (validationError + ' ' + JSON.stringify (subjects, null, '   '));
+                     return next (null, rs);
+                  }
+                  if (Date.now () - started > 10000) return next ('Expected ' + length + ' commits, found ' + subjects.length + ' ' + JSON.stringify (subjects, null, '   '));
+                  setTimeout (check, 50);
+               }
+               check ();
+            }];
+         }
+
          // *** PUBLIC ***
 
          suites.public = dale.go ([
@@ -720,15 +745,7 @@ if (mode === 'server') {
             ['Run command that fails', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'exit 1'}}, 200, function (s, rq, rs) {
                return assert (['body.code', rs.body.code, 1, teishi.test.equal]);
             }],
-            ['List commits when there is only the initial commit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               s.assertCommit = function (stdout, length, name) {
-                  return assert ([
-                     ['commit length', stdout.split ('commit').length, length + 1, teishi.test.equal],
-                     ['last commit name', stdout.split ('\n').slice (0, 5).join ('\n'), new RegExp (name), teishi.test.match]
-                  ]);
-               }
-               return s.assertCommit (rs.body.stdout, 1, "Write 'main.md'");
-            }],
+            waitForCommits ('List commits when there is only the initial commit', 1, "Write 'main.md'"),
             ['Read file from nonexistent project', 'get', '/project/nonexistent/file/main.md', 404],
             ['Read absolute path', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('/main.md')}, 400, assertBody ({error: 'Invalid path'})],
             ['Read parent traversal path', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('../main.md')}, 400, assertBody ({error: 'Invalid path'})],
@@ -748,48 +765,19 @@ if (mode === 'server') {
             ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text found .+ times/, teishi.test.match]);
             }],
-            ['Edit main file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, function (s, rq, rs) {
-               return assert ([
-                  ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
-                  ['sha', rs.body.sha, 'string'],
-                  function () {return [
-                     ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]
-                  ]}
-               ]);
-            }],
-            ['List commits after edit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 2, "Edit 'main.md'");
-            }],
+            ['Edit main file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, assertBody ({})],
+            waitForCommits ('List commits after edit', 2, "Edit 'main.md'"),
             ['Get main file after edit', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 200, assertBody ('# El Norte!\n\n')],
             ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text not found/, teishi.test.match]);
             }],
             ['Edit main file (noop)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
-            ['List commits after noop edit', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 2, "Edit 'main.md'");
-            }],
-            ['Overwrite file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte\n\n'}}, 200, function (s, rq, rs) {
-               return assert ([
-                  ['keys', dale.keys (rs.body), ['sha'], 'eachOf', teishi.test.equal],
-                  ['sha', rs.body.sha, 'string'],
-                  function () {return [
-                     ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]
-                  ]}
-               ]);
-            }],
-            ['List commits after write', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 3, "Write 'main.md'");
-            }],
+            waitForCommits ('List commits after noop edit', 2, "Edit 'main.md'"),
+            ['Overwrite file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
+            waitForCommits ('List commits after write', 3, "Write 'main.md'"),
             ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
-            ['List commits after noop write', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 3, "Write 'main.md'");
-            }],
-            ['Write empty file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/empty.md', content: ''}}, 200, function (s, rq, rs) {
-               return assert ([
-                  ['sha', rs.body.sha, 'string'],
-                  function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
-               ]);
-            }],
+            waitForCommits ('List commits after noop write', 3, "Write 'main.md'"),
+            ['Write empty file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/empty.md', content: ''}}, 200, assertBody ({})],
             ['Read back empty file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/empty.md')}, 200, assertBody ('')],
             ['Reject base64 file write', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.txt', content: 'aGVsbG8=', base64: true}}, 400],
             ['Write text file with multipart', 'post', '/project/write', function (s) {
@@ -798,12 +786,7 @@ if (mode === 'server') {
                   {name: 'path', value: 'doc/binary.txt'},
                   {name: 'file', filename: 'upload', value: 'hello multipart'},
                ]};
-            }, 200, function (s, rq, rs) {
-               return assert ([
-                  ['sha', rs.body.sha, 'string'],
-                  function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
-               ]);
-            }],
+            }, 200, assertBody ({})],
             ['Read back multipart-written file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/binary.txt')}, 200, assertBody ('hello multipart')],
             ['Write binary file with multipart', 'post', '/project/write', function (s) {
                // Hitit requires a file path to send arbitrary binary bytes unchanged.
@@ -818,10 +801,7 @@ if (mode === 'server') {
             }, 200, function (s, rq, rs) {
                fs.rmSync (s.uploadDir, {recursive: true, force: true});
                delete s.uploadDir;
-               return assert ([
-                  ['sha', rs.body.sha, 'string'],
-                  function () {return ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]}
-               ]);
+               return assertBody ({}) (s, rq, rs);
             }],
             {
                tag: 'Read back binary file',
@@ -838,30 +818,19 @@ if (mode === 'server') {
                   ]);
                },
             },
-            ['Write file with spaces in name', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/come back.md', content: 'hello spaces'}}, 200, function (s, rq, rs) {
-               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
-            }],
+            ['Write file with spaces in name', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/come back.md', content: 'hello spaces'}}, 200, assertBody ({})],
             ['Read file with spaces in name', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/come back.md')}, 200, assertBody ('hello spaces')],
             ['Run a command with pipe', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
-            ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'printf foo'}}, 200, assertBody ({stdout: 'foo'})],
-            ['Run a command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, function (s, rq, rs, next) {
-               if (! assert ([
-                  ['keys', dale.keys (rs.body), ['stdout', 'sha'], 'eachOf', teishi.test.equal],
-                  ['stdout', rs.body.stdout, 'foo\n', teishi.test.equal],
-                  ['sha', rs.body.sha, 'string'],
-                  function () {return [
-                     ['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]
-                  ]}
-               ])) return false;
-
+            ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'printf foo', read: true}}, 200, assertBody ({stdout: 'foo'})],
+            ['Run a command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: 'foo\n'})],
+            waitForCommits ('List commits after command with change and output', 8, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
+            ['Stop project container', 'get', '/', 200, function (s, rq, rs, next) {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   next (null, rs);
                }) ();
             }],
-            ['List commits after command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'git log'}}, 200, function (s, rq, rs) {
-               return s.assertCommit (rs.body.stdout, 8, "Run 'echo foo > doc/another.md && cat doc/another.md'");
-            }],
+            waitForCommits ('List commits after container restart', 8, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
 
             ['Upload multipart file', 'post', '/project/write', function (s) {
                return {multipart: [
@@ -869,9 +838,7 @@ if (mode === 'server') {
                   {name: 'path', value: 'doc/upload test.txt'},
                   {name: 'file', filename: 'upload', value: 'hello multipart\nこんにちは\0'},
                ]};
-            }, 200, function (s, rq, rs) {
-               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
-            }],
+            }, 200, assertBody ({})],
             ['Read multipart upload', 'get', function (s) {
                return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/upload test.txt');
             }, 200, assertBody ('hello multipart\nこんにちは\0')],
@@ -905,13 +872,10 @@ if (mode === 'server') {
                }, 400];
             }),
 
-            ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, function (s, rq, rs) {
-               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
-            }],
+            ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, assertBody ({})],
             ['Read file after append to empty file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/empty.md')}, 200, assertBody ('first message\n')],
-            ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, function (s, rq, rs) {
-               return assert (['sha', rs.body.sha, /[0-9a-f]{40}/, teishi.test.match]);
-            }],
+            ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, assertBody ({})],
+            waitForCommits ('List commits after appends', 12, "Edit 'doc/empty.md'"),
             ['Read file after second append', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/empty.md')}, 200, function (s, rq, rs, next) {
                if (! assertBody ('first message\nsecond message\n') (s, rq, rs)) return false;
                (async function () {

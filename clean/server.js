@@ -328,10 +328,16 @@ var run = async function (... args) {
    });
 }
 
-var docker = {};
+var project = {};
 
-docker.access = async function (id) {
-   var file = await docker.read (id, '/project/vibey/access.md');
+var lock = async function (key, ttl) {
+   while (! await redis ('set', key, '1', 'NX', 'EX', ttl)) {
+      await new Promise (function (resolve) {setTimeout (resolve, 50)});
+   }
+}
+
+project.access = async function (id) {
+   var file = await project.read (id, '/project/vibey/access.md');
    if (file.code) return file;
 
    var invalidEntry;
@@ -392,47 +398,51 @@ Path.quote = function (path) {
    return "'" + path.replace (/'/g, "'\\''") + "'";
 }
 
-docker.run = async function (id, command, options) {
+project.run = async function (id, command, options) {
    id = 'vibey-project-' + id;
    if (type (command) === 'array') command = command.join (' ');
 
-   var commit = options && options.commit, originalCommand;
-   // Retry commit up to 50x at ~1ms to handle concurrent git lock contention
-   if (commit) {
-      originalCommand = command;
-      command += ' || exit $?; n=0; sha=; while [ $n -lt 50 ]; do if [ -n "$(git status --porcelain 2>/dev/null)" ]; then git add -A && git commit -m ' + Path.quote (commit) + ' > /dev/null 2>&1 && sha=$(git rev-parse HEAD) && break; fi; sleep 0.001; n=$((n+1)); done; printf "\\nvibey-sha:%s\\n" "$sha"';
-      delete options.commit;
-   }
-
    var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, {... options, 'catch': true});
    if (result.code === 1 && result.stderr && result.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
-      var recreate = await run ('docker', 'run', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
+      var recreate = await run ('docker', 'run', '--init', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
       if (recreate.code) {
          var restart = await run ('docker', 'start', id, {catch: true});
          if (restart.code) return result;
       }
-      return docker.run (id.replace ('vibey-project-', ''), originalCommand || command, {... options, commit});
+      return project.run (id.replace ('vibey-project-', ''), command, options);
    }
    if (result.code && ! (options && options.catch)) throw result;
-   var marker = commit && result.stdout && result.stdout.match (/\nvibey-sha:([0-9a-f]*)\n$/);
-   if (marker) {
-      result.sha = marker [1] || undefined;
-      result.stdout = result.stdout.slice (0, marker.index);
-      if (result.stdout === '') delete result.stdout;
-      if (result.sha) await docker.backup (id.replace ('vibey-project-', ''));
-   }
+
+   // Commits run in the background, one at a time per project, after the command that caused them completes.
+   var commit = options && options.commit;
+   if (commit && ! result.code) (async function () {
+      var projectId = id.replace ('vibey-project-', '');
+      var lockKey = 'lock:commit:' + projectId;
+      await lock (lockKey, 60);
+      try {
+         var committed = await project.run (projectId, 'git add -A && (git diff --cached --quiet || (git commit -q -m ' + Path.quote (commit) + ' && git rev-parse HEAD))', {catch: true});
+         if (committed.code) return clog ({type: 'Commit error', id: projectId, message: commit, error: committed.stderr});
+         if (committed.stdout) await project.backup (projectId);
+      }
+      finally {
+         await redis ('del', lockKey);
+      }
+   }) ().catch (function (error) {
+      clog ({type: 'Commit error', id, message: commit, error: formatError (error)});
+   });
+
    return result;
 }
 
-docker.read = async function (id, path) {
+project.read = async function (id, path) {
    var chunks = [];
-   var result = await docker.run (id, 'cat ' + Path.quote (path), {catch: true, stdout: function (chunk) {chunks.push (chunk)}});
+   var result = await project.run (id, 'cat ' + Path.quote (path), {catch: true, stdout: function (chunk) {chunks.push (chunk)}});
    return result.code ? {code: result.code, error: result.stderr} : {stdout: Buffer.concat (chunks)};
 }
 
-docker.video = async function (rq, rs, id, path) {
+project.video = async function (rq, rs, id, path) {
    var quoted = Path.quote (path);
-   var stat = await docker.run (id, 'test -f ' + quoted + ' || exit 44; wc -c < ' + quoted, {catch: true});
+   var stat = await project.run (id, 'test -f ' + quoted + ' || exit 44; wc -c < ' + quoted, {catch: true});
    if (rs.destroyed) return;
    if (stat.code === 44) return reply (rs, 404, fourohfour, 'html');
    if (stat.code) return reply (rs, 500);
@@ -512,26 +522,19 @@ docker.video = async function (rq, rs, id, path) {
    });
 };
 
-docker.write = async function (id, path, content, noCommit) {
+project.write = async function (id, path, content, noCommit) {
    var command = 'mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > ' + Path.quote (path);
-   var result = await docker.run (id, command, {input: content, commit: noCommit ? undefined : ('Write ' + Path.quote (path)), catch: true});
+   var result = await project.run (id, command, {input: content, commit: noCommit ? undefined : ('Write ' + Path.quote (path)), catch: true});
    return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
-docker.edit = async function (id, path, oldText, newText) {
+project.edit = async function (id, path, oldText, newText, noCommit) {
 
    var lockKey = 'lock:edit:' + id + ':' + path;
-   while (true) {
-      var count = await redis ('incr', lockKey);
-      if (count === 1) {
-         await redis ('expire', lockKey, 10);
-         break;
-      }
-      await new Promise (function (resolve) {setTimeout (resolve, 50)});
-   }
+   await lock (lockKey, 10);
 
    if (oldText === '[EOF]') {
-      var result = await docker.run (id, 'cat >> ' + Path.quote (path), {input: newText, catch: true, commit: 'Edit ' + Path.quote (path)});
+      var result = await project.run (id, 'cat >> ' + Path.quote (path), {input: newText, catch: true, commit: noCommit ? false : 'Edit ' + Path.quote (path)});
       await redis ('del', lockKey);
       return result.code ? {code: result.code, error: result.stderr} : result;
    }
@@ -560,12 +563,12 @@ docker.edit = async function (id, path, oldText, newText) {
       +    "}"
       + "' target=" + Path.quote (path) + ' ' + Path.quote (path);
 
-   var result = await docker.run (id, script, {input: input, catch: true, commit: 'Edit ' + Path.quote (path)});
+   var result = await project.run (id, script, {input: input, catch: true, commit: noCommit ? false : 'Edit ' + Path.quote (path)});
    await redis ('del', lockKey);
    return result.code ? {code: result.code, error: result.stderr} : result;
 }
 
-docker.cleanup = async function () {
+project.cleanup = async function () {
    var result = await run ('docker', 'ps', '-aq', '-f', 'name=vibey-project-', {catch: true});
    if (result.stdout) {
       var projectIds = result.stdout.trim ().split ('\n');
@@ -647,14 +650,14 @@ backup.list = async function (prefix) {
    }
 }
 
-docker.backup = async function (id) {
+project.backup = async function (id) {
 
    if (! CONFIG.backup?.enable) return;
 
    var [tracked, files, lastCommit] = await dale.async (dale.times (3), function (k) {
-      if (k === 1) return docker.run (id, 'git -C /project ls-files -co --exclude-standard');
-      if (k === 2) return docker.run (id, "find /project -type f -printf '%T@ %p\\n'");
-      if (k === 3) return docker.run (id, 'git -C /project log -1 --format=%ct');
+      if (k === 1) return project.run (id, 'git -C /project ls-files -co --exclude-standard');
+      if (k === 2) return project.run (id, "find /project -type f -printf '%T@ %p\\n'");
+      if (k === 3) return project.run (id, 'git -C /project log -1 --format=%ct');
    }, {concurrent: true});
 
    tracked = dale.obj (tracked.stdout.split ('\n'), function (file) {
@@ -1453,14 +1456,14 @@ var routes = [
       });
       if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
 
-      var project = {
+      var newProject = {
          created: now (),
          id:      crypto.randomUUID (),
          last:    now (),
          name:    rq.body.name,
          owner:   rq.user.id,
       }
-      if (rq.body.slot) project.slot = rq.body.slot;
+      if (rq.body.slot) newProject.slot = rq.body.slot;
 
       var slotConflict = ! rq.body.slot ? undefined : dale.stopNot (projects, undefined, function (project) {
          if (project.owner !== rq.user.id) return;
@@ -1468,22 +1471,22 @@ var routes = [
       });
 
       var ops = [
-         ['hmset', 'project:' + project.id, project],
-         ['sadd',  'owner:' + rq.user.id, 'project:' + project.id]
+         ['hmset', 'project:' + newProject.id, newProject],
+         ['sadd',  'owner:' + rq.user.id, 'project:' + newProject.id]
       ];
       if (slotConflict) ops.push (['hdel', 'project:' + slotConflict.id, 'slot']);
 
       await redis (ops);
 
-      var containerId = 'vibey-project-' + project.id;
+      var containerId = 'vibey-project-' + newProject.id;
 
-      await run ('docker', 'run', '--network', 'vibey-projects', '-v', containerId + ':/project', '--name', containerId, '-d', 'vibey-project');
+      await run ('docker', 'run', '--init', '--network', 'vibey-projects', '-v', containerId + ':/project', '--name', containerId, '-d', 'vibey-project');
 
-      await docker.run (project.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local', {catch: true});
+      await project.run (newProject.id, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local', {catch: true});
 
-      await docker.write (project.id, 'main.md', '# ' + rq.body.name + '\n\n');
+      await project.write (newProject.id, 'main.md', '# ' + rq.body.name + '\n\n');
 
-      reply (rs, 200, {id: project.id});
+      reply (rs, 200, {id: newProject.id});
    }],
 
    ['put', '/project', async function (rq, rs) {
@@ -1611,7 +1614,7 @@ var routes = [
       });
       if (! scopes.length) return reply (rs, 404);
 
-      var result = await docker.run (id, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
+      var result = await project.run (id, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
       if (result.code) return reply (rs, 500, {error: 'Could not list files'});
 
       var files = dale.fil ((result.stdout || '').toString ().split ('\0'), undefined, function (line) {
@@ -1644,9 +1647,9 @@ var routes = [
       }
       if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', id, 'read', path)) return reply (rs, 404, fourohfour, 'html');
 
-      if (/\.mp4$/i.test (path)) return docker.video (rq, rs, id, '/project/' + path);
+      if (/\.mp4$/i.test (path)) return project.video (rq, rs, id, '/project/' + path);
 
-      var file = await docker.read (id, '/project/' + path);
+      var file = await project.read (id, '/project/' + path);
       if (file.code) {
          if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404, fourohfour, 'html');
          clog ({priority: 'important', type: 'Read file error', error: formatError (file)});
@@ -1693,7 +1696,7 @@ var routes = [
          ? await fs.promises.readFile (rq.data.files.file)
          : rq.body.content;
 
-      var result = await docker.write (rq.body.id, rq.body.path, content);
+      var result = await project.write (rq.body.id, rq.body.path, content);
       if (result.code === 0) delete result.code;
 
       if (! result.code) redis ('hset', 'project:' + rq.body.id, 'last', now ());
@@ -1711,7 +1714,7 @@ var routes = [
 
       if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.path)) return reply (rs, 404);
 
-      var result = await docker.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
+      var result = await project.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
       if (result.code === 0) delete result.code;
 
       if (! result.code) redis ('hset', 'project:' + rq.body.id, 'last', now ());
@@ -1730,8 +1733,8 @@ var routes = [
       if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
 
       var result = rq.body.command.trim () === 'vibey access'
-         ? await docker.access (rq.body.id)
-         : await docker.run (rq.body.id, rq.body.command, {catch: true, commit: 'Run ' + Path.quote (rq.body.command)});
+         ? await project.access (rq.body.id)
+         : await project.run (rq.body.id, rq.body.command, {catch: true, commit: rq.body.read ? false : 'Run ' + Path.quote (rq.body.command)});
       if (result.code === 0) delete result.code;
 
       if (! rq.body.read) redis ('hset', 'project:' + rq.body.id, 'last', now ());
@@ -1749,7 +1752,7 @@ var routes = [
 
       if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.body.projectId, 'read', rq.body.file)) return reply (rs, 404);
 
-      var result = await docker.read (rq.body.projectId, rq.body.file);
+      var result = await project.read (rq.body.projectId, rq.body.file);
       if (result.code) {
          if (result.code === 1 && result.error && result.error.match ('No such file or directory')) return reply (rs, 404);
          clog ({
@@ -1871,10 +1874,10 @@ var routes = [
          rq.body.body,
       ], undefined, function (line) {return line}).join ('\n');
 
-      var result = await docker.run (rq.body.id, 'mkdir -p ' + Path.quote (Path.dirname (rq.body.file)) + ' && touch ' + Path.quote (rq.body.file), {catch: true});
+      var result = await project.run (rq.body.id, 'mkdir -p ' + Path.quote (Path.dirname (rq.body.file)) + ' && touch ' + Path.quote (rq.body.file), {catch: true});
       if (result.code) return reply (rs, 400, {code: result.code, error: result.stderr});
 
-      result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + message);
+      result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + message);
       if (result.code) return reply (rs, 400, result);
 
       redis ('hset', 'project:' + rq.body.id, 'last', now ());
@@ -1919,13 +1922,13 @@ var routes = [
             if (checking || ended || cancelled) return;
             checking = true;
             try {
-               var chat = await docker.read (rq.body.id, rq.body.file);
+               var chat = await project.read (rq.body.id, rq.body.file);
                if (ended || chat.code) return;
                if (! new RegExp (
                   '^əəə head ' + messageId + '\n(?:(?!əəə (?:head|body) )[^\n]*\n)*cancelled .+$', 'im'
                ).test (chat.stdout.toString ('utf8'))) return;
                cancelled = true;
-               var result = await docker.run (executionProjectId, 'bash -c ' + Path.quote (
+               var result = await project.run (executionProjectId, 'bash -c ' + Path.quote (
                   'read -r pid < ' + Path.quote (pidFile)
                   + ' && kill -KILL -- "-$pid"'
                ), {catch: true});
@@ -1952,7 +1955,7 @@ var routes = [
          proc.once ('exit', stop);
          proc.once ('close', async function () {
             try {
-               await docker.run (executionProjectId, 'rm -f ' + Path.quote (pidFile));
+               await project.run (executionProjectId, 'rm -f ' + Path.quote (pidFile));
             }
             catch (error) {
                clog ({error: formatError (error), responseId: messageId, type: 'Process cleanup error'});
@@ -1964,13 +1967,19 @@ var routes = [
          var newBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
          editQueue = editQueue.then (async function () {
             if (editError) return;
-            var result = await docker.edit (rq.body.id, rq.body.file, oldBody, newBody);
+            var result = await project.edit (rq.body.id, rq.body.file, oldBody, newBody, Math.random () > 0.05);
             if (result.code) throw result;
             oldBody = newBody;
          }).catch (function (error) {
             editError = error;
             clog ({priority: 'important', type: 'Stream persistence error', error: formatError (error), responseId});
          });
+      };
+
+      // Commits whatever the stream left uncommitted, for exits that skip the closing head edit.
+      var streamCommit = async function () {
+         await editQueue;
+         await project.run (rq.body.id, 'true', {catch: true, commit: 'Edit ' + Path.quote (rq.body.file)});
       };
 
       if (rq.body.to === 'shell') {
@@ -1980,7 +1989,7 @@ var routes = [
             shellProject = projectCall [1];
             shellCommand = projectCall [2];
             if (shellProject !== rq.body.id) {
-               var access = await docker.read (shellProject, '/project/vibey/access.md');
+               var access = await project.read (shellProject, '/project/vibey/access.md');
                var allowed = ! access.code && access.stdout.toString ('utf8').split (/\r?\n/).some (function (line) {
                   var grant = /^(\S+)\s+write$/.exec (line.trim ());
                   return grant && grant [1] === 'project:' + rq.body.id;
@@ -1989,16 +1998,16 @@ var routes = [
             }
          }
 
-         result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
+         result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
          if (result.code) return reply (rs, 400, result);
          reply (rs, 200, {id: id, responseId: responseId});
 
          if (shellCommand.trim () === 'vibey access') {
-            var accessResult = await docker.access (shellProject);
+            var accessResult = await project.access (shellProject);
             output += accessResult.stdout || accessResult.error || 'Could not sync access\n';
             streamEdit ();
          }
-         else await docker.run (shellProject, groupedCommand (shellCommand), {catch: true, onSpawn: function (proc) {
+         else await project.run (shellProject, groupedCommand (shellCommand), {catch: true, onSpawn: function (proc) {
             watchCancellation (proc, shellProject);
          }, stdout: function (chunk) {
             output += chunk;
@@ -2009,7 +2018,7 @@ var routes = [
          }});
          await editQueue;
 
-         if (cancelled) return;
+         if (cancelled) return await streamCommit ();
 
          var shellHead = [
             'əəə head ' + responseId,
@@ -2027,14 +2036,14 @@ var routes = [
             't-start ' + tStart,
          ].join ('\n');
 
-         await docker.edit (rq.body.id, rq.body.file, shellHead, shellDone);
+         await project.edit (rq.body.id, rq.body.file, shellHead, shellDone);
          redis ('hset', 'project:' + rq.body.id, 'last', now ());
          return;
       }
 
       var toolDone;
       for (var turn = 0; ; turn++) {
-         var chat = await docker.read (rq.body.id, rq.body.file);
+         var chat = await project.read (rq.body.id, rq.body.file);
          if (chat.code) throw chat;
          var transcript = chat.stdout.toString ('utf8');
          if (toolDone) transcript = transcript.replace (toolDone [0], toolDone [1]);
@@ -2061,12 +2070,12 @@ var routes = [
                'əəə body ' + systemId,
                systemPrompt.replace (/^əəə (head|body)/gm, '> əəə $1'),
             ].join ('\n');
-            result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + systemMessage);
+            result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + systemMessage);
             if (result.code) throw result;
             transcript += '\n' + systemMessage;
          }
 
-         var main = await docker.read (rq.body.id, 'main.md');
+         var main = await project.read (rq.body.id, 'main.md');
          if (main.code && ! (main.code === 1 && /No such file or directory/.test (main.error || ''))) {
             throw main;
          }
@@ -2082,7 +2091,7 @@ var routes = [
                   'əəə body ' + mainId,
                   mainBody,
                ].join ('\n');
-               result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + mainMessage);
+               result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + mainMessage);
                if (result.code) throw result;
                transcript += '\n' + mainMessage;
             }
@@ -2090,13 +2099,13 @@ var routes = [
 
          // Context is saved first; the transcript does not include the new pending response.
          if (turn === 0) {
-            result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
+            result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
             if (result.code) return reply (rs, 400, result);
             reply (rs, 200, {id: id, responseId: responseId});
          }
          else {
             await startMessage (rq.body.to, responseId);
-            await docker.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
+            await project.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
          }
 
          var buffer = '', aiStderr = '';
@@ -2222,7 +2231,7 @@ var routes = [
 
          prompt += '\nCurrent chat file: ' + JSON.stringify (rq.body.file) + '\n';
 
-         var temp = await docker.run (rq.body.id, 'umask 077; mktemp -d /home/vibey/.vibey-ai.XXXXXXXXXX', {catch: true});
+         var temp = await project.run (rq.body.id, 'umask 077; mktemp -d /home/vibey/.vibey-ai.XXXXXXXXXX', {catch: true});
          if (temp.code) throw temp;
          var configDir = temp.stdout.trim ();
 
@@ -2243,7 +2252,7 @@ var routes = [
                         account_id: creds.account.accountId || '',
                      },
                   });
-               var result = await docker.write (rq.body.id, configDir + '/auth.json', codexAuth, 'noCommit');
+               var result = await project.write (rq.body.id, configDir + '/auth.json', codexAuth, 'noCommit');
                if (result.code) throw result;
 
                dockerArgs.push ('-e', 'CODEX_HOME=' + configDir);
@@ -2258,12 +2267,12 @@ var routes = [
                      expiresAt: creds.account.expires,
                      refreshToken: creds.account.refresh,
                   }});
-                  var result = await docker.write (rq.body.id, configDir + '/.credentials.json', claudeAuth, 'noCommit');
+                  var result = await project.write (rq.body.id, configDir + '/.credentials.json', claudeAuth, 'noCommit');
                   if (result.code) throw result;
                }
 
                var credentialPath = configDir + '/credential';
-               var result = await docker.write (
+               var result = await project.write (
                   rq.body.id, credentialPath,
                   auth === 'apiKey' ? creds.apiKey : creds.account.access,
                   'noCommit'
@@ -2312,7 +2321,7 @@ var routes = [
          }
          finally {
             try {
-               var cleanup = await docker.run (rq.body.id, 'rm -rf -- ' + Path.quote (configDir), {catch: true});
+               var cleanup = await project.run (rq.body.id, 'rm -rf -- ' + Path.quote (configDir), {catch: true});
                if (cleanup.code) throw cleanup;
             }
             catch (error) {
@@ -2323,8 +2332,7 @@ var routes = [
          if (buffer) processLines ([buffer]);
 
          if (cancelled) {
-            await editQueue;
-            return;
+            return await streamCommit ();
          }
 
          if (aiFlavor === 'openai' && ! aiResult.code && ! aiResult.signal && (codexError || ! codexDone)) {
@@ -2414,7 +2422,7 @@ var routes = [
                   if (call.op !== 'run' && ! validProjectPath (call.path)) {
                      return {code: 1, error: 'Invalid path'};
                   }
-                  var access = await docker.read (target, '/project/vibey/access.md');
+                  var access = await project.read (target, '/project/vibey/access.md');
                   var allowed = ! access.code && dale.stop (
                      access.stdout.toString ('utf8').split (/\r?\n/), true,
                      function (line) {
@@ -2429,15 +2437,15 @@ var routes = [
                   if (! allowed) return {code: 1, error: 'Access denied'};
                }
 
-               if (call.op === 'read') return await docker.read (target, call.path);
-               if (call.op === 'write') return await docker.write (target, call.path, call.content);
-               if (call.op === 'edit') return await docker.edit (target, call.path, call.oldText, call.newText);
+               if (call.op === 'read') return await project.read (target, call.path);
+               if (call.op === 'write') return await project.write (target, call.path, call.content);
+               if (call.op === 'edit') return await project.edit (target, call.path, call.oldText, call.newText);
                if (call.op === 'run' && call.command.trim () === 'vibey access') {
-                  var result = await docker.access (target);
+                  var result = await project.access (target);
                   if (onOutput) onOutput (result.stdout || result.error || '');
                   return result;
                }
-               if (call.op === 'run') return await docker.run (target, groupedCommand (call.command), {
+               if (call.op === 'run') return await project.run (target, groupedCommand (call.command), {
                   catch: true,
                   onSpawn: function (proc) {watchCancellation (proc, target)},
                   stdout: onOutput,
@@ -2492,7 +2500,7 @@ var routes = [
                't-start ' + tStart,
                ...(from === rq.body.to ? ['credential ' + auth] : []),
             ].join ('\n');
-            var result = await docker.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + head + '\nto ' + to + '\n' + oldBody);
+            var result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + head + '\nto ' + to + '\n' + oldBody);
             if (result.code) throw result;
             return head;
          };
@@ -2500,7 +2508,7 @@ var routes = [
          // Append the successor before finishing this message, so pollers never see a finished chain end early.
          if (toolCall) var toolHead = await startMessage ('shell', responseId, toolCallText + '\n\nResult:\n');
 
-         result = await docker.edit (rq.body.id, rq.body.file, oldHead, newHead);
+         result = await project.edit (rq.body.id, rq.body.file, oldHead, newHead);
          if (result.code) throw result;
          redis ('hset', 'project:' + rq.body.id, 'last', now ());
          if (! toolCall) break;
@@ -2510,8 +2518,7 @@ var routes = [
             streamEdit ();
          });
          if (cancelled) {
-            await editQueue;
-            return;
+            return await streamCommit ();
          }
          if (toolCall.op !== 'run' && toolResult.stdout) output += toolResult.stdout.toString ('utf8');
          if (toolResult.error) output += '\n' + toolResult.error;
@@ -2523,7 +2530,7 @@ var routes = [
          // Finished once the next AI message is appended (or now, if this is the last turn).
          toolDone = [toolHead, toolHead.replace ('\npending 1\n', '\nt-end ' + now () + '\n')];
          if (turn < 49) continue;
-         await docker.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
+         await project.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
          redis ('hset', 'project:' + rq.body.id, 'last', now ());
          break;
       }
@@ -2754,7 +2761,7 @@ dale.go (['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT', 'SIGUSR1', 'SIGUSR2', 'SIGPI
       clog ({type: 'Signal received', priority: 'important', signal: signal});
       if (inc (['SIGTERM', 'SIGINT'], signal)) {
          exiting = true;
-         if (cicek.isMaster && new URL (CONFIG.baseURL).hostname === 'localhost') docker.cleanup ();
+         if (cicek.isMaster && new URL (CONFIG.baseURL).hostname === 'localhost') project.cleanup ();
       }
    });
 });
