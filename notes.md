@@ -1,5 +1,14 @@
 # Vibey development notes
 
+## 2026-10-13
+
+The "redirecting" route for projects is really the project gatekeeper! The old auth gatekeeper is the host gatekeeper.
+
+Next step for subdomains:
+- Map also username + project name wherever possible with an inner redirect to project id.
+
+I'm thinking that we still need to be able to POST/PUT to the project endpoints directly to the host. If we did it through the subdomain, we cannot do the entire project autologin (it's really an autologin). Although, you could simply open the project and then use that cookie. Having one set of URLs could simplify things considerably. Any project call goes to subdomains, non-project calls go to the host.
+
 ## 2026-10-12
 
 Channels for the demo:

@@ -116,7 +116,8 @@ lock:edit:<projectId>:<path> <integer> // per-file edit lock, expires 10s
 loginLink:<link> <email>
 loginLinkR:<email> <loginLink> // reverse login link
 owner:<userId> 1 session:<sessionId>
-               2 project:<projectId>
+               2 session-p:<sessionId>
+               3 project:<projectId>
                ...
 pkce:<userId>:<provider> <JSON> // {verifier: "<PKCE verifier>"}, expires after 900 seconds
 project:<projectId> created <date>
@@ -125,12 +126,20 @@ project:<projectId> created <date>
                     name <name>
                     owner <userId>
                     slot <integer|undefined>
+projectCode:<code> project <projectId> // single-use, expires after 60 seconds
+                   session <sessionId>
+                   state <state>
+                   user <userId>
 rateLimit:<identifier> <number>
 session:<session> csrf <csrfToken>
                   expires <date>
                   last date <date>
                        ip <ip>
                   user <userId>
+session-p:<session> csrf <csrfToken> // expires with the cookie; valid only while session:<sessionId> is valid
+                    project <projectId>
+                    session <sessionId>
+                    user <userId>
 user:<id> count <integer>
           created <date>
           creator <1|undefined>
@@ -179,6 +188,8 @@ Except for `GET /auth/user` and `PUT /auth/user`, all other auth routes will ret
 - **Update user**: `PUT /auth/user`: accepts `{settings: <object>|undefined, username: <string>|undefined}`, at least one of them. `settings` is `{vi: true|false}` or `{}` and replaces the settings object; omitting `vi` clears the preference (undefined), since JSON cannot represent an explicit `undefined`. `username` is lowercased and NFC-normalized, with a minimum length of 3 UTF-16 units. Allows Unicode letters, combining marks, numbers and single internal dashes; must start with a letter or number, cannot have a combining mark after a dash, and cannot be a UUID. Whitespace and mixing ASCII letters with non-ASCII characters are rejected; ASCII numbers and dashes can accompany non-ASCII names. Setting a new username releases the previous one. Returns `{settings, username}` with whichever was sent, using the normalized username. Rejects missing fields, unknown keys, invalid types and invalid usernames with 400, and a username owned by another user with 409; on any rejection nothing is changed. Available in local mode; cloud mode requires a valid session and CSRF token. This endpoint stores the settings only; it does not change editor bindings.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet, with a username generated from the email: the local part (`hello@example.com` → `hello`), then local part plus domain without its TLD (`hello-example`), then that with `-1`, `-2`… until one is free. Candidates are lowercased, characters other than ASCII letters and digits become single dashes, and leading/trailing dashes are removed. Empty candidates become `user`; short candidates are padded with trailing ones to 3 characters (`a` → `a11`, `ab` → `ab1`). UUID candidates get `-1` appended. Sends a login link by email.
 - **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found. Returns the same than what `GET /auth/user` does, and sets a session cookie.
+- **Project code**: `GET /auth/project/<projectId>?returnUrl=<url>&state=<state>`: requires a session and read access to the path in `returnUrl`, whose origin must be the project host (`<projectId>.<host>`). Redirects to `returnUrl` with a single-use `code` that is bound to `state` and expires in 60 seconds. Returns 400 for an invalid `returnUrl` or a missing `state`, and 404 without access.
+- **Project host**: `GET <projectId>.<host>/<path>`: serves the project file at `<path>`. Public files are served directly. With a `code`, checks that the `projectState` cookie matches the code's `state`, creates a project session, sets the project cookie and redirects to the same path without the code. A project session is valid only while the host session that issued it is valid. Without a valid project cookie, private files set a `projectState` cookie and redirect to `GET /auth/project/<projectId>`.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
 - **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie.
 - **Delete account**: `POST /auth/delete`: deletes the user and all their resources (sessions, projects). Clears the cookie.

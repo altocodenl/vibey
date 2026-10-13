@@ -26,6 +26,8 @@ catch (error) {
 }
 
 CONFIG.cookie.name = '__Host-' + CONFIG.cookie.name;
+var base        = new URL (CONFIG.baseURL);
+var projectHost = new RegExp ('^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\\.' + require ('cicek').escape (base.host) + '$');
 
 // *** SETUP ***
 
@@ -861,7 +863,7 @@ var setUsername = async function (id, value, generate) {
 
 var routes = [
 
-   // *** GATEKEEPER ***
+   // *** HOST GATEKEEPER ***
 
    ['all', '*', async function (rq, rs) {
 
@@ -870,6 +872,9 @@ var routes = [
          rq.user = {id: 'local', creator: true};
          return rs.next ();
       }
+
+      // Project hosts are handled by the project gatekeeper.
+      if (projectHost.test ((rq.headers.host || '').toLowerCase ())) return rs.next ();
 
       var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
 
@@ -937,7 +942,83 @@ var routes = [
          }],
          ['hset', 'user:' + rq.user.id, 'last', now ()],
       ]);
+   }],
 
+   // *** PROJECT GATEKEEPER ***
+
+   ['all', '*', async function (rq, rs) {
+      var match = (rq.headers.host || '').toLowerCase ().match (projectHost);
+      if (! match) return rs.next ();
+
+      var id = match [1], path = rq.url.slice (1);
+      if (rq.method !== 'get' || ! path) return reply (rs, 404);
+
+      if (! CONFIG.cloud) rq.user = {id: 'local', creator: true};
+
+      else if (rq.data.query && rq.data.query.code) {
+         var [code] = await redis ([
+            ['hgetall', 'projectCode:' + rq.data.query.code],
+            ['del',     'projectCode:' + rq.data.query.code]
+         ]);
+         // The code must be redeemed by the browser that requested it, which holds the matching state cookie.
+         if (! code || code.project !== id || ! rq.data.cookie || code.state !== rq.data.cookie.projectState) return reply (rs, 403, {error: 'Invalid code'});
+
+         var csrf   = crypto.randomBytes (32).toString ('hex');
+         var secret = crypto.randomBytes (32).toString ('hex');
+         await redis ([
+            ['hmset',  'session-p:' + secret, {csrf, project: id, session: code.session, user: code.user}],
+            ['expire', 'session-p:' + secret, CONFIG.cookie.expires],
+            ['sadd',   'owner:' + code.user, 'session-p:' + secret]
+         ]);
+         return reply (rs, 302, '', {
+            location: encodeURI (rq.url),
+            'referrer-policy': 'no-referrer',
+            'set-cookie': cicek.cookie.write (CONFIG.cookie.name, secret, {
+               expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
+               httponly: true,
+               path: '/',
+               samesite: 'Lax',
+               secure: true,
+            })
+         });
+      }
+
+      else {
+         var secret  = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name];
+         var session = secret ? await redis ('hgetall', 'session-p:' + secret) : null;
+         if (session && session.project === id) {
+            // A project session lives as long as the host session that issued it.
+            var parent = await redis ('hgetall', 'session:' + session.session);
+            if (parent && parent.user === session.user && new Date (parent.expires).getTime () > Date.now ()) {
+               var user = await redis ('hgetall', 'user:' + session.user);
+               if (user) rq.user = {csrf: session.csrf, session: secret, ... user};
+            }
+            else await redis ([
+               ['del',  'session-p:' + secret],
+               ['srem', 'owner:' + session.user, 'session-p:' + secret]
+            ]);
+         }
+
+         if (! rq.user && ! await allowOp ('PUBLIC', id, 'read', path)) {
+            var state = crypto.randomBytes (32).toString ('hex');
+            return reply (rs, 302, '', {
+               location: CONFIG.baseURL + '/auth/project/' + id + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
+               'set-cookie': cicek.cookie.write ('projectState', state, {
+                  expires: new Date (Date.now () + 10 * 60 * 1000),
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               })
+            });
+         }
+      }
+
+      if (CONFIG.cloud && rq.user && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== rq.user.csrf) return reply (rs, 403, {error: 'Invalid csrf token'});
+
+      rq.projectHost = id;
+      rq.url = '/project/' + id + '/file/' + path;
+      rs.next ();
    }],
 
    // *** STATIC ***
@@ -1336,6 +1417,33 @@ var routes = [
          samesite: 'Lax',
          secure: true,
       })});
+   }],
+
+   ['get', '/auth/project/:id', async function (rq, rs) {
+      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      var id = rq.data.params.id;
+
+      try {
+         var url  = new URL (rq.data.query.returnUrl);
+         var path = decodeURIComponent (url.pathname.slice (1));
+      }
+      catch (error) {
+         return reply (rs, 400, {error: 'Invalid returnUrl'});
+      }
+
+      if (url.origin !== base.protocol + '//' + id + '.' + base.host) return reply (rs, 400, {error: 'Invalid returnUrl'});
+      if (type (rq.data.query.state) !== 'string' || rq.data.query.state.length === 0) return reply (rs, 400, {error: 'Invalid state'});
+
+      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404);
+
+      var code = crypto.randomBytes (32).toString ('hex');
+      await redis ([
+         ['hmset',  'projectCode:' + code, {project: id, session: rq.user.session, state: rq.data.query.state, user: rq.user.id}],
+         ['expire', 'projectCode:' + code, 60]
+      ]);
+      url.searchParams.set ('code', code);
+      reply (rs, 302, '', {location: url.href});
    }],
 
    // *** PROJECT ***

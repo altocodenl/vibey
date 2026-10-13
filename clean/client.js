@@ -587,9 +587,10 @@ B.mrespond ([
             return;
          }
          var options = Array.from (recipient.querySelectorAll ('.chat-recipient-options button'));
-         if (ev.key === 'Enter' && ev.target.id === 'chat-to' && options.length === 1) {
+         var exact = options.filter (function (option) {return option.textContent === ev.target.value.trim ().toLowerCase ()});
+         if (ev.key === 'Enter' && ev.target.id === 'chat-to' && (options.length === 1 || exact.length)) {
             ev.preventDefault ();
-            options [0].click ();
+            (exact [0] || options [0]).click ();
             return;
          }
          if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
@@ -1094,12 +1095,13 @@ B.mrespond ([
    }],
 
    ['change', ['user', 'settings'], {match: B.changeResponder}, function (x) {
-      if (editor) editor.setOption ('keyMap', B.get ('user', 'settings', 'vi') ? 'vim' : 'default');
+      if (editor) editor.setOption ('keyMap', B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default');
    }],
 
-   ['change', [/^(projects|project|file|settings)$/], {match: B.changeResponder, priority: -1000}, function (x) {
+   ['change', [/^(projects|project|file|show)$/], {match: B.changeResponder, priority: -1000}, function (x) {
       if (B.get ('view') !== 'files') return;
       if (x.path [0] === 'project' && x.path [1] === 'size') return;
+      if (x.path [0] === 'show' && x.path [1] !== 'settings') return;
 
       var name = B.get ('file', 'name') || '';
 
@@ -1113,7 +1115,7 @@ B.mrespond ([
          });
          editor = CodeMirror (c ('#file-editor'), {
             readOnly: content === undefined || ! project || !! project.read,
-            keyMap: B.get ('user', 'settings', 'vi') ? 'vim' : 'default',
+            keyMap: B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default',
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
             value: content || '',
@@ -1130,7 +1132,7 @@ B.mrespond ([
 
       if (c ('#chat-editor')) {
          editor = CodeMirror (c ('#chat-editor'), {
-            keyMap: B.get ('user', 'settings', 'vi') ? 'vim' : 'default',
+            keyMap: B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default',
             lineWrapping: true,
             mode: 'markdown',
             value: B.get ('message', 'body') || '',
@@ -1391,6 +1393,11 @@ B.mrespond ([
    }],
 
    ['create', 'message', function (x, to, name, body) {
+      // On mobile, CodeMirror reads text the keyboard is still composing only after a delay: read it now and send what the editor shows.
+      if (editor && c ('#chat-editor')) {
+         editor.display.input.ensurePolled ();
+         body = editor.getValue ();
+      }
       var project = B.get ('project', 'id');
       if (! project || B.get ('file', 'name') !== name) return;
       if (! (body || '').trim ()) return;
@@ -3823,6 +3830,14 @@ views.chat = function (read) {
             B.view ([['message'], ['user', 'credentials']], function (message, credentials) {
                message = message || {};
                var recipient = message.to || '';
+               var options = ['all', 'shell'].concat (function () {
+                  var aiOptions = dale.fil (models, undefined, function (m) {
+                     if (modelCredential (m, credentials)) return 'ai-' + m.model;
+                  });
+                  return aiOptions.length ? aiOptions : ['ai'];
+               } ());
+               // A recipient that is already an option shows every option; anything else filters them.
+               var filter = options.indexOf (recipient.trim ().toLowerCase ()) === -1 ? recipient.trim ().toLowerCase () : '';
                return ['div', {
                   class: 'flex items-center pv3',
                   style: style ({gap: '0.75rem'}),
@@ -3847,13 +3862,8 @@ views.chat = function (read) {
                      ['div', {
                         class: 'absolute ba bg-vdeepnavy border-box br2 chat-recipient-options w-100',
                         style: style ({bottom: '100%', 'z-index': '10'}),
-                     }, dale.fil (['all', 'shell'].concat (function () {
-                        var aiOptions = dale.fil (models, undefined, function (m) {
-                           if (modelCredential (m, credentials)) return 'ai-' + m.model;
-                        });
-                        return aiOptions.length ? aiOptions : ['ai'];
-                     } ()), undefined, function (to) {
-                        if (to.indexOf (recipient.trim ().toLowerCase ()) === -1) return;
+                     }, dale.fil (options, undefined, function (to) {
+                        if (to.indexOf (filter) === -1) return;
                         return ['button', {
                            class: 'bg-vdeepnavy bn db f5 pa2 pointer tl vlightblue w-100',
                            type: 'button',
