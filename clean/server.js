@@ -26,10 +26,8 @@ catch (error) {
 }
 
 CONFIG.cookie.name = '__Host-' + CONFIG.cookie.name;
-var base        = new URL (CONFIG.baseURL);
-var projectHost = new RegExp ('^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\\.' + require ('cicek').escape (base.host) + '$');
 
-// *** SETUP ***
+// *** LIBRARIES ***
 
 var child   = require ('child_process')
 var cluster = require ('cluster');
@@ -48,20 +46,6 @@ var mime  = require ('mime');
 var hitit = require ('hitit');
 
 var {inc, last, type} = teishi;
-
-// *** SYSTEM PROMPT ***
-
-var systemPrompt = fs.readFileSync ('prompt.md', 'utf8');
-
-// *** MODELS ***
-
-var models = [
-   {provider: 'openai',    model: 'gpt-6',   canonical: 'gpt-6-astra',    window: 1050000, priceCache: 1,   priceIn: 10, priceOut: 50},
-   {provider: 'openai',    model: 'gpt-5.6', canonical: 'gpt-5.6-sol',    window: 1050000, priceCache: 0.4, priceIn: 4,  priceOut: 20},
-   {provider: 'openai',    model: 'gpt-4.1', canonical: 'gpt-4.1',        window: 1047576, priceCache: 0.5, priceIn: 2,  priceOut: 8, requireAPIKey: true},
-   {provider: 'anthropic', model: 'opus-5.5', canonical: 'claude-opus-5-5', window: 1000000, priceCache: 0.2, priceIn: 4,  priceOut: 20},
-   {provider: 'anthropic', model: 'opus-4.6', canonical: 'claude-opus-4-6', window: 1000000, priceCache: 0.5, priceIn: 5,  priceOut: 25},
-];
 
 // *** TEST ***
 
@@ -170,8 +154,6 @@ dale.async = async function (input, fun, options) {
    return results;
 }
 
-// *** REDIS ***
-
 var redis = function (command) {
    // Multi
    if (type (command) === 'array') {
@@ -185,88 +167,6 @@ var redis = function (command) {
    // Simple
    return promise (Redis [command].bind (Redis), [].slice.call (arguments, 1));
 }
-
-var getForUser = async function (userId, entity) {
-   var keys = await redis ('smembers', 'owner:' + userId);
-   if (entity === 'project') {
-      var grants = await redis ('smembers', 'accessTo:' + userId);
-      keys = [... new Set (keys.concat (dale.fil (grants, undefined, function (grant) {
-         var [verb, id] = grant.split (':');
-         if (verb === 'read' || verb === 'write') return 'project:' + id;
-      })))];
-   }
-   var items = dale.fil (keys, undefined, function (key) {
-      if (key.match (new RegExp ('^' + entity + ':'))) return key;
-   });
-
-   var results = await redis (dale.go (items, function (item) {
-      return ['hgetall', item];
-   }));
-   if (entity === 'project') {
-      var writable = dale.obj (dale.fil (grants, undefined, function (grant) {
-         var [verb, id] = grant.split (':');
-         if (verb === 'write') return id;
-      }), function (id) {
-         return [id, true];
-      });
-      dale.go (results, function (project) {
-         project.read = project.owner !== userId && ! writable [project.id] ? true : undefined;
-      });
-   }
-   return results;
-}
-
-var validProjectPath = function (path) {
-   return type (path) === 'string' &&
-      ! path.startsWith ('/') &&
-      ! /[\\\x00-\x1f\x7f]/.test (path) &&
-      ! path.includes ('//') &&
-      ! dale.stop (path.split ('/'), true, function (part) {
-         return part === '.' || part === '..';
-      });
-};
-
-// Project names appear in URLs as /p/<user>/<name>, with each space as `-` and each dash as `--`. A name can't be a UUID (a UUID in that slot is a project id), can't have two spaces in a row or a space next to a dash (those would decode ambiguously), and can't have `/` or `?` (the server decodes the whole URL before routing).
-var validProjectName = function (name) {
-   return ! /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test (name) && ! / {2}| -|- |[/?]/.test (name);
-};
-
-var allowOp = async function (userId, projectId, op, prefix) {
-   if (op !== 'read' && op !== 'write') return false;
-   if (prefix !== undefined && ! validProjectPath (prefix)) return false;
-   // access.md names who the project is shared with; requests without a session can't read it.
-   if (userId === 'PUBLIC' && prefix === 'vibey/access.md') return false;
-
-   var [owner, grants] = await redis ([
-      ['hget', 'project:' + projectId, 'owner'],
-      ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
-   ]);
-   if (! owner) return false;
-   if (owner === userId) return true;
-
-   return !! dale.stop (grants, true, function (grant) {
-      var [verb, id, ... parts] = grant.split (':');
-      if (id !== projectId) return;
-      if (verb !== 'write' && verb !== op) return;
-
-      var scope = parts.join (':');
-      return ! scope || (type (prefix) === 'string' && prefix.startsWith (scope));
-   });
-};
-
-var projectAccessCleanup = async function (id) {
-   var members = await redis ('smembers', 'accessBy:' + id);
-   return [
-      ... dale.go (members, function (member) {
-         var [verb, who, ... prefix] = member.split (':');
-         var suffix = prefix.length ? ':' + prefix.join (':') : '';
-         return ['srem', 'accessTo:' + who, verb + ':' + id + suffix];
-      }),
-      ['del', 'accessBy:' + id]
-   ];
-};
-
-// *** COMMANDS ***
 
 var run = async function (... args) {
 
@@ -330,13 +230,187 @@ var run = async function (... args) {
    });
 }
 
-var project = {};
-
-var lock = async function (key, ttl) {
+var lock = async function (key, ttl, interval) {
    while (! await redis ('set', key, '1', 'NX', 'EX', ttl)) {
-      await new Promise (function (resolve) {setTimeout (resolve, 50)});
+      await new Promise (function (resolve) {setTimeout (resolve, interval || 50)});
    }
 }
+
+var rateLimit = async function (prefix, max, ttl) {
+   var [result] = await redis ([
+      ['incr',   'rateLimit:' + prefix],
+      ['expire', 'rateLimit:' + prefix, ttl]
+   ]);
+   return result > max;
+}
+
+// *** EMAIL ***
+
+var mailer;
+if (CONFIG.email?.enable && SECRET.email?.ses?.accessKeyId && SECRET.email?.ses?.secretAccessKey) {
+   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (SECRET.email?.ses));
+}
+
+var sendmail = function (options) {
+   return new Promise (function (resolve, reject) {
+      if (! CONFIG.email?.enable) {
+         clog ({type: 'Skipping email', to: options.to, subject: options.subject});
+         return resolve ();
+      }
+      mailer.sendMail ({
+         from:    CONFIG.email?.from?.name + ' <' + CONFIG.email?.from?.address + '>',
+         to:      options.to,
+         replyTo: CONFIG.email?.from?.address,
+         subject: options.subject,
+         html:    lith.g (options.message)
+      }, function (error) {
+         if (error) reject (error);
+         else       resolve ();
+      });
+   });
+}
+
+// *** MODELS & SYSTEM PROMPT ***
+
+var models = [
+   {provider: 'openai',    model: 'gpt-6',   canonical: 'gpt-6-astra',    window: 1050000, priceCache: 1,   priceIn: 10, priceOut: 50},
+   {provider: 'openai',    model: 'gpt-5.6', canonical: 'gpt-5.6-sol',    window: 1050000, priceCache: 0.4, priceIn: 4,  priceOut: 20},
+   {provider: 'openai',    model: 'gpt-4.1', canonical: 'gpt-4.1',        window: 1047576, priceCache: 0.5, priceIn: 2,  priceOut: 8, requireAPIKey: true},
+   {provider: 'anthropic', model: 'opus-5.5', canonical: 'claude-opus-5-5', window: 1000000, priceCache: 0.2, priceIn: 4,  priceOut: 20},
+   {provider: 'anthropic', model: 'opus-4.6', canonical: 'claude-opus-4-6', window: 1000000, priceCache: 0.5, priceIn: 5,  priceOut: 25},
+];
+
+var systemPrompt = fs.readFileSync ('prompt.md', 'utf8');
+
+// *** AUTH HELPERS ***
+
+var getForUser = async function (userId, entity) {
+   var keys = await redis ('smembers', 'owner:' + userId);
+   if (entity === 'project') {
+      var grants = await redis ('smembers', 'accessTo:' + userId);
+      keys = [... new Set (keys.concat (dale.fil (grants, undefined, function (grant) {
+         var [verb, id] = grant.split (':');
+         if (verb === 'read' || verb === 'write') return 'project:' + id;
+      })))];
+   }
+   var items = dale.fil (keys, undefined, function (key) {
+      if (key.match (new RegExp ('^' + entity + ':'))) return key;
+   });
+
+   var results = await redis (dale.go (items, function (item) {
+      return ['hgetall', item];
+   }));
+   if (entity === 'project') {
+      var writable = dale.obj (dale.fil (grants, undefined, function (grant) {
+         var [verb, id] = grant.split (':');
+         if (verb === 'write') return id;
+      }), function (id) {
+         return [id, true];
+      });
+      dale.go (results, function (project) {
+         project.read = project.owner !== userId && ! writable [project.id] ? true : undefined;
+      });
+   }
+   return results;
+}
+
+var setUsername = async function (id, value, generate) {
+   var candidates, fallback, number = 0;
+   if (generate) {
+      var normalize = function (text) {
+         text = text.toLowerCase ().replace (/[^a-z0-9]+/g, '-').replace (/^-+|-+$/g, '') || 'user';
+         text = text.padEnd (3, '1');
+         return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (text) ? text + '-1' : text;
+      };
+      var parts = value.split ('@');
+      fallback = normalize (parts [0] + '-' + parts [1].replace (/\.[^.]+$/, ''));
+      candidates = [normalize (parts [0]), fallback];
+   }
+
+   while (true) {
+      var username = generate
+         ? candidates.length ? candidates.shift () : fallback + '-' + (++number)
+         : value;
+
+      var result = await redis ('eval', `
+         local user = KEYS[1]
+         local id, name = ARGV[1], ARGV[2]
+         if redis.call('EXISTS', user) == 0 then return -1 end
+         local key = 'username:' .. name
+         local owner = redis.call('GET', key)
+         if owner and owner ~= id
+            and redis.call('HGET', 'user:' .. owner, 'username') == name then
+            return 0
+         end
+         local old = redis.call('HGET', user, 'username')
+         if old and old ~= name
+            and redis.call('GET', 'username:' .. old) == id then
+            redis.call('DEL', 'username:' .. old)
+         end
+         redis.call('SET', key, id)
+         redis.call('HSET', user, 'username', name)
+         local ttl = redis.call('PTTL', user)
+         if ttl >= 0 then redis.call('PEXPIRE', key, ttl) end
+         return 1
+      `, 1, 'user:' + id, id, username);
+
+      if (! generate || result !== 0) return result;
+   }
+}
+
+// *** PROJECT ***
+
+var project = {};
+
+var validProjectPath = function (path) {
+   return type (path) === 'string' &&
+      ! path.startsWith ('/') &&
+      ! /[\\\x00-\x1f\x7f]/.test (path) &&
+      ! path.includes ('//') &&
+      ! dale.stop (path.split ('/'), true, function (part) {
+         return part === '.' || part === '..';
+      });
+};
+
+// Project names appear in URLs as /p/<user>/<name>, with each space as `-` and each dash as `--`. A name can't be a UUID (a UUID in that slot is a project id), can't have two spaces in a row or a space next to a dash (those would decode ambiguously), and can't have `/` or `?` (the server decodes the whole URL before routing).
+var validProjectName = function (name) {
+   return ! /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test (name) && ! / {2}| -|- |[/?]/.test (name);
+};
+
+var allowOp = async function (userId, projectId, op, prefix) {
+   if (op !== 'read' && op !== 'write') return false;
+   if (prefix !== undefined && ! validProjectPath (prefix)) return false;
+   // access.md names who the project is shared with; requests without a session can't read it.
+   if (userId === 'PUBLIC' && prefix === 'vibey/access.md') return false;
+
+   var [owner, grants] = await redis ([
+      ['hget', 'project:' + projectId, 'owner'],
+      ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
+   ]);
+   if (! owner) return false;
+   if (owner === userId) return true;
+
+   return !! dale.stop (grants, true, function (grant) {
+      var [verb, id, ... parts] = grant.split (':');
+      if (id !== projectId) return;
+      if (verb !== 'write' && verb !== op) return;
+
+      var scope = parts.join (':');
+      return ! scope || (type (prefix) === 'string' && prefix.startsWith (scope));
+   });
+};
+
+var projectAccessCleanup = async function (id) {
+   var members = await redis ('smembers', 'accessBy:' + id);
+   return [
+      ... dale.go (members, function (member) {
+         var [verb, who, ... prefix] = member.split (':');
+         var suffix = prefix.length ? ':' + prefix.join (':') : '';
+         return ['srem', 'accessTo:' + who, verb + ':' + id + suffix];
+      }),
+      ['del', 'accessBy:' + id]
+   ];
+};
 
 project.access = async function (id) {
    var file = await project.read (id, '/project/vibey/access.md');
@@ -580,6 +654,8 @@ project.cleanup = async function () {
    process.exit (0);
 }
 
+// *** BACKUP ***
+
 var backup = {};
 
 // Based off https://gist.github.com/adv0r/1dfaf7999d7aac95d473e65b675496b0
@@ -693,46 +769,8 @@ project.backup = async function (id) {
    //    - inside of .git, anything extraneous that is older than 7 days
 }
 
-
-// *** RATE LIMIT ***
-
-var rateLimit = async function (prefix, max, ttl) {
-   var [result] = await redis ([
-      ['incr',   'rateLimit:' + prefix],
-      ['expire', 'rateLimit:' + prefix, ttl]
-   ]);
-   return result > max;
-}
-
-// *** EMAIL ***
-
-var mailer;
-if (CONFIG.email?.enable && SECRET.email?.ses?.accessKeyId && SECRET.email?.ses?.secretAccessKey) {
-   mailer = require ('nodemailer').createTransport (require ('nodemailer-ses-transport') (SECRET.email?.ses));
-}
-
-var sendmail = function (options) {
-   return new Promise (function (resolve, reject) {
-      if (! CONFIG.email?.enable) {
-         clog ({type: 'Skipping email', to: options.to, subject: options.subject});
-         return resolve ();
-      }
-      mailer.sendMail ({
-         from:    CONFIG.email?.from?.name + ' <' + CONFIG.email?.from?.address + '>',
-         to:      options.to,
-         replyTo: CONFIG.email?.from?.address,
-         subject: options.subject,
-         html:    lith.g (options.message)
-      }, function (error) {
-         if (error) reject (error);
-         else       resolve ();
-      });
-   });
-}
-
 // *** ROUTES ***
 
-// The not-found page, served with 404s for file requests: a question mark drawn with spinnies (the client's animated |/-\\ characters) and a link back to the projects.
 var fourohfour = lith.g ([
    ['!DOCTYPE HTML'],
    ['html', [
@@ -790,7 +828,6 @@ var fourohfour = lith.g ([
          ]],
       ]],
       ['body', [
-         // The vibey logo, placed as on the projects view; like the button, it takes you to the projects.
          ['a', {href: (CONFIG.baseURL || '') + '/#/projects'}, ['img', {alt: 'vibey', class: 'logo', src: (CONFIG.baseURL || '') + '/favicon.svg'}]],
          ['div', {'aria-label': 'Not found', role: 'img'}, dale.go ([
             '.#####.',
@@ -817,50 +854,6 @@ var fourohfour = lith.g ([
    ]],
 ]);
 
-var setUsername = async function (id, value, generate) {
-   var candidates, fallback, number = 0;
-   if (generate) {
-      var normalize = function (text) {
-         text = text.toLowerCase ().replace (/[^a-z0-9]+/g, '-').replace (/^-+|-+$/g, '') || 'user';
-         text = text.padEnd (3, '1');
-         return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (text) ? text + '-1' : text;
-      };
-      var parts = value.split ('@');
-      fallback = normalize (parts [0] + '-' + parts [1].replace (/\.[^.]+$/, ''));
-      candidates = [normalize (parts [0]), fallback];
-   }
-
-   while (true) {
-      var username = generate
-         ? candidates.length ? candidates.shift () : fallback + '-' + (++number)
-         : value;
-
-      var result = await redis ('eval', `
-         local user = KEYS[1]
-         local id, name = ARGV[1], ARGV[2]
-         if redis.call('EXISTS', user) == 0 then return -1 end
-         local key = 'username:' .. name
-         local owner = redis.call('GET', key)
-         if owner and owner ~= id
-            and redis.call('HGET', 'user:' .. owner, 'username') == name then
-            return 0
-         end
-         local old = redis.call('HGET', user, 'username')
-         if old and old ~= name
-            and redis.call('GET', 'username:' .. old) == id then
-            redis.call('DEL', 'username:' .. old)
-         end
-         redis.call('SET', key, id)
-         redis.call('HSET', user, 'username', name)
-         local ttl = redis.call('PTTL', user)
-         if ttl >= 0 then redis.call('PEXPIRE', key, ttl) end
-         return 1
-      `, 1, 'user:' + id, id, username);
-
-      if (! generate || result !== 0) return result;
-   }
-};
-
 var routes = [
 
    // *** HOST GATEKEEPER ***
@@ -874,6 +867,8 @@ var routes = [
       }
 
       // Project hosts are handled by the project gatekeeper.
+      var base = new URL (CONFIG.baseURL);
+      var projectHost = new RegExp ('^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\\.' + require ('cicek').escape (base.host) + '$');
       if (projectHost.test ((rq.headers.host || '').toLowerCase ())) return rs.next ();
 
       var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
@@ -947,6 +942,8 @@ var routes = [
    // *** PROJECT GATEKEEPER ***
 
    ['all', '*', async function (rq, rs) {
+      var base = new URL (CONFIG.baseURL);
+      var projectHost = new RegExp ('^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\\.' + require ('cicek').escape (base.host) + '$');
       var match = (rq.headers.host || '').toLowerCase ().match (projectHost);
       if (! match) return rs.next ();
 
@@ -961,7 +958,7 @@ var routes = [
             ['del',     'projectCode:' + rq.data.query.code]
          ]);
          // The code must be redeemed by the browser that requested it, which holds the matching state cookie.
-         if (! code || code.project !== id || ! rq.data.cookie || code.state !== rq.data.cookie.projectState) return reply (rs, 403, {error: 'Invalid code'});
+         if (! code || code.project !== id || ! rq.data.cookie || code.state !== rq.data.cookie ['__Host-projectState']) return reply (rs, 403, {error: 'Invalid code'});
 
          var csrf   = crypto.randomBytes (32).toString ('hex');
          var secret = crypto.randomBytes (32).toString ('hex');
@@ -973,13 +970,21 @@ var routes = [
          return reply (rs, 302, '', {
             location: encodeURI (rq.url),
             'referrer-policy': 'no-referrer',
-            'set-cookie': cicek.cookie.write (CONFIG.cookie.name, secret, {
-               expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
-               httponly: true,
-               path: '/',
-               samesite: 'Lax',
-               secure: true,
-            })
+            'set-cookie': [
+               cicek.cookie.write (CONFIG.cookie.name, secret, {
+                  expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               }),
+               cicek.cookie.write ('__Host-projectState', false, {
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               })
+            ]
          });
       }
 
@@ -1001,9 +1006,10 @@ var routes = [
 
          if (! rq.user && ! await allowOp ('PUBLIC', id, 'read', path)) {
             var state = crypto.randomBytes (32).toString ('hex');
+            var base = new URL (CONFIG.baseURL);
             return reply (rs, 302, '', {
                location: CONFIG.baseURL + '/auth/project/' + id + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
-               'set-cookie': cicek.cookie.write ('projectState', state, {
+               'set-cookie': cicek.cookie.write ('__Host-projectState', state, {
                   expires: new Date (Date.now () + 10 * 60 * 1000),
                   httponly: true,
                   path: '/',
@@ -1019,6 +1025,14 @@ var routes = [
       rq.projectHost = id;
       rq.url = '/project/' + id + '/file/' + path;
       rs.next ();
+   }],
+
+   // *** ERROR REPORTING ***
+
+   ['post', '/error', function (rq, rs) {
+      var error = type (rq.body.error) === 'object' ? rq.body : {error: rq.body};
+      clog ({priority: 'important', type: 'client error', ... error, user: rq.user ? rq.user.id : 'public'});
+      reply (rs, 200);
    }],
 
    // *** STATIC ***
@@ -1075,16 +1089,8 @@ var routes = [
          background_color: '#1a1a2e',
          display: 'standalone',
          icons: [
-            {
-               sizes: '192x192',
-               src: 'icon/icon-192.png',
-               type: 'image/png',
-            },
-            {
-               sizes: '512x512',
-               src: 'icon/icon-512.png',
-               type: 'image/png',
-            },
+            {sizes: '192x192', src: 'icon/icon-192.png', type: 'image/png'},
+            {sizes: '512x512', src: 'icon/icon-512.png', type: 'image/png'},
          ],
          id: './',
          name: 'vibey',
@@ -1093,14 +1099,6 @@ var routes = [
          start_url: './',
          theme_color: '#1a1a2e',
       }), {'content-type': 'application/manifest+json'});
-   }],
-
-   // *** ERROR REPORTING ***
-
-   ['post', '/error', function (rq, rs) {
-      var error = type (rq.body.error) === 'object' ? rq.body : {error: rq.body};
-      clog ({priority: 'important', type: 'client error', ... error});
-      reply (rs, 200);
    }],
 
    // *** AUTH ***
@@ -1432,6 +1430,7 @@ var routes = [
          return reply (rs, 400, {error: 'Invalid returnUrl'});
       }
 
+      var base = new URL (CONFIG.baseURL);
       if (url.origin !== base.protocol + '//' + id + '.' + base.host) return reply (rs, 400, {error: 'Invalid returnUrl'});
       if (type (rq.data.query.state) !== 'string' || rq.data.query.state.length === 0) return reply (rs, 400, {error: 'Invalid state'});
 
@@ -1509,6 +1508,8 @@ var routes = [
 
       reply (rs, 200);
    }],
+
+   // *** PROJECTS ***
 
    ['get', '/projects', async function (rq, rs) {
       var userId = rq.user ? rq.user.id : 'PUBLIC';
@@ -1769,7 +1770,7 @@ var routes = [
          'content-type': mime.lookup (path) || 'application/octet-stream',
          'cache-control': 'private, no-cache',
          'x-content-type-options': 'nosniff',
-         'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
+         //'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
       };
       var cached = cicek.cache (rq.method, buffer, rq.headers, headers, 200);
       if (! cached) headers ['content-length'] = buffer.length;
@@ -2852,11 +2853,8 @@ var routes = [
 
    ['post', '/test/cleanup', async function (rq, rs) {
       if (CONFIG.cloud && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
-
       await test.cleanup (redis, run);
-
       reply (rs, 200);
-
    }],
 ];
 

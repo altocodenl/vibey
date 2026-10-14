@@ -1,5 +1,67 @@
 # Vibey development notes
 
+## 2026-10-14
+
+Vibey should be a perfect program. That standard I brought to the ustack should also go there. Focus on a few primitives, beautifully done, and then let everyone else build on top of that. A small, beautiful core that's a joy to work with. And improve the ustack wherever needed.
+
+Project endpoints that should be served by the host:
+- GET /projects
+- POST /project
+- PUT /project
+- DELETE /project
+
+Project endpoints that should be served by the subdomain:
+- List files
+- Read file
+- Write file
+- Edit file
+- Run command
+- Send message
+- Read message
+
+(which are basically the four commands of pi, plus list, send message & read message; the last two are variations on edit file and read file)
+
+The client should be served from both the host and the subdomain. The former is for login, project selector and settings, later also engines; the latter is for the project view.
+
+What should the modifications be for project endpoints? (all of these hosts are prepended with the subdomain)
+- Client: GET / (assets also go on the same paths as the assets of the server)
+   - The entire client.js will be partitioned! It needs to be aware of whether we're in a project subdomain or not. We could make the GET /auth/user endpoint report this.
+   - In project mode, most views won't be available. And in host mode, the other way around. Otherwise, assume the client is one piece, and could be restored if needed to work under a single domain. Do not bother eliminating responders: if the user is naughty enough to trigger them from the command line, the server will reject them. Don't add unnecessary safeguards, just hide the views.
+- Get user details: GET /auth/user
+   - Interesting problem: the state of the client is split now. A lot of what's in the host won't be in the project, and for good reason. This endpoint needs to expose what is needed: settings, which AI credentials are present.
+   - But this can be the same normal endpoint. What we need is to mask some fields, and just keep csrf (the one from the project session), email, id, mode, settings and username.
+- List files: GET /files
+- Read file: GET /f/...
+   - This endpoint requires discussion. Why not /p instead of /f ? Because we're already in a project on the subdomain. And "f" is short for "file".
+   - Why not on the root? Because we need to serve the client there, and also have a dedicated endpoint to list files that wouldn't clash with a file named "files" on a project.
+   - The client needs to be modified to display `#/f` too
+- Write file: POST /write
+- Edit file: POST /edit
+- Send message: POST /message
+- Read message: PUT /message (not a GET because it needs to send quite a few fields and URL parameters might make the URL too long)
+- Subdomain resolving (inner middleware, near the top, perhaps fold into the project gatekeeper)
+   - If the project subdomain has a "friendly" name, it won't fall back to a uuid subdomain. Conversely, if a project is requested by uuid, and it has a friendly name, it will be resolved to a friendly name. This should be shown in the client, so we will use 302s for this. The 302 can only happen if the user has access for the project, so we don't give away information to those who shouldn't have it. Check if this last requirement forces us to do this on the host in case we don't have a cookie yet.
+   - Once the project is resolved through the middleware, rq.projectId is set.
+   - Remove projectId from the bodies of write, edit, send message & read message
+- Project gatekeeper (middleware, already implemented): does autologin or checks credentials at the project level
+- GET /auth/project/<projectId> (already implemented): works as a login to a project for a user that has host credentials
+
+
+TODO:
+- projectState? projectCode? rename two new cookies?
+- content security policy?
+
+Some notes on Alexander - The process of creating life:
+- "I am talking about feeling as a way of grasping the wholeness of a situation. (...) we obtain a nearly visceral feeling of the whole"
+- "I am also talking about a feeling of what to do next (...) we can feel where it wants to go"
+- "I am also talking about the importance of the idea that a building or any made object, when it has life, creates - generates - deep feeling in the person who encounters it."
+- "this feeling or vision of emotional substance comes into our minds *from* the whole which exists."
+- "any made thing - building, room, street, or ornament - has the obligation to create experience of deep feeling in us. We may think of this by saying that the thing *itself* has feeling when it lives." [Note: it's autopoietic: we perceive the feeling of something, that something in itself doesn't have feeling on its own; but its generation of feeling is replicable by other autopoietic entities coming into contact with it]
+- "Finally, there is always a structure latent in any given wholeness. This latent structure is the weakly held system of centeres that are not quite defined yet (...) Every wholeness carries within it this "vector" in time, pointing in some direction (...) This is the most important aspect of wholeness, and the reason we must try to "feel" the structure when attempting structure-preserving transformations"
+- "We must have a feeling, in us, which will reliably tell us when we are going in the right direction, and when we are going in the wrong direction. It is ultimately this inner feeling, this inner vision of feeling, which is our only reliable (and necessary) guide."
+- "We must be able to summon up, inside us, an inner sensation of the feeling of a healthy pond (...) as a morphological feeling which allows me, in my inner eye, with my eyes closed, to remember, breathe, the kind of soft and subtle feeling of life which such a fishpond requires."
+- "Getting these colors right was one of the most exhausting things I have ever done."
+
 ## 2026-10-13
 
 The "redirecting" route for projects is really the project gatekeeper! The old auth gatekeeper is the host gatekeeper.

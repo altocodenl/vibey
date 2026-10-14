@@ -419,9 +419,8 @@ B.mrespond ([
       var project = B.get ('project', 'id');
       if (B.get ('extendClient') || B.get ('view') !== 'files') return;
 
-      // A project that's only listed because it's public doesn't run code in the visitor's session.
-      if (dale.stop (B.get ('projects') || [], true, function (p) {
-         return p.id === project && p.public;
+      if (! dale.stop (B.get ('projects') || [], true, function (p) {
+         return p.id === project && (p.owner === undefined || p.owner === (B.get ('user', 'id') || 'local'));
       })) return;
 
       if (! dale.stop (B.get ('files') || [], true, function (file) {
@@ -1384,7 +1383,7 @@ B.mrespond ([
    // Before views redraw: remember whether the chat was at the bottom, since large appends (tool calls) grow it by more than the threshold.
    ['change', [/^(content|file)$/], {match: B.changeResponder, priority: 1001}, function (x) {
       var messages = c ('.messages') [0];
-      B.call (x, 'mset', ['message', 'atBottom'], ! messages || messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100);
+      B.call (x, 'mset', ['message', 'atBottom'], ! messages || messages.scrollHeight - messages.scrollTop - messages.clientHeight < 50);
    }],
 
    ['change', [/^(content|file)$/], {match: B.changeResponder, priority: -1001}, function (x) {
@@ -1484,20 +1483,20 @@ B.mrespond ([
    // *** CREDENTIALS ***
 
    ['start', 'pkce', function (x, provider) {
-      B.call (x, 'set', ['pkce', 'loading'], provider);
+      B.call (x, 'set', ['pkce', 'account', 'loading'], provider);
       B.call (x, 'post', '/credentials/' + provider + '/start', {}, function (x, error, rs) {
          if (error) {
-            B.call (x, 'rem', 'pkce', 'loading');
+            B.call (x, 'rem', ['pkce', 'account'], 'loading');
             return B.call (x, 'snackbar', 'error', 'Failed to start login');
          }
          window.open (rs.body.url, '_blank');
-         B.call (x, 'set', ['pkce', 'step'], {provider: provider, flow: 'paste_code'});
-         B.call (x, 'rem', 'pkce', 'loading');
+         B.call (x, 'set', ['pkce', 'account', 'provider'], provider);
+         B.call (x, 'rem', ['pkce', 'account'], 'loading');
       });
    }],
 
    ['complete', 'pkce', function (x, provider, code) {
-      B.call (x, 'set', ['pkce', 'loading'], provider);
+      B.call (x, 'set', ['pkce', 'account', 'loading'], provider);
       B.call (x, 'post', '/credentials/' + provider + '/complete', {code: code}, function (x, error, rs) {
          B.call (x, 'rem', [], 'pkce');
          if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
@@ -2940,7 +2939,7 @@ views.files = function () {
                ]];
             })}, function () {return B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
                pkce = pkce || {};
-               var step = pkce.step;
+               var account = pkce.account || {};
                if (pkce.apiKey) return views.modal ({
                   'aria-label': 'Add API key',
                   'aria-modal': 'true',
@@ -2967,14 +2966,14 @@ views.files = function () {
                      }, 'Cancel'],
                   ]],
                ]);
-               if (pkce.confirm && ! step) return views.modal ({
+               if (account.confirm && ! account.provider) return views.modal ({
                   'aria-label': 'Connect account',
                   'aria-modal': 'true',
                   role: 'dialog',
                }, [
-                  ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, 'Connect ' + (pkce.confirm === 'anthropic' ? 'Anthropic' : 'OpenAI')],
+                  ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, 'Connect ' + (account.confirm === 'anthropic' ? 'Anthropic' : 'OpenAI')],
                   ['p', {class: 'lh-copy mb3 mt0 vnearwhite'}, 'Here’s what will happen:'],
-                  ['ol', {class: 'lh-copy mb4 mt0 pl3 vlightblue'}, pkce.confirm === 'anthropic' ? [
+                  ['ol', {class: 'lh-copy mb4 mt0 pl3 vlightblue'}, account.confirm === 'anthropic' ? [
                      ['li', 'Click the button below to be taken to Claude\'s login page.'],
                      ['li', 'Come back and paste the code you got.'],
                   ] : [
@@ -2982,7 +2981,7 @@ views.files = function () {
                      ['li', 'You’ll be taken to a broken page with a URL that starts with "localhost:1455...". This is expected.'],
                      ['li', 'Copy that entire URL, come back and paste it here.'],
                   ]],
-                  ((credentials || {}) [pkce.confirm] || {}).account
+                  ((credentials || {}) [account.confirm] || {}).account
                      ? ['p', {class: 'lh-copy mb4 mt0 vpurple'}, 'Completing this login will replace your currently connected account for this provider.']
                      : '',
                   ['div', {
@@ -2990,21 +2989,21 @@ views.files = function () {
                      style: style ({gap: '0.75rem'}),
                   }, [
                      ['button', {
-                        class: (css.button.replace ('bg-vblue', pkce.confirm === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
-                        disabled: !! pkce.loading,
-                        onclick: B.ev ('start', 'pkce', pkce.confirm),
+                        class: (css.button.replace ('bg-vblue', account.confirm === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
+                        disabled: !! account.loading,
+                        onclick: B.ev ('start', 'pkce', account.confirm),
                         type: 'button',
-                     }, pkce.loading ? 'Opening browser...' : 'Start login'],
+                     }, account.loading ? 'Opening browser...' : 'Start login'],
                      ['button', {
                         class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
-                        disabled: !! pkce.loading,
+                        disabled: !! account.loading,
                         onclick: B.ev ('rem', [], 'pkce'),
                         type: 'button',
                      }, 'Cancel'],
                   ]],
                ]);
-               if (step) return ['div', [
-                  ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (step.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
+               if (account.provider) return ['div', [
+                  ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (account.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
                   ['input', {
                      class: css.input + ' f6 mb2 w-100',
                      oninput: B.ev ('set', ['pkce', 'code']),
@@ -3016,7 +3015,7 @@ views.files = function () {
                      ['button', {
                         class: css.button + ' f6 flex-auto',
                         disabled: ! (pkce.code || '').trim (),
-                        onclick: B.ev ('complete', 'pkce', step.provider, pkce.code || ''),
+                        onclick: B.ev ('complete', 'pkce', account.provider, pkce.code || ''),
                      }, 'Submit'],
                      ['button', {
                         class: css.button + ' f6',
@@ -3051,10 +3050,10 @@ views.files = function () {
                      }, [
                         ['button', {
                            class: (css.button.replace ('bg-vblue', provider === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
-                           disabled: !! pkce.loading,
-                           onclick: B.ev ('set', 'pkce', {confirm: provider}),
+                           disabled: !! account.loading,
+                           onclick: B.ev ('set', 'pkce', {account: {confirm: provider}}),
                            type: 'button',
-                        }, pkce.loading === provider ? 'Opening browser...' : inc (configured, 'account') ? 'Add new account' : 'Add account'],
+                        }, account.loading === provider ? 'Opening browser...' : inc (configured, 'account') ? 'Add new account' : 'Add account'],
                         ['button', {
                            class: 'bg-transparent br2 f6 flex-auto fw6 pa3 pointer',
                            onclick: B.ev ('set', 'pkce', {apiKey: provider}),
@@ -3590,7 +3589,7 @@ views.chat = function (read) {
                }
                body = message.slice (body.index + body [0].length).replace (/\n$/, '');
                var originalLength = body.length;
-               var expandKey = ['expand', B.get ('project', 'id'), file.name, messageIndexes [messageId.toLowerCase ()]];
+               var expandKey = ['expand', B.get ('project', 'id'), file.name, messageId];
                var truncatedBody;
                if (originalLength > 10000 && ! media) {
                   var firstEnd = body.lastIndexOf ('\n', 50);

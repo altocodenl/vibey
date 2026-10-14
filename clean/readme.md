@@ -104,42 +104,43 @@ redis db <number>
 ### Redis
 
 ```
-accessBy:<projectId> 1 <verb>:<userId|email|PUBLIC>[:<prefix>] // set of recipients; verb is read or write (only read for PUBLIC)
-                     2 <verb>:<userId|email>[:<prefix>]
+accessBy:<projectId> 1 <read|write>:<userId|email|PUBLIC>
+                     2 <read|write>:<userId|email|PUBLIC>:<prefix>
                      ...
-accessTo:<userId|email|PUBLIC> 1 <verb>:<projectId>[:<prefix>] // set of shared projects; prefix is optional
-                        2 <verb>:<projectId>[:<prefix>]
-                        ...
-credentials:<userId> data <JSON> // {provider: {account: {access, expires, refresh, ...}, apiKey: "<key>"}}
+accessTo:<userId|email|PUBLIC> 1 <verb>:<projectId>
+                               2 <verb>:<projectId>:<prefix>
+                               ...
+credentials:<userId> data <JSON> // {<anthropic|openai>: {account: {access, expires, refresh, ...}, apiKey: "<key>"}}
 email:<email> <userId>
-lock:edit:<projectId>:<path> <integer> // per-file edit lock, expires 10s
+lock:commit:<projectId> <1|undefined>
+     edit:<projectId>:<path> <1|undefined>
 loginLink:<link> <email>
 loginLinkR:<email> <loginLink> // reverse login link
 owner:<userId> 1 session:<sessionId>
                2 session-p:<sessionId>
                3 project:<projectId>
                ...
-pkce:<userId>:<provider> <JSON> // {verifier: "<PKCE verifier>"}, expires after 900 seconds
+pkce:<userId>:<provider> <JSON>
 project:<projectId> created <date>
                     id <id>
                     last <date>
                     name <name>
                     owner <userId>
                     slot <integer|undefined>
-projectCode:<code> project <projectId> // single-use, expires after 60 seconds
+projectCode:<code> project <projectId>
                    session <sessionId>
                    state <state>
                    user <userId>
 rateLimit:<identifier> <number>
-session:<session> csrf <csrfToken>
-                  expires <date>
-                  last date <date>
-                       ip <ip>
-                  user <userId>
-session-p:<session> csrf <csrfToken> // expires with the cookie; valid only while session:<sessionId> is valid
-                    project <projectId>
-                    session <sessionId>
+session:<sessionId> csrf <csrfToken>
+                    expires <date>
+                    last date <date>
+                         ip <ip>
                     user <userId>
+session-p:<sessionId> csrf <csrfToken>
+                      project <projectId>
+                      session <sessionId>
+                      user <userId>
 user:<id> count <integer>
           created <date>
           creator <1|undefined>
@@ -149,7 +150,7 @@ user:<id> count <integer>
           settings <JSON> // {vi: true|false|undefined}; absent means {}
           username <username|undefined>
 userCount <integer>
-username:<username> <userId> // reverse username lookup; shares the user's expiry until verified, and can outlive a rename (user:<id> username is authoritative)
+username:<username> <userId>
 ```
 
 ### Access
@@ -189,7 +190,7 @@ Except for `GET /auth/user` and `PUT /auth/user`, all other auth routes will ret
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet, with a username generated from the email: the local part (`hello@example.com` → `hello`), then local part plus domain without its TLD (`hello-example`), then that with `-1`, `-2`… until one is free. Candidates are lowercased, characters other than ASCII letters and digits become single dashes, and leading/trailing dashes are removed. Empty candidates become `user`; short candidates are padded with trailing ones to 3 characters (`a` → `a11`, `ab` → `ab1`). UUID candidates get `-1` appended. Sends a login link by email.
 - **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **Project code**: `GET /auth/project/<projectId>?returnUrl=<url>&state=<state>`: requires a session and read access to the path in `returnUrl`, whose origin must be the project host (`<projectId>.<host>`). Redirects to `returnUrl` with a single-use `code` that is bound to `state` and expires in 60 seconds. Returns 400 for an invalid `returnUrl` or a missing `state`, and 404 without access.
-- **Project host**: `GET <projectId>.<host>/<path>`: serves the project file at `<path>`. Public files are served directly. With a `code`, checks that the `projectState` cookie matches the code's `state`, creates a project session, sets the project cookie and redirects to the same path without the code. A project session is valid only while the host session that issued it is valid. Without a valid project cookie, private files set a `projectState` cookie and redirect to `GET /auth/project/<projectId>`.
+- **Project host**: `GET <projectId>.<host>/<path>`: serves the project file at `<path>`. Public files are served directly. With a `code`, checks that the `__Host-projectState` cookie matches the code's `state`, creates a project session, sets the project cookie, clears `__Host-projectState` and redirects to the same path without the code. A project session is valid only while the host session that issued it is valid. Without a valid project cookie, private files set a `__Host-projectState` cookie and redirect to `GET /auth/project/<projectId>`.
 - **List sessions**: `GET /auth/list`: returns a list of sessions with `{expired: <boolean>, last: {date: <date>, ip: <ip>}}`.
 - **Logout**: `POST /auth/logout`: deletes the current session and clears the cookie.
 - **Delete account**: `POST /auth/delete`: deletes the user and all their resources (sessions, projects). Clears the cookie.
@@ -264,7 +265,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 
 #### Credentials
 
-- `start pkce <provider>`: opens the provider's login page in a new tab and sets `pkce.step` to receive the code.
+- `start pkce <provider>`: opens the provider's login page in a new tab and sets `pkce.account.provider` to receive the code.
 - `complete pkce <provider> <code>`: exchanges the authorization code for tokens via `POST /credentials/:provider/complete`. On success, clears `pkce` and reloads user.
 - `save apiKey <provider> <key>`: saves the API key via `POST /credentials/:provider/apiKey`. On success, clears `pkce` and reloads user.
 - `remove credential <provider> <name>`: asks for confirmation, then removes the credential via `DELETE /credentials/:provider/:name`. On success, reloads user.
@@ -282,7 +283,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
   - Command+S: opens and focuses search.
 - `change projects`: rereads the hash to validate navigation against the refreshed project list.
 - `change project.id`: clears `files` and `project.size` so the newly selected project's file list and disk usage can be loaded.
-- `load clientExtension`: skips projects with `public: true`, so their code never runs in the visitor's session. Otherwise checks the loaded file list for root-level `extend-client.js`. If present and the files view is still showing the selected project, stores its project ID in `extendClient`, reads the script via `GET /project/<projectId>/file/extend-client.js`, and evaluates it in global scope with access to `B`, `views`, etc. Skips loading when `extendClient` is already set and ignores responses if the marker or destination project has changed. Loading and evaluation errors show a snackbar. Only use trusted project code: extensions run with full app privileges. Refresh the page inside the project to activate extension changes. Leaving the project reloads the page even if loading or evaluation failed. Logout clears the marker but does not undo already-running extension code.
+- `load clientExtension`: runs only for projects the user owns, so shared and public projects' code never runs in another user's session. Otherwise checks the loaded file list for root-level `extend-client.js`. If present and the files view is still showing the selected project, stores its project ID in `extendClient`, reads the script via `GET /project/<projectId>/file/extend-client.js`, and evaluates it in global scope with access to `B`, `views`, etc. Skips loading when `extendClient` is already set and ignores responses if the marker or destination project has changed. Loading and evaluation errors show a snackbar. Only use trusted project code: extensions run with full app privileges. Refresh the page inside the project to activate extension changes. Leaving the project reloads the page even if loading or evaluation failed. Logout clears the marker but does not undo already-running extension code.
 - `load projects`: gets all projects via `GET /projects`, sets them in `projects`.
 - `create project`: creates a new project using the trimmed name at `new.project.name` and optional `new.project.slot` via `POST /project`. On success, clears the creation modal and project search, temporarily adds the project to `projects`, navigates to its `main.md` and reloads projects.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
@@ -352,11 +353,11 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 For performance purposes, we use two globals outside of the store:
 
 ```
-content <string|Uint8Array|undefined> // Text, binary data, or undefined while loading/waiting for pending edits; text advances immediately on enqueue, serving as the baseline for subsequent editor changes rather than an acknowledged server snapshot
+content <string|Uint8Array|undefined> // Text, binary data (or undefined while loading/waiting for pending edits)
 editor <CodeMirror instance>
 ```
 
-Store:
+#### Store
 
 ```
 edit file newName "<new name>"
@@ -364,85 +365,84 @@ edit file newName "<new name>"
      project id <id>
              name "<project name>"
              slot <integer|numeric string|"null"|undefined> // "null" is the edit selector's None option
-expand <projectId> <filename> <messageIndex> <true|undefined> // Chat message expansion; index is the zero-padded display number (e.g. "0001"), not UUID. Only bodies over 10,000 characters are collapsible, except file (`base64 1`) messages, which are never truncated: true shows the full body; undefined keeps the lines around the first and last 50 characters with an "(omitting N lines)" marker. Toggled by Expand (Nk)/Collapse.
-extendClient <projectId|undefined> // Project whose client extension started loading
-file actions <false|true> // Whether the filename pill shows Rename and Download; collapsed by default
-     full <false|true> // Whether the right pane fills the screen: it covers the window (the left pane stays rendered underneath), hides the project header and Settings/Logout buttons, and enters browser full screen; toggled by the fullscreen icon in the file header or Command+\. Exiting browser full screen clears it. Persists across files, cleared when leaving the files view
-     mode <edit|view> // For markdown files, view renders the doc: images fit the pane; relative image srcs and link hrefs resolve against the doc's folder, with srcs loading through the file endpoint and hrefs opening the file in vibey through its `p/` URL; relative links to images also show the image inside the link, and links to audio or video show a player after the link. Chat messages render the same way, with paths relative to the project root
+expand <projectId> <filename> <messageId> <true|undefined>
+extendClient <projectId|undefined>
+file actions <false|true>
+     full <false|true>
+     mode <edit|view>
      name "..."
-fileEdits <array|undefined> // Persistent pending-edit queue; initialized silently on first edit, mutated without change events, and retained across navigation. The head stays queued while its request is in flight; no separate saving flag
-          1 project <projectId> // Captured destination project
-            file <filename> // Captured destination file
-            oldText <string|undefined> // Unique replacement anchor, including unchanged context
-            newText <string|undefined> // Replacement including the same unchanged context
-            content <string|undefined> // Full-write fallback or confirmed overwrite; used instead of oldText/newText
+fileEdits 1 content <string|undefined> // Overwrite the entire file with this, fallback to newText/oldText
+            file <filename>
+            newText <string|undefined>
+            oldText <string|undefined>
+            project <projectId>
           ...
 files 1 mtime <integer> // Modification time in milliseconds since Unix epoch
         name "<filename>"
         size <integer> // File size in bytes
       ...
-hover project <project> // The project (or free project slot) being hovered on
-key command <true|undefined> // if set, the command key is pressed
-message atBottom <false|true> // Whether the chat was within 100px of the bottom before the latest content/file change; set with mset, so it does not trigger a change event
-        body <text> // Current chat draft, initially empty
-        cancelling <messageId> <true|undefined> // Whether a cancellation edit is being saved
-        to <all|shell|ai|ai-<model>|messageUUID> // Recipient; restored from chat when blank, defaults to all. Options list only ai-<model> entries with usable credentials, or a bare ai when there are none
-mobile <true|undefined> // Whether the screen is narrower than tachyons' `-ns` breakpoint (30em)
-new file "<file name>" // Name for a new file
-    project name "<project name>" // Enables the new project modal
+hover project <project>
+key command <true|undefined>
+message atBottom <false|true>
+        body <text|undefined>
+        cancelling <messageId> <true|undefined>
+        to <all|shell|ai|ai-<model>|messageUUID>
+mobile <true|undefined>
+new file "<file name>"
+    project name "<project name>"
             slot <integer|undefined>
-    type "chat|file" // Whether the new file is a normal file or a chat
-pkce apiKey <provider|undefined> // When set, shows the API key modal for the provider
-     code "<string>" // Code or API key being entered
-     confirm <provider|undefined> // When set, shows the PKCE confirmation modal
-     loading <provider|undefined> // Provider currently opening a browser tab
-     step flow "paste_code"
-          provider <provider> // Active PKCE code-entry step
-pending messages <array of "projectId/file/messageId"> // Pending messages in the current chat; initially empty
-        requests <map of "projectId/file/messageId" to interval ID> // Active 100ms polling intervals; initially empty
-project id <projectId|undefined> // The current project selected
-        size bytes <integer> // Disk usage including .git, displayed beside the project title; cleared when `project.id` changes
-             history <integer> // Bytes that `clear history` would free; shows the clear history pill when nonzero
+    type "chat|file"
+pkce account confirm <provider|undefined>
+             loading <provider|undefined>
+             provider <provider|undefined>
+     apiKey <provider|undefined>
+     code "<string>"
+pending messages <array of "projectId/file/messageId">
+        requests <map of "projectId/file/messageId" to interval ID>
+project id <projectId|undefined>
+        size bytes <integer>
+             history <integer> // Bytes that `clear history` would free
 projects 1 created <date>
            id <id>
            last <date>
            name "..."
            owner <userId>
-           ownerUsername <username|undefined> // The owner's username; the list shows projects owned by someone else as username/name
+           ownerUsername <username|undefined>
            public <true|undefined> // Listed only because it has a PUBLIC grant; hidden from logged-in users' projects view and slot shortcuts, and never runs its client extension
            slot <integer|undefined>
          ...
-search content count <integer> // Number of text-editor matches; 0 for an empty query or no active text editor
-               current <integer> // 1-based selected match; 0 when no match is selected; resets when highlighting is rebuilt
-               query <text|undefined> // Undefined hides search; empty string shows it unfiltered. Toggled by Search or Command+/. Literal, case-insensitive text-editor search; smartcase filtering of message bodies, filenames, senders and destinations
-       file <text|undefined> // Filters filenames
-       project <text|undefined> // Filters project; undefined shows the spiral, a defined value shows the list. Anonymous users always see the list
-show account <true|undefined> // On mobile, whether the account modal (who you're logged in as) is open in the projects view.
-     pane <left|right|undefined> // On mobile, which pane of the files view is shown; undefined shows the left pane. Clicking a file in the list sets it to right; the ‹ chevron in the file header and Command+B remove it. The right pane hides the project header, so it takes the full height. Ignored on wider screens
-     settings <false|true> // Whether the settings panel is visible
+search content count <integer>
+               current <integer>
+               query <text|undefined>
+       file <text|undefined>
+       project <text|undefined>
+show account <true|undefined>
+     pane <left|right|undefined>
+     settings <false|true>
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
-         type "<notification type>" // Usually ok, warning, or error
-swipe <{x, y}|undefined> // Where the current touch started; undefined when it started inside something that scrolls sideways. Set with mset, so it does not trigger a change event
-test enabled <true|undefined> // Whether test mode is enabled
-     loginLink // Login link for testing
-upload done <integer> // Successfully uploaded files, or files sent as chat messages; upload exists only while uploading
-       total <integer> // Total files in the upload
+         type "<ok|warning|error>"
+swipe x <integer|undefined>
+      y <integer|undefined>
+test enabled <true|undefined>
+     loginLink
+upload done <integer>
+       total <integer>
 user admin <true|undefined>
-     anonymous <true|undefined> // Cloud mode without a session: the projects view shows the list of public projects, and the header shows Login instead of Logout and hides Settings
-     settings vi <boolean|undefined> // Vim bindings for file and chat editors; unset means off
+     anonymous <true|undefined>
      count <integer>
      creator <false|true>
-     creatorRequest <pending|sent|undefined> // Creator access request state
+     creatorRequest <pending|sent|undefined>
      credentials anthropic account <true|undefined>
-                          apiKey <true|undefined>
-                openai account <true|undefined>
-                       apiKey <true|undefined>
+                           apiKey <true|undefined>
+                 openai account <true|undefined>
+                        apiKey <true|undefined>
      csrf "<CSRF token>"
      email "<email>" // Entered in the login form; set from the server once logged in
      id <userId>
-     loginLinkRequested <true|undefined> // Whether the login link was already sent
-     mode <local|cloud> // Determines if we're in local vibey or cloud vibey.
+     loginLinkRequested <true|undefined>
+     mode <local|cloud>
+     settings vi <boolean|undefined>
      username "<username>"
 view "<view name>"
 ```
