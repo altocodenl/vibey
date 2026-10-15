@@ -1,5 +1,120 @@
 # Vibey development notes
 
+## 2026-10-15
+
+A user says: vibey is not an AI agent/harness, it is a platform enabler:
+- It's not easy to use, can be rough around the edges. Still, it's useful.
+- There's no boundaries to what you can do.
+- You have a much larger range of customers, in the different things they can do with vibey.
+
+Provisioning a fresh ubuntu vps:
+```
+echo 'PasswordAuthentication no' | sudo tee /etc/ssh/sshd_config.d/00-keys-only.conf
+sudo sshd -t && sudo systemctl restart ssh
+sudo sshd -T | grep -i passwordauth
+
+sudo apt update
+sudo apt upgrade
+
+sudo apt -y install -y nginx
+
+# Docker
+
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo docker run hello-world
+
+# certbot
+apt install -y certbot python3-certbot-nginx
+```
+
+One liner to generate public/private keys:
+```
+d=$(mktemp -d) && mkfifo "$d/k" "$d/k.pub" && { cat "$d/k" & cat "$d/k.pub" & yes | ssh-keygen -t ed25519 -N '' -C '' -q -f "$d/k" >/dev/null; wait; }; rm -r "$d"
+```
+
+TODO now:
+- Small things:
+   - projectState? projectCode? rename two new cookies?
+   - content security policy?
+- Subdomain per project
+- BYOE
+- Email to project
+- Token/API hooks
+- Demos
+
+Engine flow:
+- Create primary IP: https://docs.hetzner.cloud/reference/cloud#tag/primary-ips/create_primary_ip
+- Create SSH key (server side, run one call, store the private key in redis, read the public one)
+- Create server: https://docs.hetzner.cloud/reference/cloud#tag/servers/create_server : location, server_type, ssh_keys, image, name, public_net (pass the id of the primary ip)
+
+Endpoints:
+- POST /engine
+   - User must be a creator
+   - Takes name & location (for now, no other parameters)
+   - Creates the engine in hetzner
+   - Stores an engine:<id> entry, and adds it to
+- PUT /engine
+   - Takes name and creators (array of user ids of users that can create projects on the engine)
+- DELETE /engine/<id>
+   - Will fail if there are projects still on it
+   - Destroys the hetzner server & IP
+
+Later, when upgrading a server, we keep the IP and resize a new server. If necessary, later, we can keep the IP as something more independent.
+
+The full engine flow would also require automatic payments. We need to do this step wise. The next natural step is BYOE, with me setting up engines manually (yet with a script). But this is limited BYOE, because it doesn't allow users to really bring their own servers. I should also allow them to set the keys to an existing server.
+
+Changes, from the user perspective:
+- When you land on vibey without a session: show the list of public projects (we do this), saying something like "Public projects" at the top:
+- When you land on vibey logged in:
+   - If you have no engines where you have creator status
+      - Don't show the shell, instead show the list of projects only, with the non-public ones at the top, and the public ones marked as "[PUBLIC]" just after their name.
+      - Still show the New project button. When clicking it, show a modal that says: if you know someone who has a vibey engine, ask them to give you creator access; or request a paid vibey account to create your own engine (button for it, which sends an email to the admin).
+   - If you have an engine where you have creator status:
+      - In the projects view, show what we show right now.
+      - In the settings view, list the engines and allow to add/remove email addresses of who else beyond you has creator access on an engine. This adds entries to accessTo and accessBy, where the ids are those of engines, not projects. Also allow to change the name of the engine, and replace the pair of public/private keys for it.
+- When you create a new project: show the engine to which it will be assigned. If there's more than one, show a dropdown. If it's just one, it shouldn't be a dropdown. When creating, don't use the creator status, just see if the user has access to that engine.
+- Allow the admin to create projects in the "host" engine, which is whatever (single) server vibey host is running on.
+
+Backend changes:
+- Do not allow (yet) to move a project from one engine to the other. The PUT stays like it is for now.
+- Add two endpoints: GET /engines and PUT /engine (the PUT changes the name of the engine and also sets the list of creators).
+- Put a migration to 1) remove the creator field; 2) add the "engine: host" entries to all the existing projects.
+- For non-host engines, run the docker commands through ssh using the private key and the IP.
+   - Replace groupedCommand with something simpler, like `set -m; sh -c "$cmd" & echo $! > pidfile; wait $!`
+   - Let's use TOFU (trust on first use) for ssh, but storing that verification key in the db as well, on the engine.
+   - Let's use openssh's control master (see below). Simpler than ssh2 because we don't have to manage a pool of connections from the master process.
+- Remove the request creator endpoints and client functionality.
+
+Idea: rename "vibey" to "fivey". The logo could be five fingers of a left hand, with the thumb being purple.
+
+Add this to the host vibey
+```
+RUN apk add --no-cache redis bash docker-cli openssh-client
+```
+
+```
+ssh -o ControlMaster=auto \
+    -o ControlPath=/tmp/vibey-ssh/%C \
+    -o ControlPersist=10m \
+    -o StrictHostKeyChecking=accept-new \
+    -o UserKnownHostsFile=/app/data/known_hosts/<target-id> \
+    -o ServerAliveInterval=15 \
+    user@host 'docker exec -i vibey-project-x sh -c ...'
+```
+
 ## 2026-10-14
 
 Vibey should be a perfect program. That standard I brought to the ustack should also go there. Focus on a few primitives, beautifully done, and then let everyone else build on top of that. A small, beautiful core that's a joy to work with. And improve the ustack wherever needed.
@@ -45,11 +160,6 @@ What should the modifications be for project endpoints? (all of these hosts are 
    - Remove projectId from the bodies of write, edit, send message & read message
 - Project gatekeeper (middleware, already implemented): does autologin or checks credentials at the project level
 - GET /auth/project/<projectId> (already implemented): works as a login to a project for a user that has host credentials
-
-
-TODO:
-- projectState? projectCode? rename two new cookies?
-- content security policy?
 
 Some notes on Alexander - The process of creating life:
 - "I am talking about feeling as a way of grasping the wholeness of a situation. (...) we obtain a nearly visceral feeling of the whole"
