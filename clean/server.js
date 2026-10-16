@@ -599,7 +599,12 @@ project.video = async function (rq, rs, id, path) {
 };
 
 project.write = async function (id, path, content, noCommit) {
-   var command = 'mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > ' + Path.quote (path);
+   // Writes go through a rename, since truncating a file that a concurrent git add is reading crashes git (SIGBUS).
+   var command = 'tmp=$(mktemp -d /project/.git/vibey.XXXXXX) || exit 1;'
+      + ' trap \'rm -rf "$tmp"\' 0;'
+      + ' mkdir -p ' + Path.quote (Path.dirname (path)) + ' && cat > "$tmp/out"'
+      + ' && { ! [ -e ' + Path.quote (path) + ' ] || chmod $(stat -c %a ' + Path.quote (path) + ') "$tmp/out"; }'
+      + ' && mv "$tmp/out" ' + Path.quote (path);
    var result = await project.run (id, command, {input: content, commit: noCommit ? undefined : ('Write ' + Path.quote (path)), catch: true});
    return result.code ? {code: result.code, error: result.stderr} : result;
 }
@@ -619,7 +624,8 @@ project.edit = async function (id, path, oldText, newText, noCommit) {
    newText = Buffer.from (newText);
    var input = Buffer.concat ([Buffer.from (oldText.length + '\n' + newText.length + '\n'), oldText, newText]);
 
-   var script = 'tmp=$(mktemp -d) || exit 1;'
+   // Edits go through a rename, since truncating a file that a concurrent git add is reading crashes git (SIGBUS).
+   var script = 'tmp=$(mktemp -d /project/.git/vibey.XXXXXX) || exit 1;'
       + ' trap \'rm -rf "$tmp"\' 0;'
       + ' read old_len; read new_len;'
       + ' dd bs=1 count=$old_len of="$tmp/old" 2>/dev/null || exit 1;'
@@ -637,7 +643,8 @@ project.edit = async function (id, path, oldText, newText, noCommit) {
       +       ' i = index (file, old);'
       +       ' printf "%s", substr (file, 1, i - 1) new_ substr (file, i + olen) > target'
       +    "}"
-      + "' target=" + Path.quote (path) + ' ' + Path.quote (path);
+      + "' target=\"$tmp/out\" " + Path.quote (path)
+      + ' && chmod $(stat -c %a ' + Path.quote (path) + ') "$tmp/out" && mv "$tmp/out" ' + Path.quote (path);
 
    var result = await project.run (id, script, {input: input, catch: true, commit: noCommit ? false : 'Edit ' + Path.quote (path)});
    await redis ('del', lockKey);
@@ -1770,6 +1777,7 @@ var routes = [
          'content-type': mime.lookup (path) || 'application/octet-stream',
          'cache-control': 'private, no-cache',
          'x-content-type-options': 'nosniff',
+         // TODO: define if we need this
          //'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
       };
       var cached = cicek.cache (rq.method, buffer, rq.headers, headers, 200);
@@ -2739,8 +2747,15 @@ var routes = [
       }
       catch (e) {}
 
-      var clientId = rq.data.params.provider === 'anthropic' ? Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString () : 'app_EMoamEEZ73f0CkXaXp7hrann';
-      var redirectURI = rq.data.params.provider === 'anthropic' ? 'https://console.anthropic.com/oauth/code/callback' : 'http://localhost:1455/auth/callback';
+      var clientId = {
+         anthropic: Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString (),
+         openai: 'app_EMoamEEZ73f0CkXaXp7hrann'
+      } [rq.data.params.provider];
+
+      var redirectURI = {
+         anthropic: 'https://console.anthropic.com/oauth/code/callback',
+         openai: 'http://localhost:1455/auth/callback'
+      } [rq.data.params.provider];
 
       try {
          var tokenData = await new Promise (function (resolve, reject) {
