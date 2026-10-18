@@ -25,8 +25,6 @@ catch (error) {
    var SECRET = {};
 }
 
-CONFIG.cookie.name = '__Host-' + CONFIG.cookie.name;
-
 // *** LIBRARIES ***
 
 var child   = require ('child_process')
@@ -52,6 +50,10 @@ var {inc, last, type} = teishi;
 var test = require ('./test.js');
 
 // *** HELPERS ***
+
+var cookie = function (type) {
+   return '__Host-' + CONFIG.cookie.name + '-' + type;
+}
 
 var now = function () {
    return new Date ().toISOString ();
@@ -873,25 +875,95 @@ var routes = [
          return rs.next ();
       }
 
-      // Project hosts are handled by the project gatekeeper.
-      var base = new URL (CONFIG.baseURL);
-      var projectHost = new RegExp ('^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\\.' + require ('cicek').escape (base.host) + '$');
-      if (projectHost.test ((rq.headers.host || '').toLowerCase ())) return rs.next ();
+      if ((rq.headers.host || '').toLowerCase () !== new URL (CONFIG.baseURL).host) rq.projectId = (rq.headers.host || '').toLowerCase ().split ('.') [0];
 
-      var sessionId = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name] ? rq.data.cookie [CONFIG.cookie.name] : undefined;
+      var cookieName = cookie (rq.projectId ? 'project' : 'host');
+
+      var sessionId = rq.data.cookie && rq.data.cookie [cookieName] ? rq.data.cookie [cookieName] : undefined;
 
       if (sessionId) {
-         var session = await redis ('hgetall', 'session:' + sessionId);
+         var session = await redis ('hgetall', (rq.projectId ? 'session-p:' : 'session-h:') + sessionId);
+         if (rq.projectId && session) {
+            var hostSession = await redis ('hgetall', 'session-h:' + session.hostSession);
+            if (! hostSession || new Date (hostSession.expires).getTime () < Date.now ()) {
+               await redis ([
+                  ['del',  'session-p:' + sessionId],
+                  ['srem', 'owner:' + session.user, 'session-p:' + sessionId]
+               ]);
+               session = hostSession = undefined;
+            }
+         }
 
-         if (session && new Date (session.expires).getTime () > new Date ().getTime ()) {
+         if (rq.projectId && hostSession || session && new Date (session.expires).getTime () > new Date ().getTime ()) {
 
             var user = await redis ('hgetall', 'user:' + session.user);
 
             if (! user) return reply (rs, 500, {priority: 'critical', type: 'User not found', user: session.user});
 
-            rq.user = {csrf: session.csrf, session: sessionId, ... user};
+            rq.user = {csrf: session.csrf, session: session.hostSession || sessionId, ... user};
          }
       }
+
+      // Create project cookie from session cookie
+      if (rq.projectId && rq.data.query && rq.data.query.sessionCode) {
+         var [sessionCode] = await redis ([
+            ['hgetall', 'session-code:' + rq.data.query.sessionCode],
+            ['del',     'session-code:' + rq.data.query.sessionCode]
+         ]);
+
+         if (! sessionCode) return reply (rs, 403, {error: 'Missing session code'});
+
+         if (! rq.data.cookie || rq.data.cookie [cookie ('project-state')] !== sessionCode.state) return reply (rs, 403, {error: 'Invalid session code'});
+
+         var csrf      = crypto.randomBytes (32).toString ('hex');
+         var sessionId = crypto.randomBytes (32).toString ('hex');
+
+         await redis ([
+            ['hmset',  'session-p:' + sessionId, {csrf, hostSession: sessionCode.hostSession, project: sessionCode.project, user: sessionCode.user}],
+            ['expire', 'session-p:' + sessionId, CONFIG.cookie.expires],
+            ['sadd',   'owner:' + sessionCode.user, 'session-p:' + sessionId]
+         ]);
+
+         return reply (rs, 302, '', {
+            location: encodeURI (rq.url),
+            'referrer-policy': 'no-referrer',
+            'set-cookie': [
+               cicek.cookie.write (cookie ('project'), sessionId, {
+                  expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               }),
+               cicek.cookie.write (cookie ('project-state'), false, {
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               })
+            ]
+         });
+      }
+
+      if (rq.projectId) {
+         // TODO: redirect with 302 to
+
+         if (! rq.user && ! await allowOp ('PUBLIC', id, 'read', path)) {
+            var state = crypto.randomBytes (32).toString ('hex');
+            var base = new URL (CONFIG.baseURL);
+            return reply (rs, 302, '', {
+               location: CONFIG.baseURL + '/auth/project/' + id + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
+               'set-cookie': cicek.cookie.write ('project-login', state, {
+                  expires: new Date (Date.now () + 10 * 60 * 1000),
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               })
+            });
+         }
+      }
+
 
       clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
 
@@ -902,17 +974,21 @@ var routes = [
 
       // Project read routes are public; requests without a session are checked against PUBLIC grants.
       var publicPath = dale.stop ([
+         // Static
          ['get', '/'],
          ['get', /^\/assets\/.+/],
          ['get', '/client.js'],
          ['get', '/favicon.svg'],
          ['get', /^\/icon\/icon-(?:180|192|512)\.png$/],
          ['get', '/manifest.json'],
+         // Error reporting
          ['post', '/error'],
+         // Auth
          ['post', '/auth/login'],
          ['get', /^\/auth\/verify\//],
+         // Project (all of these are semi-public endpoints, access is checked by the endpoints themselves)
+         ['get', /^\/f\//],
          ['get', '/projects'],
-         ['get', /^\/p\//],
          ['get', /^\/project\/[^/]+(?:\/files|\/file\/.+)?$/],
          ['put', '/project/message'],
       ], true, function (endpoint) {
@@ -921,7 +997,7 @@ var routes = [
       });
 
       if (! rq.user && ! publicPath) {
-         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
+         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (cookie (rq.projectId ? 'project' : 'host'), false, {
             httponly: true,
             path: '/',
             samesite: 'Lax',
@@ -935,7 +1011,7 @@ var routes = [
       rs.next ();
 
       if (rq.user && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
-         ['hmset', 'session:' + sessionId, {
+         ['hmset', 'session-h:' + (hostSession ? session.hostSession : sessionId), {
             expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
             last: JSON.stringify ({
                date: now (),
@@ -944,94 +1020,6 @@ var routes = [
          }],
          ['hset', 'user:' + rq.user.id, 'last', now ()],
       ]);
-   }],
-
-   // *** PROJECT GATEKEEPER ***
-
-   ['all', '*', async function (rq, rs) {
-      var base = new URL (CONFIG.baseURL);
-      var projectHost = new RegExp ('^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\\.' + require ('cicek').escape (base.host) + '$');
-      var match = (rq.headers.host || '').toLowerCase ().match (projectHost);
-      if (! match) return rs.next ();
-
-      var id = match [1], path = rq.url.slice (1);
-      if (rq.method !== 'get' || ! path) return reply (rs, 404);
-
-      if (! CONFIG.cloud) rq.user = {id: 'local', creator: true};
-
-      else if (rq.data.query && rq.data.query.code) {
-         var [code] = await redis ([
-            ['hgetall', 'projectCode:' + rq.data.query.code],
-            ['del',     'projectCode:' + rq.data.query.code]
-         ]);
-         // The code must be redeemed by the browser that requested it, which holds the matching state cookie.
-         if (! code || code.project !== id || ! rq.data.cookie || code.state !== rq.data.cookie ['__Host-projectState']) return reply (rs, 403, {error: 'Invalid code'});
-
-         var csrf   = crypto.randomBytes (32).toString ('hex');
-         var secret = crypto.randomBytes (32).toString ('hex');
-         await redis ([
-            ['hmset',  'session-p:' + secret, {csrf, project: id, session: code.session, user: code.user}],
-            ['expire', 'session-p:' + secret, CONFIG.cookie.expires],
-            ['sadd',   'owner:' + code.user, 'session-p:' + secret]
-         ]);
-         return reply (rs, 302, '', {
-            location: encodeURI (rq.url),
-            'referrer-policy': 'no-referrer',
-            'set-cookie': [
-               cicek.cookie.write (CONFIG.cookie.name, secret, {
-                  expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               }),
-               cicek.cookie.write ('__Host-projectState', false, {
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               })
-            ]
-         });
-      }
-
-      else {
-         var secret  = rq.data.cookie && rq.data.cookie [CONFIG.cookie.name];
-         var session = secret ? await redis ('hgetall', 'session-p:' + secret) : null;
-         if (session && session.project === id) {
-            // A project session lives as long as the host session that issued it.
-            var parent = await redis ('hgetall', 'session:' + session.session);
-            if (parent && parent.user === session.user && new Date (parent.expires).getTime () > Date.now ()) {
-               var user = await redis ('hgetall', 'user:' + session.user);
-               if (user) rq.user = {csrf: session.csrf, session: secret, ... user};
-            }
-            else await redis ([
-               ['del',  'session-p:' + secret],
-               ['srem', 'owner:' + session.user, 'session-p:' + secret]
-            ]);
-         }
-
-         if (! rq.user && ! await allowOp ('PUBLIC', id, 'read', path)) {
-            var state = crypto.randomBytes (32).toString ('hex');
-            var base = new URL (CONFIG.baseURL);
-            return reply (rs, 302, '', {
-               location: CONFIG.baseURL + '/auth/project/' + id + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
-               'set-cookie': cicek.cookie.write ('__Host-projectState', state, {
-                  expires: new Date (Date.now () + 10 * 60 * 1000),
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               })
-            });
-         }
-      }
-
-      if (CONFIG.cloud && rq.user && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== rq.user.csrf) return reply (rs, 403, {error: 'Invalid csrf token'});
-
-      rq.projectHost = id;
-      rq.url = '/project/' + id + '/file/' + path;
-      rs.next ();
    }],
 
    // *** ERROR REPORTING ***
@@ -1337,7 +1325,7 @@ var routes = [
          mode: 'cloud',
          settings: JSON.parse (user.settings || '{}'),
          username: user.username,
-      }, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, sessionId, {
+      }, {'set-cookie': cicek.cookie.write (cookie ('host'), sessionId, {
          expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10),
          httponly: true,
          path: '/',
@@ -1365,7 +1353,7 @@ var routes = [
          ['srem', 'owner:' + rq.user.id, 'session:' + rq.user.session]
       ]);
 
-      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
+      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (cookie ('host'), false, {
          httponly: true,
          path: '/',
          samesite: 'Lax',
@@ -1416,7 +1404,7 @@ var routes = [
          }) ()
       ]);
 
-      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (CONFIG.cookie.name, false, {
+      reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (cookie ('host'), false, {
          httponly: true,
          path: '/',
          samesite: 'Lax',

@@ -116,7 +116,7 @@ lock:commit:<projectId> <1|undefined>
      edit:<projectId>:<path> <1|undefined>
 loginLink:<link> <email>
 loginLinkR:<email> <loginLink> // reverse login link
-owner:<userId> 1 session:<sessionId>
+owner:<userId> 1 session-h:<sessionId>
                2 session-p:<sessionId>
                3 project:<projectId>
                ...
@@ -127,19 +127,19 @@ project:<projectId> created <date>
                     name <name>
                     owner <userId>
                     slot <integer|undefined>
-projectCode:<code> project <projectId>
-                   session <sessionId>
-                   state <state>
-                   user <userId>
 rateLimit:<identifier> <number>
-session:<sessionId> csrf <csrfToken>
-                    expires <date>
-                    last date <date>
-                         ip <ip>
+session-code:<code> hostSession <sessionId>
+                    project <projectId>
+                    state <state>
                     user <userId>
+session-h:<sessionId> csrf <csrfToken>
+                      expires <date>
+                      last date <date>
+                           ip <ip>
+                      user <userId>
 session-p:<sessionId> csrf <csrfToken>
+                      hostSession <sessionId>
                       project <projectId>
-                      session <sessionId>
                       user <userId>
 user:<id> count <integer>
           created <date>

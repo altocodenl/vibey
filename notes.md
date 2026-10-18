@@ -1,5 +1,27 @@
 # Vibey development notes
 
+## 2026-10-17
+
+`mode`, from GET /auth/user, can return now `local`, `cloud-host` or `cloud-project`. The partition of the client can be done along those lines, and still remain very much integrated.
+
+Concerning doing a 302 redirect to a name instead of ids for projects whose owner username & name support it, this will only be for the main GET /f route. The other routes can still work by id without a redirect. This is only about seeing a nice name on the url for users to then share. Internally, it all goes to a project id.
+
+Two routes should do the redirect to the project login: GET /p and GET /auth/user. The first is for serving static files. The second one is what loads the user in the client, and opens the door for the client to work on a project directly. But we can just do redirect on any project GET.
+
+
+TODO:
+- move /p to /f
+- move put /message to get
+
+## 2026-10-16
+
+Unlock locked containers:
+```
+rm /project/.git/index.lock
+# should print 0
+git -C /project add -A; echo $?
+```
+
 ## 2026-10-15
 
 A user says: vibey is not an AI agent/harness, it is a platform enabler:
