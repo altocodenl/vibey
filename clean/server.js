@@ -101,6 +101,8 @@ var reply = function () {
 
 var validEmail = /^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i;
 
+var validUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+
 var stop = function (rs, rules) {
    return teishi.stop (rules, function (error) {
       reply (rs, 400, {error: error});
@@ -875,15 +877,15 @@ var routes = [
          return rs.next ();
       }
 
-      if ((rq.headers.host || '').toLowerCase () !== new URL (CONFIG.baseURL).host) rq.projectId = (rq.headers.host || '').toLowerCase ().split ('.') [0];
+      if ((rq.headers.host || '').toLowerCase () !== new URL (CONFIG.baseURL).host) rq.project = (rq.headers.host || '').toLowerCase ().split ('.') [0];
 
-      var cookieName = cookie (rq.projectId ? 'project' : 'host');
+      var cookieName = cookie (rq.project ? 'project' : 'host');
 
       var sessionId = rq.data.cookie && rq.data.cookie [cookieName] ? rq.data.cookie [cookieName] : undefined;
 
       if (sessionId) {
-         var session = await redis ('hgetall', (rq.projectId ? 'session-p:' : 'session-h:') + sessionId);
-         if (rq.projectId && session) {
+         var session = await redis ('hgetall', (rq.project ? 'session-p:' : 'session-h:') + sessionId);
+         if (rq.project && session) {
             var hostSession = await redis ('hgetall', 'session-h:' + session.hostSession);
             if (! hostSession || new Date (hostSession.expires).getTime () < Date.now ()) {
                await redis ([
@@ -894,7 +896,7 @@ var routes = [
             }
          }
 
-         if (rq.projectId && hostSession || session && new Date (session.expires).getTime () > new Date ().getTime ()) {
+         if (rq.project && hostSession || session && new Date (session.expires).getTime () > new Date ().getTime ()) {
 
             var user = await redis ('hgetall', 'user:' + session.user);
 
@@ -905,7 +907,7 @@ var routes = [
       }
 
       // Create project cookie from session cookie
-      if (rq.projectId && rq.data.query && rq.data.query.sessionCode) {
+      if (rq.project && rq.data.query && rq.data.query.sessionCode) {
          var [sessionCode] = await redis ([
             ['hgetall', 'session-code:' + rq.data.query.sessionCode],
             ['del',     'session-code:' + rq.data.query.sessionCode]
@@ -945,8 +947,31 @@ var routes = [
          });
       }
 
-      if (rq.projectId) {
-         // TODO: redirect with 302 to
+      if (rq.project) {
+
+         // - Subdomain scheme: username + double dash + project (with the dash/double dash slugging) + dash + first four chars of the project id. The last four chars give the project uniqueness in case of username or project renames. IF the characters in the username and the project, plus their length, allow for a subdomain, that project has a human readable subdomain. In that case, if the project id is used as a subdomain, it is redirected to the human readable one. IF the username + project doesn't have a valid subdomain, we fall back to the id as the subdomain.
+         if (! validUuid.test (rq.project)) {
+            subdomain = subdomain.split ('--');
+            var username = subdomain [0], projectName = subdomain.slice (1).join ('--');
+            var userId = await redis ('username:' + username);
+            if (! userId) return reply (rs, 404);
+            var projects = await getForUser (userId, 'project');
+            var projectId = dale.stopNot (projects, undefined, function (project) {
+               // TODO; deslug
+               if (project.name === projectName) return project.id;
+            });
+            if (! projectId) return reply (rs, 404);
+         }
+         else {
+            var projectId = rq.project;
+            var project = await redis ('hgetall', 'project:' + rq.project);
+            var user = await redis ('user:' + project.owner);
+            // TODO: enslug user + project and see if it's viable.
+            if (! project) return reply (rs, 404);
+
+            var owner = await redis (
+
+         }
 
          if (! rq.user && ! await allowOp ('PUBLIC', id, 'read', path)) {
             var state = crypto.randomBytes (32).toString ('hex');
@@ -997,7 +1022,7 @@ var routes = [
       });
 
       if (! rq.user && ! publicPath) {
-         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (cookie (rq.projectId ? 'project' : 'host'), false, {
+         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (cookie (rq.project ? 'project' : 'host'), false, {
             httponly: true,
             path: '/',
             samesite: 'Lax',
@@ -1162,8 +1187,7 @@ var routes = [
          if (username.endsWith ('-')) return reply (rs, 400, {error: 'Username cannot end with a dash'});
          if (/-\p{M}/u.test (username)) return reply (rs, 400, {error: 'A combining mark cannot follow a dash'});
 
-         var isUuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test (username);
-         if (isUuid) return reply (rs, 400, {error: 'Username cannot be a UUID'});
+         if (! validUuid.test (username)) return reply (rs, 400, {error: 'Username cannot be a UUID'});
 
          rq.body.username = username;
          // Local mode has no signup flow.
