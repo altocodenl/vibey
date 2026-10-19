@@ -949,29 +949,53 @@ var routes = [
 
       if (rq.project) {
 
+         var slug   = (s) => s.replace (/-/g, '--').replace (/ /g, '-');
+         var unslug = (s) => s.replace (/--|-/g, (m) => m === '--' ? '-' : ' ');
+
+         var notFound = rq.url.match (/^f\/) ? fourohfour : '';
+
          // - Subdomain scheme: username + double dash + project (with the dash/double dash slugging) + dash + first four chars of the project id. The last four chars give the project uniqueness in case of username or project renames. IF the characters in the username and the project, plus their length, allow for a subdomain, that project has a human readable subdomain. In that case, if the project id is used as a subdomain, it is redirected to the human readable one. IF the username + project doesn't have a valid subdomain, we fall back to the id as the subdomain.
          if (! validUuid.test (rq.project)) {
             subdomain = subdomain.split ('--');
             var username = subdomain [0], projectName = subdomain.slice (1).join ('--');
-            var userId = await redis ('username:' + username);
-            if (! userId) return reply (rs, 404);
-            var projects = await getForUser (userId, 'project');
+            var ownerId = await redis ('username:' + username);
+            if (! ownerId) return reply (rs, 404, notFound, 'html');
+            var projects = await getForUser (ownerId, 'project');
             var projectId = dale.stopNot (projects, undefined, function (project) {
-               // TODO; deslug
-               if (project.name === projectName) return project.id;
+               if (project.name === unslug (projectName)) return project.id;
             });
-            if (! projectId) return reply (rs, 404);
+            if (! projectId) return reply (rs, 404, notFound, 'html');
          }
          else {
             var projectId = rq.project;
             var project = await redis ('hgetall', 'project:' + rq.project);
-            var user = await redis ('user:' + project.owner);
-            // TODO: enslug user + project and see if it's viable.
-            if (! project) return reply (rs, 404);
-
-            var owner = await redis (
-
+            var owner = await redis ('user:' + project.owner);
+            if (! project) return reply (rs, 404, notFound, 'html');
+            var readableSubdomain = owner.username + '--' + slug (project.name);
+            if (! readableSubdomain.match (/^[a-z0-9\-]{,63}$/)) readableSubdomain = false;
          }
+
+         // GET auth/project/id
+      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404);
+
+         // GET file
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', id, 'read', path)) return reply (rs, 404, fourohfour, 'html');
+
+         // LIST files: ??
+
+         // write/edit file
+      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.path)) return reply (rs, 404);
+
+         // run
+      if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
+
+         // PUT (read) message
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.body.projectId, 'read', rq.body.file)) return reply (rs, 404);
+
+         // POST message
+      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.file)) return reply (rs, 404);
+      if (rq.body.to === 'shell' || rq.body.to.match (/^ai-/)) {
+         if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
 
          if (! rq.user && ! await allowOp ('PUBLIC', id, 'read', path)) {
             var state = crypto.randomBytes (32).toString ('hex');
