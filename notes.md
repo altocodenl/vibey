@@ -1,5 +1,35 @@
 # Vibey development notes
 
+## 2026-10-18
+
+Project gatekeeper sequence:
+
+- If subdomain not an id, get the id, but don't give it away yet.
+- If there's no id that matches any existing project, return a 404 (if a GET /f, do fourohfour).
+- If this is a GET /file or a list of the files, it's id and it could be expressed as name, do the 302 to the name but only AFTER you checked for permissions.
+- Prepend /project to the url, but block in each of the project routes if rq.projectId is not set, so that the host doesn't serve those seven endpoints.
+
+I need to decide which endpoint will make the client follow the redirect. The natural one is list files: a 302 there should make us switch from id to username.
+
+Slug operation:
+- Dash -> double dash.
+- Space -> dash.
+
+Project slug:
+- username + double dash + project slug
+- It should only have lowercase a-z, 0-9 and dashes.
+- Maximum length: 63 characters
+
+TODO small:
+- light mode with the same high contrast
+- check links between projects
+- pin: allow for local user, when clicking + also allow to pin existing without the edit
+- first command + I to switch to view (the first time it doesn't work)
+- content security policy
+- move /p to /f
+- move put /message to get
+- Use allowOp in list files
+
 ## 2026-10-17
 
 `mode`, from GET /auth/user, can return now `local`, `cloud-host` or `cloud-project`. The partition of the client can be done along those lines, and still remain very much integrated.
@@ -7,7 +37,6 @@
 Concerning doing a 302 redirect to a name instead of ids for projects whose owner username & name support it, this will only be for the main GET /f route. The other routes can still work by id without a redirect. This is only about seeing a nice name on the url for users to then share. Internally, it all goes to a project id.
 
 Two routes should do the redirect to the project login: GET /p and GET /auth/user. The first is for serving static files. The second one is what loads the user in the client, and opens the door for the client to work on a project directly. But we can just do redirect on any project GET.
-
 
 TODO:
 - move /p to /f
