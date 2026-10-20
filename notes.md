@@ -1,5 +1,31 @@
 # Vibey development notes
 
+## 2026-10-20
+
+Let the redirecting endpoints (list & file) do their own redirecting, it should be straightforward. And it can be done after checking for access.
+
+Let's make it `/file`, not `/f`.
+
+Decided to make the project subdomain to still prepend /project to the urls, otherwise it's confusing.
+
+How not to over-reveal through a 30 to an unauthenticated user? Let's make it simple:
+- On any project GET, check if the project has a public grant.
+   - If so, let it through and let the route validate later for access.
+      - If the route later decides that the resource it is not public, then the user is stuck without achieving auth. We'd have to do another redirect from there.
+      - If the route indeed sees that the resource is public, it can serve it to a non-authenticated user.
+   - If not, redirect to the auth exchange. After the exchange, there might be an user, or not.
+      - If there's no user (exchange failed), there should be no redirect, just a 403. The gatekeeper won't let you reach, directly.
+      - If there's user, let the exchange endpoint create the project cookie for the user. This endpoint should NOT read for project permissions. That's the business of the endpoints later. A user X without a grant on project Y could create a cookie for it, but that cookie will just tell vibey that this is user X wanting to access project Y, it does not at all mean that user X has access to project Y.
+- Therefore, I think it's silly that the gatekeeper should do these validations. The 302 should be done by the potentially public routes of project when there's insufficient access BECAUSE there is no user.
+- The 302 to switch from id to name should also be done by these routes, AFTER verifying access.
+
+```
+  Still open:
+
+  1. Visitors not logged in on the host get 403 No session from /auth/project/... instead of going to host login and back.
+  2. The project routes don't have the no-user 302/403 branch yet. Until they do, an existing private project still answers differently from a missing one.
+```
+
 ## 2026-10-18
 
 Project gatekeeper sequence:
