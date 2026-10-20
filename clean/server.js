@@ -915,7 +915,7 @@ var routes = [
 
          if (! sessionCode) return reply (rs, 403, {error: 'Missing session code'});
 
-         if (! rq.data.cookie || rq.data.cookie [cookie ('project-state')] !== sessionCode.state) return reply (rs, 403, {error: 'Invalid session code'});
+         if (sessionCode.project !== rq.project || ! rq.data.cookie || rq.data.cookie [cookie ('project-state')] !== sessionCode.state) return reply (rs, 403, {error: 'Invalid session code'});
 
          var csrf      = crypto.randomBytes (32).toString ('hex');
          var sessionId = crypto.randomBytes (32).toString ('hex');
@@ -927,7 +927,7 @@ var routes = [
          ]);
 
          return reply (rs, 302, '', {
-            location: encodeURI (rq.url),
+            location: encodeURI (rq.url.replace (/\?.*$/, '')),
             'referrer-policy': 'no-referrer',
             'set-cookie': [
                cicek.cookie.write (cookie ('project'), sessionId, {
@@ -947,62 +947,75 @@ var routes = [
          });
       }
 
+      var matchRoute = function (routes) {
+         return dale.stop (routes, true, function (endpoint) {
+            if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
+            return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
+         });
+      };
+
+      var staticRoutes = [
+         // Static
+         ['get', '/'],
+         ['get', /^\/assets\/.+/],
+         ['get', '/client.js'],
+         ['get', '/favicon.svg'],
+         ['get', /^\/icon\/icon-(?:180|192|512)\.png$/],
+         ['get', '/manifest.json'],
+         // Error reporting, static only in spirit
+         ['post', '/error'],
+      ];
+
+      var projectRoutes = [
+         ['get', '/project/files'],
+         ['get', /^\/project\/file\/.+/],
+         ['get', /^\/project\/message\/.+/],
+         ['post', '/project/write'],
+         ['post', '/project/edit'],
+         ['post', '/project/run'],
+         ['post', '/project/message'],
+      ];
+
+      if (! rq.project && matchRoute (projectRoutes)) return reply (rs, 404);
+
       if (rq.project) {
+
+         if (! matchRoute ([... staticRoutes, ... projectRoutes])) return reply (rs, 404);
 
          var slug   = (s) => s.replace (/-/g, '--').replace (/ /g, '-');
          var unslug = (s) => s.replace (/--|-/g, (m) => m === '--' ? '-' : ' ');
 
-         var notFound = rq.url.match (/^f\/) ? fourohfour : '';
+         var notFound = rq.url.match (/^\/project\/file\//) ? fourohfour : '';
 
-         // - Subdomain scheme: username + double dash + project (with the dash/double dash slugging) + dash + first four chars of the project id. The last four chars give the project uniqueness in case of username or project renames. IF the characters in the username and the project, plus their length, allow for a subdomain, that project has a human readable subdomain. In that case, if the project id is used as a subdomain, it is redirected to the human readable one. IF the username + project doesn't have a valid subdomain, we fall back to the id as the subdomain.
          if (! validUuid.test (rq.project)) {
-            subdomain = subdomain.split ('--');
+            var subdomain = rq.project.split ('--');
             var username = subdomain [0], projectName = subdomain.slice (1).join ('--');
-            var ownerId = await redis ('username:' + username);
-            if (! ownerId) return reply (rs, 404, notFound, 'html');
-            var projects = await getForUser (ownerId, 'project');
-            var projectId = dale.stopNot (projects, undefined, function (project) {
-               if (project.name === unslug (projectName)) return project.id;
+            var ownerId = await redis ('get', 'username:' + username);
+            var projects = ownerId ? await getForUser (ownerId, 'project') : [];
+            rq.projectId = dale.stopNot (projects, undefined, function (project) {
+               if (project.owner === ownerId && project.name === unslug (projectName)) return project.id;
             });
-            if (! projectId) return reply (rs, 404, notFound, 'html');
          }
          else {
-            var projectId = rq.project;
             var project = await redis ('hgetall', 'project:' + rq.project);
-            var owner = await redis ('user:' + project.owner);
-            if (! project) return reply (rs, 404, notFound, 'html');
-            var readableSubdomain = owner.username + '--' + slug (project.name);
-            if (! readableSubdomain.match (/^[a-z0-9\-]{,63}$/)) readableSubdomain = false;
+            var owner = project ? await redis ('hgetall', 'user:' + project.owner) : null;
+            if (owner) {
+               rq.projectId = rq.project;
+               var readableSubdomain = owner.username + '--' + slug (project.name);
+               if (readableSubdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/)) rq.projectRedirect = readableSubdomain;
+            }
          }
-
-         // GET auth/project/id
-      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404);
-
-         // GET file
-      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', id, 'read', path)) return reply (rs, 404, fourohfour, 'html');
-
-         // LIST files: ??
-
-         // write/edit file
-      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.path)) return reply (rs, 404);
-
-         // run
-      if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
-
-         // PUT (read) message
-      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.body.projectId, 'read', rq.body.file)) return reply (rs, 404);
-
-         // POST message
-      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.file)) return reply (rs, 404);
-      if (rq.body.to === 'shell' || rq.body.to.match (/^ai-/)) {
-         if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
-
-         if (! rq.user && ! await allowOp ('PUBLIC', id, 'read', path)) {
+         if (rq.user && session.project !== rq.project) delete rq.user;
+         // A subdomain that doesn't resolve looks like a private project: static files are served, project routes need a login and then 404.
+         if (! rq.projectId && ! matchRoute (staticRoutes)) {
+            if (rq.user) return reply (rs, 404, notFound, 'html');
+            // Only page loads can follow the redirect to log in; client calls get a 403 and navigate themselves.
+            if (rq.method !== 'get' || ! notFound) return reply (rs, 403, {error: 'Login required'});
+            var base  = new URL (CONFIG.baseURL);
             var state = crypto.randomBytes (32).toString ('hex');
-            var base = new URL (CONFIG.baseURL);
             return reply (rs, 302, '', {
-               location: CONFIG.baseURL + '/auth/project/' + id + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
-               'set-cookie': cicek.cookie.write ('project-login', state, {
+               location: CONFIG.baseURL + '/auth/project/' + rq.project + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
+               'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
                   expires: new Date (Date.now () + 10 * 60 * 1000),
                   httponly: true,
                   path: '/',
@@ -1011,10 +1024,10 @@ var routes = [
                })
             });
          }
+         delete rq.project;
       }
 
-
-      clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
+      clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, projectId: rq.projectId, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
 
       if (rq.headers ['x-test'] === '1') {
          if (CONFIG.baseURL !== 'http://localhost:5353') return reply (rs, 403, {error: 'Not a local request'});
@@ -1022,31 +1035,20 @@ var routes = [
       }
 
       // Project read routes are public; requests without a session are checked against PUBLIC grants.
-      var publicPath = dale.stop ([
-         // Static
-         ['get', '/'],
-         ['get', /^\/assets\/.+/],
-         ['get', '/client.js'],
-         ['get', '/favicon.svg'],
-         ['get', /^\/icon\/icon-(?:180|192|512)\.png$/],
-         ['get', '/manifest.json'],
-         // Error reporting
-         ['post', '/error'],
+      var publicPath = matchRoute ([
+         ... staticRoutes,
          // Auth
          ['post', '/auth/login'],
          ['get', /^\/auth\/verify\//],
          // Project (all of these are semi-public endpoints, access is checked by the endpoints themselves)
-         ['get', /^\/f\//],
          ['get', '/projects'],
-         ['get', /^\/project\/[^/]+(?:\/files|\/file\/.+)?$/],
-         ['put', '/project/message'],
-      ], true, function (endpoint) {
-         if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
-         return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
-      });
+         ['get', '/project/files'],
+         ['get', /^\/project\/file\/.+/],
+         ['get', /^\/project\/message\/.+/],
+      ]);
 
       if (! rq.user && ! publicPath) {
-         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (cookie (rq.project ? 'project' : 'host'), false, {
+         if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (cookie (rq.projectId ? 'project' : 'host'), false, {
             httponly: true,
             path: '/',
             samesite: 'Lax',
@@ -1146,6 +1148,34 @@ var routes = [
    }],
 
    // *** AUTH ***
+
+   // Gives the user a code to open a session on a project subdomain. It doesn't check access to the project: the session only says who the user is, and the project routes decide what they can see.
+   ['get', '/auth/project/:subdomain', async function (rq, rs) {
+      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
+
+      var subdomain = rq.data.params.subdomain;
+      if (! subdomain.match (/^[a-z0-9\-]{1,63}$/)) return reply (rs, 400, {error: 'Invalid subdomain'});
+
+      try {
+         var url = new URL (rq.data.query.returnUrl);
+      }
+      catch (error) {
+         return reply (rs, 400, {error: 'Invalid returnUrl'});
+      }
+
+      var base = new URL (CONFIG.baseURL);
+      if (url.origin !== base.protocol + '//' + subdomain + '.' + base.host) return reply (rs, 400, {error: 'Invalid returnUrl'});
+      if (type (rq.data.query.state) !== 'string' || rq.data.query.state.length === 0) return reply (rs, 400, {error: 'Invalid state'});
+
+      var code = crypto.randomBytes (32).toString ('hex');
+      await redis ([
+         ['hmset',  'session-code:' + code, {hostSession: rq.user.session, project: subdomain, state: rq.data.query.state, user: rq.user.id}],
+         ['expire', 'session-code:' + code, 60]
+      ]);
+      url.searchParams.set ('sessionCode', code);
+      reply (rs, 302, '', {location: url.href});
+   }],
+
 
    ['get', '/auth/user', async function (rq, rs) {
       var [user, credentials] = await redis ([
@@ -1460,34 +1490,6 @@ var routes = [
       })});
    }],
 
-   ['get', '/auth/project/:id', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
-
-      var id = rq.data.params.id;
-
-      try {
-         var url  = new URL (rq.data.query.returnUrl);
-         var path = decodeURIComponent (url.pathname.slice (1));
-      }
-      catch (error) {
-         return reply (rs, 400, {error: 'Invalid returnUrl'});
-      }
-
-      var base = new URL (CONFIG.baseURL);
-      if (url.origin !== base.protocol + '//' + id + '.' + base.host) return reply (rs, 400, {error: 'Invalid returnUrl'});
-      if (type (rq.data.query.state) !== 'string' || rq.data.query.state.length === 0) return reply (rs, 400, {error: 'Invalid state'});
-
-      if (! await allowOp (rq.user.id, id, 'read', path)) return reply (rs, 404);
-
-      var code = crypto.randomBytes (32).toString ('hex');
-      await redis ([
-         ['hmset',  'projectCode:' + code, {project: id, session: rq.user.session, state: rq.data.query.state, user: rq.user.id}],
-         ['expire', 'projectCode:' + code, 60]
-      ]);
-      url.searchParams.set ('code', code);
-      reply (rs, 302, '', {location: url.href});
-   }],
-
    // *** PROJECT ***
 
    ['post', '/creator/request', async function (rq, rs) {
@@ -1750,8 +1752,8 @@ var routes = [
       reply (rs, 200, {id: id});
    }],
 
-   ['get', '/project/:id/files', async function (rq, rs) {
-      var id = rq.data.params.id;
+   ['get', '/project/files', async function (rq, rs) {
+      var id = rq.projectId;
       var userId = rq.user ? rq.user.id : 'PUBLIC';
       var [owner, grants] = await redis ([
          ['hget', 'project:' + id, 'owner'],
@@ -1792,8 +1794,9 @@ var routes = [
       return reply (rs, 200, files);
    }],
 
-   ['get', /^\/project\/([^/]+)\/file\/(.+)$/, async function (rq, rs) {
-      var id = rq.data.params [0], path = rq.data.params [1];
+   ['get', /^\/project\/file\/(.+)$/, async function (rq, rs) {
+      var id = rq.projectId;
+      var path = rq.data.params [0];
       if (! validProjectPath (path)) {
          return reply (rs, 400, {error: 'Invalid path'});
       }
@@ -1894,18 +1897,12 @@ var routes = [
       reply (rs, 200, result);
    }],
 
-   ['put', '/project/message', async function (rq, rs) {
-      if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['file', 'messageId', 'projectId'], 'eachOf', teishi.test.equal],
-         ['file', rq.body.file, 'string'],
-         ['messageId', rq.body.messageId, 'string'],
-         ['projectId', rq.body.projectId, 'string'],
-         ['messageId', rq.body.messageId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match],
-      ])) return;
+   ['get', /^\/project\/message\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\/(.+)$/, async function (rq, rs) {
+      var messageId = rq.data.params [0], file = rq.data.params [1];
 
-      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.body.projectId, 'read', rq.body.file)) return reply (rs, 404);
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.projectId, 'read', file)) return reply (rs, 404);
 
-      var result = await project.read (rq.body.projectId, rq.body.file);
+      var result = await project.read (rq.projectId, file);
       if (result.code) {
          if (result.code === 1 && result.error && result.error.match ('No such file or directory')) return reply (rs, 404);
          clog ({
@@ -1916,12 +1913,12 @@ var routes = [
          return reply (rs, 500);
       }
       var text = (result.stdout || Buffer.alloc (0)).toString ('utf8');
-      var head = text.match (new RegExp ('^əəə head ' + rq.body.messageId + '\\n', 'im'));
+      var head = text.match (new RegExp ('^əəə head ' + messageId + '\\n', 'im'));
       if (! head) return reply (rs, 404);
       var rest = text.slice (head.index + head [0].length);
       var nextHead = rest.match (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im);
       var message = head [0] + (nextHead ? rest.slice (0, nextHead.index).replace (/\n$/, '') : rest);
-      if (! message.match (new RegExp ('^əəə body ' + rq.body.messageId + '\\n', 'im'))) return reply (rs, 404);
+      if (! message.match (new RegExp ('^əəə body ' + messageId + '\\n', 'im'))) return reply (rs, 404);
       var next = [], heads = /^əəə head ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/gim, match;
       while ((match = heads.exec (rest))) next.push (match [1]);
       reply (rs, 200, {message: message, next: next});
