@@ -1,5 +1,42 @@
 # Vibey development notes
 
+## 2026-10-21
+
+Some notes on Alexander - The process of creating life:
+- "It was hard work. Nothing obvious came. (...) Finally, after many hours, I began to see the inside of the hall and its columns as black. This was startling and unexpected (...) But it had the marks of an authentic vision."
+- "There was so much black that I coudln't even persuade my assistants to mix them correctly - they kept making them too red, not black enough."
+- "I realized that once again, the thing was lacking on the level of the inner visino. So once again, I simply sat in the water of my bath, looking, looking, with my eyes closed. For hours, nothing came."
+- "But once again, the key thing in the solution was not the work, the actual painting, the trying different things. It was the simmering sense of black and white, which was quite different from anything I had tried before, which I saw only after immense effort."
+- "The hours of sitting intensely in the bath (...) waiting until an authentic living vision entered my mind, was fifty times more work, emotionally, than the actual work of painting, trying, mockup, etc. That is where the value of the whole thing came from."
+- "At every step one takes, in an unfolding work, it is always the process of knowing the emotional substance - and then getting it clear enough, so that it exists alive, in one's mind, and can be followed and materialized - which is so hard. This is the hard work, this is where the thing begins, and this is where its success or failure is determined."
+- "the essence was that at each step of a living process one must be able to feel, ahead of time, the *feeling* which will later exist in the finished object (...) without yet knowing its form in detail."
+
+- "we can constantly check to see if the next action, the emerging form, this detail or that, does have *that* feeling and not some other."
+- "It is not verbal, it is not visual, it is not auditory. Yet it is articulate and highly specific, very particular, unique each time that it occurs. (...) it is so specific that it will allow me to consider 100 possible ways to make a roof, and reject them all, because they do not have this feelingthen to accept the 101st because it *does* have it."
+- "Fewpaintings or drawings (...) how much deep quality in them, if they do not come, first, from such an experience of feeling, which is first kept alive, and manifested then in actual geometrical form."
+- "You know the *feeling* which the thing will have. But you do *not* yet know the *form*.
+- "Because you keep the *feeling* constant, you *have* to change the form."
+- Note: the form as the negative impression of the feeling.
+
+I think I see the sequence now:
+- Gatekeeper
+   - First, determine subdomain and project id.
+   - Then, authenticate.
+   - If completing an exchange, do it.
+   - Then, authorize.
+- GET project routes (list, get file, but NOT get message)
+   - Check for access
+   - If no access and no user, send to the exchange
+   - If access and rq.projectRedirect is there, redirect the user.
+   - Only get file shows fourohfour if insufficient access
+   - Why these two routes? One is the one that the client uses when loading the project (list files), the other one is for direct links to files, instead of the client.
+
+Half done with the surgery. Don't forget the following scalpels:
+- GET /project/:id can just go. We instead repurpose /p to be /f/{path}, and that's the only route to get files.
+- Two 302s (exchange and readable subdomain) on the three GETs that support them.
+
+This was not an easy sequence to get to!
+
 ## 2026-10-20
 
 Let the redirecting endpoints (list & file) do their own redirecting, it should be straightforward. And it can be done after checking for access.
