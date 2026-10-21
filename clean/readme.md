@@ -129,8 +129,8 @@ project:<projectId> created <date>
                     slot <integer|undefined>
 rateLimit:<identifier> <number>
 session-code:<code> hostSession <sessionId>
-                    project <projectId>
                     state <state>
+                    subdomain <projectId>
                     user <userId>
 session-h:<sessionId> csrf <csrfToken>
                       expires <date>

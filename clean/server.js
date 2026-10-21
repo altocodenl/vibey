@@ -871,21 +871,50 @@ var routes = [
 
    ['all', '*', async function (rq, rs) {
 
+      if (rq.headers ['x-test'] === '1') {
+         if (CONFIG.baseURL !== 'http://localhost:5353') return reply (rs, 403, {error: 'Not a local request'});
+         rq.test = true;
+      }
+
+      if ((rq.headers.host || '').toLowerCase () !== new URL (CONFIG.baseURL).host) rq.subdomain = (rq.headers.host || '').toLowerCase ().split ('.') [0];
+
+      if (rq.subdomain) {
+
+         var slug = (s) => s.toLowerCase ().replace (/-/g, '--').replace (/ /g, '-');
+
+         if (validUuid.test (rq.subdomain)) {
+            var project = await redis ('hgetall', 'project:' + rq.subdomain);
+            var owner = project ? await redis ('hgetall', 'user:' + project.owner) : undefined;
+            if (project && ! owner && ! CONFIG.cloud) owner = {};
+            if (owner) {
+               rq.projectId = rq.subdomain;
+               var readableSubdomain = owner.username + '--' + slug (project.name);
+               if (owner.username && readableSubdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/)) rq.projectRedirect = readableSubdomain;
+            }
+         }
+         else {
+            var subdomain = rq.subdomain.split ('--');
+            var username = subdomain [0], projectName = subdomain.slice (1).join ('--');
+            var ownerId = await redis ('get', 'username:' + username);
+            var projects = ownerId ? await getForUser (ownerId, 'project') : undefined;
+            rq.projectId = dale.stopNot (projects, undefined, function (project) {
+               if (project.owner === ownerId && slug (project.name) === projectName) return project.id;
+            });
+         }
+      }
+
       if (! CONFIG.cloud) {
-         clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, ip: rs.log.origin});
+         clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, subdomain: rq.subdomain, projectId: rq.projectId, ip: rs.log.origin});
          rq.user = {id: 'local', creator: true};
          return rs.next ();
       }
 
-      if ((rq.headers.host || '').toLowerCase () !== new URL (CONFIG.baseURL).host) rq.project = (rq.headers.host || '').toLowerCase ().split ('.') [0];
-
-      var cookieName = cookie (rq.project ? 'project' : 'host');
-
+      var cookieName = cookie (rq.subdomain ? 'project' : 'host');
       var sessionId = rq.data.cookie && rq.data.cookie [cookieName] ? rq.data.cookie [cookieName] : undefined;
 
       if (sessionId) {
-         var session = await redis ('hgetall', (rq.project ? 'session-p:' : 'session-h:') + sessionId);
-         if (rq.project && session) {
+         var session = await redis ('hgetall', (rq.subdomain ? 'session-p:' : 'session-h:') + sessionId);
+         if (rq.subdomain && session) {
             var hostSession = await redis ('hgetall', 'session-h:' + session.hostSession);
             if (! hostSession || new Date (hostSession.expires).getTime () < Date.now ()) {
                await redis ([
@@ -896,7 +925,7 @@ var routes = [
             }
          }
 
-         if (rq.project && hostSession || session && new Date (session.expires).getTime () > new Date ().getTime ()) {
+         if (rq.subdomain && hostSession || session && new Date (session.expires).getTime () > new Date ().getTime ()) {
 
             var user = await redis ('hgetall', 'user:' + session.user);
 
@@ -904,10 +933,14 @@ var routes = [
 
             rq.user = {csrf: session.csrf, session: session.hostSession || sessionId, ... user};
          }
+
+         if (rq.user && rq.projectId && session.project !== rq.projectId) delete rq.user;
       }
 
+      clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, subdomain: rq.subdomain, projectId: rq.projectId, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
+
       // Create project cookie from session cookie
-      if (rq.project && rq.data.query && rq.data.query.sessionCode) {
+      if (rq.subdomain && rq.data.query && rq.data.query.sessionCode) {
          var [sessionCode] = await redis ([
             ['hgetall', 'session-code:' + rq.data.query.sessionCode],
             ['del',     'session-code:' + rq.data.query.sessionCode]
@@ -915,13 +948,13 @@ var routes = [
 
          if (! sessionCode) return reply (rs, 403, {error: 'Missing session code'});
 
-         if (sessionCode.project !== rq.project || ! rq.data.cookie || rq.data.cookie [cookie ('project-state')] !== sessionCode.state) return reply (rs, 403, {error: 'Invalid session code'});
+         if (rq.subdomain !== sessionCode.subdomain || ! rq.data.cookie || rq.data.cookie [cookie ('project-state')] !== sessionCode.state) return reply (rs, 403, {error: 'Invalid session code'});
 
          var csrf      = crypto.randomBytes (32).toString ('hex');
          var sessionId = crypto.randomBytes (32).toString ('hex');
 
          await redis ([
-            ['hmset',  'session-p:' + sessionId, {csrf, hostSession: sessionCode.hostSession, project: sessionCode.project, user: sessionCode.user}],
+            ['hmset',  'session-p:' + sessionId, {csrf, hostSession: sessionCode.hostSession, project: rq.projectId || '', user: sessionCode.user}],
             ['expire', 'session-p:' + sessionId, CONFIG.cookie.expires],
             ['sadd',   'owner:' + sessionCode.user, 'session-p:' + sessionId]
          ]);
@@ -955,7 +988,6 @@ var routes = [
       };
 
       var staticRoutes = [
-         // Static
          ['get', '/'],
          ['get', /^\/assets\/.+/],
          ['get', '/client.js'],
@@ -968,7 +1000,7 @@ var routes = [
 
       var projectRoutes = [
          ['get', '/project/files'],
-         ['get', /^\/project\/file\/.+/],
+         ['get', /^\/f\/.+/],
          ['get', /^\/project\/message\/.+/],
          ['post', '/project/write'],
          ['post', '/project/edit'],
@@ -976,76 +1008,21 @@ var routes = [
          ['post', '/project/message'],
       ];
 
-      if (! rq.project && matchRoute (projectRoutes)) return reply (rs, 404);
-
-      if (rq.project) {
-
-         if (! matchRoute ([... staticRoutes, ... projectRoutes])) return reply (rs, 404);
-
-         var slug   = (s) => s.replace (/-/g, '--').replace (/ /g, '-');
-         var unslug = (s) => s.replace (/--|-/g, (m) => m === '--' ? '-' : ' ');
-
-         var notFound = rq.url.match (/^\/project\/file\//) ? fourohfour : '';
-
-         if (! validUuid.test (rq.project)) {
-            var subdomain = rq.project.split ('--');
-            var username = subdomain [0], projectName = subdomain.slice (1).join ('--');
-            var ownerId = await redis ('get', 'username:' + username);
-            var projects = ownerId ? await getForUser (ownerId, 'project') : [];
-            rq.projectId = dale.stopNot (projects, undefined, function (project) {
-               if (project.owner === ownerId && project.name === unslug (projectName)) return project.id;
-            });
-         }
-         else {
-            var project = await redis ('hgetall', 'project:' + rq.project);
-            var owner = project ? await redis ('hgetall', 'user:' + project.owner) : null;
-            if (owner) {
-               rq.projectId = rq.project;
-               var readableSubdomain = owner.username + '--' + slug (project.name);
-               if (readableSubdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/)) rq.projectRedirect = readableSubdomain;
-            }
-         }
-         if (rq.user && session.project !== rq.project) delete rq.user;
-         // A subdomain that doesn't resolve looks like a private project: static files are served, project routes need a login and then 404.
-         if (! rq.projectId && ! matchRoute (staticRoutes)) {
-            if (rq.user) return reply (rs, 404, notFound, 'html');
-            // Only page loads can follow the redirect to log in; client calls get a 403 and navigate themselves.
-            if (rq.method !== 'get' || ! notFound) return reply (rs, 403, {error: 'Login required'});
-            var base  = new URL (CONFIG.baseURL);
-            var state = crypto.randomBytes (32).toString ('hex');
-            return reply (rs, 302, '', {
-               location: CONFIG.baseURL + '/auth/project/' + rq.project + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
-               'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
-                  expires: new Date (Date.now () + 10 * 60 * 1000),
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               })
-            });
-         }
-         delete rq.project;
-      }
-
-      clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, projectId: rq.projectId, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
-
-      if (rq.headers ['x-test'] === '1') {
-         if (CONFIG.baseURL !== 'http://localhost:5353') return reply (rs, 403, {error: 'Not a local request'});
-         rq.test = true;
-      }
-
-      // Project read routes are public; requests without a session are checked against PUBLIC grants.
       var publicPath = matchRoute ([
          ... staticRoutes,
          // Auth
          ['post', '/auth/login'],
          ['get', /^\/auth\/verify\//],
+         ['get', /^\/auth\/project\//],
          // Project (all of these are semi-public endpoints, access is checked by the endpoints themselves)
          ['get', '/projects'],
          ['get', '/project/files'],
-         ['get', /^\/project\/file\/.+/],
+         ['get', /^\/f\/.+/],
          ['get', /^\/project\/message\/.+/],
       ]);
+
+      if (! rq.subdomain && matchRoute (projectRoutes)) return reply (rs, 404);
+      if (rq.subdomain && ! matchRoute ([... staticRoutes, ... projectRoutes, ['get', '/auth/user']])) return reply (rs, 404);
 
       if (! rq.user && ! publicPath) {
          if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (cookie (rq.projectId ? 'project' : 'host'), false, {
@@ -1167,15 +1144,16 @@ var routes = [
       if (url.origin !== base.protocol + '//' + subdomain + '.' + base.host) return reply (rs, 400, {error: 'Invalid returnUrl'});
       if (type (rq.data.query.state) !== 'string' || rq.data.query.state.length === 0) return reply (rs, 400, {error: 'Invalid state'});
 
+      if (! rq.user) return reply (rs, 302, '', {location: CONFIG.baseURL + '/#/login/' + encodeURIComponent (rq.url)});
+
       var code = crypto.randomBytes (32).toString ('hex');
       await redis ([
-         ['hmset',  'session-code:' + code, {hostSession: rq.user.session, project: subdomain, state: rq.data.query.state, user: rq.user.id}],
+         ['hmset',  'session-code:' + code, {hostSession: rq.user.session, subdomain, state: rq.data.query.state, user: rq.user.id}],
          ['expire', 'session-code:' + code, 60]
       ]);
       url.searchParams.set ('sessionCode', code);
       reply (rs, 302, '', {location: url.href});
    }],
-
 
    ['get', '/auth/user', async function (rq, rs) {
       var [user, credentials] = await redis ([
@@ -1199,7 +1177,7 @@ var routes = [
          creator: rq.user.email === CONFIG.admin || !! rq.user.creator,
          credentials,
          csrf: rq.user.csrf,
-         email: rq.user.email,
+         email: rq.subdomain ? undefined : rq.user.email,
          id: rq.user.id,
          mode: 'cloud',
          settings,
@@ -1241,7 +1219,7 @@ var routes = [
          if (username.endsWith ('-')) return reply (rs, 400, {error: 'Username cannot end with a dash'});
          if (/-\p{M}/u.test (username)) return reply (rs, 400, {error: 'A combining mark cannot follow a dash'});
 
-         if (! validUuid.test (username)) return reply (rs, 400, {error: 'Username cannot be a UUID'});
+         if (validUuid.test (username)) return reply (rs, 400, {error: 'Username cannot be a UUID'});
 
          rq.body.username = username;
          // Local mode has no signup flow.
@@ -1554,7 +1532,7 @@ var routes = [
       reply (rs, 200);
    }],
 
-   // *** PROJECTS ***
+   // *** PROJECTS (HOST) ***
 
    ['get', '/projects', async function (rq, rs) {
       var userId = rq.user ? rq.user.id : 'PUBLIC';
@@ -1691,84 +1669,77 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', ['/project/write', '/project/edit', '/project/run', '/project/message'], async function (rq, rs) {
+   ['delete', '/project/:id', async function (rq, rs) {
 
-      if (rq.url === '/project/write' && rq.data.fields) rq.body = rq.data.fields;
+      var projects = await getForUser (rq.user.id, 'project');
+      var match = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === rq.data.params.id) return project;
+      });
+      if (! match) return reply (rs, 404);
 
-      if (stop (rs, ['id', rq.body.id, 'string'])) return;
+      if (match.owner !== rq.user.id) return reply (rs, 403, {error: 'Only the project owner can delete the project'});
 
-      rs.next ();
-   }],
+      var containerId = 'vibey-project-' + rq.data.params.id;
 
-   // /p/<username or user id>/<encoded project name or project id>[/<path>] resolves the user and project (which exist or not regardless of access), then rewrites the URL to /project/<id> or /project/<id>/file/<path>, whose routes below check access.
-   ['get', /^\/p\/([^/]+)\/([^/]+)(?:\/(.+))?$/, async function (rq, rs) {
-      var user = rq.data.params [0], project = rq.data.params [1], path = rq.data.params [2];
-      var uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-
-      var userId = user;
-      if (! uuid.test (user)) {
-         userId = await redis ('get', 'username:' + user);
-         // The username key can outlive a rename; the user hash has the current one.
-         if (! userId || await redis ('hget', 'user:' + userId, 'username') !== user) return path === undefined ? reply (rs, 404) : reply (rs, 404, fourohfour, 'html');
+      var noSuchContainer = function (result) {
+         return result.code && result.stderr && result.stderr.match (/No such container|is not running/);
       }
 
-      var projectId;
-      if (uuid.test (project)) {
-         if (await redis ('hget', 'project:' + project, 'owner') === userId) projectId = project;
-      }
-      else {
-         var name = project.replace (/--?/g, function (dashes) {
-            return dashes === '--' ? '-' : ' ';
-         });
-         var keys = dale.fil (await redis ('smembers', 'owner:' + userId), undefined, function (key) {
-            if (/^project:/.test (key)) return key;
-         });
-         var names = keys.length ? await redis (dale.go (keys, function (key) {
-            return ['hget', key, 'name'];
-         })) : [];
-         projectId = dale.stopNot (names, undefined, function (candidate, index) {
-            if (candidate === name) return keys [index].replace (/^project:/, '');
-         });
-      }
-      if (! projectId) return path === undefined ? reply (rs, 404) : reply (rs, 404, fourohfour, 'html');
+      var stop = await run ('docker', 'stop', containerId, {catch: true});
+      if (stop.code && ! noSuchContainer (stop)) throw stop;
 
-      rq.url = '/project/' + projectId + (path === undefined ? '' : '/file/' + path);
-      rs.next ();
-   }],
+      var rm = await run ('docker', 'rm', containerId, {catch: true});
+      if (rm.code && ! noSuchContainer (rm)) throw rm;
 
-   ['get', '/project/:id', async function (rq, rs) {
-      var id = rq.data.params.id;
-      var userId = rq.user ? rq.user.id : 'PUBLIC';
-      var [owner, grants] = await redis ([
-         ['hget', 'project:' + id, 'owner'],
-         ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
+      await run ('docker', 'volume', 'rm', containerId);
+
+      await redis ([
+         ['del',  'project:' + rq.data.params.id],
+         ['srem', 'owner:' + rq.user.id, 'project:' + rq.data.params.id],
+         ... await projectAccessCleanup (rq.data.params.id)
       ]);
-      if (! owner) return reply (rs, 404);
-      // Any read or write grant on the project counts, whatever its path scope.
-      if (owner !== userId && ! dale.stop (grants, true, function (grant) {
-         var [verb, projectId] = grant.split (':');
-         return projectId === id && (verb === 'read' || verb === 'write');
-      })) return reply (rs, 404);
-      reply (rs, 200, {id: id});
+
+      reply (rs, 200);
    }],
+
+   // *** PROJECT (SUBDOMAIN) ***
 
    ['get', '/project/files', async function (rq, rs) {
-      var id = rq.projectId;
+
       var userId = rq.user ? rq.user.id : 'PUBLIC';
       var [owner, grants] = await redis ([
-         ['hget', 'project:' + id, 'owner'],
+         ['hget', 'project:' + rq.projectId, 'owner'],
          ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
       ]);
-      if (! owner) return reply (rs, 404);
 
       // Load permissions once, rather than querying Redis for every file.
       var scopes = owner === userId ? [''] : dale.fil (grants, undefined, function (grant) {
          var [verb, projectId, ... parts] = grant.split (':');
-         if (projectId === id && (verb === 'read' || verb === 'write')) return parts.join (':');
+         if (projectId === rq.projectId && (verb === 'read' || verb === 'write')) return parts.join (':');
       });
-      if (! scopes.length) return reply (rs, 404);
+      if (! scopes.length) {
+         if (! rq.user) {
+            var base  = new URL (CONFIG.baseURL);
+            var state = crypto.randomBytes (32).toString ('hex');
+            return reply (rs, 302, '', {
+               location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
+               'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
+                  expires: new Date (Date.now () + 10 * 60 * 1000),
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               })
+            });
+         }
+         else return reply (rs, 404);
+      }
 
-      var result = await project.run (id, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
+      if (rq.projectRedirect) return reply (rs, 302, '', {
+         location: new URL (CONFIG.baseURL).protocol + '//' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (rq.url)
+      });
+
+      var result = await project.run (rq.projectId, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
       if (result.code) return reply (rs, 500, {error: 'Could not list files'});
 
       var files = dale.fil ((result.stdout || '').toString ().split ('\0'), undefined, function (line) {
@@ -1794,17 +1765,37 @@ var routes = [
       return reply (rs, 200, files);
    }],
 
-   ['get', /^\/project\/file\/(.+)$/, async function (rq, rs) {
-      var id = rq.projectId;
+   ['get', /^\/f\/(.+)$/, async function (rq, rs) {
       var path = rq.data.params [0];
       if (! validProjectPath (path)) {
          return reply (rs, 400, {error: 'Invalid path'});
       }
-      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', id, 'read', path)) return reply (rs, 404, fourohfour, 'html');
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.projectId, 'read', path)) {
 
-      if (/\.mp4$/i.test (path)) return project.video (rq, rs, id, '/project/' + path);
+         if (! rq.user) {
+            var base  = new URL (CONFIG.baseURL);
+            var state = crypto.randomBytes (32).toString ('hex');
+            return reply (rs, 302, '', {
+               location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
+               'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
+                  expires: new Date (Date.now () + 10 * 60 * 1000),
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               })
+            });
+         }
+         else return reply (rs, 404, fourohfour, 'html');
+      }
 
-      var file = await project.read (id, '/project/' + path);
+      if (rq.projectRedirect) return reply (rs, 302, '', {
+         location: new URL (CONFIG.baseURL).protocol + '//' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (rq.url)
+      });
+
+      if (/\.mp4$/i.test (path)) return project.video (rq, rs, rq.projectId, '/project/' + path);
+
+      var file = await project.read (rq.projectId, '/project/' + path);
       if (file.code) {
          if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404, fourohfour, 'html');
          clog ({priority: 'important', type: 'Read file error', error: formatError (file)});
@@ -1833,9 +1824,10 @@ var routes = [
    ['post', '/project/write', async function (rq, rs) {
 
       var multipart = !! rq.data.files;
+      if (multipart) rq.body = rq.data.fields;
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), multipart ? ['id', 'path'] : ['id', 'path', 'content'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), multipart ? ['path'] : ['path', 'content'], 'eachOf', teishi.test.equal],
          ['path', rq.body.path, 'string'],
       ])) return;
 
@@ -1846,63 +1838,63 @@ var routes = [
          ['content', rq.body.content, 'string'],
       ])) return;
 
-      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.path)) return reply (rs, 404);
+      if (! await allowOp (rq.user.id, rq.projectId, 'write', rq.body.path)) return reply (rs, 404);
 
       var content = multipart
          ? await fs.promises.readFile (rq.data.files.file)
          : rq.body.content;
 
-      var result = await project.write (rq.body.id, rq.body.path, content);
+      var result = await project.write (rq.projectId, rq.body.path, content);
       if (result.code === 0) delete result.code;
 
-      if (! result.code) redis ('hset', 'project:' + rq.body.id, 'last', now ());
+      if (! result.code) redis ('hset', 'project:' + rq.projectId, 'last', now ());
       reply (rs, result.code ? 400 : 200, result);
    }],
 
    ['post', '/project/edit', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'path', 'oldText', 'newText'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['path', 'oldText', 'newText'], 'eachOf', teishi.test.equal],
          ['path', rq.body.path, 'string'],
          ['oldText', rq.body.oldText, 'string'],
          ['newText', rq.body.newText, 'string'],
       ])) return;
 
-      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.path)) return reply (rs, 404);
+      if (! await allowOp (rq.user.id, rq.projectId, 'write', rq.body.path)) return reply (rs, 404);
 
-      var result = await project.edit (rq.body.id, rq.body.path, rq.body.oldText, rq.body.newText);
+      var result = await project.edit (rq.projectId, rq.body.path, rq.body.oldText, rq.body.newText);
       if (result.code === 0) delete result.code;
 
-      if (! result.code) redis ('hset', 'project:' + rq.body.id, 'last', now ());
+      if (! result.code) redis ('hset', 'project:' + rq.projectId, 'last', now ());
       return reply (rs, result.code ? 400 : 200, result);
    }],
 
    ['post', '/project/run', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'command', 'read'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['command', 'read'], 'eachOf', teishi.test.equal],
          ['command', rq.body.command, 'string'],
          ['read', rq.body.read, ['boolean', 'undefined'], 'oneOf']
       ])) return;
 
       // The client's read flag is not an authorization boundary.
-      if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
+      if (! await allowOp (rq.user.id, rq.projectId, 'write')) return reply (rs, 404);
 
       var result = rq.body.command.trim () === 'vibey access'
-         ? await project.access (rq.body.id)
-         : await project.run (rq.body.id, rq.body.command, {catch: true, commit: rq.body.read ? false : 'Run ' + Path.quote (rq.body.command)});
+         ? await project.access (rq.projectId)
+         : await project.run (rq.projectId, rq.body.command, {catch: true, commit: rq.body.read ? false : 'Run ' + Path.quote (rq.body.command)});
       if (result.code === 0) delete result.code;
 
-      if (! rq.body.read) redis ('hset', 'project:' + rq.body.id, 'last', now ());
+      if (! rq.body.read) redis ('hset', 'project:' + rq.projectId, 'last', now ());
       reply (rs, 200, result);
    }],
 
    ['get', /^\/project\/message\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\/(.+)$/, async function (rq, rs) {
-      var messageId = rq.data.params [0], file = rq.data.params [1];
+      var messageId = rq.data.params [0], path = rq.data.params [1];
 
-      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.projectId, 'read', file)) return reply (rs, 404);
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.projectId, 'read', path)) return reply (rs, 404);
 
-      var result = await project.read (rq.projectId, file);
+      var result = await project.read (rq.projectId, path);
       if (result.code) {
          if (result.code === 1 && result.error && result.error.match ('No such file or directory')) return reply (rs, 404);
          clog ({
@@ -1926,10 +1918,9 @@ var routes = [
 
    ['post', '/project/message', async function (rq, rs) {
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'id', 'name', 'to'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'name', 'to'], 'eachOf', teishi.test.equal],
          ['base64', rq.body.base64, ['boolean', 'undefined'], 'oneOf'],
          ['file', rq.body.file, 'string'],
-         ['id', rq.body.id, 'string'],
          ['body', rq.body.body, 'string'],
          ['body without marker lines', rq.body.body, /^(?![\s\S]*(^|\n)əəə (head|body))/, teishi.test.match],
          ['body', rq.body.body, undefined, function () {
@@ -1957,9 +1948,9 @@ var routes = [
          }],
       ])) return;
 
-      if (! await allowOp (rq.user.id, rq.body.id, 'write', rq.body.file)) return reply (rs, 404);
+      if (! await allowOp (rq.user.id, rq.projectId, 'write', rq.body.file)) return reply (rs, 404);
       if (rq.body.to === 'shell' || rq.body.to.match (/^ai-/)) {
-         if (! await allowOp (rq.user.id, rq.body.id, 'write')) return reply (rs, 404);
+         if (! await allowOp (rq.user.id, rq.projectId, 'write')) return reply (rs, 404);
       }
 
       var aiModel = dale.stopNot (models, undefined, function (m) {
@@ -2024,13 +2015,13 @@ var routes = [
          rq.body.body,
       ], undefined, function (line) {return line}).join ('\n');
 
-      var result = await project.run (rq.body.id, 'mkdir -p ' + Path.quote (Path.dirname (rq.body.file)) + ' && touch ' + Path.quote (rq.body.file), {catch: true});
+      var result = await project.run (rq.projectId, 'mkdir -p ' + Path.quote (Path.dirname (rq.body.file)) + ' && touch ' + Path.quote (rq.body.file), {catch: true});
       if (result.code) return reply (rs, 400, {code: result.code, error: result.stderr});
 
-      result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + message);
+      result = await project.edit (rq.projectId, rq.body.file, '[EOF]', '\n' + message);
       if (result.code) return reply (rs, 400, result);
 
-      redis ('hset', 'project:' + rq.body.id, 'last', now ());
+      redis ('hset', 'project:' + rq.projectId, 'last', now ());
 
       if (rq.body.to !== 'shell' && ! rq.body.to.match (/^ai-/)) return reply (rs, 200, {id: id});
 
@@ -2062,7 +2053,7 @@ var routes = [
          );
       };
 
-      var watchCancellation = function (proc, executionProjectId = rq.body.id) {
+      var watchCancellation = function (proc, executionProjectId = rq.projectId) {
          var messageId = responseId;
          var pidFile = processFile (messageId);
          var checking = false, ended = false;
@@ -2072,7 +2063,7 @@ var routes = [
             if (checking || ended || cancelled) return;
             checking = true;
             try {
-               var chat = await project.read (rq.body.id, rq.body.file);
+               var chat = await project.read (rq.projectId, rq.body.file);
                if (ended || chat.code) return;
                if (! new RegExp (
                   '^əəə head ' + messageId + '\n(?:(?!əəə (?:head|body) )[^\n]*\n)*cancelled .+$', 'im'
@@ -2117,7 +2108,7 @@ var routes = [
          var newBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
          editQueue = editQueue.then (async function () {
             if (editError) return;
-            var result = await project.edit (rq.body.id, rq.body.file, oldBody, newBody, Math.random () > 0.05);
+            var result = await project.edit (rq.projectId, rq.body.file, oldBody, newBody, Math.random () > 0.05);
             if (result.code) throw result;
             oldBody = newBody;
          }).catch (function (error) {
@@ -2129,26 +2120,26 @@ var routes = [
       // Commits whatever the stream left uncommitted, for exits that skip the closing head edit.
       var streamCommit = async function () {
          await editQueue;
-         await project.run (rq.body.id, 'true', {catch: true, commit: 'Edit ' + Path.quote (rq.body.file)});
+         await project.run (rq.projectId, 'true', {catch: true, commit: 'Edit ' + Path.quote (rq.body.file)});
       };
 
       if (rq.body.to === 'shell') {
-         var shellProject = rq.body.id, shellCommand = rq.body.body;
+         var shellProject = rq.projectId, shellCommand = rq.body.body;
          var projectCall = /^\s*vibey project ([^\s:]+)\s+([\s\S]+)$/.exec (shellCommand);
          if (projectCall) {
             shellProject = projectCall [1];
             shellCommand = projectCall [2];
-            if (shellProject !== rq.body.id) {
+            if (shellProject !== rq.projectId) {
                var access = await project.read (shellProject, '/project/vibey/access.md');
                var allowed = ! access.code && access.stdout.toString ('utf8').split (/\r?\n/).some (function (line) {
                   var grant = /^(\S+)\s+write$/.exec (line.trim ());
-                  return grant && grant [1] === 'project:' + rq.body.id;
+                  return grant && grant [1] === 'project:' + rq.projectId;
                });
                if (! allowed) return reply (rs, 404);
             }
          }
 
-         result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
+         result = await project.edit (rq.projectId, rq.body.file, '[EOF]', '\n' + responseMessage);
          if (result.code) return reply (rs, 400, result);
          reply (rs, 200, {id: id, responseId: responseId});
 
@@ -2186,14 +2177,14 @@ var routes = [
             't-start ' + tStart,
          ].join ('\n');
 
-         await project.edit (rq.body.id, rq.body.file, shellHead, shellDone);
-         redis ('hset', 'project:' + rq.body.id, 'last', now ());
+         await project.edit (rq.projectId, rq.body.file, shellHead, shellDone);
+         redis ('hset', 'project:' + rq.projectId, 'last', now ());
          return;
       }
 
       var toolDone;
       for (var turn = 0; ; turn++) {
-         var chat = await project.read (rq.body.id, rq.body.file);
+         var chat = await project.read (rq.projectId, rq.body.file);
          if (chat.code) throw chat;
          var transcript = chat.stdout.toString ('utf8');
          if (toolDone) transcript = transcript.replace (toolDone [0], toolDone [1]);
@@ -2220,12 +2211,12 @@ var routes = [
                'əəə body ' + systemId,
                systemPrompt.replace (/^əəə (head|body)/gm, '> əəə $1'),
             ].join ('\n');
-            result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + systemMessage);
+            result = await project.edit (rq.projectId, rq.body.file, '[EOF]', '\n' + systemMessage);
             if (result.code) throw result;
             transcript += '\n' + systemMessage;
          }
 
-         var main = await project.read (rq.body.id, 'main.md');
+         var main = await project.read (rq.projectId, 'main.md');
          if (main.code && ! (main.code === 1 && /No such file or directory/.test (main.error || ''))) {
             throw main;
          }
@@ -2241,7 +2232,7 @@ var routes = [
                   'əəə body ' + mainId,
                   mainBody,
                ].join ('\n');
-               result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + mainMessage);
+               result = await project.edit (rq.projectId, rq.body.file, '[EOF]', '\n' + mainMessage);
                if (result.code) throw result;
                transcript += '\n' + mainMessage;
             }
@@ -2249,13 +2240,13 @@ var routes = [
 
          // Context is saved first; the transcript does not include the new pending response.
          if (turn === 0) {
-            result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + responseMessage);
+            result = await project.edit (rq.projectId, rq.body.file, '[EOF]', '\n' + responseMessage);
             if (result.code) return reply (rs, 400, result);
             reply (rs, 200, {id: id, responseId: responseId});
          }
          else {
             await startMessage (rq.body.to, responseId);
-            await project.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
+            await project.edit (rq.projectId, rq.body.file, toolDone [0], toolDone [1]);
          }
 
          var buffer = '', aiStderr = '';
@@ -2381,7 +2372,7 @@ var routes = [
 
          prompt += '\nCurrent chat file: ' + JSON.stringify (rq.body.file) + '\n';
 
-         var temp = await project.run (rq.body.id, 'umask 077; mktemp -d /home/vibey/.vibey-ai.XXXXXXXXXX', {catch: true});
+         var temp = await project.run (rq.projectId, 'umask 077; mktemp -d /home/vibey/.vibey-ai.XXXXXXXXXX', {catch: true});
          if (temp.code) throw temp;
          var configDir = temp.stdout.trim ();
 
@@ -2402,7 +2393,7 @@ var routes = [
                         account_id: creds.account.accountId || '',
                      },
                   });
-               var result = await project.write (rq.body.id, configDir + '/auth.json', codexAuth, 'noCommit');
+               var result = await project.write (rq.projectId, configDir + '/auth.json', codexAuth, 'noCommit');
                if (result.code) throw result;
 
                dockerArgs.push ('-e', 'CODEX_HOME=' + configDir);
@@ -2417,13 +2408,13 @@ var routes = [
                      expiresAt: creds.account.expires,
                      refreshToken: creds.account.refresh,
                   }});
-                  var result = await project.write (rq.body.id, configDir + '/.credentials.json', claudeAuth, 'noCommit');
+                  var result = await project.write (rq.projectId, configDir + '/.credentials.json', claudeAuth, 'noCommit');
                   if (result.code) throw result;
                }
 
                var credentialPath = configDir + '/credential';
                var result = await project.write (
-                  rq.body.id, credentialPath,
+                  rq.projectId, credentialPath,
                   auth === 'apiKey' ? creds.apiKey : creds.account.access,
                   'noCommit'
                );
@@ -2438,7 +2429,7 @@ var routes = [
                   + ' --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions';
             }
 
-            dockerArgs.push ('vibey-project-' + rq.body.id, 'sh', '-c', groupedCommand (command));
+            dockerArgs.push ('vibey-project-' + rq.projectId, 'sh', '-c', groupedCommand (command));
 
             var aiResult = await run ('docker', ... dockerArgs, {
                catch: true,
@@ -2471,7 +2462,7 @@ var routes = [
          }
          finally {
             try {
-               var cleanup = await project.run (rq.body.id, 'rm -rf -- ' + Path.quote (configDir), {catch: true});
+               var cleanup = await project.run (rq.projectId, 'rm -rf -- ' + Path.quote (configDir), {catch: true});
                if (cleanup.code) throw cleanup;
             }
             catch (error) {
@@ -2529,7 +2520,7 @@ var routes = [
             var lines = text.slice (start.index).split ('\n');
             var op = /^tool-call: (read|write|edit|run)(?: ([^\s:]+))?$/.exec (lines [0]);
             if (! op) return {error: 'Expected tool-call: read|write|edit|run [projectId]'};
-            var projectId = op [2] || rq.body.id;
+            var projectId = op [2] || rq.projectId;
             op = op [1];
 
             var description = lines [1];
@@ -2568,7 +2559,7 @@ var routes = [
             if (call.error) return {code: 1, error: call.error};
             try {
                var target = call.projectId;
-               if (target !== rq.body.id) {
+               if (target !== rq.projectId) {
                   if (call.op !== 'run' && ! validProjectPath (call.path)) {
                      return {code: 1, error: 'Invalid path'};
                   }
@@ -2577,7 +2568,7 @@ var routes = [
                      access.stdout.toString ('utf8').split (/\r?\n/), true,
                      function (line) {
                         var grant = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line.trim ());
-                        if (! grant || grant [1] !== 'project:' + rq.body.id) return;
+                        if (! grant || grant [1] !== 'project:' + rq.projectId) return;
                         if (grant [2] !== 'write' && call.op !== 'read') return;
                         var prefix = grant [3] || '';
                         if (! validProjectPath (prefix)) return;
@@ -2650,7 +2641,7 @@ var routes = [
                't-start ' + tStart,
                ...(from === rq.body.to ? ['credential ' + auth] : []),
             ].join ('\n');
-            var result = await project.edit (rq.body.id, rq.body.file, '[EOF]', '\n' + head + '\nto ' + to + '\n' + oldBody);
+            var result = await project.edit (rq.projectId, rq.body.file, '[EOF]', '\n' + head + '\nto ' + to + '\n' + oldBody);
             if (result.code) throw result;
             return head;
          };
@@ -2658,9 +2649,9 @@ var routes = [
          // Append the successor before finishing this message, so pollers never see a finished chain end early.
          if (toolCall) var toolHead = await startMessage ('shell', responseId, toolCallText + '\n\nResult:\n');
 
-         result = await project.edit (rq.body.id, rq.body.file, oldHead, newHead);
+         result = await project.edit (rq.projectId, rq.body.file, oldHead, newHead);
          if (result.code) throw result;
-         redis ('hset', 'project:' + rq.body.id, 'last', now ());
+         redis ('hset', 'project:' + rq.projectId, 'last', now ());
          if (! toolCall) break;
 
          var toolResult = turn >= 49 ? {code: 1, error: 'Tool-call limit reached (50 AI responses).'} : await makeToolCall (toolCall, function (chunk) {
@@ -2680,44 +2671,10 @@ var routes = [
          // Finished once the next AI message is appended (or now, if this is the last turn).
          toolDone = [toolHead, toolHead.replace ('\npending 1\n', '\nt-end ' + now () + '\n')];
          if (turn < 49) continue;
-         await project.edit (rq.body.id, rq.body.file, toolDone [0], toolDone [1]);
-         redis ('hset', 'project:' + rq.body.id, 'last', now ());
+         await project.edit (rq.projectId, rq.body.file, toolDone [0], toolDone [1]);
+         redis ('hset', 'project:' + rq.projectId, 'last', now ());
          break;
       }
-
-   }],
-
-   ['delete', '/project/:id', async function (rq, rs) {
-
-      var projects = await getForUser (rq.user.id, 'project');
-      var match = dale.stopNot (projects, undefined, function (project) {
-         if (project.id === rq.data.params.id) return project;
-      });
-      if (! match) return reply (rs, 404);
-
-      if (match.owner !== rq.user.id) return reply (rs, 403, {error: 'Only the project owner can delete the project'});
-
-      var containerId = 'vibey-project-' + rq.data.params.id;
-
-      var noSuchContainer = function (result) {
-         return result.code && result.stderr && result.stderr.match (/No such container|is not running/);
-      }
-
-      var stop = await run ('docker', 'stop', containerId, {catch: true});
-      if (stop.code && ! noSuchContainer (stop)) throw stop;
-
-      var rm = await run ('docker', 'rm', containerId, {catch: true});
-      if (rm.code && ! noSuchContainer (rm)) throw rm;
-
-      await run ('docker', 'volume', 'rm', containerId);
-
-      await redis ([
-         ['del',  'project:' + rq.data.params.id],
-         ['srem', 'owner:' + rq.user.id, 'project:' + rq.data.params.id],
-         ... await projectAccessCleanup (rq.data.params.id)
-      ]);
-
-      reply (rs, 200);
    }],
 
    // *** CREDENTIALS ***
