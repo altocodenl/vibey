@@ -1,5 +1,76 @@
 # Vibey development notes
 
+## 2026-10-22
+
+
+
+
+
+Presentation on vibey:
+- Don't start with why.
+- Start with what has changed now because of AI: 1) most production is now communication (chat); 2) many people can create their own custom software quickly and cheaply (server).
+- Next slide extends the previous to the right: put chat and server in the web, so that it can be everywhere: computer, mobile, someone else, always running.
+- How it works: start with shell view. Create a project.
+- Project starts with main.md. Add a quick explanation. This is the root context. Also upload a file to provide more context.
+- Show chat with AI. Send the same query to another AI in the same chat.
+- Share project with someone while the AIs work. Can do it with AI (show).
+- Show going in with another user (in light mode).
+- Make a file public.
+- Why vibey: 1) projects are fragmented across many tools; 2) long-term ownership (files, open source).
+- Pricing, two tiers: 1) free to use and host yourself; 2) monthly subscription + pay for servers & backups at cost.
+
+Ideas:
+- logs by default for activity, landing on vibey/log-<yyyy-mm-dd>.log
+- Later, when scaling, add a sort of hybrid of WAF and IP banning to detect threats and block traffic (but still logging it in each project so users know)
+
+- TODO
+   - small:
+      - {"error":"anthropic account token refresh failed, please reconnect: \"Timed out after 60 seconds, request aborted.\""}, this doesn't show in the chat, just the console!
+      - don't lose chat editor status when switching to To with keyboard shortcut
+      - show gauges as we go
+      - light mode with the same high contrast
+      - check links between projects
+      - Fix pin: allow for local user, when clicking + also allow to pin existing without the edit
+      - first command + I to switch to view (the first time it doesn't work)
+      - content security policy
+   - demos
+   - devops: notification project to see alerts
+   - engine
+      - support engines without provisioning (BYOE)
+      - provision engines
+   - apps
+   - access
+      - email to project
+      - token/api hooks
+      - email hooks (token in an email address)
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+   - project
+      - subdomain per project
+      - fix autogit
+      - autobackup
+      - skip docker.exec to slash command time by 10x
+   - tests: local mode, client tests: auth, project, files, chat, access
+
+For smaller changes to the client or server, I will use vibey to change those files and then rebuild from uotside. I need to polish off the small sharp edges that come from lack of hours of flight.
+
+"You lost me at installation."
+
+```
+git pull origin $(git branch --show-current)
+git push origin $(git branch --show-current)
+```
+
+https://scotthelme.co.uk/eight-bits-of-trust-emudhras-ca-keys-cracked-in-milliseconds/
+"Eight bits. For 17 whole months, that's all that stood between a huge amount of non-browser software and a forged certificate for any site blowing the security on all of your encrypted traffic."
+
+https://joshuamorris.info/notes/2026/10/13/a-markdown-file-should-just-open/
+point taken
+
 ## 2026-10-21
 
 Some notes on Alexander - The process of creating life:
