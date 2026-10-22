@@ -3351,14 +3351,13 @@ views.chat = function (read) {
    };
 
    var parseToolResult = function (b) {
-      var match = b.match (/^tool-call: (edit|read|run|write)\n/);
+      var match = b.match (/^tool-call: (edit|read|run|write)(?:\n|$)/);
       if (! match) return;
       var op = match [1];
       var rest = b.slice (match [0].length);
       var resultSplit = rest.indexOf ('\n\nResult:\n');
-      if (resultSplit === -1) return;
-      var header = rest.slice (0, resultSplit);
-      var result = rest.slice (resultSplit + '\n\nResult:\n'.length);
+      var header = resultSplit === -1 ? rest : rest.slice (0, resultSplit);
+      var result = resultSplit === -1 ? '' : rest.slice (resultSplit + '\n\nResult:\n'.length);
       var exitMatch = result.match (/\nExit code: (-?\d+)$/);
       var exitCode = exitMatch ? parseInt (exitMatch [1]) : undefined;
       if (exitMatch) result = result.slice (0, exitMatch.index);
@@ -3527,6 +3526,7 @@ views.chat = function (read) {
             var maxIndent = 4;
             var messageIndexes = {};
             var messageLevels = {};
+            var messageFroms = {};
             var messageCount = 0;
             dale.go (messages, function (message) {
                var id = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
@@ -3534,6 +3534,7 @@ views.chat = function (read) {
                var key = id [1].toLowerCase ();
                messageIndexes [key] = String (++messageCount).padStart (4, '0');
                var head = message.slice (0, id.index);
+               messageFroms [key] = (head.match (/^from (.+)$/m) || ['', '']) [1];
                var replyTo = head.match (/^to ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/im);
                messageLevels [key] = replyTo ? Math.min ((messageLevels [replyTo [1].toLowerCase ()] || 0) + 1, maxIndent - 1) : 0;
             });
@@ -3548,8 +3549,14 @@ views.chat = function (read) {
                var from = head.match (/^from (.+)$/m) [1];
                var to = head.match (/^to (.+)$/m);
                to = to ? to [1] : '';
-               var fromLabel = from === userId ? 'you' : from;
-               if (to && to !== 'all' && ! replyTo) fromLabel += ' -> ' + to;
+               var senderLabel = function (sender) {return sender === userId ? 'you' : sender};
+               var fromLabel = senderLabel (from);
+               // Replies show only the direct parent's sender, not the whole chain.
+               if (replyTo) {
+                  var parentFrom = messageFroms [replyTo [1].toLowerCase ()];
+                  if (parentFrom) fromLabel += ' -> ' + senderLabel (parentFrom);
+               }
+               else if (to && to !== 'all') fromLabel += ' -> ' + to;
                var shell = from === 'shell' || to === 'shell';
                var media = /^base64 1$/m.test (head);
                var mediaName = (head.match (/^name (.+)$/m) || ['', 'file']) [1];
@@ -3635,14 +3642,16 @@ views.chat = function (read) {
                   return ['LITERAL', localPaths (marked.parse (b), '')];
                };
                var isToolResult = shell && parseToolResult (truncatedBody || body);
+               // Replies indent the whole row, which also narrows the bubble.
+               var indent = (messageLevels [messageId.toLowerCase ()] || 0) * (mobile ? 0.5 : 2);
                return ['div', {
-                  class: 'border-box items-start mb4 mw-100 pv3 relative w-100',
+                  class: 'border-box items-start mb4 mw-100 pr3 pv3 relative w-100',
                   style: style ({
                      display: 'grid',
                      gap: '0.75rem',
-                     'grid-template-columns': mobile ? 'max-content minmax(0, 1fr) max-content' : 'max-content minmax(0, max-content) minmax(min(8rem, 25%), 1fr)',
-                     'margin-left': messageLevels [messageId.toLowerCase ()] ? (messageLevels [messageId.toLowerCase ()] * (mobile ? 0.5 : 2)) + 'rem' : undefined,
-                     width: messageLevels [messageId.toLowerCase ()] ? 'calc(100% - ' + (messageLevels [messageId.toLowerCase ()] * (mobile ? 0.5 : 2)) + 'rem)' : undefined,
+                     'grid-template-columns': mobile ? 'max-content minmax(0, 1fr) max-content' : 'max-content minmax(0, 1fr)',
+                     'margin-left': indent ? indent + 'rem' : undefined,
+                     width: indent ? 'calc(100% - ' + indent + 'rem)' : undefined,
                   }),
                }, [
                   ['div', {
@@ -3653,9 +3662,28 @@ views.chat = function (read) {
                         'pointer-events': 'none',
                      }),
                   }],
-                  ['pre', {class: 'code f6 fw7 lh-solid ma0 pl3'}, [
-                     replyTo ? ['span', {class: views.projectColor (messageIndexes [replyTo [1].toLowerCase ()], true)}, (messageIndexes [replyTo [1].toLowerCase ()] || '????') + '\n |- '] : '',
-                     ['span', {class: 'br2 dib ph2 pv1 ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true)}, messageIndexes [messageId.toLowerCase ()]],
+                  ['div', {
+                     class: 'code f6 flex flex-wrap fw7 items-center lh-solid',
+                     style: style ({
+                        gap: '0.5rem',
+                        'grid-column': mobile ? '2 / -1' : '2',
+                        'grid-row': '1',
+                        'justify-self': mobile ? undefined : 'start',
+                        'min-width': 0,
+                     }),
+                  }, [
+                     ['span', {class: 'br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true)}, fromLabel],
+                     tokenLabel ? ['span', {class: 'br2 dib ph2 pv1 vlightblue'}, tokenLabel] : '',
+                     usageLabel ? ['span', {class: 'br2 dib ph2 pv1 vlightblue'}, usageLabel] : '',
+                     costLabel ? ['span', {
+                        class: 'br2 dib ph2 pv1 vgreen',
+                        title: 'Estimated API cost in USD, using configured model prices.',
+                     }, costLabel] : '',
+                  ]],
+                  ['pre', {
+                     class: 'code f6 fw7 lh-solid ma0 pl3',
+                     style: mobile ? undefined : style ({'grid-column': '1', 'grid-row': '2'}),
+                  }, [
                      /^pending 1$/m.test (head) ? B.view (['message', 'cancelling', messageId], function (cancelling) {
                         return ['button', {
                            'aria-label': 'Stop message ' + messageIndexes [messageId.toLowerCase ()],
@@ -3678,7 +3706,8 @@ views.chat = function (read) {
                      style: style ({
                         'border-width': '0.25rem',
                         'font-size': from === userId ? '1.125rem' : undefined,
-                        'grid-column': mobile ? '1 / -1' : undefined,
+                        'grid-column': mobile ? '1 / -1' : '2',
+                        'grid-row': mobile ? undefined : '2',
                         'margin-left': mobile ? '1rem' : undefined,
                         'max-width': mobile ? 'calc(100% - 1rem)' : undefined,
                         'min-width': 0,
@@ -3707,43 +3736,13 @@ views.chat = function (read) {
                      }, '(cancelled ' + ago (cancelled [1]) + ')'] : ['span'],
                   ]],
                   ['div', {
-                     class: 'code f6 flex flex-column fw7 lh-solid self-stretch',
+                     class: 'br2 code dib f6 fw7 lh-solid ph2 pv1 ' + views.projectColor (timeLabel, true),
                      style: style ({
-                        display: mobile ? 'contents' : undefined,
-                        gap: '0.5rem',
-                        'min-width': 0,
-                        'overflow-wrap': 'anywhere',
+                        'grid-column': mobile ? '3' : '2',
+                        'grid-row': '3',
+                        'justify-self': 'end',
                      }),
-                  }, [
-                     ['div', {
-                        class: 'br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true),
-                        style: mobile ? style ({'grid-column': '2 / -1', 'grid-row': '1'}) : undefined,
-                     }, fromLabel],
-                     tokenLabel || usageLabel || costLabel ? ['div', {
-                        class: 'flex ' + (mobile ? 'flex-wrap' : 'flex-column'),
-                        style: style ({
-                           'column-gap': '0.5rem',
-                           'grid-column': mobile ? '1 / 3' : undefined,
-                           'grid-row': mobile ? '3' : undefined,
-                           'margin-left': mobile ? '1rem' : undefined,
-                        }),
-                     }, [
-                        tokenLabel ? ['div', {class: 'br2 dib lh-copy ph2 pv1 vlightblue'}, tokenLabel] : '',
-                        usageLabel ? ['div', {class: 'br2 dib lh-copy ph2 pv1 vlightblue'}, usageLabel] : '',
-                        costLabel ? ['div', {
-                           class: 'br2 dib lh-copy ph2 pv1 vgreen',
-                           title: 'Estimated API cost in USD, using configured model prices.',
-                        }, costLabel] : '',
-                     ]] : '',
-                     ['div', {
-                        class: 'br2 dib ph2 pv1 ' + views.projectColor (timeLabel, true),
-                        style: style ({
-                           'grid-column': mobile ? '3' : undefined,
-                           'grid-row': mobile ? '3' : undefined,
-                           'margin-top': 'auto',
-                        }),
-                     }, timeLabel],
-                  ]],
+                  }, timeLabel],
                ]];
             });
             return ['div', {
