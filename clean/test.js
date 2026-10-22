@@ -149,6 +149,10 @@ if (mode === 'server') {
             }];
          }
 
+         var cookie = function (type) {
+            return '__Host-' + CONFIG.cookie.name + '-' + type;
+         }
+
          // *** PUBLIC ***
 
          suites.public = dale.go ([
@@ -307,7 +311,7 @@ if (mode === 'server') {
                ['Verify login again', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   if (! assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="[a-f0-9]{64}"; Expires=.+ ' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10) + ' .+ HttpOnly; Path=\\/; SameSite=Lax;'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="[a-f0-9]{64}"; Expires=.+ ' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10) + ' .+ HttpOnly; Path=\\/; SameSite=Lax;'), teishi.test.match],
                      ['csrf token', rs.body.csrf, 'string']
                   ])) return false;
                   s.headers.cookie = getCookie (rs.headers);
@@ -472,7 +476,7 @@ if (mode === 'server') {
                ['Logout', 'post', '/auth/logout', {}, 200, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                   ]);
                }],
                ['Logout again', 'post', '/auth/logout', {}, 403, assertBody ({error: 'Invalid session'})],
@@ -509,12 +513,12 @@ if (mode === 'server') {
                ['Private route with invalid session', 'get', '/auth/user', 403, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                      ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
                   ]);
-               }, {cookie: CONFIG.cookie.name + '="foo"'}],
+               }, {cookie: cookie ('host') + '="foo"'}],
                ['Private route with no session', 'get', '/auth/user', 403, assertBody ({error: 'No session'}), {cookie: ''}],
-               ['Public route with invalid session', 'get', '/', 200, {cookie: CONFIG.cookie.name + '="foo"'}],
+               ['Public route with invalid session', 'get', '/', 200, {cookie: cookie ('host') + '="foo"'}],
                ['Private route with invalid csrf token', 'post', '/auth/logout', {}, 403, assertBody ({error: 'Invalid csrf token'}), {'x-csrf': 'foo'}],
                ['Public route with invalid csrf token', 'post', '/error', {hi: 'there'}, 200],
                ['Login again (second session)', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
@@ -553,7 +557,7 @@ if (mode === 'server') {
                }],
                ['Expire a session', 'get', '/', 200, function (s, rq, rs, next) {
                   (async function () {
-                     await redis ('hset', 'session:' + s.sessions [1].cookie.match (/"[0-9a-f]+"/) [0].replace (/"/g, ''), 'expires', new Date ().toISOString ());
+                     await redis ('hset', 'session-h:' + s.sessions [1].cookie.match (/"[0-9a-f]+"/) [0].replace (/"/g, ''), 'expires', new Date ().toISOString ());
                      next (null, rs);
                   }) ();
                }],
@@ -579,13 +583,13 @@ if (mode === 'server') {
                   return assert ([
                      ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                   ]);
                }],
                ['Delete account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (CONFIG.cookie.name + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
                   ]);
                }],
                ['List sessions after delete', 'get', '/auth/list', 403, assertBody ({error: 'Invalid session'})],
@@ -737,9 +741,10 @@ if (mode === 'server') {
             ['Delete nonexistent project', 'delete', '/project/nonexistent', 404],
             ['Delete project', 'delete', function (s) {return '/project/' + s.secondProjectId}, 200],
             ['List projects after second project deletion', 'get', '/projects', 200, function (s, rq, rs) {
+               s.host = s.projectId + '.localhost';
                return assert (['length', rs.body.length, 1, teishi.test.equal]);
             }],
-            ['List files', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './main.md\n'})],
+            ['List files', 'post', '/project/run', function (s) {return {command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './main.md\n'})],
             ['Run command without id', 'post', '/project/run', {command: 'ls'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Run command without command', 'post', '/project/run', function (s) {return {id: s.projectId}}, 400, assertBody ({error: 'command should have as type string but instead is undefined with type undefined'})],
             ['Run command that fails', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'exit 1'}}, 200, function (s, rq, rs) {

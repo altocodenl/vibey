@@ -1334,7 +1334,7 @@ var routes = [
       var sessionId = crypto.randomBytes (32).toString ('hex');
 
       await redis ([
-         ['hmset',  'session:' + sessionId, {
+         ['hmset',  'session-h:' + sessionId, {
             csrf,
             expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
             last: JSON.stringify ({
@@ -1343,7 +1343,7 @@ var routes = [
             }),
             user: userId
          }],
-         ['sadd', 'owner:' + userId, 'session:' + sessionId],
+         ['sadd', 'owner:' + userId, 'session-h:' + sessionId],
          ['del', 'loginLink:' + loginLink, 'loginLinkR:' + email, 'rateLimit:login:' + user.email],
          // Remove the TTL for email & user entries in case this is the first successful verify for this user
          ['persist', 'user:' + userId],
@@ -1393,7 +1393,7 @@ var routes = [
    ['get', '/auth/list', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
-      reply (rs, 200, dale.go (await getForUser (rq.user.id, 'session'), function (session) {
+      reply (rs, 200, dale.go (await getForUser (rq.user.id, 'session-h'), function (session) {
          return {
             expired: new Date (session.expires).getTime () < new Date ().getTime (),
             last: JSON.parse (session.last)
@@ -1404,9 +1404,23 @@ var routes = [
    ['post', '/auth/logout', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
+      var projectSessions = dale.fil (await redis ('smembers', 'owner:' + rq.user.id), undefined, function (key) {
+         if (key.match (/^session-p:/)) return key;
+      });
+      var hostSessions = await redis (dale.go (projectSessions, function (key) {
+         return ['hget', key, 'hostSession'];
+      }));
+
       await redis ([
-         ['del', 'session:' + rq.user.session],
-         ['srem', 'owner:' + rq.user.id, 'session:' + rq.user.session]
+         ['del', 'session-h:' + rq.user.session],
+         ['srem', 'owner:' + rq.user.id, 'session-h:' + rq.user.session],
+         ... dale.go (projectSessions, function (key, k) {
+            if (hostSessions [k] === rq.user.session || ! hostSessions [k]) return [
+               ['del', key],
+               ['srem', 'owner:' + rq.user.id, key]
+            ];
+            return [];
+         }).flat ()
       ]);
 
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (cookie ('host'), false, {
