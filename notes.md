@@ -1,10 +1,128 @@
 # Vibey development notes
 
+## 2026-10-26
+
+How can vibey bring abundance?
+- Make it easy to run your own software in the cloud.
+- Make it easy to host content (text, media) in the cloud.
+- Have a useful project memory that you can backup and restore fully without depending on a vendor.
+- Set up your own VPS-equivalent.
+- Have the core benefits of a versioning system and a bucket-backed backup done automatically.
+- Be able to run things in a server without having to ssh into it.
+- Be able to receive email for free in your domain (but not sending it?).
+
+It would make sense now to remove the rediret rom the list files endpoint. The only two ways to load a redirectable link are either full client or single file. So it's just GET / or GET /f that redirect.
+
+- TODO
+   - small:
+      - more padding at the bottom of the DNA list to avoid overlap of the last with the search bar
+      - {"error":"anthropic account token refresh failed, please reconnect: \"Timed out after 60 seconds, request aborted.\""}, this doesn't show in the chat, just the console!
+      - don't lose chat editor status when switching to To with keyboard shortcut
+      - show gauges as we go
+      - light mode with the same high contrast
+      - check links between projects
+      - Fix pin: allow for local user, when clicking + also allow to pin existing without the edit
+      - first command + I to switch to view (the first time it doesn't work)
+      - content security policy
+      - client.js and client_extend.js
+      - Fix annoying overwrite message when starting a new document.
+      - Fix esc escaping full mode in vi mode (we should intercept it if we're in full mode and in normal mode in the editor)
+      - Make panes take full height, put project (with details as expansion) in left pane, move settings to projects page as a wrench, show sessions
+      - Status bar:
+         - If creator and no projects pinned, tell that you can click on one of the slots to create a project.
+         - If no creator access, don't show the shell, just the dna list.
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - demos
+      - devops: notification project to see alerts
+      - engine
+         - support engines without provisioning (BYOE)
+         - provision engines
+         - Port mapping from the project to the engine: allow to run ina. port. Check for contention within the engine. Then auto-modify nginx to allow for direct access. Allow direct access with mappings of URLs, per individual file and also per folder/prefix (forbid dots).
+   - access
+      - email to project
+      - token/api hooks
+      - email hooks (token in an email address)
+   - apps
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+   - project
+      - subdomain per project
+      - fix autogit
+      - autobackup
+      - skip docker.exec to slash command time by 10x
+   - tests: local mode, client tests: auth, project, files, chat, access
+
+How the web looks like from vibey, if vibey were to work?
+- id first, backed by email. Not logged in means public/anonymous. Once logged in, you have identity.
+- engine+project: while you can run things locally, it makes the most sense to run and host things in a server that has a good connection to the web and is up 24/7. That goes for static and software.
+- Files as the primitive for everything. Pages, chat/communication and apps. Email can be folded to chat.
+- Access as a per-project file that determines who can do what.
+- The verbs are still few. Per project, there are seven (list files, read/write/edit file, run command, read/edit message).
+
+Strange shape of vibey's seven, a rocket-like column that goes up: the three infra ones are one atop the other, with id at the bottom, engine on top of it, project on top of engine. Then file on top of them, with both chat and app on top of file. Atop these two is access. And that's it.
+
+https://contraptions.venkateshrao.com/p/cognitive-mercantilism
+"Fourth, there was little reason to imagine most people doing anything other than agricultural labor. If something like 80% of the population was engaged in inefficient subsistence farming, that was simply the natural order of things. What else were they good for? Remove them from the fields and you would merely have millions of useless mouths to feed.
+
+Now replace wealth with intelligence, and mercantilism with cognitive mercantilism.
+
+The parallels are almost embarrassingly direct."
+"The result was not a world full of useless mouths. It was a world in which vastly more people could do things other than farm, while enjoying access to vastly more food."
+"The analogous possibility with AI is that most people will no longer need to be significant producers of intelligence in order to become significant consumers of it."
+"This does not mean that intelligence becomes irrelevant as a human capacity. Quite the opposite. Just as abundant food supported the emergence of elaborate culinary cultures rather than eliminating interest in cooking, abundant intelligence may stimulate increasingly sophisticated cultures of thought.
+
+People may become more intellectually ambitious precisely because they no longer have to do all the cognitive production themselves."
+"Access to intelligence, the ability to command it, the freedom to pursue projects with it, and the institutional rights necessary to participate in an increasingly intelligence-rich economy may become the foundations of a new kind of labor politics.
+
+This would be a labor politics of cognitive abundance rather than cognitive scarcity."
+"What gets missed is the possibility that we are witnessing the beginning of a transition as profound as the one from an overwhelmingly agricultural society to an industrial and commercial one. From a world where 80% of human brains are engaged in subsistence cognition to one in which 95% are engaged in satisfying previously unfulfillable cognitive demands."
+"The cognitive mercantilist sees a world threatened by an oversupply of intelligence and an impending surplus of useless minds. The AI Malthusian sees a world in which intelligence outruns the capacity of humanity to absorb it, leaving a growing population of economically redundant minds primed for revolutionary explosions.
+
+The cognitive capitalist sees the possibility of an almost limitless expansion of demand, and a world full of minds whose potential has barely begun to be explored."
+
+## 2026-10-23
+
+https://news.ycombinator.com/item?id=50202681
+```
+vbezhenar 9 hours ago | prev | next [–]
+What made Docker unique IMO is not the container technology itself. I used chroot 20 years ago and it worked just fine. Yes, no network namespaces; no process namespaces, but I don't even think these are that important.
+What made Docker unique were there things:
+
+1. Dockerfile concept. Building images layer by layer. Caching layers. Everything in a single file. It made possible to iterate on image quickly. It made possible to implement CI builds efficiently.
+
+2. Docker network registry concept. Putting universal images onto a server and share them with the world.
+
+3. Momentum. A lot of software that was traditionally complicated to deploy, suddenly appeared in docker servers. I remember how fascinated I was, when I could deploy wordpress website with tiny docker-compose. And how contained it was. I could just delete every trace of it from my host. I always felt uneasy installing various things onto my host and docker just solved that uneasiness.
+```
+
+https://codeandcake.dev/posts/2026-10-22-docker-is-weird
+```
+I decided to make my own container runtime for fun, and even though I’m still early on, I’ve learned that Docker is weird. Here’s some weird things I learned about Docker.
+
+Containers aren’t real
+Unlike VMs, containers are just processes with special restrictions on them. Your kernel is still running that process! And if you know where to look, you can even find that process in /proc.
+
+Containers really aren’t real
+There’s not really a linux feature that’s just “containers” either. Instead, containers are really 5 different linux kernel features in trenchcoat.
+
+Namespaces hide what the host and container can see, cgroups limit container resource usage, and there’s a whole bunch of networking magic I don’t understand that lets you isolate a container’s network.
+
+Images are just folders
+Images are just folders that Docker puts somewhere and then calls chroot (or pivot_root) to make that folder your container process’s new root directory. So if you run docker run -it --rm ubuntu /bin/bash, Docker is going to:
+
+Download the ubuntu image from Dockerhub.
+Put that image somewhere.
+Run /some/weird/docker/path/bin/bash
+```
+
 ## 2026-10-22
-
-
-
-
 
 Presentation on vibey:
 - Don't start with why.
