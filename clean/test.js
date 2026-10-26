@@ -9,6 +9,7 @@ if (mode === 'server') {
    var dale   = require ('dale');
    var teishi = require ('teishi');
    var hitit  = require ('hitit');
+   var cicek  = require ('cicek');
    var fs     = require ('fs');
    var os     = require ('os');
    var path   = require ('path');
@@ -129,9 +130,9 @@ if (mode === 'server') {
             return [tag, 'get', '/', 200, function (s, rq, rs, next) {
                var started = Date.now ();
                var check = async function () {
-                  var response = await fetch ('http://localhost:' + CONFIG.port + '/project/run', {
-                     body: JSON.stringify ({id: s.projectId, command: 'git log --format=%s', read: true}),
-                     headers: {... s.headers, 'content-type': 'application/json'},
+                  var response = await fetch ('http://' + s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname + ':' + CONFIG.port + '/project/run', {
+                     body: JSON.stringify ({command: 'git log --format=%s', read: true}),
+                     headers: {... s.headers, 'content-type': 'application/json', 'x-csrf': s.projectCsrf},
                      method: 'POST',
                   });
                   var subjects = response.ok ? ((await response.json ()).stdout || '').split ('\n').slice (0, -1) : [];
@@ -609,7 +610,67 @@ if (mode === 'server') {
             ] : [],
          ];
 
+         // Asks the host for a code to open a session on `subdomain`, which comes back to `path` on that subdomain.
+         var mintSessionCode = function (tag, subdomain, state, path) {
+            return ['Mint session code ' + tag, 'get', function (s) {
+               var base = new URL (CONFIG.baseURL);
+               return '/auth/project/' + subdomain (s) + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + subdomain (s) + '.' + base.host + (path || '/f/main.md')) + '&state=' + state (s);
+            }, 302, function (s, rq, rs) {
+               var location = new URL (rs.headers.location);
+               s.mintedCodePath = location.pathname + location.search;
+               return true;
+            }];
+         }
+
+         // Makes `s [key]` the subdomain that project routes go to.
+         var useProject = function (key) {
+            return ['Use project ' + key, 'get', '/', 200, function (s) {
+               s.projectSubdomain = s [key];
+               return true;
+            }];
+         }
+
+         // Switches to a session opened by `projectLogin`, including its user's host session.
+         var useSession = function (tag) {
+            return ['Switch to ' + tag, 'get', '/', 200, function (s) {
+               var session = s.projectSessions [tag];
+               s.headers.cookie = session.cookie;
+               s.headers ['x-csrf'] = session.hostCsrf;
+               s.projectCsrf = session.projectCsrf;
+               s.projectSubdomain = session.projectSubdomain;
+               return true;
+            }];
+         }
+
+         // Opens a session for the current user on `s [key]`'s subdomain, makes it the current project and saves it as `tag` for `useSession`.
+         var projectLogin = function (tag, key) {
+            return [
+               useProject (key),
+               mintSessionCode ('for ' + tag, function (s) {return s.projectSubdomain}, function (s) {return 'foo'}),
+               ['Exchange session code for ' + tag, 'get', function (s) {return s.mintedCodePath}, 302, function (s, rq, rs) {
+                  s.headers.cookie = s.headers.cookie.split (';') [0] + '; ' + rs.headers ['set-cookie'] [0].split (';') [0];
+                  return true;
+               }, {cookie: cookie ('project-state') + '="foo"'}],
+               {
+                  tag: 'Get project csrf for ' + tag,
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/auth/user',
+                  code: 200,
+                  apres: function (s, rq, rs) {
+                     s.projectCsrf = rs.body.csrf;
+                     s.projectSessions = s.projectSessions || {};
+                     s.projectSessions [tag] = {cookie: s.headers.cookie, hostCsrf: s.headers ['x-csrf'], projectCsrf: s.projectCsrf, projectSubdomain: s.projectSubdomain};
+                     return true;
+                  },
+               },
+            ];
+         }
+
          suites.project = [
+
+            // *** PROJECT (HOST) ***
+
             CONFIG.cloud ? [
                ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
                ['Login', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
@@ -692,18 +753,17 @@ if (mode === 'server') {
                };
             }, 400],
             ['Restore project name', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
-            // Names must stay encodable in /p/<user>/<name> URLs.
             dale.go ([
-               ['a UUID', '0b1f6c2e-8d3a-4f5b-9c7d-1e2f3a4b5c6d'],
-               ['an uppercase UUID', '0B1F6C2E-8D3A-4F5B-9C7D-1E2F3A4B5C6D'],
-               ['two spaces in a row', 'el  norte'],
-               ['a space before a dash', 'el -norte'],
-               ['a dash before a space', 'el- norte'],
-               ['a slash', 'el/norte'],
-               ['a question mark', 'el norte?'],
+               ['is a UUID', '0b1f6c2e-8d3a-4f5b-9c7d-1e2f3a4b5c6d'],
+               ['is an uppercase UUID', '0B1F6C2E-8D3A-4F5B-9C7D-1E2F3A4B5C6D'],
+               ['has two spaces in a row', 'el  norte'],
+               ['has a space before a dash', 'el -norte'],
+               ['has a dash before a space', 'el- norte'],
+               ['has a slash', 'el/norte'],
+               ['has a question mark', 'el norte?'],
             ], function (entry) {
                return [
-                  ['Create project with ' + entry [0], 'post', '/project', {name: entry [1]}, 400, assertBody ({error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'})],
+                  ['Create project with a name that ' + entry [0], 'post', '/project', {name: entry [1]}, 400, assertBody ({error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'})],
                   ['Rename project to ' + entry [0], 'put', '/project', function (s) {return {id: s.projectId, name: entry [1]}}, 400, assertBody ({error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'})],
                ];
             }),
@@ -741,22 +801,233 @@ if (mode === 'server') {
             ['Delete nonexistent project', 'delete', '/project/nonexistent', 404],
             ['Delete project', 'delete', function (s) {return '/project/' + s.secondProjectId}, 200],
             ['List projects after second project deletion', 'get', '/projects', 200, function (s, rq, rs) {
-               s.host = s.projectId + '.localhost';
+               s.projectSubdomain = s.projectId;
                return assert (['length', rs.body.length, 1, teishi.test.equal]);
             }],
+
+            // *** PROJECT (SUBDOMAIN) ***
+
+            CONFIG.cloud ? [
+               ['Get username', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  if (! assert (['username', rs.body.username, 'string'])) return false;
+                  s.username = rs.body.username;
+                  return true;
+               }],
+               {
+                  tag: 'Redirect to project login for nonexistent project',
+                  method: 'get',
+                  host: '00000000-0000-4000-8000-000000000000.' + new URL (CONFIG.baseURL).hostname,
+                  path: '/f/main.md',
+                  code: 302,
+                  apres: function (s, rq, rs) {
+                     var base = new URL (CONFIG.baseURL);
+                     var location = new URL (rs.headers.location);
+                     return assert ([
+                        ['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/00000000-0000-4000-8000-000000000000', teishi.test.equal],
+                        ['returnUrl', location.searchParams.get ('returnUrl'), base.protocol + '//00000000-0000-4000-8000-000000000000.' + base.host + '/f/main.md', teishi.test.equal],
+                        ['cookie', getCookie (rs.headers), new RegExp ('^' + cookie ('project-state') + '='), teishi.test.match],
+                     ]);
+                  },
+               },
+               {
+                  tag: 'Redirect to project login with invalid project session',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/f/main.md',
+                  headers: function (s) {return {cookie: s.headers.cookie.split (';') [0] + '; ' + cookie ('project') + '="' + 'f'.repeat (64) + '"'}},
+                  code: 302,
+                  apres: function (s, rq, rs) {
+                     var location = new URL (rs.headers.location);
+                     return assert ([
+                        ['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/' + s.projectSubdomain, teishi.test.equal],
+                        ['only sets state cookie', rs.headers ['set-cookie'].length, 1, teishi.test.equal],
+                        ['cookie', getCookie (rs.headers), new RegExp ('^' + cookie ('project-state') + '='), teishi.test.match],
+                     ]);
+                  },
+               },
+               ['Redirect to project login', 'get', '/f/main.md', 302, function (s, rq, rs) {
+                  var base = new URL (CONFIG.baseURL);
+                  var location = new URL (rs.headers.location);
+                  if (! assert ([
+                     ['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/' + s.projectSubdomain, teishi.test.equal],
+                     ['returnUrl', location.searchParams.get ('returnUrl'), base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/f/main.md', teishi.test.equal],
+                     ['state', location.searchParams.get ('state'), /^[a-f0-9]{64}$/, teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp ('^' + cookie ('project-state') + '='), teishi.test.match],
+                  ])) return false;
+                  s.authProjectPath = location.pathname + location.search;
+                  s.projectState = location.searchParams.get ('state');
+                  s.hostCookie = s.headers.cookie.split (';') [0];
+                  s.headers.cookie = s.hostCookie + '; ' + getCookie (rs.headers).split (';') [0];
+                  return true;
+               }],
+               ['Get project session code with invalid subdomain', 'get', function (s) {
+                  var base = new URL (CONFIG.baseURL);
+                  return '/auth/project/bad_subdomain?returnUrl=' + encodeURIComponent (base.protocol + '//bad_subdomain.' + base.host + '/') + '&state=foo';
+               }, 400, assertBody ({error: 'Invalid subdomain'})],
+               ['Get project session code without returnUrl', 'get', function (s) {
+                  return '/auth/project/' + s.projectSubdomain + '?state=foo';
+               }, 400, assertBody ({error: 'Invalid returnUrl'})],
+               dale.go ([
+                  ['another site', function (s, base) {return 'https://evil.com/'}],
+                  ['the host', function (s, base) {return CONFIG.baseURL + '/'}],
+                  ['another subdomain', function (s, base) {return base.protocol + '//other.' + base.host + '/'}],
+                  ['another scheme', function (s, base) {return (base.protocol === 'https:' ? 'http:' : 'https:') + '//' + s.projectSubdomain + '.' + base.host + '/'}],
+                  ['another port', function (s, base) {return base.protocol + '//' + s.projectSubdomain + '.' + base.hostname + ':' + (parseInt (base.port || 80) + 1) + '/'}],
+               ], function (v) {
+                  return ['Get project session code with returnUrl on ' + v [0], 'get', function (s) {
+                     return '/auth/project/' + s.projectSubdomain + '?returnUrl=' + encodeURIComponent (v [1] (s, new URL (CONFIG.baseURL))) + '&state=foo';
+                  }, 400, assertBody ({error: 'Invalid returnUrl'})];
+               }),
+               ['Get project session code without state', 'get', function (s) {
+                  var base = new URL (CONFIG.baseURL);
+                  return '/auth/project/' + s.projectSubdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/f/main.md');
+               }, 400, assertBody ({error: 'Invalid state'})],
+               ['Get project session code with empty state', 'get', function (s) {
+                  var base = new URL (CONFIG.baseURL);
+                  return '/auth/project/' + s.projectSubdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/f/main.md') + '&state=';
+               }, 400, assertBody ({error: 'Invalid state'})],
+               ['Get project session code', 'get', function (s) {return s.authProjectPath}, 302, function (s, rq, rs) {
+                  var base = new URL (CONFIG.baseURL);
+                  var location = new URL (rs.headers.location);
+                  if (! assert ([
+                     ['origin', location.origin, base.protocol + '//' + s.projectSubdomain + '.' + base.host, teishi.test.equal],
+                     ['path', location.pathname, '/f/main.md', teishi.test.equal],
+                     ['sessionCode', location.searchParams.get ('sessionCode'), /^[a-f0-9]{64}$/, teishi.test.match],
+                  ])) return false;
+                  s.sessionCodePath = location.pathname + location.search;
+                  return true;
+               }],
+               ['Exchange unknown session code', 'get', '/f/main.md?sessionCode=' + 'f'.repeat (64), 403, assertBody ({error: 'Missing session code'})],
+               mintSessionCode ('for another subdomain', function (s) {return 'other'}, function (s) {return s.projectState}),
+               ['Exchange session code on another subdomain', 'get', function (s) {return s.mintedCodePath}, 403, assertBody ({error: 'Invalid session code'})],
+               mintSessionCode ('to exchange without cookies', function (s) {return s.projectSubdomain}, function (s) {return s.projectState}),
+               ['Exchange session code without cookies', 'get', function (s) {return s.mintedCodePath}, 403, assertBody ({error: 'Invalid session code'}), {cookie: ''}],
+               mintSessionCode ('with another state', function (s) {return s.projectSubdomain}, function (s) {return 'foo'}),
+               ['Exchange session code with mismatched state', 'get', function (s) {return s.mintedCodePath}, 403, assertBody ({error: 'Invalid session code'})],
+               ['Exchange session code for project session', 'get', function (s) {return s.sessionCodePath}, 302, function (s, rq, rs) {
+                  if (! assert ([
+                     ['location', rs.headers.location, '/f/main.md', teishi.test.equal],
+                     ['referrer-policy', rs.headers ['referrer-policy'], 'no-referrer', teishi.test.equal],
+                     ['project cookie', rs.headers ['set-cookie'] [0], new RegExp ('^' + cookie ('project') + '="[a-f0-9]{64}"; Expires=.+; HttpOnly; Path=\\/; SameSite=Lax; Secure'), teishi.test.match],
+                     ['state cookie cleared', rs.headers ['set-cookie'] [1], new RegExp ('^' + cookie ('project-state') + '=("false"|false)'), teishi.test.match],
+                  ])) return false;
+                  s.headers.cookie = s.hostCookie + '; ' + rs.headers ['set-cookie'] [0].split (';') [0];
+                  return true;
+               }],
+               ['Exchange used session code', 'get', function (s) {return s.sessionCodePath}, 403, assertBody ({error: 'Missing session code'})],
+               mintSessionCode ('with query', function (s) {return s.projectSubdomain}, function (s) {return 'foo'}, '/f/main.md?foo=bar'),
+               ['Exchange session code keeps other query parameters', 'get', function (s) {return s.mintedCodePath}, 302, function (s, rq, rs) {
+                  return assert (['location', rs.headers.location, '/f/main.md?foo=bar', teishi.test.equal]);
+               }, {cookie: cookie ('project-state') + '="foo"'}],
+               {
+                  tag: 'UUID root without readable name serves app',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/',
+                  code: 200,
+                  apres: function (s, rq, rs) {
+                     return assert (['location', rs.headers.location, undefined, teishi.test.equal]);
+                  },
+               },
+               ['Rename project to a readable name', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
+               {
+                  tag: 'Redirect UUID root to readable subdomain',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/',
+                  code: 302,
+                  apres: function (s, rq, rs) {
+                     var base = new URL (CONFIG.baseURL);
+                     return assert (['location', rs.headers.location, base.protocol + '//' + s.username + '--el-norte.' + base.host + '/', teishi.test.equal]);
+                  },
+               },
+               {
+                  tag: 'Redirect UUID root keeping query',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/?foo=bar',
+                  code: 302,
+                  apres: function (s, rq, rs) {
+                     var base = new URL (CONFIG.baseURL);
+                     return assert (['location', rs.headers.location, base.protocol + '//' + s.username + '--el-norte.' + base.host + '/?foo=bar', teishi.test.equal]);
+                  },
+               },
+               ['Redirect UUID file keeping query', 'get', '/f/main.md?foo=bar', 302, function (s, rq, rs) {
+                  var base = new URL (CONFIG.baseURL);
+                  return assert (['location', rs.headers.location, base.protocol + '//' + s.username + '--el-norte.' + base.host + '/f/main.md?foo=bar', teishi.test.equal]);
+               }],
+               ['List files on UUID subdomain', 'get', '/project/files', 200, function (s, rq, rs) {
+                  return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
+               }],
+               {
+                  tag: 'Anonymous UUID root serves app without redirect',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/',
+                  headers: {cookie: ''},
+                  code: 200,
+                  apres: function (s, rq, rs) {
+                     return assert (['location', rs.headers.location, undefined, teishi.test.equal]);
+                  },
+               },
+               ['Anonymous cannot list files on UUID subdomain', 'get', '/project/files', 404, function (s, rq, rs) {
+                  // The project cookie belongs to the UUID subdomain, so the browser doesn't send it to the readable one.
+                  s.projectSubdomain = s.username + '--el-norte';
+                  s.headers.cookie = s.hostCookie;
+                  return true;
+               }, {cookie: ''}],
+               ['Readable subdomain without session redirects to login', 'get', '/f/main.md', 302, function (s, rq, rs) {
+                  var location = new URL (rs.headers.location);
+                  return assert (['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/' + s.projectSubdomain, teishi.test.equal]);
+               }],
+               mintSessionCode ('for readable subdomain', function (s) {return s.projectSubdomain}, function (s) {return 'foo'}),
+               ['Exchange session code on readable subdomain', 'get', function (s) {return s.mintedCodePath}, 302, function (s, rq, rs) {
+                  if (! assert (['project cookie', rs.headers ['set-cookie'] [0], new RegExp ('^' + cookie ('project') + '='), teishi.test.match])) return false;
+                  s.headers.cookie = s.hostCookie + '; ' + rs.headers ['set-cookie'] [0].split (';') [0];
+                  return true;
+               }, {cookie: cookie ('project-state') + '="foo"'}],
+               ['Read file on readable subdomain', 'get', '/f/main.md', 200, assertBody ('# el norte\n\n')],
+               {
+                  tag: 'Readable root serves app without redirect',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/',
+                  code: 200,
+                  apres: function (s, rq, rs) {
+                     return assert (['location', rs.headers.location, undefined, teishi.test.equal]);
+                  },
+               },
+               ['List files on readable subdomain', 'get', '/project/files', 200, function (s, rq, rs) {
+                  return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
+               }],
+               {
+                  tag: 'Get project session csrf',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/auth/user',
+                  code: 200,
+                  apres: function (s, rq, rs) {
+                     if (! assert ([
+                        ['csrf', rs.body.csrf, 'string'],
+                        ['no email on subdomain', rs.body.email, undefined, teishi.test.equal],
+                     ])) return false;
+                     s.projectCsrf = rs.body.csrf;
+                     return true;
+                  },
+               },
+            ] : [],
             ['List files', 'post', '/project/run', function (s) {return {command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './main.md\n'})],
-            ['Run command without id', 'post', '/project/run', {command: 'ls'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
-            ['Run command without command', 'post', '/project/run', function (s) {return {id: s.projectId}}, 400, assertBody ({error: 'command should have as type string but instead is undefined with type undefined'})],
-            ['Run command that fails', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'exit 1'}}, 200, function (s, rq, rs) {
+            ['Run command without command', 'post', '/project/run', function (s) {return {}}, 400, assertBody ({error: 'command should have as type string but instead is undefined with type undefined'})],
+            ['Run command that fails', 'post', '/project/run', function (s) {return {command: 'exit 1'}}, 200, function (s, rq, rs) {
                return assert (['body.code', rs.body.code, 1, teishi.test.equal]);
             }],
             waitForCommits ('List commits when there is only the initial commit', 1, "Write 'main.md'"),
-            ['Read file from nonexistent project', 'get', '/project/nonexistent/file/main.md', 404],
-            ['Read absolute path', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('/main.md')}, 400, assertBody ({error: 'Invalid path'})],
-            ['Read parent traversal path', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('../main.md')}, 400, assertBody ({error: 'Invalid path'})],
-            ['Read path with null byte', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md\0')}, 400, assertBody ({error: 'Invalid path'})],
-            ['Get file that is not there', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/whatevs.md')}, 404],
-            ['Get main file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 200, function (s, rq, rs) {
+            ['Read file from nonexistent project', 'get', '/f/main.md', 404],
+            ['Read absolute path', 'get', '/f/' + encodeURIComponent ('/main.md'), 400, assertBody ({error: 'Invalid path'})],
+            ['Read parent traversal path', 'get', '/f/' + encodeURIComponent ('../main.md'), 400, assertBody ({error: 'Invalid path'})],
+            ['Read path with null byte', 'get', '/f/' + encodeURIComponent ('main.md\0'), 400, assertBody ({error: 'Invalid path'})],
+            ['Get file that is not there', 'get', '/f/' + encodeURIComponent ('doc/whatevs.md'), 404],
+            ['Get main file', 'get', '/f/' + encodeURIComponent ('main.md'), 200, function (s, rq, rs) {
                return assert ([
                   ['body', rs.body, '# el norte\n\n', teishi.test.equal],
                   ['content-type', rs.headers ['content-type'], /text\/markdown/, teishi.test.match],
@@ -766,41 +1037,39 @@ if (mode === 'server') {
                   //['content-security-policy', rs.headers ['content-security-policy'], "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'", teishi.test.equal],
                ]);
             }],
-            ['Edit file without path', 'post', '/project/edit', function (s) {return {id: s.projectId, oldText: 'a', newText: 'b'}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
-            ['Edit file without oldText', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
-            ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
+            ['Edit file without path', 'post', '/project/edit', function (s) {return {oldText: 'a', newText: 'b'}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
+            ['Edit file without oldText', 'post', '/project/edit', function (s) {return {path: 'main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
+            ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text found .+ times/, teishi.test.match]);
             }],
-            ['Edit main file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, assertBody ({})],
+            ['Edit main file', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, assertBody ({})],
             waitForCommits ('List commits after edit', 2, "Edit 'main.md'"),
-            ['Get main file after edit', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 200, assertBody ('# El Norte!\n\n')],
-            ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
+            ['Get main file after edit', 'get', '/f/' + encodeURIComponent ('main.md'), 200, assertBody ('# El Norte!\n\n')],
+            ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text not found/, teishi.test.match]);
             }],
-            ['Edit main file (noop)', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
+            ['Edit main file (noop)', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
             waitForCommits ('List commits after noop edit', 2, "Edit 'main.md'"),
-            ['Overwrite file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
+            ['Overwrite file', 'post', '/project/write', function (s) {return {path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
             waitForCommits ('List commits after write', 3, "Write 'main.md'"),
-            ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
+            ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
             waitForCommits ('List commits after noop write', 3, "Write 'main.md'"),
-            ['Write empty file', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/empty.md', content: ''}}, 200, assertBody ({})],
-            ['Read back empty file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/empty.md')}, 200, assertBody ('')],
-            ['Reject base64 file write', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/binary.txt', content: 'aGVsbG8=', base64: true}}, 400],
+            ['Write empty file', 'post', '/project/write', function (s) {return {path: 'doc/empty.md', content: ''}}, 200, assertBody ({})],
+            ['Read back empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, assertBody ('')],
+            ['Reject base64 file write', 'post', '/project/write', function (s) {return {path: 'doc/binary.txt', content: 'aGVsbG8=', base64: true}}, 400],
             ['Write text file with multipart', 'post', '/project/write', function (s) {
                return {multipart: [
-                  {name: 'id', value: s.projectId},
                   {name: 'path', value: 'doc/binary.txt'},
                   {name: 'file', filename: 'upload', value: 'hello multipart'},
                ]};
             }, 200, assertBody ({})],
-            ['Read back multipart-written file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/binary.txt')}, 200, assertBody ('hello multipart')],
+            ['Read back multipart-written file', 'get', '/f/' + encodeURIComponent ('doc/binary.txt'), 200, assertBody ('hello multipart')],
             ['Write binary file with multipart', 'post', '/project/write', function (s) {
                // Hitit requires a file path to send arbitrary binary bytes unchanged.
                s.uploadDir = fs.mkdtempSync (path.join (os.tmpdir (), 'vibey-upload-'));
                var file = path.join (s.uploadDir, 'upload.bin');
                fs.writeFileSync (file, Buffer.from ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]));
                return {multipart: [
-                  {name: 'id', value: s.projectId},
                   {name: 'path', value: 'doc/binary.bin'},
                   {name: 'file', path: file, contentType: 'application/octet-stream'},
                ]};
@@ -812,7 +1081,7 @@ if (mode === 'server') {
             {
                tag: 'Read back binary file',
                method: 'get',
-               path: function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/binary.bin')},
+               path: '/f/' + encodeURIComponent ('doc/binary.bin'),
                code: 200,
                raw: true,
                apres: function (s, rq, rs) {
@@ -824,11 +1093,11 @@ if (mode === 'server') {
                   ]);
                },
             },
-            ['Write file with spaces in name', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/come back.md', content: 'hello spaces'}}, 200, assertBody ({})],
-            ['Read file with spaces in name', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/come back.md')}, 200, assertBody ('hello spaces')],
-            ['Run a command with pipe', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
-            ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'printf foo', read: true}}, 200, assertBody ({stdout: 'foo'})],
-            ['Run a command with change and output', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: 'foo\n'})],
+            ['Write file with spaces in name', 'post', '/project/write', function (s) {return {path: 'doc/come back.md', content: 'hello spaces'}}, 200, assertBody ({})],
+            ['Read file with spaces in name', 'get', '/f/' + encodeURIComponent ('doc/come back.md'), 200, assertBody ('hello spaces')],
+            ['Run a command with pipe', 'post', '/project/run', function (s) {return {command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
+            ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {command: 'printf foo', read: true}}, 200, assertBody ({stdout: 'foo'})],
+            ['Run a command with change and output', 'post', '/project/run', function (s) {return {command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: 'foo\n'})],
             waitForCommits ('List commits after command with change and output', 8, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
             ['Stop project container', 'get', '/', 200, function (s, rq, rs, next) {
                (async function () {
@@ -840,24 +1109,18 @@ if (mode === 'server') {
 
             ['Upload multipart file', 'post', '/project/write', function (s) {
                return {multipart: [
-                  {name: 'id', value: s.projectId},
                   {name: 'path', value: 'doc/upload test.txt'},
                   {name: 'file', filename: 'upload', value: 'hello multipart\nこんにちは\0'},
                ]};
             }, 200, assertBody ({})],
-            ['Read multipart upload', 'get', function (s) {
-               return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/upload test.txt');
-            }, 200, assertBody ('hello multipart\nこんにちは\0')],
+            ['Read multipart upload', 'get', '/f/' + encodeURIComponent ('doc/upload test.txt'), 200, assertBody ('hello multipart\nこんにちは\0')],
             ['Upload empty multipart file', 'post', '/project/write', function (s) {
                return {multipart: [
-                  {name: 'id', value: s.projectId},
                   {name: 'path', value: 'doc/upload test.txt'},
                   {name: 'file', filename: 'upload', value: ''},
                ]};
             }, 200],
-            ['Read empty multipart upload', 'get', function (s) {
-               return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/upload test.txt');
-            }, 200, assertBody ('')],
+            ['Read empty multipart upload', 'get', '/f/' + encodeURIComponent ('doc/upload test.txt'), 200, assertBody ('')],
             dale.go ([
                ['missing file', []],
                ['wrong file field', [{name: 'other', filename: 'upload', value: 'hello'}]],
@@ -872,17 +1135,16 @@ if (mode === 'server') {
             ], function (test) {
                return ['Reject multipart ' + test [0], 'post', '/project/write', function (s) {
                   return {multipart: [
-                     {name: 'id', value: s.projectId},
                      {name: 'path', value: 'doc/upload test.txt'},
                   ].concat (test [1])};
                }, 400];
             }),
 
-            ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, assertBody ({})],
-            ['Read file after append to empty file', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/empty.md')}, 200, assertBody ('first message\n')],
-            ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, assertBody ({})],
+            ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, assertBody ({})],
+            ['Read file after append to empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, assertBody ('first message\n')],
+            ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, assertBody ({})],
             waitForCommits ('List commits after appends', 12, "Edit 'doc/empty.md'"),
-            ['Read file after second append', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('doc/empty.md')}, 200, function (s, rq, rs, next) {
+            ['Read file after second append', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, function (s, rq, rs, next) {
                if (! assertBody ('first message\nsecond message\n') (s, rq, rs)) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
@@ -890,11 +1152,11 @@ if (mode === 'server') {
                }) ();
             }],
 
-            ['Post message to new chat in missing folder', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', body: 'Hello everyone!', to: 'all'}}, 200, function (s, rq, rs) {
+            ['Post message to new chat in missing folder', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', body: 'Hello everyone!', to: 'all'}}, 200, function (s, rq, rs) {
                s.messageId = rs.body.id;
                return assert (['message id', rs.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match]);
             }],
-            ['Read new chat message', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('chat/nested/test.md')}, 200, function (s, rq, rs) {
+            ['Read new chat message', 'get', '/f/' + encodeURIComponent ('chat/nested/test.md'), 200, function (s, rq, rs) {
                s.chatContent = rs.body;
                return assert ([
                   ['head marker', rs.body.indexOf ('\nəəə head ' + s.messageId + '\n'), 0, teishi.test.equal],
@@ -905,57 +1167,28 @@ if (mode === 'server') {
                   ['no base64 header', /\nbase64 /.test (rs.body), false, teishi.test.equal],
                ]);
             }],
-            ['Read message by id', 'put', '/project/message', function (s) {
-               return {
-                  file: 'chat/nested/test.md',
-                  messageId: s.messageId,
-                  projectId: s.projectId,
-               };
-            }, 200, function (s, rq, rs) {
+            ['Read message by id', 'get', function (s) {return '/project/message/' + s.messageId + '/chat/nested/test.md'}, 200, function (s, rq, rs) {
                return assert ([
                   ['message', rs.body.message, s.chatContent.slice (1), teishi.test.equal],
                   ['next', rs.body.next, [], teishi.test.equal],
                ]);
             }],
-            ['Read message with invalid id', 'put', '/project/message', function (s) {
-               return {
-                  file: 'chat/nested/test.md',
-                  messageId: 'invalid',
-                  projectId: s.projectId,
-               };
-            }, 400],
-            ['Read message without file', 'put', '/project/message', function (s) {
-               return {
-                  messageId: s.messageId,
-                  projectId: s.projectId,
-               };
-            }, 400],
-            ['Read missing message', 'put', '/project/message', function (s) {
-               return {
-                  file: 'chat/nested/test.md',
-                  messageId: '00000000-0000-0000-0000-000000000000',
-                  projectId: s.projectId,
-               };
-            }, 404],
-            ['Read message from missing file', 'put', '/project/message', function (s) {
-               return {
-                  file: 'chat/missing.md',
-                  messageId: s.messageId,
-                  projectId: s.projectId,
-               };
-            }, 404],
-            ['Reject name without base64', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', body: 'hi', name: 'a.png', to: 'all'}}, 400],
-            ['Reject name with a slash', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: 'aGk=', name: 'a/b.png', to: 'all'}}, 400],
-            ['Reject invalid base64 body', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: 'not base64!', to: 'all'}}, 400],
-            ['Reject base64 message to shell', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: 'aGk=', to: 'shell'}}, 400],
-            ['Post base64 reply to existing message', 'post', '/project/message', function (s) {return {id: s.projectId, file: 'chat/nested/test.md', base64: true, body: Buffer.from ('Hello back!').toString ('base64'), name: 'hello.txt', to: s.messageId}}, 200, function (s, rq, rs) {
+            ['Read message with invalid id', 'get', '/project/message/invalid/chat/nested/test.md', 404],
+            ['Read message without file', 'get', function (s) {return '/project/message/' + s.messageId}, 404],
+            ['Read missing message', 'get', '/project/message/00000000-0000-0000-0000-000000000000/chat/nested/test.md', 404],
+            ['Read message from missing file', 'get', function (s) {return '/project/message/' + s.messageId + '/chat/missing.md'}, 404],
+            ['Reject name without base64', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', body: 'hi', name: 'a.png', to: 'all'}}, 400],
+            ['Reject name with a slash', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: 'aGk=', name: 'a/b.png', to: 'all'}}, 400],
+            ['Reject invalid base64 body', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: 'not base64!', to: 'all'}}, 400],
+            ['Reject base64 message to shell', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: 'aGk=', to: 'shell'}}, 400],
+            ['Post base64 reply to existing message', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: Buffer.from ('Hello back!').toString ('base64'), name: 'hello.txt', to: s.messageId}}, 200, function (s, rq, rs) {
                s.replyId = rs.body.id;
                return assert ([
                   ['reply id', rs.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match],
                   ['distinct id', rs.body.id === s.messageId, false, teishi.test.equal],
                ]);
             }],
-            ['Read chat with appended reply', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('chat/nested/test.md')}, 200, function (s, rq, rs, next) {
+            ['Read chat with appended reply', 'get', '/f/' + encodeURIComponent ('chat/nested/test.md'), 200, function (s, rq, rs, next) {
                var appended = rs.body.slice (s.chatContent.length);
                if (! assert ([
                   ['original message preserved', rs.body.slice (0, s.chatContent.length), s.chatContent, teishi.test.equal],
@@ -972,25 +1205,14 @@ if (mode === 'server') {
                }) ();
             }],
 
-            ['Read first message without appended reply', 'put', '/project/message', function (s) {
-               return {
-                  file: 'chat/nested/test.md',
-                  messageId: s.messageId,
-                  projectId: s.projectId,
-               };
-            }, 200, function (s, rq, rs) {
+            ['Read first message without appended reply', 'get', function (s) {return '/project/message/' + s.messageId + '/chat/nested/test.md'}, 200, function (s, rq, rs) {
                return assert ([
                   ['message', rs.body.message, s.chatContent.slice (1), teishi.test.equal],
                   ['next', rs.body.next, [s.replyId], teishi.test.equal],
                ]);
             }],
-            ['Read reply by uppercase id', 'put', '/project/message', function (s) {
-               return {
-                  file: 'chat/nested/test.md',
-                  messageId: s.replyId.toUpperCase (),
-                  projectId: s.projectId,
-               };
-            }, 200, function (s, rq, rs) {
+            ['Reject uppercase message id', 'get', function (s) {return '/project/message/' + s.replyId.toUpperCase () + '/chat/nested/test.md'}, 404],
+            ['Read reply by id', 'get', function (s) {return '/project/message/' + s.replyId + '/chat/nested/test.md'}, 200, function (s, rq, rs) {
                return assert ([
                   ['reply head', rs.body.message.indexOf ('əəə head ' + s.replyId + '\n'), 0, teishi.test.equal],
                   ['reply body', rs.body.message.endsWith ('əəə body ' + s.replyId + '\n' + Buffer.from ('Hello back!').toString ('base64')), true, teishi.test.equal],
@@ -998,22 +1220,22 @@ if (mode === 'server') {
                ]);
             }],
 
-            ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
+            ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {command: 'ls doc'}}, 200, function (s, rq, rs, next) {
                if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\nupload test.txt\n', teishi.test.equal])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   next (null, rs);
                }) ();
             }],
-            ['Read file after container has been turned off', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 200, assertBody ('# el norte\n\n')],
-            ['Stop and remove container for next test', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'true'}}, 200, function (s, rq, rs, next) {
+            ['Read file after container has been turned off', 'get', '/f/' + encodeURIComponent ('main.md'), 200, assertBody ('# el norte\n\n')],
+            ['Stop and remove container for next test', 'post', '/project/run', function (s) {return {command: 'true'}}, 200, function (s, rq, rs, next) {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   await run ('docker', 'rm', 'vibey-project-' + s.projectId);
                   next (null, rs);
                }) ();
             }],
-            ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls doc'}}, 200, function (s, rq, rs, next) {
+            ['Run a command after container has been removed', 'post', '/project/run', function (s) {return {command: 'ls doc'}}, 200, function (s, rq, rs, next) {
                if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\nupload test.txt\n', teishi.test.equal])) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
@@ -1021,7 +1243,7 @@ if (mode === 'server') {
                   next (null, rs);
                }) ();
             }],
-            ['Read file after container has been removed', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 200, assertBody ('# el norte\n\n')],
+            ['Read file after container has been removed', 'get', '/f/' + encodeURIComponent ('main.md'), 200, assertBody ('# el norte\n\n')],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {
@@ -1052,17 +1274,12 @@ if (mode === 'server') {
                }],
                ['Create project as non-creator', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Please request creator access'})],
                ['Update another user\'s project', 'put', '/project', function (s) {return {id: s.projectId, name: 'hacked'}}, 404],
-               ['Read file from another user\'s project', 'get', function (s) {return '/project/' + s.projectId + '/file/' + encodeURIComponent ('main.md')}, 404],
-               ['Read message from another user\'s project', 'put', '/project/message', function (s) {
-                  return {
-                     file: 'chat/nested/test.md',
-                     messageId: s.messageId,
-                     projectId: s.projectId,
-                  };
-               }, 404],
-               ['Write file to another user\'s project', 'post', '/project/write', function (s) {return {id: s.projectId, path: 'doc/hack.md', content: 'hacked'}}, 404],
-               ['Edit file in another user\'s project', 'post', '/project/edit', function (s) {return {id: s.projectId, path: 'main.md', oldText: 'el', newText: 'EL'}}, 404],
-               ['Run command on another user\'s project', 'post', '/project/run', function (s) {return {id: s.projectId, command: 'ls'}}, 404],
+               projectLogin ('another user\'s project', 'projectId'),
+               ['Read file from another user\'s project', 'get', '/f/' + encodeURIComponent ('main.md'), 404],
+               ['Read message from another user\'s project', 'get', function (s) {return '/project/message/' + s.messageId + '/chat/nested/test.md'}, 404],
+               ['Write file to another user\'s project', 'post', '/project/write', function (s) {return {path: 'doc/hack.md', content: 'hacked'}}, 404],
+               ['Edit file in another user\'s project', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'el', newText: 'EL'}}, 404],
+               ['Run command on another user\'s project', 'post', '/project/run', function (s) {return {command: 'ls'}}, 404],
                ['Delete another user\'s project', 'delete', function (s) {return '/project/' + s.projectId}, 404],
                ['Delete non-creator account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
                   s.headers.cookie = s.user1Headers.cookie;
@@ -1096,29 +1313,23 @@ if (mode === 'server') {
          var accessAs = function (who) {
             return ['Switch to access ' + who, 'get', '/', 200, function (s) {
                Object.assign (s.headers, s.accessUsers [who]);
+               delete s.projectCsrf;
                return true;
             }];
          }
 
          var accessFile = function (path) {
-            return function (s) {
-               return '/project/' + s.accessProjectId + '/file/' + encodeURIComponent (path);
-            };
-         }
-
-         // The shared project through its name-based URL: A's generated username and the encoded name of `access test`.
-         var accessNamedFile = function (path) {
-            return '/p/access-a/access-test/' + encodeURIComponent (path);
+            return '/f/' + encodeURIComponent (path);
          }
 
          var accessWrite = function (path, content, code) {
             return ['Write ' + path + ' expecting ' + code, 'post', '/project/write', function (s) {
-               return {id: s.accessProjectId, path, content};
+               return {path, content};
             }, code];
          }
 
          var accessSync = ['Sync access', 'post', '/project/run', function (s) {
-            return {id: s.accessProjectId, command: 'vibey access'};
+            return {command: 'vibey access'};
          }, 200, function (s, rq, rs) {
             return assert ([
                ['sync error', rs.body.error, undefined, teishi.test.equal],
@@ -1130,10 +1341,8 @@ if (mode === 'server') {
          var accessWait = ['Wait for shell command', 'get', '/', 200, function (s, rq, rs, next) {
             var started = Date.now ();
             var check = async function () {
-               var response = await fetch ('http://localhost:' + CONFIG.port + '/project/message', {
-                  body: JSON.stringify ({file: 'chat/thread.md', messageId: s.accessResponseId, projectId: s.accessProjectId}),
-                  headers: {... s.headers, 'content-type': 'application/json'},
-                  method: 'PUT',
+               var response = await fetch ('http://' + s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname + ':' + CONFIG.port + '/project/message/' + s.accessResponseId + '/chat/thread.md', {
+                  headers: s.headers,
                });
                var body = response.ok ? await response.json () : {};
                if (/^t-end /m.test (body.message || '')) return next (null, rs);
@@ -1147,7 +1356,7 @@ if (mode === 'server') {
          var accessShell = function (tag, target, command, code) {
             return ['Cross-project shell ' + tag + ' expecting ' + code, 'post', '/project/message', function (s) {
                var id = target === 'target' ? s.accessTargetId : s.accessProjectId;
-               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'shell', body: 'vibey project ' + id + ' ' + command};
+               return {file: 'chat/thread.md', to: 'shell', body: 'vibey project ' + id + ' ' + command};
             }, code, function (s, rq, rs) {
                if (code === 200) s.accessResponseId = rs.body.responseId;
                return true;
@@ -1156,9 +1365,13 @@ if (mode === 'server') {
 
          // Grants the shared project `verb` on the target, next to a user grant so the sync must skip the project line.
          var targetAccess = function (verb) {
-            return ['Grant origin ' + verb + ' on target', 'post', '/project/write', function (s) {
-               return {id: s.accessTargetId, path: 'vibey/access.md', content: 'access-b@example.com read\nproject:' + s.accessProjectId + ' ' + verb + '\n'};
-            }, 200];
+            return [
+               useSession ('A on target project'),
+               ['Grant origin ' + verb + ' on target', 'post', '/project/write', function (s) {
+                  return {path: 'vibey/access.md', content: 'access-b@example.com read\nproject:' + s.accessProjectId + ' ' + verb + '\n'};
+               }, 200],
+               useSession ('A on shared project'),
+            ];
          }
 
          suites.access = CONFIG.cloud ? [
@@ -1166,15 +1379,21 @@ if (mode === 'server') {
             accessLogin ('a'),
             accessLogin ('b'),
             accessAs ('a'),
+            // Readable subdomains are <username>--<project name>, with each space as `-` and each dash as `--`.
+            ['A reads own username', 'get', '/auth/user', 200, function (s, rq, rs) {
+               return assert (['username', rs.body.username, 'access-a', teishi.test.equal]);
+            }],
             ['A creates shared project', 'post', '/project', {name: 'access test'}, 200, function (s, rq, rs) {
                s.accessProjectId = rs.body.id;
+               s.accessProject = 'access-a--access-test';
                return assert (['project id', s.accessProjectId, 'string']);
             }],
+            projectLogin ('A on shared project', 'accessProject'),
             accessWrite ('outside.txt', 'original', 200),
             accessWrite ('chat/inside.txt', 'original', 200),
             accessWrite ('chatty/outside.txt', 'original', 200),
             ['A creates message', 'post', '/project/message', function (s) {
-               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Shared message'};
+               return {file: 'chat/thread.md', to: 'all', body: 'Shared message'};
             }, 200, function (s, rq, rs) {
                s.accessMessageId = rs.body.id;
                return assert (['message id', s.accessMessageId, 'string']);
@@ -1183,60 +1402,57 @@ if (mode === 'server') {
             accessWrite ('vibey/access.md', 'access-b@example.com read\nproject:00000000-0000-0000-0000-000000000000 write\naccess-c@example.com write\n', 200),
             accessSync,
 
-            // Name-based URLs: /p/<username or user id>/<encoded project name or project id>[/<path>].
-            ['A reads own id and username', 'get', '/auth/user', 200, function (s, rq, rs) {
-               s.accessOwnerId = rs.body.id;
-               return assert (['username', rs.body.username, 'access-a', teishi.test.equal]);
-            }],
-            ['A resolves project by username and name', 'get', '/p/access-a/access-test', 200, function (s, rq, rs) {
-               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
-            }],
-            ['A resolves project by user id and project id', 'get', function (s) {return '/p/' + s.accessOwnerId + '/' + s.accessProjectId}, 200, function (s, rq, rs) {
-               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
-            }],
-            ['A resolves project by username and project id', 'get', function (s) {return '/p/access-a/' + s.accessProjectId}, 200, function (s, rq, rs) {
-               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
-            }],
-            ['A resolves project by user id and name', 'get', function (s) {return '/p/' + s.accessOwnerId + '/access-test'}, 200, function (s, rq, rs) {
-               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
-            }],
-            ['A reads file through name-based URL', 'get', accessNamedFile ('outside.txt'), 200, assertBody ('original')],
-            ['A reads nested file through name-based URL', 'get', accessNamedFile ('chat/inside.txt'), 200, assertBody ('original')],
-            ['Name-based URL for missing file', 'get', accessNamedFile ('missing.txt'), 404],
-            ['Unknown username', 'get', '/p/no-such-user/access-test', 404],
-            ['Unknown project name', 'get', '/p/access-a/no-such-project', 404],
+            ['A reads file on readable subdomain', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
+            ['A reads nested file on readable subdomain', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('original')],
+            ['Missing file on readable subdomain', 'get', accessFile ('missing.txt'), 404],
+            dale.go ([
+               ['Unknown username', 'no-such-user--access-test'],
+               ['Unknown project name', 'access-a--no-such-project'],
+            ], function (entry) {
+               return {
+                  tag: entry [0],
+                  method: 'get',
+                  host: entry [1] + '.' + new URL (CONFIG.baseURL).hostname,
+                  path: '/project/files',
+                  code: 404,
+               };
+            }),
             ['A creates project with a dash', 'post', '/project', {name: 'x-y z'}, 200, function (s, rq, rs) {
                s.accessDashId = rs.body.id;
+               s.accessDashProject = 'access-a--x--y-z';
                return assert (['project id', s.accessDashId, 'string']);
             }],
-            ['Double dash decodes to a dash', 'get', '/p/access-a/x--y-z', 200, function (s, rq, rs) {
-               return assert (['id', rs.body.id, s.accessDashId, teishi.test.equal]);
-            }],
-            ['Single dash decodes to a space', 'get', '/p/access-a/x-y-z', 404],
+            projectLogin ('A on dash project', 'accessDashProject'),
+            ['Double dash decodes to a dash', 'get', '/project/files', 200],
+            {
+               tag: 'Single dash decodes to a space',
+               method: 'get',
+               host: 'access-a--x-y-z.' + new URL (CONFIG.baseURL).hostname,
+               path: '/project/files',
+               code: 404,
+            },
             ['A deletes project with a dash', 'delete', function (s) {return '/project/' + s.accessDashId}, 200],
-            ['Deleted project no longer resolves', 'get', '/p/access-a/x--y-z', 404],
+            ['Deleted project no longer resolves', 'get', '/project/files', 404],
+            useSession ('A on shared project'),
 
             // B already existed when the grants were synced.
             accessAs ('b'),
             ['B sees shared project', 'get', '/projects', 200, function (s, rq, rs) {
                return assert (['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal]);
             }],
-            ['B lists files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 200, function (s, rq, rs) {
+            projectLogin ('B on shared project', 'accessProject'),
+            ['B lists files', 'get', '/project/files', 200, function (s, rq, rs) {
                return assert (['outside file visible', inc (dale.go (rs.body, function (f) {return f.name}), 'outside.txt'), true, teishi.test.equal]);
             }],
             ['B reads file', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
-            ['B resolves shared project by name', 'get', '/p/access-a/access-test', 200, function (s, rq, rs) {
-               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
-            }],
-            ['B reads file through name-based URL', 'get', accessNamedFile ('outside.txt'), 200, assertBody ('original')],
-            ['B reads own id', 'get', '/auth/user', 200, function (s, rq, rs) {
-               s.accessReaderId = rs.body.id;
-               return assert (['id', s.accessReaderId, 'string']);
-            }],
-            ['Project id under a user who does not own it', 'get', function (s) {return '/p/' + s.accessReaderId + '/' + s.accessProjectId}, 404],
-            ['B reads message', 'put', '/project/message', function (s) {
-               return {projectId: s.accessProjectId, file: 'chat/thread.md', messageId: s.accessMessageId};
-            }, 200, function (s, rq, rs) {
+            {
+               tag: 'Project name under a user who does not own it',
+               method: 'get',
+               host: 'access-b--access-test.' + new URL (CONFIG.baseURL).hostname,
+               path: '/project/files',
+               code: 404,
+            },
+            ['B reads message', 'get', function (s) {return '/project/message/' + s.accessMessageId + '/chat/thread.md'}, 200, function (s, rq, rs) {
                return assert ([
                   ['message', rs.body.message, 'string'],
                   function () {return ['message body', rs.body.message.endsWith ('Shared message'), true, teishi.test.equal]},
@@ -1246,20 +1462,19 @@ if (mode === 'server') {
             accessWrite ('outside.txt', 'forbidden', 404),
             ['B cannot upload', 'post', '/project/write', function (s) {
                return {multipart: [
-                  {name: 'id', value: s.accessProjectId},
                   {name: 'path', value: 'outside.txt'},
                   {name: 'file', filename: 'upload', value: 'forbidden'},
                ]};
             }, 404],
             ['B cannot edit', 'post', '/project/edit', function (s) {
-               return {id: s.accessProjectId, path: 'outside.txt', oldText: 'original', newText: 'forbidden'};
+               return {path: 'outside.txt', oldText: 'original', newText: 'forbidden'};
             }, 404],
             ['B cannot send messages', 'post', '/project/message', function (s) {
-               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Forbidden'};
+               return {file: 'chat/thread.md', to: 'all', body: 'Forbidden'};
             }, 404],
             dale.go ([false, true], function (read) {
                return ['B cannot run commands with read=' + read, 'post', '/project/run', function (s) {
-                  return {id: s.accessProjectId, command: 'printf forbidden > outside.txt', read};
+                  return {command: 'printf forbidden > outside.txt', read};
                }, 404];
             }),
             ['B mutations left file unchanged', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
@@ -1269,24 +1484,24 @@ if (mode === 'server') {
             ['C sees shared project', 'get', '/projects', 200, function (s, rq, rs) {
                return assert (['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal]);
             }],
+            projectLogin ('C on shared project', 'accessProject'),
             accessWrite ('outside.txt', 'written by C', 200),
             ['C edits file', 'post', '/project/edit', function (s) {
-               return {id: s.accessProjectId, path: 'outside.txt', oldText: 'written', newText: 'edited'};
+               return {path: 'outside.txt', oldText: 'written', newText: 'edited'};
             }, 200],
             ['C reads edited file', 'get', accessFile ('outside.txt'), 200, assertBody ('edited by C')],
             ['C uploads file', 'post', '/project/write', function (s) {
                return {multipart: [
-                  {name: 'id', value: s.accessProjectId},
                   {name: 'path', value: 'upload.txt'},
                   {name: 'file', filename: 'upload', value: 'uploaded by C'},
                ]};
             }, 200],
             ['C reads uploaded file', 'get', accessFile ('upload.txt'), 200, assertBody ('uploaded by C')],
             ['C sends message', 'post', '/project/message', function (s) {
-               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Hello from C'};
+               return {file: 'chat/thread.md', to: 'all', body: 'Hello from C'};
             }, 200],
             ['C runs command', 'post', '/project/run', function (s) {
-               return {id: s.accessProjectId, command: 'printf "command by C" > outside.txt'};
+               return {command: 'printf "command by C" > outside.txt'};
             }, 200],
             ['C command changed file', 'get', accessFile ('outside.txt'), 200, assertBody ('command by C')],
             ['C cannot rename project', 'put', '/project', function (s) {
@@ -1295,66 +1510,61 @@ if (mode === 'server') {
             ['C cannot delete project', 'delete', function (s) {return '/project/' + s.accessProjectId}, 403],
 
             // Replace C's whole-project grant with a prefix-scoped grant.
-            accessAs ('a'),
+            useSession ('A on shared project'),
             accessWrite ('vibey/access.md', 'access-b@example.com read\naccess-c@example.com write chat/\n', 200),
             accessSync,
-            accessAs ('c'),
-            ['C lists only scoped files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 200, function (s, rq, rs) {
+            useSession ('C on shared project'),
+            ['C lists only scoped files', 'get', '/project/files', 200, function (s, rq, rs) {
                return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
             }],
             ['C reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('original')],
-            ['Scoped C resolves project by name', 'get', '/p/access-a/access-test', 200, function (s, rq, rs) {
-               return assert (['id', rs.body.id, s.accessProjectId, teishi.test.equal]);
-            }],
-            ['Scoped C reads scoped file through name-based URL', 'get', accessNamedFile ('chat/inside.txt'), 200, assertBody ('original')],
-            ['Scoped C cannot read outside scope through name-based URL', 'get', accessNamedFile ('outside.txt'), 404],
             accessWrite ('chat/inside.txt', 'scoped write', 200),
             ['C edits scoped file', 'post', '/project/edit', function (s) {
-               return {id: s.accessProjectId, path: 'chat/inside.txt', oldText: 'write', newText: 'edit'};
+               return {path: 'chat/inside.txt', oldText: 'write', newText: 'edit'};
             }, 200],
             ['C reads scoped edit', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
             ['C sends scoped message', 'post', '/project/message', function (s) {
-               return {id: s.accessProjectId, file: 'chat/thread.md', to: 'all', body: 'Still allowed'};
+               return {file: 'chat/thread.md', to: 'all', body: 'Still allowed'};
             }, 200],
             dale.go (['outside.txt', 'chatty/outside.txt'], function (path) {
                return [
                   ['C cannot read ' + path, 'get', accessFile (path), 404],
                   accessWrite (path, 'forbidden', 404),
                   ['C cannot edit ' + path, 'post', '/project/edit', function (s) {
-                     return {id: s.accessProjectId, path, oldText: '[EOF]', newText: 'forbidden'};
+                     return {path, oldText: '[EOF]', newText: 'forbidden'};
                   }, 404],
                ];
             }),
             ['C cannot send out-of-scope message', 'post', '/project/message', function (s) {
-               return {id: s.accessProjectId, file: 'outside.txt', to: 'all', body: 'Forbidden'};
+               return {file: 'outside.txt', to: 'all', body: 'Forbidden'};
             }, 404],
             dale.go ([false, true], function (read) {
                return ['Scoped C cannot run commands with read=' + read, 'post', '/project/run', function (s) {
-                  return {id: s.accessProjectId, command: 'printf forbidden > outside.txt', read};
+                  return {command: 'printf forbidden > outside.txt', read};
                }, 404];
             }),
             dale.go (['shell', 'ai-gpt-6'], function (to) {
                return ['Scoped C cannot message ' + to, 'post', '/project/message', function (s) {
-                  return {id: s.accessProjectId, file: 'chat/thread.md', to, body: 'printf forbidden'};
+                  return {file: 'chat/thread.md', to, body: 'printf forbidden'};
                }, 404];
             }),
 
-            accessAs ('b'),
+            useSession ('B on shared project'),
             ['B retains whole-project read; denied writes had no effect', 'get', accessFile ('outside.txt'), 200, assertBody ('command by C')],
             ['Prefix lookalike file unchanged', 'get', accessFile ('chatty/outside.txt'), 200, assertBody ('original')],
-            accessAs ('a'),
+            useSession ('A on shared project'),
             accessWrite ('vibey/access.md', 'access-b@example.com read chat/\naccess-c@example.com write chat/\n', 200),
             accessSync,
-            accessAs ('b'),
-            ['B lists only scoped files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 200, function (s, rq, rs) {
+            useSession ('B on shared project'),
+            ['B lists only scoped files', 'get', '/project/files', 200, function (s, rq, rs) {
                return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
             }],
             ['B reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
             ['B cannot read outside scope', 'get', accessFile ('outside.txt'), 404],
             ['B cannot read prefix lookalike', 'get', accessFile ('chatty/outside.txt'), 404],
-            accessAs ('a'),
+            useSession ('A on shared project'),
             ['A retains write outside prefix', 'post', '/project/edit', function (s) {
-               return {id: s.accessProjectId, path: 'outside.txt', oldText: 'command by C', newText: 'owner still writes'};
+               return {path: 'outside.txt', oldText: 'command by C', newText: 'owner still writes'};
             }, 200],
 
             // Invalid entries abort the sync without touching existing grants.
@@ -1368,41 +1578,42 @@ if (mode === 'server') {
                return [
                   accessWrite ('vibey/access.md', 'access-c@example.com write chat/\n' + entry [1], 200),
                   ['Sync with ' + entry [0] + ' fails', 'post', '/project/run', function (s) {
-                     return {id: s.accessProjectId, command: 'vibey access'};
+                     return {command: 'vibey access'};
                   }, 200, function (s, rq, rs) {
                      return assert (['sync error', rs.body.error, /^Invalid vibey\/access\.md (line|prefix)/, teishi.test.match]);
                   }],
                ];
             }),
-            accessAs ('b'),
+            useSession ('B on shared project'),
             ['B keeps scoped read after failed syncs', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
 
             // Comments, blank lines and email case don't affect the sync. Syncing replaces grants, so B would lose access if its line were skipped.
-            accessAs ('a'),
+            useSession ('A on shared project'),
             accessWrite ('vibey/access.md', '# Shared with the team\n\nACCESS-B@Example.com read chat/\naccess-c@example.com write chat/\n', 200),
             accessSync,
-            accessAs ('b'),
+            useSession ('B on shared project'),
             ['B keeps access through comment, blank line and uppercase email', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
 
             // A read prefix also scopes messages.
-            accessAs ('a'),
+            useSession ('A on shared project'),
             ['A posts message outside B scope', 'post', '/project/message', function (s) {
-               return {id: s.accessProjectId, file: 'notes/thread.md', to: 'all', body: 'Not for B'};
+               return {file: 'notes/thread.md', to: 'all', body: 'Not for B'};
             }, 200, function (s, rq, rs) {
                s.accessNotesMessageId = rs.body.id;
                return assert (['message id', s.accessNotesMessageId, 'string']);
             }],
-            accessAs ('b'),
-            ['B cannot read message outside scope', 'put', '/project/message', function (s) {
-               return {projectId: s.accessProjectId, file: 'notes/thread.md', messageId: s.accessNotesMessageId};
-            }, 404],
+            useSession ('B on shared project'),
+            ['B cannot read message outside scope', 'get', function (s) {return '/project/message/' + s.accessNotesMessageId + '/notes/thread.md'}, 404],
 
             // Cross-project shell commands: `vibey project <targetId> <command>`, authorized by `project:<originId> write` in the target's access.md.
-            accessAs ('a'),
+            useSession ('A on shared project'),
             ['A creates target project', 'post', '/project', {name: 'access target'}, 200, function (s, rq, rs) {
                s.accessTargetId = rs.body.id;
+               s.accessTarget = 'access-a--access-target';
                return assert (['target id', s.accessTargetId, 'string']);
             }],
+            projectLogin ('A on target project', 'accessTarget'),
+            useSession ('A on shared project'),
             accessShell ('without target access.md', 'target', 'printf denied > cross.txt', 404),
             targetAccess ('read'),
             accessShell ('with read grant', 'target', 'printf denied > cross.txt', 404),
@@ -1415,48 +1626,57 @@ if (mode === 'server') {
             accessWait,
             accessShell ('targeting the origin', 'origin', 'printf self > self.txt', 200),
             accessWait,
-            ['Target has cross-project output', 'get', function (s) {return '/project/' + s.accessTargetId + '/file/cross.txt'}, 200, assertBody ('cross')],
+            useSession ('A on target project'),
+            ['Target has cross-project output', 'get', accessFile ('cross.txt'), 200, assertBody ('cross')],
+            useSession ('A on shared project'),
             ['Origin unaffected by cross-project command', 'get', accessFile ('cross.txt'), 404],
             ['Origin has self-targeted output', 'get', accessFile ('self.txt'), 200, assertBody ('self')],
             accessAs ('b'),
             ['B sees target after cross-project sync', 'get', '/projects', 200, function (s, rq, rs) {
                return assert (['includes target', inc (dale.go (rs.body, function (p) {return p.id}), s.accessTargetId), true, teishi.test.equal]);
             }],
-            accessAs ('a'),
+            useSession ('A on target project'),
             ['A revokes project grant without syncing', 'post', '/project/write', function (s) {
-               return {id: s.accessTargetId, path: 'vibey/access.md', content: 'access-b@example.com read\n'};
+               return {path: 'vibey/access.md', content: 'access-b@example.com read\n'};
             }, 200],
+            useSession ('A on shared project'),
             accessShell ('after revocation', 'target', 'printf denied > cross.txt', 404),
-            ['Target file unchanged by denied commands', 'get', function (s) {return '/project/' + s.accessTargetId + '/file/cross.txt'}, 200, assertBody ('cross')],
+            useSession ('A on target project'),
+            ['Target file unchanged by denied commands', 'get', accessFile ('cross.txt'), 200, assertBody ('cross')],
             ['A deletes target project', 'delete', function (s) {return '/project/' + s.accessTargetId}, 200],
 
             // PUBLIC grants: one project public as a whole, another only under chat/.
             ['A creates full public project', 'post', '/project', {name: 'public full', slot: 2}, 200, function (s, rq, rs) {
                s.publicFullId = rs.body.id;
+               s.publicFull = 'access-a--public-full';
                return true;
             }],
             ['A creates partial public project', 'post', '/project', {name: 'public partial'}, 200, function (s, rq, rs) {
                s.publicPartialId = rs.body.id;
+               s.publicPartial = 'access-a--public-partial';
                return true;
             }],
             dale.go ([
-               ['publicFullId', 'notes.md', 'Notes'],
-               ['publicFullId', 'src/app.js', 'console.log ("app");'],
-               ['publicFullId', 'vibey/access.md', 'PUBLIC read\n'],
-               ['publicPartialId', 'chat/one.txt', 'one'],
-               ['publicPartialId', 'chat/two.txt', 'two'],
-               ['publicPartialId', 'vibey/access.md', 'PUBLIC read chat/\n'],
-            ], function (file) {
-               return ['A writes ' + file [1] + ' to ' + file [0], 'post', '/project/write', function (s) {
-                  return {id: s [file [0]], path: file [1], content: file [2]};
-               }, 200];
-            }),
-            dale.go (['publicFullId', 'publicPartialId'], function (key) {
-               return ['Sync access for ' + key, 'post', '/project/run', function (s) {
-                  return {id: s [key], command: 'vibey access'};
-               }, 200, function (s, rq, rs) {
-                  return assert (['sync error', rs.body.error, undefined, teishi.test.equal]);
-               }];
+               ['publicFull', [
+                  ['notes.md', 'Notes'],
+                  ['src/app.js', 'console.log ("app");'],
+                  ['vibey/access.md', 'PUBLIC read\n'],
+               ]],
+               ['publicPartial', [
+                  ['chat/one.txt', 'one'],
+                  ['chat/two.txt', 'two'],
+                  ['vibey/access.md', 'PUBLIC read chat/\n'],
+               ]],
+            ], function (project) {
+               return [
+                  projectLogin ('A on ' + project [0], project [0]),
+                  dale.go (project [1], function (file) {
+                     return ['A writes ' + file [0] + ' to ' + project [0], 'post', '/project/write', {path: file [0], content: file [1]}, 200];
+                  }),
+                  ['Sync access for ' + project [0], 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
+                     return assert (['sync error', rs.body.error, undefined, teishi.test.equal]);
+                  }],
+               ];
             }),
             ['A sees own public projects unflagged, with slot', 'get', '/projects', 200, function (s, rq, rs) {
                var full = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.publicFullId) return p});
@@ -1471,6 +1691,7 @@ if (mode === 'server') {
             ['Switch to anonymous', 'get', '/', 200, function (s) {
                delete s.headers.cookie;
                delete s.headers ['x-csrf'];
+               delete s.projectCsrf;
                return true;
             }],
             ['Anonymous lists public projects without slots', 'get', '/projects', 200, function (s, rq, rs) {
@@ -1483,19 +1704,19 @@ if (mode === 'server') {
                   ['slots', dale.go (listed, function (p) {return p.slot}), [undefined, undefined], teishi.test.equal],
                ]);
             }],
-            ['Anonymous lists full public project files', 'get', function (s) {return '/project/' + s.publicFullId + '/files'}, 200, function (s, rq, rs) {
+            useProject ('publicFull'),
+            ['Anonymous lists full public project files', 'get', '/project/files', 200, function (s, rq, rs) {
                return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['main.md', 'notes.md', 'src/app.js'], teishi.test.equal]);
             }],
-            ['Anonymous lists partial public project files', 'get', function (s) {return '/project/' + s.publicPartialId + '/files'}, 200, function (s, rq, rs) {
+            ['Anonymous reads full public project file', 'get', '/f/notes.md', 200, assertBody ('Notes')],
+            ['Anonymous cannot read access.md', 'get', '/f/vibey/access.md', 302],
+            ['Anonymous cannot write', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 403],
+            useProject ('publicPartial'),
+            ['Anonymous lists partial public project files', 'get', '/project/files', 200, function (s, rq, rs) {
                return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/one.txt', 'chat/two.txt'], teishi.test.equal]);
             }],
-            ['Anonymous reads full public project file', 'get', function (s) {return '/project/' + s.publicFullId + '/file/notes.md'}, 200, assertBody ('Notes')],
-            ['Anonymous reads partial public project file', 'get', function (s) {return '/project/' + s.publicPartialId + '/file/chat/one.txt'}, 200, assertBody ('one')],
-            ['Anonymous cannot read outside partial public prefix', 'get', function (s) {return '/project/' + s.publicPartialId + '/file/main.md'}, 404],
-            ['Anonymous cannot read access.md', 'get', function (s) {return '/project/' + s.publicFullId + '/file/vibey/access.md'}, 404],
-            ['Anonymous cannot write', 'post', '/project/write', function (s) {
-               return {id: s.publicFullId, path: 'notes.md', content: 'forbidden'};
-            }, 403],
+            ['Anonymous reads partial public project file', 'get', '/f/chat/one.txt', 200, assertBody ('one')],
+            ['Anonymous cannot read outside partial public prefix', 'get', '/f/main.md', 302],
             accessAs ('b'),
             ['B sees public projects without slots', 'get', '/projects', 200, function (s, rq, rs) {
                var listed = dale.fil (rs.body, undefined, function (p) {
@@ -1507,23 +1728,21 @@ if (mode === 'server') {
                   ['slots', dale.go (listed, function (p) {return p.slot}), [undefined, undefined], teishi.test.equal],
                ]);
             }],
-            ['B reads full public project file', 'get', function (s) {return '/project/' + s.publicFullId + '/file/notes.md'}, 200, assertBody ('Notes')],
-            ['B cannot write to public project', 'post', '/project/write', function (s) {
-               return {id: s.publicFullId, path: 'notes.md', content: 'forbidden'};
-            }, 404],
+            projectLogin ('B on publicFull', 'publicFull'),
+            ['B reads full public project file', 'get', '/f/notes.md', 200, assertBody ('Notes')],
+            ['B cannot write to public project', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 404],
             accessAs ('a'),
             ['A deletes full public project', 'delete', function (s) {return '/project/' + s.publicFullId}, 200],
             ['A deletes partial public project', 'delete', function (s) {return '/project/' + s.publicPartialId}, 200],
 
             // Removing a user's line entirely revokes their access on the next sync.
+            useSession ('A on shared project'),
             accessWrite ('vibey/access.md', 'access-c@example.com write chat/\n', 200),
             accessSync,
-            accessAs ('b'),
+            useSession ('B on shared project'),
             ['B no longer sees revoked project', 'get', '/projects', 200, assertBody ([])],
-            ['B cannot list revoked project files', 'get', function (s) {return '/project/' + s.accessProjectId + '/files'}, 404],
+            ['B cannot list revoked project files', 'get', '/project/files', 404],
             ['B cannot read revoked file', 'get', accessFile ('chat/inside.txt'), 404],
-            ['B cannot resolve revoked project', 'get', '/p/access-a/access-test', 404],
-            ['B cannot read revoked file through name-based URL', 'get', accessNamedFile ('chat/inside.txt'), 404],
             accessAs ('a'),
             ['A deletes shared project', 'delete', function (s) {return '/project/' + s.accessProjectId}, 200],
             accessAs ('b'),
@@ -1570,11 +1789,36 @@ if (mode === 'server') {
             if (type (test) === 'object') return test; // Allow verbose object format
             var noBody = inc (['get', 'delete'], test [1]);
             var headers = type (last (test)) === 'object' ? last (test) : {};
+
+            var host = function (s) {
+
+               var method = type (test [1]) === 'function' ? test [1] (s) : test [1];
+               var path = type (test [2]) === 'function' ? test [2] (s) : test [2];
+
+               var matchRoute = function (routes) {
+                  return dale.stop (routes, true, function (endpoint) {
+                     if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
+                     return method === endpoint [0] && !! path.match (endpoint [1]);
+                  });
+               }
+
+               if (matchRoute ([
+                  ['get', '/project/files'],
+                  ['get', /^\/f\/.+/],
+                  ['get', /^\/project\/message\/.+/],
+                  ['post', '/project/write'],
+                  ['post', '/project/edit'],
+                  ['post', '/project/run'],
+                  ['post', '/project/message'],
+               ])) return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname;
+            }
+
             return {
+               host,
                tag:    test [0],
                method: test [1],
                path:   test [2],
-               headers,
+               headers: function (s) {return host (s) && s.projectCsrf ? {... headers, 'x-csrf': s.projectCsrf} : headers},
                body:   noBody ? '' : test [3],
                code:   test [noBody ? 3 : 4],
                apres:  type (test [noBody ? 4 : 5]) === 'function' ? test [noBody ? 4 : 5] : undefined,

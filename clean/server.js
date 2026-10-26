@@ -959,24 +959,41 @@ var routes = [
             ['sadd',   'owner:' + sessionCode.user, 'session-p:' + sessionId]
          ]);
 
+         rs.setHeader ('set-cookie', [
+            cicek.cookie.write (cookie ('project'), sessionId, {
+               expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
+               httponly: true,
+               path: '/',
+               samesite: 'Lax',
+               secure: true,
+            }),
+            cicek.cookie.write (cookie ('project-state'), false, {
+               httponly: true,
+               path: '/',
+               samesite: 'Lax',
+               secure: true,
+            })
+         ]);
+
+         var location = new URL (rq.rawurl, CONFIG.baseURL);
+         location.searchParams.delete ('sessionCode');
+
          return reply (rs, 302, '', {
-            location: encodeURI (rq.url.replace (/\?.*$/, '')),
+            location: location.pathname + location.search,
             'referrer-policy': 'no-referrer',
-            'set-cookie': [
-               cicek.cookie.write (cookie ('project'), sessionId, {
-                  expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               }),
-               cicek.cookie.write (cookie ('project-state'), false, {
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               })
-            ]
+         });
+      }
+
+      if (rq.projectRedirect && rq.method === 'get' && rq.url === '/') {
+         var [owner, grants] = await redis ([
+            ['hget', 'project:' + rq.projectId, 'owner'],
+            ['sunion', 'accessTo:' + (rq.user ? rq.user.id : 'PUBLIC'), 'accessTo:PUBLIC']
+         ]);
+         if (owner === (rq.user && rq.user.id) || dale.stop (grants, true, function (grant) {
+            var [verb, projectId] = grant.split (':');
+            return projectId === rq.projectId && (verb === 'read' || verb === 'write');
+         })) return reply (rs, 302, '', {
+            location: new URL (CONFIG.baseURL).protocol + '//' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (rq.rawurl || rq.url)
          });
       }
 
@@ -985,7 +1002,7 @@ var routes = [
             if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
             return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
          });
-      };
+      }
 
       var staticRoutes = [
          ['get', '/'],
@@ -1731,27 +1748,7 @@ var routes = [
          var [verb, projectId, ... parts] = grant.split (':');
          if (projectId === rq.projectId && (verb === 'read' || verb === 'write')) return parts.join (':');
       });
-      if (! scopes.length) {
-         if (! rq.user) {
-            var base  = new URL (CONFIG.baseURL);
-            var state = crypto.randomBytes (32).toString ('hex');
-            return reply (rs, 302, '', {
-               location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
-               'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
-                  expires: new Date (Date.now () + 10 * 60 * 1000),
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               })
-            });
-         }
-         else return reply (rs, 404);
-      }
-
-      if (rq.projectRedirect) return reply (rs, 302, '', {
-         location: new URL (CONFIG.baseURL).protocol + '//' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (rq.url)
-      });
+      if (! scopes.length) return reply (rs, 404);
 
       var result = await project.run (rq.projectId, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
       if (result.code) return reply (rs, 500, {error: 'Could not list files'});
@@ -1790,7 +1787,7 @@ var routes = [
             var base  = new URL (CONFIG.baseURL);
             var state = crypto.randomBytes (32).toString ('hex');
             return reply (rs, 302, '', {
-               location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.url)) + '&state=' + state,
+               location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.rawurl || rq.url)) + '&state=' + state,
                'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
                   expires: new Date (Date.now () + 10 * 60 * 1000),
                   httponly: true,
@@ -1804,7 +1801,7 @@ var routes = [
       }
 
       if (rq.projectRedirect) return reply (rs, 302, '', {
-         location: new URL (CONFIG.baseURL).protocol + '//' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (rq.url)
+         location: new URL (CONFIG.baseURL).protocol + '//' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (rq.rawurl || rq.url)
       });
 
       if (/\.mp4$/i.test (path)) return project.video (rq, rs, rq.projectId, '/project/' + path);
