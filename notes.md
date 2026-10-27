@@ -1,5 +1,68 @@
 # Vibey development notes
 
+## 2026-10-27
+
+For engine provision script, necessary so that nginx doesn't crash when upgraded with unattended upgrades:
+
+```
+mkdir -p /etc/systemd/system/nginx.service.d
+printf '[Service]\nRestart=on-failure\nRestartSec=5s\n' > /etc/systemd/system/nginx.service.d/override.conf
+systemctl daemon-reload
+```
+
+Devops ideas:
+- Logging app:
+   - Listens to incoming JSON (or plain text), does the parsing and puts it in a sqlite DB per day.
+   - Every row has time (t), priority (defaults to normal), tags (one or more), the rest goes in a big json.
+   - The insight is that if logs are accessible and searchable, we can know what's going on much more, for both security and accessibility reasons.
+- Have a "fake" host project that the admin can log in to, so that the admin can run commands on the host directly through the vibey interface. Useful for logs and for redis.
+- Push system logs (both host container and the actual host) to the logging app, so they can be unified. A cron with curl could do the pushing to the logging app. The log transport could be refined later to remember how much it pushed before (a line offset).
+
+TODO new:
+- How to put chats inside folders? and main.md should refer to the one relative to the chat folder!
+- And it's probably a good idea to not expand folders by default.
+- Put descriptions on top of tool uses, rather than as a separate message
+
+https://www.bitlog.com/2026/10/27/software-may-be-getting-worse-but-it-used-to-be-horrible/
+"Software is degrading all around us, for obvious reasons. I've written about this before. All else equal, if you increase your code production by 10x but you don't reduce your error rate by a factor of 10, then your production app is buggier than it used to be."
+"Yes, there were great programmers like John Carmack who could keep the entire program in their head and iterate on thoughtful codebases over decades. No, they did not write a majority of the software that we used to use."
+
+https://www.bitlog.com/2026/05/19/why-are-we-getting-worse-at-software-engineering/
+"But I did 3 days of 1-hour-a-day side project time in like 20 minutes. And that's bad! I shouldn't be the type of person that can set up a VPS in 20 minutes. It should actually take me a long time because I don't know what I'm doing. In some ways, it's actually dangerous that I can do this."
+"If anything, you can now ship code faster if you're clueless because you're unconstrained by reality. You're not pouring over the code looking for API keys it's leaking, looking for obvious scaling bottlenecks, looking for unnecessary bundles you're sending the client."
+"Who's going to spend a week whiteboarding to determine the future architecture of your company? Nobody. Who's going to investigate that weird thing before it becomes a huge problem? Nobody."
+
+Porting the client to subdomains:
+- Change links to go to projects.
+- Detect if you're on a subdomain. If so, you're in a project.
+- If you're in a subdomain, the only view is project. Forbid the other views. And viceversa: forbid the project view if there's no subdomain.
+
+```
+Dead code that can go now
+  - read hash:
+    - The projectUrl matching becomes projectId = subdomain.
+    - The hash.length < 3 check goes, and file becomes hash.slice (1).
+    - The projectId === undefined branch can go. It calls GET /p/…, and that route no longer exists on the server: server.js has no /p/ route.
+    - The extendClient reload check can go. It handled leaving a project inside the same page, and the project can't change on a subdomain now.
+    - So can rem file files for non-p views: a subdomain never leaves p, and the main host never enters it.
+  - projectUrl (client.js:65) and its rewrite in navigate (client.js:174) can go. Every in-project navigate 'files/<id>/<file>' becomes navigate 'p/<file>',
+    with no project id. That covers client.js:245, 249, 693, 948, 970, 1004, 1035, 1065 and 2704.
+  - The race guards like B.get ('project', 'id') !== project are spread over about 20 handlers. They protected against switching projects mid-request, which
+    can't happen now. They're harmless, though, so they could be a separate pass.
+  - The readme: the Resolve project by name section (readme.md:208) and the p/<owner>/<project> part of read hash (readme.md:251).
+
+  Things that are broken now, so they need a fix rather than a trim
+  - Cross-project navigation from the main host still goes to files/<id>, which the new view check forbids there. That's the slot wheel (client.js:1985), the slot shortcuts (client.js:534) and create project (client.js:468). They should send you to the subdomain the way the project card does. Right after creation there's no subdomain yet, so that one would use the id.
+  - Old /project/<id>/… URLs: /project/<id>/files (client.js:737) and /project/<id>/file/… (client.js:431, 780, 829, 2462) should be /project/files and /f/…. id in POST bodies, for example {id: project, path, content} (client.js:942). /project/write only allows the keys path and content (server.js:1841), so these return 400 now. The other /project/* POSTs probably check their keys the same way.
+  - load projects on a subdomain: /projects returns 404 there (server.js:1042). load clientExtension checks ownership against B.get ('projects'), so on a
+    subdomain the extension never loads.
+
+  My suggested order: first read hash together with projectUrl and navigate, since they're one unit. Then the URLs and POST bodies, then the cross-project
+  navigation. The guards and readme can come last.
+```
+
+I'm floored that subdomain is actually simplifying the client. I never expected this. But it makes sense. We use the isolation mechanisms of the browser to not let projects clash with each other.
+
 ## 2026-10-26
 
 How can vibey bring abundance?
@@ -18,7 +81,7 @@ It would make sense now to remove the rediret rom the list files endpoint. The o
       - more padding at the bottom of the DNA list to avoid overlap of the last with the search bar
       - {"error":"anthropic account token refresh failed, please reconnect: \"Timed out after 60 seconds, request aborted.\""}, this doesn't show in the chat, just the console!
       - don't lose chat editor status when switching to To with keyboard shortcut
-      - show gauges as we go
+      - update gauges as we go
       - light mode with the same high contrast
       - check links between projects
       - Fix pin: allow for local user, when clicking + also allow to pin existing without the edit
@@ -56,7 +119,7 @@ It would make sense now to remove the rediret rom the list files endpoint. The o
       - subdomain per project
       - fix autogit
       - autobackup
-      - skip docker.exec to slash command time by 10x
+      - explore alternative to docker to reduce command latency (50ms base)
    - tests: local mode, client tests: auth, project, files, chat, access
 
 How the web looks like from vibey, if vibey were to work?
@@ -101,6 +164,11 @@ What made Docker unique were there things:
 
 3. Momentum. A lot of software that was traditionally complicated to deploy, suddenly appeared in docker servers. I remember how fascinated I was, when I could deploy wordpress website with tiny docker-compose. And how contained it was. I could just delete every trace of it from my host. I always felt uneasy installing various things onto my host and docker just solved that uneasiness.
 ```
+
+This reminds me of npm:
+- 1. package.json, specify versions. what you have is not re-downloaded on install.
+- 2. the npm registry, just pull.
+- 3: Can have different versions of the same package and it all works. Easy to remove, just files in nested folders.
 
 https://codeandcake.dev/posts/2026-10-22-docker-is-weird
 ```
