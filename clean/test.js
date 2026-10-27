@@ -1022,7 +1022,13 @@ if (mode === 'server') {
                return assert (['body.code', rs.body.code, 1, teishi.test.equal]);
             }],
             waitForCommits ('List commits when there is only the initial commit', 1, "Write 'main.md'"),
-            ['Read file from nonexistent project', 'get', '/f/main.md', 404],
+            {
+               tag: 'Read file from nonexistent project',
+               method: 'get',
+               host: '00000000-0000-4000-8000-000000000000.' + new URL (CONFIG.baseURL).hostname,
+               path: '/f/main.md',
+               code: 404,
+            },
             ['Read absolute path', 'get', '/f/' + encodeURIComponent ('/main.md'), 400, assertBody ({error: 'Invalid path'})],
             ['Read parent traversal path', 'get', '/f/' + encodeURIComponent ('../main.md'), 400, assertBody ({error: 'Invalid path'})],
             ['Read path with null byte', 'get', '/f/' + encodeURIComponent ('main.md\0'), 400, assertBody ({error: 'Invalid path'})],
@@ -1081,6 +1087,7 @@ if (mode === 'server') {
             {
                tag: 'Read back binary file',
                method: 'get',
+               host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
                path: '/f/' + encodeURIComponent ('doc/binary.bin'),
                code: 200,
                raw: true,
@@ -1785,6 +1792,7 @@ if (mode === 'server') {
                var prefix = 'OK ' + prepend ('(' + (v.time [1] - v.time [0]) + 'ms): ', 12);
                return prefix + v.request.tag;
             }).join ('\n'));
+
          }, function (test) {
             if (type (test) === 'object') return test; // Allow verbose object format
             var noBody = inc (['get', 'delete'], test [1]);

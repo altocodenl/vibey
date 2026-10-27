@@ -1085,6 +1085,7 @@ var routes = [
             ['meta', {charset: 'utf-8'}],
             CONFIG.baseURL?.match (/\/app\/?$/) ? ['base', {href: '/app/'}] : '',
             ['title', 'vibey'],
+            ['meta', {name: 'base-host', content: new URL (CONFIG.baseURL).host}],
             ['link', {rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg'}],
             ['link', {rel: 'manifest', href: 'manifest.json'}],
             ['link', {rel: 'apple-touch-icon', href: 'icon/icon-180.png'}],
@@ -1581,6 +1582,8 @@ var routes = [
       })) : [];
       dale.go (projects, function (project, k) {
          project.ownerUsername = usernames [k] || undefined;
+         var subdomain = project.ownerUsername + '--' + project.name.toLowerCase ().replace (/-/g, '--').replace (/ /g, '-');
+         if (project.ownerUsername && subdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/)) project.subdomain = subdomain;
       });
 
       reply (rs, 200, dale.go (projects.sort (function (a, b) {

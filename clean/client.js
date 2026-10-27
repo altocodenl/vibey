@@ -180,20 +180,13 @@ B.mrespond ([
 
    ['read', 'hash', function (x) {
       var hash = window.location.hash.slice (2).split ('/');
-
-      // p/<owner>/<project>[/<file>] shows a project in the files view. The project is matched against the loaded projects by its URL slots, the owner's id, or its own id in the project slot.
-      var projectId = hash [0] !== 'p' ? undefined : dale.stopNot (B.get ('projects'), undefined, function (project) {
-         var url = projectUrl (project.id).split ('/');
-         if (hash [2] === project.id || (hash [1] === url [1] || hash [1] === project.owner) && hash [2] === url [2]) return project.id;
-      });
-
-      var extensionProject = B.get ('extendClient');
-      if (extensionProject && projectId !== extensionProject) {
-         return window.location.reload ();
-      }
+      var subdomain = window.location.host !== document.querySelector ('meta[name="base-host"]').content ? window.location.hostname.split ('.') [0] : undefined;
 
       var authViews   = ['login', 'verify'];
       var loggedViews = ['projects', 'p'];
+
+      if (subdomain && hash [0] !== 'p') return B.call (x, 'navigate', 'p');
+      if (! subdomain && hash [0] === 'p') return B.call (x, 'navigate', 'projects');
 
       if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
 
@@ -208,27 +201,11 @@ B.mrespond ([
 
       if (hash.length > 1 && hash [0] !== 'p') return B.call (x, 'navigate', 'projects');
 
-      if (hash [0] !== 'p') B.call (x, 'rem', [], ['file', 'files']);
-
       if (hash [0] === 'p') {
 
-         if (hash.length < 3) return B.call (x, 'navigate', 'projects');
+         var file = decodeURIComponent (hash.slice (1).join ('/'));
 
-         var file = decodeURIComponent (hash.slice (3).join ('/'));
-
-         // No loaded project matches (e.g. the owner slot is another user's username): resolve it through the server.
-         if (projectId === undefined) {
-            if (! B.get ('projects')) return;
-            return B.call (x, 'get', '/p/' + hash [1] + '/' + hash [2], function (x, error, rs) {
-               if (! error && dale.stop (B.get ('projects'), true, function (project) {
-                  return project.id === rs.body.id;
-               })) return window.location.replace ('#/' + projectUrl (rs.body.id, file));
-               B.call (x, 'snackbar', 'error', 'Project not found');
-               B.call (x, 'navigate', 'projects');
-            });
-         }
-
-         B.call (x, 'set', ['project', 'id'], projectId);
+         B.call (x, 'set', ['project', 'id'], subdomain);
 
          var files = B.get ('files');
 
@@ -241,11 +218,11 @@ B.mrespond ([
          });
          if (! defaultFile && files && files.length) defaultFile = files [0].name;
 
-         if (! file && defaultFile !== '') return B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (defaultFile));
+         if (! file && defaultFile !== '') return B.call (x, 'navigate', 'p/' + encodeURIComponent (defaultFile));
 
          if (files && files.length && ! dale.stop (files, true, function (f) {
-            if (f.name === file) return fileExists = true;
-         })) return B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (defaultFile));
+            if (f.name === file) return true;
+         })) return B.call (x, 'navigate', 'p/' + encodeURIComponent (defaultFile));
 
          B.call (x, 'set', ['file', 'name'], file);
 
@@ -428,7 +405,7 @@ B.mrespond ([
       })) return;
 
       B.call (x, 'set', 'extendClient', project);
-      B.call (x, 'get', '/project/' + project + '/file/extend-client.js', function (x, error, rs) {
+      B.call (x, 'get', '/f/extend-client.js', function (x, error, rs) {
          if (B.get ('extendClient') !== project || B.get ('view') !== 'files' || B.get ('project', 'id') !== project) return;
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading extend-client.js');
 
@@ -463,9 +440,7 @@ B.mrespond ([
          B.call (x, 'rem', 'new', 'project');
          B.call (x, 'rem', 'search', 'project');
 
-         B.call (x, 'add', 'projects', {id: rs.body.id, name: name}); // Put the project in projects temporarily until the list of projects is refreshed, so we can navigate to it.
-         B.call (x, 'navigate', 'files/' + rs.body.id + '/main.md');
-         B.call (x, 'load', 'projects');
+         window.location.href = window.location.protocol + '//' + rs.body.id + '.' + window.location.host + '/#/p/main.md';
       });
    }],
 
@@ -499,7 +474,7 @@ B.mrespond ([
 
    ['download', 'project', function (x, project) {
       B.call (x, 'snackbar', 'yellow', 'Preparing download...', 'keep');
-      B.call (x, 'post', '/project/run', {id: project.id, read: true, command: 'cd /project && python3 -m zipfile -c /dev/stdout . | base64 -w 0'}, function (x, error, rs) {
+      B.call (x, 'post', '/project/run', {read: true, command: 'cd /project && python3 -m zipfile -c /dev/stdout . | base64 -w 0'}, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to download project');
          var bytes = Uint8Array.from (atob (rs.body.stdout), function (c) {return c.charCodeAt (0)});
          var stamp = new Date ().toISOString ().slice (0, 19).replace (/[-:]/g, '').replace ('T', '-');
@@ -530,7 +505,10 @@ B.mrespond ([
             });
             project = filteredProjects [parseInt (ev.key) - 1];
          }
-         if (project) shortcut (ev.key, ev, x, 'navigate', 'files/' + project.id);
+         if (project && ev.metaKey) {
+            ev.preventDefault ();
+            window.location.href = window.location.protocol + '//' + (project.subdomain || project.id) + '.' + window.location.host + '/';
+         }
       }
 
       if (ev.metaKey && ev.key === 's') {
@@ -734,7 +712,7 @@ B.mrespond ([
       if (! project) return B.call (x, 'navigate', 'projects');
 
       if (! B.get ('files')) B.call (x, 'mset', 'files', []); // Set it to an empty array to prevent multiple in-flight calls.
-      B.call (x, 'get', '/project/' + project.id + '/files', function (x, error, rs) {
+      B.call (x, 'get', '/project/files', function (x, error, rs) {
          if (B.get ('project', 'id') !== project.id) return;
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
          B.call (x, 'set', 'files', rs.body);
@@ -742,7 +720,6 @@ B.mrespond ([
          // Second line: bytes that clearing history would free, measured against a fresh single-commit repository.
          // Read-only projects cannot run commands.
          if (! project.read) B.call (x, 'post', '/project/run', {
-            id: project.id,
             read: true,
             command: "du -sk /project && (cd /project && tmp=$(mktemp -d) && trap 'rm -rf \"$tmp\"' EXIT && git init -q -b main \"$tmp\" && export GIT_DIR=\"$tmp/.git\" GIT_WORK_TREE=/project && git add -A && git -c user.name=vibey -c user.email=vibey@local commit --allow-empty -qm Estimate && git gc --quiet && du -sk /project/.git \"$tmp/.git\" | awk 'NR == 1 {before = $1} NR == 2 {printf \"%.0f\\n\", (before - $1) * 1024}')",
          }, function (x, error, rs) {
@@ -777,7 +754,7 @@ B.mrespond ([
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
-         var rs = await fetch ('/project/' + project.id + '/file/' + encodeURIComponent (name));
+         var rs = await fetch ('/f/' + encodeURIComponent (name));
          if (! rs.ok) throw rs;
          var newContent = new Uint8Array (await rs.arrayBuffer ());
          if (newContent.indexOf (0) === -1) {
@@ -826,7 +803,7 @@ B.mrespond ([
 
       var link = document.createElement ('a');
       link.download = file.name.split ('/').pop ();
-      link.href = '/project/' + B.get ('project', 'id') + '/file/' + encodeURIComponent (file.name);
+      link.href = '/f/' + encodeURIComponent (file.name);
       document.body.appendChild (link);
       link.click ();
       link.remove ();
@@ -902,7 +879,7 @@ B.mrespond ([
          var edit = queue [0];
          if (! edit) return;
          var write = edit.overwrite;
-         var body = {id: edit.project, path: edit.file};
+         var body = {path: edit.file};
          if (write) body.content = edit.content;
          else {
             body.oldText = edit.oldText;
@@ -939,7 +916,7 @@ B.mrespond ([
 
    ['write', 'file', function (x, name, newContent, New) {
       var project = B.get ('project', 'id');
-      B.call (x, 'post', '/project/write', {id: project, path: name, content: newContent}, function (x, error, rs) {
+      B.call (x, 'post', '/project/write', {path: name, content: newContent}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
          if (B.get ('project', 'id') !== project) return;
 
@@ -978,7 +955,6 @@ B.mrespond ([
       var id = B.get ('project', 'id'), projectSize = B.get ('project', 'size') || {};
       B.call (x, 'snackbar', 'yellow', 'Clearing history...', 'keep');
       B.call (x, 'post', '/project/run', {
-         id: id,
          read: true,
          command: 'cd /project && rm -rf .git && git init -q -b main && git config user.name vibey && git config user.email vibey@local && git add -A && git commit -qm "Fresh start" && git gc --quiet',
       }, function (x, error, rs) {
@@ -997,7 +973,7 @@ B.mrespond ([
       if (! project) return;
 
       var path = "'" + ('/project/' + name).replace (/'/g, "'\\''") + "'";
-      B.call (x, 'post', '/project/run', {id: project.id, command: 'rm -- ' + path}, function (x, error, rs) {
+      B.call (x, 'post', '/project/run', {command: 'rm -- ' + path}, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'list', 'files');
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project', 'id'));
@@ -1024,7 +1000,6 @@ B.mrespond ([
 
       B.call (x, 'post', '/project/run', {
          command: command,
-         id: projectId,
       }, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to rename file: check if there is a file in the way of the path you are setting');
          if (B.get ('project', 'id') !== projectId) return;
@@ -1067,7 +1042,6 @@ B.mrespond ([
       dale.go (files, function (file, index) {
          var name = options.prefix !== undefined ? options.prefix + file.name : file.webkitRelativePath || file.name;
          var body = new FormData ();
-         body.append ('id', projectId);
          body.append ('path', name);
          body.append ('file', file, 'upload');
 
@@ -1250,7 +1224,6 @@ B.mrespond ([
 
       B.call (x, 'set', ['message', 'cancelling', id], true);
       B.call (x, 'post', '/project/edit', {
-         id: project,
          newText: head [0].replace (/^pending 1$/m, 'cancelled ' + new Date ().toISOString () + '\npending 0'),
          oldText: head [0],
          path: name,
@@ -1317,11 +1290,7 @@ B.mrespond ([
          };
          if (! ids.length || stale ()) return cb ();
          if (present (ids [0])) return appendMessages (x, project, name, ids.slice (1), cb);
-         B.call (x, 'put', '/project/message', {
-            file: name,
-            messageId: ids [0],
-            projectId: project,
-         }, function (x, error, rs) {
+         B.call (x, 'get', '/project/message/' + ids [0] + '/' + name, function (x, error, rs) {
             if (error || stale ()) return cb ();
             if (! present (ids [0])) {
                content += '\n' + rs.body.message;
@@ -1345,11 +1314,7 @@ B.mrespond ([
             if (B.get ('pending', 'requests', key) !== interval) return clearInterval (interval);
             if (inFlight) return;
             inFlight = true;
-            B.call (x, 'put', '/project/message', {
-               file: name,
-               messageId: id,
-               projectId: project,
-            }, function (x, error, rs) {
+            B.call (x, 'get', '/project/message/' + id + '/' + name, function (x, error, rs) {
                if (error || B.get ('pending', 'requests', key) !== interval) return inFlight = false;
                if (B.get ('project', 'id') !== project || B.get ('file', 'name') !== name || type (content) !== 'string') return inFlight = false;
 
@@ -1413,7 +1378,6 @@ B.mrespond ([
       B.call (x, 'post', '/project/message', {
          body: body,
          file: name,
-         id: project,
          to: to,
       }, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem sending the message');
@@ -1467,7 +1431,6 @@ B.mrespond ([
                B.call (x, 'post', '/project/message', {
                   body: '[' + files [index].name.replace (/[\\[\]]/g, '\\$&') + '](<' + uploaded [index] + '>)',
                   file: chat,
-                  id: projectId,
                   to: to,
                }, function (x, error) {
                   if (error) return B.call (x, 'snackbar', 'error', 'Could not post ' + files [index].name + ' to the chat');
@@ -1981,7 +1944,9 @@ views.projects = function () {
 
                         return ['div', {
                            class: 'absolute flex items-center justify-center pointer' + (matchingProject ? ' ' + views.projectColor (matchingProject.name) : ''),
-                           onclick: matchingProject ? B.ev ('navigate', 'files/' + matchingProject.id) : undefined,
+                           onclick: matchingProject ? function () {
+                              window.location.href = window.location.protocol + '//' + (matchingProject.subdomain || matchingProject.id) + '.' + window.location.host + '/';
+                           } : undefined,
                            onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
                            onmouseleave: B.ev ('rem', [], 'hover'),
                            style: style ({
@@ -2103,7 +2068,9 @@ views.projects = function () {
                            var offset = start + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (span - cardWidth);
                            return ['div', {
                               class: 'border-box flex items-center justify-between pointer relative ' + views.projectColor (project.name),
-                              onclick: B.ev ('navigate', 'files/' + project.id),
+                              onclick: function () {
+                                 window.location.href = window.location.protocol + '//' + (project.subdomain || project.id) + '.' + window.location.host + '/';
+                              },
                               style: style ({
                                  'border-radius': '0.75rem',
                                  height: '10vh',
@@ -2456,8 +2423,8 @@ var localPaths = function (html, folder) {
          if (part === '..') parts.pop ();
          else if (part !== '.' && part !== '') parts.push (part);
       });
-      if (tag.toLowerCase () === 'a') return prefix + '#/' + projectUrl (B.get ('project', 'id'), parts.join ('/')) + '"';
-      return prefix + '/project/' + encodeURIComponent (B.get ('project', 'id')) + '/file/' + encodeURIComponent (parts.join ('/')) + '"';
+      if (tag.toLowerCase () === 'a') return prefix + '#/p/' + encodeURIComponent (parts.join ('/')) + '"';
+      return prefix + '/f/' + encodeURIComponent (parts.join ('/')) + '"';
    });
 }
 
@@ -2848,7 +2815,7 @@ views.files = function () {
                         loop: true,
                         playsinline: true,
                         preload: 'metadata',
-                        src: '/project/' + encodeURIComponent (B.get ('project', 'id')) + '/file/' + encodeURIComponent (file.name),
+                        src: '/f/' + encodeURIComponent (file.name),
                         onerror: B.ev ('snackbar', 'error', 'There was a problem loading the video'),
                         style: style ({'object-fit': 'contain'}),
                      }],
@@ -2857,7 +2824,7 @@ views.files = function () {
                      ['img', {
                         alt: file.name,
                         class: 'absolute h-100 left-0 top-0 w-100',
-                        src: '/project/' + encodeURIComponent (B.get ('project', 'id')) + '/file/' + encodeURIComponent (file.name),
+                        src: '/f/' + encodeURIComponent (file.name),
                         onerror: B.ev ('snackbar', 'error', 'There was a problem loading the image'),
                         style: style ({'object-fit': 'contain'}),
                      }],
@@ -2865,7 +2832,7 @@ views.files = function () {
                   isPdf ? ['div', {class: 'flex-auto relative'}, [
                      ['object', {
                         class: 'absolute bn h-100 left-0 top-0 w-100',
-                        data: '/project/' + encodeURIComponent (B.get ('project', 'id')) + '/file/' + encodeURIComponent (file.name),
+                        data: '/f/' + encodeURIComponent (file.name),
                         title: file.name,
                         type: 'application/pdf',
                      }, [
