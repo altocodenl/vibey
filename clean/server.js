@@ -529,11 +529,12 @@ project.video = async function (rq, rs, id, path) {
    var size = Number (stat.stdout), start = 0, end = size - 1, code = 200;
    if (! Number.isSafeInteger (size) || size < 0) return reply (rs, 500);
    var headers = {
+      'access-control-allow-origin': '*',
       'content-type': 'video/mp4',
       'accept-ranges': 'bytes',
       'cache-control': 'private, no-cache',
       'x-content-type-options': 'nosniff',
-      'content-security-policy': "sandbox; default-src 'none'; media-src 'self'; style-src 'unsafe-inline'",
+      'content-security-policy': "default-src 'none'; media-src 'self'; style-src 'unsafe-inline'",
    };
    // No validators: If-Range always falls back to the full representation.
    var range = ! rq.headers ['if-range'] && /^bytes=(\d*)-(\d*)$/.exec (rq.headers.range || '');
@@ -1016,7 +1017,7 @@ var routes = [
       ];
 
       var projectRoutes = [
-         ['get', '/project/files'],
+         ['get', '/project'],
          ['get', /^\/f\/.+/],
          ['get', /^\/project\/message\/.+/],
          ['post', '/project/write'],
@@ -1029,11 +1030,12 @@ var routes = [
          ... staticRoutes,
          // Auth
          ['post', '/auth/login'],
+         rq.projectId ? ['get', '/auth/user'] : [], // This one is public only for projects
          ['get', /^\/auth\/verify\//],
          ['get', /^\/auth\/project\//],
          // Project (all of these are semi-public endpoints, access is checked by the endpoints themselves)
          ['get', '/projects'],
-         ['get', '/project/files'],
+         ['get', '/project'],
          ['get', /^\/f\/.+/],
          ['get', /^\/project\/message\/.+/],
       ]);
@@ -1174,6 +1176,28 @@ var routes = [
    }],
 
    ['get', '/auth/user', async function (rq, rs) {
+      if (! rq.user) {
+         if (! rq.projectId) return reply (rs, 403);
+         var grants = await redis ('smembers', 'accessTo:PUBLIC');
+         if (dale.stop (grants, true, function (grant) {
+            var [verb, projectId] = grant.split (':');
+            return verb === 'read' && projectId === rq.projectId;
+         })) return reply (rs, 200, {anonymous: true, mode: 'cloud'});
+         var base  = new URL (CONFIG.baseURL);
+         var state = crypto.randomBytes (32).toString ('hex');
+         return reply (rs, 403, {
+            location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + '/') + '&state=' + state
+         }, {
+            'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
+               expires: new Date (Date.now () + 10 * 60 * 1000),
+               httponly: true,
+               path: '/',
+               samesite: 'Lax',
+               secure: true,
+            })
+         });
+      }
+
       var [user, credentials] = await redis ([
          ['hmget', 'user:' + rq.user.id, 'settings', 'username'],
          ['hget', 'credentials:' + rq.user.id, 'data'],
@@ -1738,20 +1762,20 @@ var routes = [
 
    // *** PROJECT (SUBDOMAIN) ***
 
-   ['get', '/project/files', async function (rq, rs) {
+   ['get', '/project', async function (rq, rs) {
 
       var userId = rq.user ? rq.user.id : 'PUBLIC';
-      var [owner, grants] = await redis ([
-         ['hget', 'project:' + rq.projectId, 'owner'],
+      var [[owner, name], grants] = await redis ([
+         ['hmget', 'project:' + rq.projectId, 'owner', 'name'],
          ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
       ]);
 
       // Load permissions once, rather than querying Redis for every file.
-      var scopes = owner === userId ? [''] : dale.fil (grants, undefined, function (grant) {
+      var access = owner === userId ? undefined : dale.fil (grants, undefined, function (grant) {
          var [verb, projectId, ... parts] = grant.split (':');
-         if (projectId === rq.projectId && (verb === 'read' || verb === 'write')) return parts.join (':');
+         if (projectId === rq.projectId && (verb === 'read' || verb === 'write')) return [verb, ... parts].join (':');
       });
-      if (! scopes.length) return reply (rs, 404);
+      if (access && ! access.length) return reply (rs, 404);
 
       var result = await project.run (rq.projectId, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
       if (result.code) return reply (rs, 500, {error: 'Could not list files'});
@@ -1763,8 +1787,8 @@ var routes = [
          var name = line.slice (second + 1);
          if (! validProjectPath (name)) return;
          if (! rq.user && name === 'vibey/access.md') return;
-         if (! dale.stop (scopes, true, function (scope) {
-            return name.startsWith (scope);
+         if (access && ! dale.stop (access, true, function (grant) {
+            return name.startsWith (grant.split (':').slice (1).join (':'));
          })) return;
 
          return {
@@ -1776,7 +1800,16 @@ var routes = [
       files.sort (function (a, b) {
          return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
       });
-      return reply (rs, 200, files);
+      return reply (rs, 200, {
+         files,
+         project: {
+            access,
+            id: rq.projectId,
+            name,
+            ownerId: owner,
+            subdomain: rq.subdomain !== rq.projectId ? rq.subdomain : undefined,
+         }
+      });
    }],
 
    ['get', /^\/f\/(.+)$/, async function (rq, rs) {
@@ -1818,12 +1851,12 @@ var routes = [
 
       var buffer = file.stdout || Buffer.alloc (0);
       var headers = {
+         'access-control-allow-origin': '*',
          'content-type': mime.lookup (path) || 'application/octet-stream',
          'cache-control': 'private, no-cache',
          'x-content-type-options': 'nosniff',
-         // TODO: define if we need this
-         //'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
       };
+      if (inc (['text/html', 'image/svg+xml'], headers ['content-type'])) headers ['content-security-policy'] = 'sandbox allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts';
       var cached = cicek.cache (rq.method, buffer, rq.headers, headers, 200);
       if (! cached) headers ['content-length'] = buffer.length;
 

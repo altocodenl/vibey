@@ -61,18 +61,6 @@ var size = function (bytes) {
    return Math.floor (bytes / (1000 * 1000 * 1000)) + 'G';
 }
 
-// URL path (without `#/`) of a project, and optionally a file in it: p/<owner>/<project>[/<file>]. The owner is the user's own username (or id) for their projects and the owner's id for shared ones; the project is its name with each dash as `--`, each space as `-` and the rest percent-encoded, as the server's /p/ route expects. A project that isn't loaded is named by its id.
-var projectUrl = function (projectId, file) {
-   var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
-      if (project.id === projectId) return project;
-   }) || {id: projectId};
-   var ownId = B.get ('user', 'id') || 'local';
-   // Projects added locally right after creation have no owner yet; they're the user's.
-   var owner = project.owner === undefined || project.owner === ownId ? B.get ('user', 'username') || ownId : project.owner;
-   var name = project.name === undefined ? project.id : encodeURIComponent (project.name.replace (/-/g, '--').replace (/ /g, '-'));
-   return 'p/' + owner + '/' + name + (file ? '/' + encodeURIComponent (file) : '');
-}
-
 var shortcut = function (key, ev, x, verb, path, arg) {
    if (! ev.metaKey || ev.key !== key) return;
    ev.preventDefault ();
@@ -137,7 +125,7 @@ document.addEventListener ('visibilitychange', function () {
    B.call ('get', '/auth/user', function (x, error, rs) {
       if (error || ! rs.body.csrf) return;
       B.call (x, 'set', 'user', rs.body);
-      B.call (x, 'load', 'projects');
+      B.call (x, 'read', 'projects');
       B.call (x, 'navigate', 'projects');
       B.call (x, 'snackbar', 'ok', 'Welcome back to vibey!');
    });
@@ -170,9 +158,18 @@ B.mrespond ([
    // *** NAVIGATION ***
 
    ['navigate', '*', function (x) {
-      // Code navigates to files/<projectId>[/<file>]; the URL shows it as p/<owner>/<project>[/<file>].
+      // Code navigates to files/<projectId>[/<file>]: on the host, this opens the project's subdomain; on a project, the URL shows it as f[/<file>].
       var match = x.path [0].match (/^files\/([^/]+)(?:\/(.*))?$/);
-      if (match) x.path = [projectUrl (match [1], match [2] && decodeURIComponent (match [2]))];
+      if (match) {
+         var path = match [2] ? 'f/' + encodeURIComponent (decodeURIComponent (match [2])) : 'f';
+         if (window.location.host === document.querySelector ('meta[name="base-host"]').content) {
+            var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
+               if (project.id === match [1]) return project;
+            }) || {id: match [1]};
+            return window.location.href = window.location.protocol + '//' + (project.subdomain || project.id) + '.' + window.location.host + '/#/' + path;
+         }
+         x.path = [path];
+      }
       var hash = '#/' + x.path;
       if (window.location.hash === hash) return B.call (x, 'read', 'hash');
       else                               window.location.hash = '#/' + x.path;
@@ -183,10 +180,10 @@ B.mrespond ([
       var subdomain = window.location.host !== document.querySelector ('meta[name="base-host"]').content ? window.location.hostname.split ('.') [0] : undefined;
 
       var authViews   = ['login', 'verify'];
-      var loggedViews = ['projects', 'p'];
+      var loggedViews = ['projects', 'f'];
 
-      if (subdomain && hash [0] !== 'p') return B.call (x, 'navigate', 'p');
-      if (! subdomain && hash [0] === 'p') return B.call (x, 'navigate', 'projects');
+      if (subdomain && hash [0] !== 'f') return B.call (x, 'navigate', 'f');
+      if (! subdomain && hash [0] === 'f') return B.call (x, 'navigate', 'projects');
 
       if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
 
@@ -199,9 +196,9 @@ B.mrespond ([
          if (inc (authViews, hash [0])) return B.call (x, 'navigate', 'projects');
       }
 
-      if (hash.length > 1 && hash [0] !== 'p') return B.call (x, 'navigate', 'projects');
+      if (hash.length > 1 && hash [0] !== 'f') return B.call (x, 'navigate', 'projects');
 
-      if (hash [0] === 'p') {
+      if (hash [0] === 'f') {
 
          var file = decodeURIComponent (hash.slice (1).join ('/'));
 
@@ -218,18 +215,18 @@ B.mrespond ([
          });
          if (! defaultFile && files && files.length) defaultFile = files [0].name;
 
-         if (! file && defaultFile !== '') return B.call (x, 'navigate', 'p/' + encodeURIComponent (defaultFile));
+         if (! file && defaultFile !== '') return B.call (x, 'navigate', 'f/' + encodeURIComponent (defaultFile));
 
          if (files && files.length && ! dale.stop (files, true, function (f) {
             if (f.name === file) return true;
-         })) return B.call (x, 'navigate', 'p/' + encodeURIComponent (defaultFile));
+         })) return B.call (x, 'navigate', 'f/' + encodeURIComponent (defaultFile));
 
          B.call (x, 'set', ['file', 'name'], file);
 
-         if (! B.get ('files')) B.call (x, 'list', 'files');
+         if (! B.get ('files')) B.call (x, 'read', 'project');
       }
 
-      B.call (x, 'set', 'view', hash [0] === 'p' ? 'files' : hash [0]);
+      B.call (x, 'set', 'view', hash [0] === 'f' ? 'files' : hash [0]);
 
    }],
 
@@ -312,7 +309,7 @@ B.mrespond ([
 
    // *** AUTH ***
 
-   ['load', 'user', function (x) {
+   ['read', 'user', function (x) {
 
       if (window.location.hash.match (/^#\/verify\/[^\\]+/)) return B.call (x, 'read', 'hash');
 
@@ -320,14 +317,16 @@ B.mrespond ([
 
          if (error && error.status !== 403) return B.call (x, 'snackbar', 'error', 'Error when reaching the server');
 
+         if (error && error.body.location) return window.location.href = error.body.location + window.location.hash;
+
          if (error && error.status === 403) {
             B.call (x, 'set', 'user', {anonymous: true, mode: 'cloud'});
             // Without a session, the projects shared with PUBLIC are shown; loading them reads the hash.
-            return B.call (x, 'load', 'projects');
+            return B.call (x, 'read', 'projects');
          }
 
          B.call (x, 'set', 'user', rs.body);
-         B.call (x, 'load', 'projects');
+         if (window.location.host === document.querySelector ('meta[name="base-host"]').content) B.call (x, 'read', 'projects');
          B.call (x, 'read', 'hash');
       });
    }],
@@ -354,7 +353,7 @@ B.mrespond ([
             return B.call (x, 'navigate', 'login');
          }
          B.call (x, 'set', 'user', rs.body);
-         B.call (x, 'load', 'projects');
+         B.call (x, 'read', 'projects');
          B.call (x, 'navigate', 'projects');
          B.call (x, 'snackbar', 'ok', 'Welcome back to vibey!');
       });
@@ -387,26 +386,18 @@ B.mrespond ([
       B.call (x, 'read', 'hash');
    }],
 
-   ['change', ['project', 'id'], function (x) {
-      B.call (x, 'rem', [], 'files');
-      B.call (x, 'rem', 'project', 'size');
-   }],
-
-   ['load', 'clientExtension', function (x) {
-      var project = B.get ('project', 'id');
+   ['read', 'clientExtension', function (x) {
       if (B.get ('extendClient') || B.get ('view') !== 'files') return;
 
-      if (! dale.stop (B.get ('projects') || [], true, function (p) {
-         return p.id === project && (p.owner === undefined || p.owner === (B.get ('user', 'id') || 'local'));
-      })) return;
+      if (B.get ('project', 'ownerId') !== (B.get ('user', 'id') || 'local')) return;
 
       if (! dale.stop (B.get ('files') || [], true, function (file) {
          return file.name === 'extend-client.js';
       })) return;
 
-      B.call (x, 'set', 'extendClient', project);
+      B.call (x, 'set', 'extendClient', true);
       B.call (x, 'get', '/f/extend-client.js', function (x, error, rs) {
-         if (B.get ('extendClient') !== project || B.get ('view') !== 'files' || B.get ('project', 'id') !== project) return;
+         if (! B.get ('extendClient') || B.get ('view') !== 'files') return;
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading extend-client.js');
 
          try {
@@ -419,7 +410,7 @@ B.mrespond ([
       });
    }],
 
-   ['load', 'projects', function (x) {
+   ['read', 'projects', function (x) {
       B.call (x, 'get', '/projects', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading projects');
          B.call (x, 'set', 'projects', rs.body);
@@ -440,7 +431,7 @@ B.mrespond ([
          B.call (x, 'rem', 'new', 'project');
          B.call (x, 'rem', 'search', 'project');
 
-         window.location.href = window.location.protocol + '//' + rs.body.id + '.' + window.location.host + '/#/p/main.md';
+         window.location.href = window.location.protocol + '//' + rs.body.id + '.' + window.location.host + '/#/f/main.md';
       });
    }],
 
@@ -456,7 +447,7 @@ B.mrespond ([
       B.call (x, 'put', '/project', {id: edit.id, name: name, slot: (edit.slot && edit.slot !== 'null') ? parseInt (edit.slot) : undefined}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to rename project');
          B.call (x, 'rem', 'edit', 'project');
-         B.call (x, 'load', 'projects');
+         B.call (x, 'read', 'projects');
          B.call (x, 'snackbar', 'ok', 'Project renamed');
       });
    }],
@@ -467,7 +458,7 @@ B.mrespond ([
       B.call (x, 'snackbar', 'yellow', 'Deleting project...', 'keep');
       B.call (x, 'delete', 'project/' + project.id, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete project');
-         B.call (x, 'load', 'projects');
+         B.call (x, 'read', 'projects');
          B.call (x, 'snackbar', 'ok', 'Project deleted');
       });
    }],
@@ -507,7 +498,7 @@ B.mrespond ([
          }
          if (project && ev.metaKey) {
             ev.preventDefault ();
-            window.location.href = window.location.protocol + '//' + (project.subdomain || project.id) + '.' + window.location.host + '/';
+            B.call (x, 'navigate', 'files/' + project.id);
          }
       }
 
@@ -700,54 +691,47 @@ B.mrespond ([
       if (B.get ('edit', 'file') !== undefined) c ('#edit-file-input').focus ();
    }],
 
-   ['list', 'files', function (x, noRead) {
-      // If no projects loaded yet, retry in 10ms.
-      if (! B.get ('projects')) return setTimeout (function () {
-         if (! B.get ('files')) B.call (x, 'list', 'files');
-      }, 10);
-
-      var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
-         if (project.id === B.get ('project', 'id')) return project;
-      });
-      if (! project) return B.call (x, 'navigate', 'projects');
-
+   ['read', 'project', function (x, noRead) {
       if (! B.get ('files')) B.call (x, 'mset', 'files', []); // Set it to an empty array to prevent multiple in-flight calls.
-      B.call (x, 'get', '/project/files', function (x, error, rs) {
-         if (B.get ('project', 'id') !== project.id) return;
+      B.call (x, 'get', '/project', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading files');
-         B.call (x, 'set', 'files', rs.body);
+         var access = rs.body.project.access;
+         B.call (x, 'set', ['project', 'name'], rs.body.project.name);
+         B.call (x, 'set', ['project', 'ownerId'], rs.body.project.ownerId);
+         // Read-only unless the caller owns the project or has a write grant, even a prefix-scoped one.
+         B.call (x, 'set', ['project', 'read'], access && ! dale.stop (access, true, function (grant) {
+            return grant.split (':') [0] === 'write';
+         }) ? true : undefined);
+         B.call (x, 'set', 'files', rs.body.files);
 
          // Second line: bytes that clearing history would free, measured against a fresh single-commit repository.
          // Read-only projects cannot run commands.
-         if (! project.read) B.call (x, 'post', '/project/run', {
+         if (! B.get ('project', 'read')) B.call (x, 'post', '/project/run', {
             read: true,
             command: "du -sk /project && (cd /project && tmp=$(mktemp -d) && trap 'rm -rf \"$tmp\"' EXIT && git init -q -b main \"$tmp\" && export GIT_DIR=\"$tmp/.git\" GIT_WORK_TREE=/project && git add -A && git -c user.name=vibey -c user.email=vibey@local commit --allow-empty -qm Estimate && git gc --quiet && du -sk /project/.git \"$tmp/.git\" | awk 'NR == 1 {before = $1} NR == 2 {printf \"%.0f\\n\", (before - $1) * 1024}')",
          }, function (x, error, rs) {
-            if (B.get ('project', 'id') !== project.id || error || rs.body.code) return;
+            if (error || rs.body.code) return;
             var match = /^\s*(\d+)\s[^\n]*\n(-?\d+)/.exec (rs.body.stdout || '');
             if (! match) return;
             B.call (x, 'set', ['project', 'size', 'bytes'], Number (match [1]) * 1024);
             B.call (x, 'set', ['project', 'size', 'history'], Math.max (0, Number (match [2])));
          });
 
-         B.call (x, 'load', 'clientExtension');
+         B.call (x, 'read', 'clientExtension');
          if (! noRead) B.call (x, 'read', 'file');
       });
    }],
 
    ['read', 'file', async function (x) {
-      var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
-         if (project.id === B.get ('project', 'id')) return project;
-      });
       var name = B.get ('file', 'name');
-      if (! project || name === undefined || name === '') return;
+      if (name === undefined || name === '') return;
 
       content = undefined;
       B.call (x, 'change', 'file');
 
       // Wait for this file's previous edits to finish before loading potentially stale server content.
       if ((B.get ('fileEdits') || []).some (function (edit) {
-         return edit.project === project.id && edit.file === name;
+         return edit.file === name;
       })) return;
 
       if (/\.(avif|bmp|gif|jpe?g|png|webp|pdf|mp4)$/i.test (name)) return;
@@ -765,7 +749,7 @@ B.mrespond ([
                // Invalid UTF-8: keep the original bytes for the binary view.
             }
          }
-         if (B.get ('project', 'id') !== project.id || B.get ('file', 'name') !== name) return;
+         if (B.get ('file', 'name') !== name) return;
          content = newContent;
          if (type (content) === 'string' && /^chat\/.+\.md$/.test (name) && ! (B.get ('message', 'to') || '').trim ()) {
             var entries = content.split (/^əəə head [0-9a-f-]{36}\n/im).slice (1).reverse ();
@@ -786,13 +770,13 @@ B.mrespond ([
          }
          B.call (x, 'change', 'file');
          if (/^chat\/.+\.md$/.test (name)) requestAnimationFrame (function () {
-            if (B.get ('view') !== 'files' || B.get ('project', 'id') !== project.id || B.get ('file', 'name') !== name) return;
+            if (B.get ('view') !== 'files' || B.get ('file', 'name') !== name) return;
             var messages = c ('.messages') [0];
             if (messages) messages.scrollTop = messages.scrollHeight;
          });
       }
       catch (error) {
-         if (B.get ('project', 'id') !== project.id || B.get ('file', 'name') !== name) return;
+         if (B.get ('file', 'name') !== name) return;
          B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
       }
    }],
@@ -866,9 +850,8 @@ B.mrespond ([
          queue = [];
          B.call (x, 'mset', 'fileEdits', queue);
       }
-      var idle = queue.length === 0, project = B.get ('project', 'id');
+      var idle = queue.length === 0;
       dale.go (edits, function (edit) {
-         edit.project = project;
          edit.file = name;
          queue.push (edit);
       });
@@ -886,26 +869,26 @@ B.mrespond ([
             body.newText = edit.newText;
          }
          B.call (x, 'post', write ? '/project/write' : '/project/edit', body, function (x, error) {
-            var selected = B.get ('project', 'id') === edit.project && B.get ('file', 'name') === edit.file;
+            var selected = B.get ('file', 'name') === edit.file;
             if (error) {
-               console.error ('Error saving file', edit.project, edit.file, error);
+               console.error ('Error saving file', edit.file, error);
                dale.go (queue.slice (), function (entry) {
-                  if (entry.project === edit.project && entry.file === edit.file) queue.splice (queue.indexOf (entry), 1);
+                  if (entry.file === edit.file) queue.splice (queue.indexOf (entry), 1);
                });
                if (selected && content !== undefined && c ('#file-editor') && confirm (
                   'Could not save ' + edit.file + '.\n\nOK: overwrite with your local version.\nCancel: load the server version.'
                )) {
-                  queue.unshift ({project: edit.project, file: edit.file, overwrite: true, content: editor.getValue ()});
+                  queue.unshift ({file: edit.file, overwrite: true, content: editor.getValue ()});
                }
                else {
-                  B.call (x, 'snackbar', 'error', 'Could not save ' + edit.project + '/' + edit.file);
+                  B.call (x, 'snackbar', 'error', 'Could not save ' + edit.file);
                   if (selected) content = undefined;
                }
             }
             else queue.shift ();
 
             var pending = queue.some (function (entry) {
-               return entry.project === edit.project && entry.file === edit.file;
+               return entry.file === edit.file;
             });
             if (selected && ! pending && content === undefined) B.call (x, 'read', 'file');
             next ();
@@ -915,14 +898,12 @@ B.mrespond ([
    }],
 
    ['write', 'file', function (x, name, newContent, New) {
-      var project = B.get ('project', 'id');
       B.call (x, 'post', '/project/write', {path: name, content: newContent}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
-         if (B.get ('project', 'id') !== project) return;
 
          if (New) {
-            B.call (x, 'navigate', 'files/' + project + '/' + name);
-            B.call (x, 'list', 'files');
+            B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + name);
+            B.call (x, 'read', 'project');
          }
          if (! New && B.get ('file', 'name') === name) content = newContent;
 
@@ -952,14 +933,14 @@ B.mrespond ([
    ['clear', 'history', function (x) {
       if (! confirm ('Clear the history of this project? Past versions will be gone; current files stay. This cannot be undone.')) return;
 
-      var id = B.get ('project', 'id'), projectSize = B.get ('project', 'size') || {};
+      var projectSize = B.get ('project', 'size') || {};
       B.call (x, 'snackbar', 'yellow', 'Clearing history...', 'keep');
       B.call (x, 'post', '/project/run', {
          read: true,
          command: 'cd /project && rm -rf .git && git init -q -b main && git config user.name vibey && git config user.email vibey@local && git add -A && git commit -qm "Fresh start" && git gc --quiet',
       }, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to clear history');
-         if (B.get ('project', 'id') === id) B.call (x, 'set', ['project', 'size'], {bytes: Math.max (0, (projectSize.bytes || 0) - (projectSize.history || 0))});
+         B.call (x, 'set', ['project', 'size'], {bytes: Math.max (0, (projectSize.bytes || 0) - (projectSize.history || 0))});
          B.call (x, 'snackbar', 'ok', 'History cleared');
       });
    }],
@@ -967,15 +948,10 @@ B.mrespond ([
    ['remove', 'file', function (x, name) {
       if (! confirm ('Delete file "' + name + '"? This cannot be undone.')) return;
 
-      var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
-         if (project.id === B.get ('project', 'id')) return project;
-      });
-      if (! project) return;
-
       var path = "'" + ('/project/' + name).replace (/'/g, "'\\''") + "'";
       B.call (x, 'post', '/project/run', {command: 'rm -- ' + path}, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
-         B.call (x, 'list', 'files');
+         B.call (x, 'read', 'project');
          if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project', 'id'));
       });
    }],
@@ -986,7 +962,6 @@ B.mrespond ([
          return part === '..' || part === '.' || part === '.git' || part === '';
       })) return B.call (x, 'snackbar', 'error', 'Please enter a valid relative file path');
 
-      var projectId = B.get ('project', 'id');
       var quote = function (value) {
          return "'" + value.replace (/'/g, "'\\''") + "'";
       }
@@ -1002,11 +977,10 @@ B.mrespond ([
          command: command,
       }, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to rename file: check if there is a file in the way of the path you are setting');
-         if (B.get ('project', 'id') !== projectId) return;
          B.call (x, 'rem', 'edit', 'file');
          B.call (x, 'add', 'files', {name: newName}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
-         B.call (x, 'list', 'files');
-         if (B.get ('file', 'name') === oldName) B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (newName));
+         B.call (x, 'read', 'project');
+         if (B.get ('file', 'name') === oldName) B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + encodeURIComponent (newName));
       });
    }],
 
@@ -1014,7 +988,6 @@ B.mrespond ([
    ['upload', [/^(file|folder)$/], function (x, files, options) {
       if (! files || ! files.length || B.get ('upload')) return;
       options = options || {};
-      var projectId = B.get ('project', 'id');
       var done = 0, finished = 0, total = files.length, uploaded = [];
       B.call (x, 'set', 'upload', {done: done, total: total});
 
@@ -1033,10 +1006,9 @@ B.mrespond ([
             B.call (x, 'snackbar', 'ok', 'Uploaded ' + total + ' file' + (total > 1 ? 's' : ''));
          }
          if (options.cb) return options.cb (uploaded);
-         if (B.get ('project', 'id') !== projectId) return;
-         B.call (x, 'list', 'files');
+         B.call (x, 'read', 'project');
          B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
-         if (total === 1 && done === total) B.call (x, 'navigate', 'files/' + projectId + '/' + encodeURIComponent (name));
+         if (total === 1 && done === total) B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + encodeURIComponent (name));
       }
 
       dale.go (files, function (file, index) {
@@ -1083,11 +1055,8 @@ B.mrespond ([
       if (editor) editor.getWrapperElement ().remove ();
 
       if (c ('#file-editor')) {
-         var project = dale.stopNot (B.get ('projects') || [], undefined, function (project) {
-            if (project.id === B.get ('project', 'id')) return project;
-         });
          editor = CodeMirror (c ('#file-editor'), {
-            readOnly: content === undefined || ! project || !! project.read,
+            readOnly: content === undefined || !! B.get ('project', 'read'),
             keyMap: B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default',
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
@@ -1212,9 +1181,8 @@ B.mrespond ([
    // *** CHATS ***
 
    ['cancel', 'message', function (x, id) {
-      var project = B.get ('project', 'id');
       var name = B.get ('file', 'name');
-      if (! project || ! name || type (content) !== 'string') return;
+      if (! name || type (content) !== 'string') return;
       if (B.get ('message', 'cancelling', id)) return;
 
       var head = content.match (new RegExp (
@@ -1230,7 +1198,7 @@ B.mrespond ([
       }, function (x, error) {
          B.call (x, 'rem', ['message', 'cancelling'], id);
          if (error) return B.call (x, 'snackbar', 'error', 'Could not stop the message; it may have already finished');
-         if (B.get ('project', 'id') !== project || B.get ('file', 'name') !== name) return;
+         if (B.get ('file', 'name') !== name) return;
          B.call (x, 'read', 'file');
       });
    }],
@@ -1264,15 +1232,14 @@ B.mrespond ([
       if (target) viewport.scrollTop += up ? target.top - top : target.bottom - bottom;
    }],
 
-   ['change', [/^(content|file|project|view)$/], {match: B.changeResponder}, function (x) {
+   ['change', [/^(content|file|view)$/], {match: B.changeResponder}, function (x) {
       var name = B.get ('file', 'name') || '';
-      var project = B.get ('project', 'id');
       var pending = [];
-      if (B.get ('view') === 'files' && project && /^chat\/.+\.md$/.test (name) && type (content) === 'string') {
+      if (B.get ('view') === 'files' && /^chat\/.+\.md$/.test (name) && type (content) === 'string') {
          var heads = /^əəə head ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n([\s\S]*?)^əəə body \1\n/gim;
          var match;
          while ((match = heads.exec (content))) {
-            if (/^pending 1$/m.test (match [2])) pending.push (project + '/' + name + '/' + match [1]);
+            if (/^pending 1$/m.test (match [2])) pending.push (name + '/' + match [1]);
          }
       }
       B.call (x, 'set', ['pending', 'messages'], pending);
@@ -1281,28 +1248,27 @@ B.mrespond ([
    ['change', ['pending', 'messages'], function (x) {
       var pending = B.get ('pending', 'messages') || [];
       // Appends messages missing from content, in order; skips ids that are already present.
-      var appendMessages = function (x, project, name, ids, cb) {
+      var appendMessages = function (x, name, ids, cb) {
          var stale = function () {
-            return B.get ('project', 'id') !== project || B.get ('file', 'name') !== name || type (content) !== 'string';
+            return B.get ('file', 'name') !== name || type (content) !== 'string';
          };
          var present = function (id) {
             return new RegExp ('^əəə head ' + id + '\\n', 'im').test (content);
          };
          if (! ids.length || stale ()) return cb ();
-         if (present (ids [0])) return appendMessages (x, project, name, ids.slice (1), cb);
+         if (present (ids [0])) return appendMessages (x, name, ids.slice (1), cb);
          B.call (x, 'get', '/project/message/' + ids [0] + '/' + name, function (x, error, rs) {
             if (error || stale ()) return cb ();
             if (! present (ids [0])) {
                content += '\n' + rs.body.message;
                B.call (x, 'change', 'content');
             }
-            appendMessages (x, project, name, ids.slice (1), cb);
+            appendMessages (x, name, ids.slice (1), cb);
          });
       };
       dale.go (pending, function (key) {
          if (B.get ('pending', 'requests', key) !== undefined) return;
          var parts = key.split ('/');
-         var project = parts.shift ();
          var id = parts.pop ();
          var name = parts.join ('/');
          var inFlight = false;
@@ -1316,7 +1282,7 @@ B.mrespond ([
             inFlight = true;
             B.call (x, 'get', '/project/message/' + id + '/' + name, function (x, error, rs) {
                if (error || B.get ('pending', 'requests', key) !== interval) return inFlight = false;
-               if (B.get ('project', 'id') !== project || B.get ('file', 'name') !== name || type (content) !== 'string') return inFlight = false;
+               if (B.get ('file', 'name') !== name || type (content) !== 'string') return inFlight = false;
 
                var head = content.match (new RegExp ('^əəə head ' + id + '\\n', 'im'));
                if (! head) return inFlight = false;
@@ -1329,9 +1295,9 @@ B.mrespond ([
                   var finished = body && ! /^pending 1$/m.test (rs.body.message.slice (0, body.index));
                   content = updated;
                   B.call (x, 'change', 'content');
-                  if (finished) B.call (x, 'list', 'files', true);
+                  if (finished) B.call (x, 'read', 'project', true);
                }
-               appendMessages (x, project, name, rs.body.next, function () {
+               appendMessages (x, name, rs.body.next, function () {
                   inFlight = false;
                });
             });
@@ -1362,8 +1328,7 @@ B.mrespond ([
          editor.display.input.ensurePolled ();
          body = editor.getValue ();
       }
-      var project = B.get ('project', 'id');
-      if (! project || B.get ('file', 'name') !== name) return;
+      if (B.get ('file', 'name') !== name) return;
       if (! (body || '').trim ()) return;
 
       to = (to || '').trim () || 'all';
@@ -1381,7 +1346,7 @@ B.mrespond ([
          to: to,
       }, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem sending the message');
-         if (B.get ('project', 'id') !== project || B.get ('file', 'name') !== name) return;
+         if (B.get ('file', 'name') !== name) return;
          if (B.get ('message', 'body') === body) B.call (x, 'set', ['message', 'body'], '');
          B.call (x, 'read', 'file');
       });
@@ -1409,7 +1374,7 @@ B.mrespond ([
    }],
 
    ['upload', 'message', function (x, files) {
-      var projectId = B.get ('project', 'id'), chat = B.get ('file', 'name');
+      var chat = B.get ('file', 'name');
       if (! files || ! files.length || ! /^chat\/.+\.md$/.test (chat || '')) return;
       files = Array.from (files); // Copy: the file input clears its live list right after this call.
 
@@ -1422,8 +1387,7 @@ B.mrespond ([
          cb: function (uploaded) {
             var post = function (index) {
                if (index === files.length) {
-                  if (B.get ('project', 'id') !== projectId) return;
-                  B.call (x, 'list', 'files');
+                  B.call (x, 'read', 'project');
                   if (B.get ('file', 'name') === chat) B.call (x, 'read', 'file');
                   return;
                }
@@ -1463,7 +1427,7 @@ B.mrespond ([
       B.call (x, 'post', '/credentials/' + provider + '/complete', {code: code}, function (x, error, rs) {
          B.call (x, 'rem', [], 'pkce');
          if (error) return B.call (x, 'snackbar', 'error', 'Login failed');
-         B.call (x, 'load', 'user');
+         B.call (x, 'read', 'user');
       });
    }],
 
@@ -1471,7 +1435,7 @@ B.mrespond ([
       B.call (x, 'post', '/credentials/' + provider + '/apiKey', {key: key}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to save API key');
          B.call (x, 'rem', [], 'pkce');
-         B.call (x, 'load', 'user');
+         B.call (x, 'read', 'user');
       });
    }],
 
@@ -1479,7 +1443,7 @@ B.mrespond ([
       if (! confirm ('Remove ' + (provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' ' + (name === 'account' ? 'account' : 'API key') + '?')) return;
       B.call (x, 'delete', '/credentials/' + provider + '/' + name, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to remove credential');
-         B.call (x, 'load', 'user');
+         B.call (x, 'read', 'user');
       });
    }],
 
@@ -1944,9 +1908,7 @@ views.projects = function () {
 
                         return ['div', {
                            class: 'absolute flex items-center justify-center pointer' + (matchingProject ? ' ' + views.projectColor (matchingProject.name) : ''),
-                           onclick: matchingProject ? function () {
-                              window.location.href = window.location.protocol + '//' + (matchingProject.subdomain || matchingProject.id) + '.' + window.location.host + '/';
-                           } : undefined,
+                           onclick: matchingProject ? B.ev ('navigate', 'files/' + matchingProject.id) : undefined,
                            onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
                            onmouseleave: B.ev ('rem', [], 'hover'),
                            style: style ({
@@ -2068,9 +2030,7 @@ views.projects = function () {
                            var offset = start + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (span - cardWidth);
                            return ['div', {
                               class: 'border-box flex items-center justify-between pointer relative ' + views.projectColor (project.name),
-                              onclick: function () {
-                                 window.location.href = window.location.protocol + '//' + (project.subdomain || project.id) + '.' + window.location.host + '/';
-                              },
+                              onclick: B.ev ('navigate', 'files/' + project.id),
                               style: style ({
                                  'border-radius': '0.75rem',
                                  height: '10vh',
@@ -2423,7 +2383,7 @@ var localPaths = function (html, folder) {
          if (part === '..') parts.pop ();
          else if (part !== '.' && part !== '') parts.push (part);
       });
-      if (tag.toLowerCase () === 'a') return prefix + '#/p/' + encodeURIComponent (parts.join ('/')) + '"';
+      if (tag.toLowerCase () === 'a') return prefix + '#/f/' + encodeURIComponent (parts.join ('/')) + '"';
       return prefix + '/f/' + encodeURIComponent (parts.join ('/')) + '"';
    });
 }
@@ -2474,15 +2434,13 @@ views.files = function () {
       });
    }
 
-   return B.view ([['mobile'], ['projects'], ['project', 'id']], function (mobile, projects, projectId) {
-      if (! projects) return ['div', {
+   return B.view ([['mobile'], ['project', 'name'], ['project', 'read']], function (mobile, name, read) {
+      if (name === undefined) return ['div', {
          class: 'bg-vmidnight flex flex-wrap items-center justify-center overflow-hidden vh-100',
          style: style ({gap: '2rem'}),
       }, dale.go (dale.times (80), () => views.spinny ())];
 
-      var project = dale.stopNot (projects, undefined, function (project) {
-         if (project.id === projectId) return project;
-      });
+      var project = {name, read};
 
       return ['div', {
          class: views.projectColor (project.name) + ' border-box flex flex-column overflow-hidden vh-100',
@@ -3563,7 +3521,7 @@ views.chat = function (read) {
                }
                body = message.slice (body.index + body [0].length).replace (/\n$/, '');
                var originalLength = body.length;
-               var expandKey = ['expand', B.get ('project', 'id'), file.name, messageId];
+               var expandKey = ['expand', file.name, messageId];
                var truncatedBody;
                if (originalLength > 10000 && ! media) {
                   var firstEnd = body.lastIndexOf ('\n', 50);
@@ -3911,5 +3869,5 @@ views.chat = function (read) {
 
 CodeMirror.Vim.unmap ('/');
 
-B.call ('load', 'user');
+B.call ('read', 'user');
 B.mount ('body', views.main);

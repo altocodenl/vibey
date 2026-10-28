@@ -956,8 +956,8 @@ if (mode === 'server') {
                   var base = new URL (CONFIG.baseURL);
                   return assert (['location', rs.headers.location, base.protocol + '//' + s.username + '--el-norte.' + base.host + '/f/main.md?foo=bar', teishi.test.equal]);
                }],
-               ['List files on UUID subdomain', 'get', '/project/files', 200, function (s, rq, rs) {
-                  return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
+               ['List files on UUID subdomain', 'get', '/project', 200, function (s, rq, rs) {
+                  return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
                }],
                {
                   tag: 'Anonymous UUID root serves app without redirect',
@@ -970,7 +970,7 @@ if (mode === 'server') {
                      return assert (['location', rs.headers.location, undefined, teishi.test.equal]);
                   },
                },
-               ['Anonymous cannot list files on UUID subdomain', 'get', '/project/files', 404, function (s, rq, rs) {
+               ['Anonymous cannot list files on UUID subdomain', 'get', '/project', 404, function (s, rq, rs) {
                   // The project cookie belongs to the UUID subdomain, so the browser doesn't send it to the readable one.
                   s.projectSubdomain = s.username + '--el-norte';
                   s.headers.cookie = s.hostCookie;
@@ -997,8 +997,8 @@ if (mode === 'server') {
                      return assert (['location', rs.headers.location, undefined, teishi.test.equal]);
                   },
                },
-               ['List files on readable subdomain', 'get', '/project/files', 200, function (s, rq, rs) {
-                  return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
+               ['List files on readable subdomain', 'get', '/project', 200, function (s, rq, rs) {
+                  return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
                }],
                {
                   tag: 'Get project session csrf',
@@ -1039,9 +1039,13 @@ if (mode === 'server') {
                   ['content-type', rs.headers ['content-type'], /text\/markdown/, teishi.test.match],
                   ['cache-control', rs.headers ['cache-control'], 'private, no-cache', teishi.test.equal],
                   ['x-content-type-options', rs.headers ['x-content-type-options'], 'nosniff', teishi.test.equal],
-                  // TODO: define if we need this
-                  //['content-security-policy', rs.headers ['content-security-policy'], "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'", teishi.test.equal],
+                  ['access-control-allow-origin', rs.headers ['access-control-allow-origin'], '*', teishi.test.equal],
+                  ['content-security-policy', rs.headers ['content-security-policy'], undefined, teishi.test.equal],
                ]);
+            }],
+            ['Write HTML file', 'post', '/project/write', {path: 'page.html', content: '<script>document.title = "x"</script>'}, 200],
+            ['Get HTML file', 'get', '/f/page.html', 200, function (s, rq, rs) {
+               return assert (['content-security-policy', rs.headers ['content-security-policy'], 'sandbox allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts', teishi.test.equal]);
             }],
             ['Edit file without path', 'post', '/project/edit', function (s) {return {oldText: 'a', newText: 'b'}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
             ['Edit file without oldText', 'post', '/project/edit', function (s) {return {path: 'main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
@@ -1049,17 +1053,17 @@ if (mode === 'server') {
                return assert (['body.error', rs.body.error, /Old text found .+ times/, teishi.test.match]);
             }],
             ['Edit main file', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, assertBody ({})],
-            waitForCommits ('List commits after edit', 2, "Edit 'main.md'"),
+            waitForCommits ('List commits after edit', 3, "Edit 'main.md'"),
             ['Get main file after edit', 'get', '/f/' + encodeURIComponent ('main.md'), 200, assertBody ('# El Norte!\n\n')],
             ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text not found/, teishi.test.match]);
             }],
             ['Edit main file (noop)', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'Norte!', newText: 'Norte!'}}, 200, assertBody ({})],
-            waitForCommits ('List commits after noop edit', 2, "Edit 'main.md'"),
+            waitForCommits ('List commits after noop edit', 3, "Edit 'main.md'"),
             ['Overwrite file', 'post', '/project/write', function (s) {return {path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
-            waitForCommits ('List commits after write', 3, "Write 'main.md'"),
+            waitForCommits ('List commits after write', 4, "Write 'main.md'"),
             ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
-            waitForCommits ('List commits after noop write', 3, "Write 'main.md'"),
+            waitForCommits ('List commits after noop write', 4, "Write 'main.md'"),
             ['Write empty file', 'post', '/project/write', function (s) {return {path: 'doc/empty.md', content: ''}}, 200, assertBody ({})],
             ['Read back empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, assertBody ('')],
             ['Reject base64 file write', 'post', '/project/write', function (s) {return {path: 'doc/binary.txt', content: 'aGVsbG8=', base64: true}}, 400],
@@ -1105,14 +1109,14 @@ if (mode === 'server') {
             ['Run a command with pipe', 'post', '/project/run', function (s) {return {command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {command: 'printf foo', read: true}}, 200, assertBody ({stdout: 'foo'})],
             ['Run a command with change and output', 'post', '/project/run', function (s) {return {command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: 'foo\n'})],
-            waitForCommits ('List commits after command with change and output', 8, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
+            waitForCommits ('List commits after command with change and output', 9, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
             ['Stop project container', 'get', '/', 200, function (s, rq, rs, next) {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
                   next (null, rs);
                }) ();
             }],
-            waitForCommits ('List commits after container restart', 8, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
+            waitForCommits ('List commits after container restart', 9, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
 
             ['Upload multipart file', 'post', '/project/write', function (s) {
                return {multipart: [
@@ -1150,7 +1154,7 @@ if (mode === 'server') {
             ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, assertBody ({})],
             ['Read file after append to empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, assertBody ('first message\n')],
             ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, assertBody ({})],
-            waitForCommits ('List commits after appends', 12, "Edit 'doc/empty.md'"),
+            waitForCommits ('List commits after appends', 13, "Edit 'doc/empty.md'"),
             ['Read file after second append', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, function (s, rq, rs, next) {
                if (! assertBody ('first message\nsecond message\n') (s, rq, rs)) return false;
                (async function () {
@@ -1420,7 +1424,7 @@ if (mode === 'server') {
                   tag: entry [0],
                   method: 'get',
                   host: entry [1] + '.' + new URL (CONFIG.baseURL).hostname,
-                  path: '/project/files',
+                  path: '/project',
                   code: 404,
                };
             }),
@@ -1430,16 +1434,16 @@ if (mode === 'server') {
                return assert (['project id', s.accessDashId, 'string']);
             }],
             projectLogin ('A on dash project', 'accessDashProject'),
-            ['Double dash decodes to a dash', 'get', '/project/files', 200],
+            ['Double dash decodes to a dash', 'get', '/project', 200],
             {
                tag: 'Single dash decodes to a space',
                method: 'get',
                host: 'access-a--x-y-z.' + new URL (CONFIG.baseURL).hostname,
-               path: '/project/files',
+               path: '/project',
                code: 404,
             },
             ['A deletes project with a dash', 'delete', function (s) {return '/project/' + s.accessDashId}, 200],
-            ['Deleted project no longer resolves', 'get', '/project/files', 404],
+            ['Deleted project no longer resolves', 'get', '/project', 404],
             useSession ('A on shared project'),
 
             // B already existed when the grants were synced.
@@ -1448,15 +1452,15 @@ if (mode === 'server') {
                return assert (['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal]);
             }],
             projectLogin ('B on shared project', 'accessProject'),
-            ['B lists files', 'get', '/project/files', 200, function (s, rq, rs) {
-               return assert (['outside file visible', inc (dale.go (rs.body, function (f) {return f.name}), 'outside.txt'), true, teishi.test.equal]);
+            ['B lists files', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['outside file visible', inc (dale.go (rs.body.files, function (f) {return f.name}), 'outside.txt'), true, teishi.test.equal]);
             }],
             ['B reads file', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
             {
                tag: 'Project name under a user who does not own it',
                method: 'get',
                host: 'access-b--access-test.' + new URL (CONFIG.baseURL).hostname,
-               path: '/project/files',
+               path: '/project',
                code: 404,
             },
             ['B reads message', 'get', function (s) {return '/project/message/' + s.accessMessageId + '/chat/thread.md'}, 200, function (s, rq, rs) {
@@ -1521,8 +1525,8 @@ if (mode === 'server') {
             accessWrite ('vibey/access.md', 'access-b@example.com read\naccess-c@example.com write chat/\n', 200),
             accessSync,
             useSession ('C on shared project'),
-            ['C lists only scoped files', 'get', '/project/files', 200, function (s, rq, rs) {
-               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
+            ['C lists only scoped files', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
             }],
             ['C reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('original')],
             accessWrite ('chat/inside.txt', 'scoped write', 200),
@@ -1563,8 +1567,8 @@ if (mode === 'server') {
             accessWrite ('vibey/access.md', 'access-b@example.com read chat/\naccess-c@example.com write chat/\n', 200),
             accessSync,
             useSession ('B on shared project'),
-            ['B lists only scoped files', 'get', '/project/files', 200, function (s, rq, rs) {
-               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
+            ['B lists only scoped files', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['chat/inside.txt', 'chat/thread.md'], teishi.test.equal]);
             }],
             ['B reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
             ['B cannot read outside scope', 'get', accessFile ('outside.txt'), 404],
@@ -1712,15 +1716,15 @@ if (mode === 'server') {
                ]);
             }],
             useProject ('publicFull'),
-            ['Anonymous lists full public project files', 'get', '/project/files', 200, function (s, rq, rs) {
-               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['main.md', 'notes.md', 'src/app.js'], teishi.test.equal]);
+            ['Anonymous lists full public project files', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md', 'notes.md', 'src/app.js'], teishi.test.equal]);
             }],
             ['Anonymous reads full public project file', 'get', '/f/notes.md', 200, assertBody ('Notes')],
             ['Anonymous cannot read access.md', 'get', '/f/vibey/access.md', 302],
             ['Anonymous cannot write', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 403],
             useProject ('publicPartial'),
-            ['Anonymous lists partial public project files', 'get', '/project/files', 200, function (s, rq, rs) {
-               return assert (['file names', dale.go (rs.body, function (f) {return f.name}), ['chat/one.txt', 'chat/two.txt'], teishi.test.equal]);
+            ['Anonymous lists partial public project files', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['chat/one.txt', 'chat/two.txt'], teishi.test.equal]);
             }],
             ['Anonymous reads partial public project file', 'get', '/f/chat/one.txt', 200, assertBody ('one')],
             ['Anonymous cannot read outside partial public prefix', 'get', '/f/main.md', 302],
@@ -1748,7 +1752,7 @@ if (mode === 'server') {
             accessSync,
             useSession ('B on shared project'),
             ['B no longer sees revoked project', 'get', '/projects', 200, assertBody ([])],
-            ['B cannot list revoked project files', 'get', '/project/files', 404],
+            ['B cannot list revoked project files', 'get', '/project', 404],
             ['B cannot read revoked file', 'get', accessFile ('chat/inside.txt'), 404],
             accessAs ('a'),
             ['A deletes shared project', 'delete', function (s) {return '/project/' + s.accessProjectId}, 200],
@@ -1811,7 +1815,7 @@ if (mode === 'server') {
                }
 
                if (matchRoute ([
-                  ['get', '/project/files'],
+                  ['get', '/project'],
                   ['get', /^\/f\/.+/],
                   ['get', /^\/project\/message\/.+/],
                   ['post', '/project/write'],
