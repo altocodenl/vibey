@@ -1,5 +1,97 @@
 # Vibey development notes
 
+## 2026-10-28
+
+Deploying latest main with pinned node version in dockerfile at 13:14 UTC. Confirmed success at 13:19.
+
+Tail all docker logs:
+```
+bash -c 'trap "kill 0" INT; for c in $(docker ps --format "{{.Names}}"); do docker logs -f --tail 20 "$c" 2>&1 | sed "s/^/[$c] /" & done; wait'
+```
+
+Decided against automatic updates on the vibey hosts, but will let them on (ubuntu default) on engines.
+
+An idea that is surfacing again, concerning a log service.
+- The last time I did it, I was more ambitious: https://github.com/fpereiro/fourlite : it combines logs, stats, a monitoring layer for servers, sending alerts and queues. That's a good overall idea: have a companion, or support, to your main app, and offload certain responsibilities there.
+- For now, let's focus on the logs, and add the rest later, organically.
+- Idea for name: destek ("support" in Turkish).
+- This is an app that can run inside or outside of vibey, I will tackle the concept of a vibey app in a bit.
+- Design decisions:
+   - Web service (node) + web interface (js SPA).
+   - All data lives in one or several sqlite files. No separate DB process. If we start with logging, perhaps best to have one sqlite per utc day.
+   - Log data is pushed through an HTTP POST endpoint, either plain text or JSON with a single field (log: "..."). Auth can be a mere token.
+   - To "tag" a source of logs, you can put it in the path. POST /log/nginx would add the nginx tag to each log. POST /log/prod1/nginx would add tags prod1 and nginx.
+   - The client can also function with a read token. Not great, but better than a password. If we make the auth heavy, it's going to be an adoption killer.
+   - The server autoparses logs into entries. It should work for nginx logs, systemd logs and also for JSON line logs like the ones I use normally.
+   - "Log transports" from the system can simply be brute pushers of system logs, to be refined later. node apps can push logs with POST requests. All that matters is that it is either done in localhost or through https, so logs are not exposed.
+   - DB structure: each row has a t (time), data (json), and raw (text). Inside data, we can put an array of tags, and all the other fields. raw has the full log entry.
+   - The query language can be full-text search or plain SQL.
+   - The resulting rows show like a table: t (normalized to query time with ago ()), tags and then the rest of the columns, in whatever order they happen to come. Each row has its columns, but if contiguous rows share columns, those get merged and sorted.
+- "Timey" (time series, see an earlier note) can also be part of the same system: a different table, but just post to it. You can also allow for sql queries directly.
+- As for ping, it's really one thing with two sides: checks on services (uptime/health), and pinging humans when something is off (as seen in a log, or in a time series). checks on services can be logged in the normal log.
+
+Questions prompted by vibey apps:
+- Auth: how can we leverage vibey auth so that you don't have to implement that in the app?
+- UI: how can you see the UI of the app (say, a SPA) integrated inside vibey?
+- AI chat: how can you use a chat to modify the interface of the app without the app having to know about AI, or having to incorporate hooks for AI? This needs both the chat as an overlay and the app having hooks to modify an existing view, or redirecting your view of the app to a different URL.
+
+The core thing to finish now is subdomain, so I can join the branches. Then, engine. Then, decomission the old vibey. Ongoing: all the smaller but useful todos.
+
+Subdomain:
+- The redirect for the client should be in GET /auth/user, check for access there and redirect if no user.
+- GET /project/files should also return a project hash, with id, subdomain (if it's different from id), ownerId, and access (if the requester is not the owner, an array of the scopes allowed to the user, directly taken from the access scopes). And it should be called GET /project, really.
+- When we have a subdomain, we already set project.subdomain directly in the client, then fetch.
+
+- TODO
+   - small
+      - How to put chats inside folders? and main.md should refer to the one relative to the chat folder! When creating a chat, let's just do it as chat- instead of chat/ . No need to migrate. So, if it starts with chat- and ends with .md, it is a chat.
+      - And it's probably a good idea to not expand folders by default.
+      - Put descriptions on top of tool uses, rather than as a separate message
+      - more padding at the bottom of the DNA list to avoid overlap of the last with the search bar
+      - {"error":"anthropic account token refresh failed, please reconnect: \"Timed out after 60 seconds, request aborted.\""}, this doesn't show in the chat, just the console!
+      - don't lose chat editor status when switching to To with keyboard shortcut
+      - update gauges as we go
+      - light mode with the same high contrast
+      - check links between projects
+      - Fix pin: allow for local user, when clicking + also allow to pin existing without the edit
+      - first command + I to switch to view (the first time it doesn't work)
+      - client.js and client_extend.js
+      - Fix annoying overwrite message when starting a new document.
+      - Fix esc escaping full mode in vi mode (we should intercept it if we're in full mode and in normal mode in the editor)
+      - Make panes take full height, put project (with details as expansion) in left pane, move settings to projects page as a wrench, show sessions
+      - Status bar:
+         - If creator and no projects pinned, tell that you can click on one of the slots to create a project.
+         - If no creator access, don't show the shell, just the dna list.
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - demos
+      - devops: notification project to see alerts
+      - engine
+         - support engines without provisioning (BYOE)
+         - provision engines
+         - Port mapping from the project to the engine: allow to run ina. port. Check for contention within the engine. Then auto-modify nginx to allow for direct access. Allow direct access with mappings of URLs, per individual file and also per folder/prefix (forbid dots).
+   - access
+      - email to project
+      - token/api hooks
+      - email hooks (token in an email address)
+   - apps
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+   - project
+      - subdomain per project
+      - fix autogit
+      - autobackup
+      - explore alternative to docker to reduce command latency (50ms base)
+   - tests: local mode, client tests: auth, project, files, chat, access
+
+
+
 ## 2026-10-27
 
 For engine provision script, necessary so that nginx doesn't crash when upgraded with unattended upgrades:
@@ -19,7 +111,7 @@ Devops ideas:
 - Push system logs (both host container and the actual host) to the logging app, so they can be unified. A cron with curl could do the pushing to the logging app. The log transport could be refined later to remember how much it pushed before (a line offset).
 
 TODO new:
-- How to put chats inside folders? and main.md should refer to the one relative to the chat folder!
+- How to put chats inside folders? and main.md should refer to the one relative to the chat folder! When creating a chat, let's just do it as chat- instead of chat/ . No need to migrate. So, if it starts with chat- and ends with .md, it is a chat.
 - And it's probably a good idea to not expand folders by default.
 - Put descriptions on top of tool uses, rather than as a separate message
 
@@ -74,7 +166,7 @@ How can vibey bring abundance?
 - Be able to run things in a server without having to ssh into it.
 - Be able to receive email for free in your domain (but not sending it?).
 
-It would make sense now to remove the rediret rom the list files endpoint. The only two ways to load a redirectable link are either full client or single file. So it's just GET / or GET /f that redirect.
+It would make sense now to remove the redirect from the list files endpoint. The only two ways to load a redirectable link are either full client or single file. So it's just GET / or GET /f that redirect.
 
 - TODO
    - small:
