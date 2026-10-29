@@ -26,7 +26,7 @@ App:
 - With own domain going straight to the engine: on the way in, it's all the same, except that nginx relays the cookies present for the vibey host to parse. on the way nginx should set the cookies set by vibey on the way back.
 - With own domain it's much trickier than I thought. I think we could fix it with an endpoint similar to the cookie exchange we do for projects in the subdomain branch: when you load a page that's not public and there are no credentials, you are redirected to the exchange endpoint, which then takes you either to a cookie interchange or a custom page to login (if there's no custom page, it's the normal vibey login with a redirect); 2) custom login pages that simply forward the data to vibey.
 
-Making /p/<port> work is the key to projects, because it connects a process to an URL, through a port number in an endpoint.
+Making /p/<port> work is the key to apps, because it connects a process to an URL, through a port number in an endpoint.
 
 TODO:
 - download in project
