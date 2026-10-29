@@ -1,5 +1,37 @@
 # Vibey development notes
 
+## 2026-10-29
+
+If I go back to the idea of ac;tools (github.com/altocodenl/actools), destek is the second half (4-7), while the first half (id, file, db) is essentially provided by vibey (if vibey lets you run a DB). Vibey also gives you the runtime. So, in the vibey substrate, if you add a db and destek, you essentially have all the services you need for your runtime, including running your own runtime. It's coming full circle.
+
+I want vibey to be megauseful for individual or small teams doing serious work, whether paid or not.
+
+Claude on ICPs:
+
+```
+A **consultant or small studio** is the main paying customer. The **AI power user** is the funnel that leads to it. The **self-hoster** is the launch channel.
+
+**Qualifying question for consultant or small studio:** "How many tools does a client touch during one engagement with you?"
+**Qualifying question for AI power users:** "Have you built something with an AI agent that other people now need to use and change with you?"
+**Timely move for self-hosters:** A post aimed at Glitch refugees in the next two months, before their redirects expire.
+```
+
+But my feel is to make vibey for people with initiative and a high degree of ownership on what they do and how they do it. Vibey only needs to help them succeed, the rest will take care of itself.
+
+Interesting that access is id again, appearing again at the top. Circular, if you go from the top right back to the bottom.
+
+App:
+- How would the proxy endpoints? you could do it by port, with read for get/head, and write for all methods. the key thing is to understand the port as a separate path!
+- Without own domain: it just works, a port is like a location. use email or token. The endpoint would be different: /p (for port), with or without hash. It would be /p/<port_number>/<optional path>
+- With own domain going straight to the engine: on the way in, it's all the same, except that nginx relays the cookies present for the vibey host to parse. on the way nginx should set the cookies set by vibey on the way back.
+- With own domain it's much trickier than I thought. I think we could fix it with an endpoint similar to the cookie exchange we do for projects in the subdomain branch: when you load a page that's not public and there are no credentials, you are redirected to the exchange endpoint, which then takes you either to a cookie interchange or a custom page to login (if there's no custom page, it's the normal vibey login with a redirect); 2) custom login pages that simply forward the data to vibey.
+
+Making /p/<port> work is the key to projects, because it connects a process to an URL, through a port number in an endpoint.
+
+TODO:
+- download in project
+- remove settings and logout, make right pane take full height
+
 ## 2026-10-28
 
 Deploying latest main with pinned node version in dockerfile at 13:14 UTC. Confirmed success at 13:19.
@@ -89,8 +121,6 @@ Subdomain:
       - autobackup
       - explore alternative to docker to reduce command latency (50ms base)
    - tests: local mode, client tests: auth, project, files, chat, access
-
-
 
 ## 2026-10-27
 
