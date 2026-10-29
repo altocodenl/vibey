@@ -159,6 +159,7 @@ B.mrespond ([
 
    ['navigate', '*', function (x) {
       // Code navigates to files/<projectId>[/<file>]: on the host, this opens the project's subdomain; on a project, the URL shows it as f[/<file>].
+      if (x.path [0] === 'projects' && window.location.host !== document.querySelector ('meta[name="base-host"]').content) return window.location.href = window.location.protocol + '//' + document.querySelector ('meta[name="base-host"]').content + '/#/projects';
       var match = x.path [0].match (/^files\/([^/]+)(?:\/(.*))?$/);
       if (match) {
          var path = match [2] ? 'f/' + encodeURIComponent (decodeURIComponent (match [2])) : 'f';
@@ -201,8 +202,6 @@ B.mrespond ([
       if (hash [0] === 'f') {
 
          var file = decodeURIComponent (hash.slice (1).join ('/'));
-
-         B.call (x, 'set', ['project', 'id'], subdomain);
 
          var files = B.get ('files');
 
@@ -431,7 +430,7 @@ B.mrespond ([
          B.call (x, 'rem', 'new', 'project');
          B.call (x, 'rem', 'search', 'project');
 
-         window.location.href = window.location.protocol + '//' + rs.body.id + '.' + window.location.host + '/#/f/main.md';
+         window.location.href = window.location.protocol + '//' + (rs.body.subdomain || rs.body.id) + '.' + window.location.host + '/#/f/main.md';
       });
    }],
 
@@ -456,7 +455,7 @@ B.mrespond ([
       if (! confirm ('Delete project "' + project.name + '"? This cannot be undone.')) return;
 
       B.call (x, 'snackbar', 'yellow', 'Deleting project...', 'keep');
-      B.call (x, 'delete', 'project/' + project.id, function (x, error) {
+      B.call (x, 'delete', '/project/' + project.id, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to delete project');
          B.call (x, 'read', 'projects');
          B.call (x, 'snackbar', 'ok', 'Project deleted');
@@ -658,7 +657,7 @@ B.mrespond ([
             var next = ev.key === 'j' ? index + 1 : index - 1;
             if (next < 0) next = files.length - 1;
             if (next >= files.length) next = 0;
-            return B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + files [next].name);
+            return B.call (x, 'navigate', 'f/' + encodeURIComponent (files [next].name));
          }
       }
 
@@ -902,7 +901,7 @@ B.mrespond ([
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
 
          if (New) {
-            B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + name);
+            B.call (x, 'navigate', 'f/' + encodeURIComponent (name));
             B.call (x, 'read', 'project');
          }
          if (! New && B.get ('file', 'name') === name) content = newContent;
@@ -924,7 +923,7 @@ B.mrespond ([
       B.call (x, 'write', 'file', name, '', 'new');
 
       B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
-      if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + encodeURIComponent (name));
+      if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'f/' + encodeURIComponent (name));
 
       B.call (x, 'rem', 'new', 'file');
       if (B.get ('mobile')) B.call (x, 'set', ['show', 'pane'], 'right');
@@ -952,7 +951,7 @@ B.mrespond ([
       B.call (x, 'post', '/project/run', {command: 'rm -- ' + path}, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to delete file');
          B.call (x, 'read', 'project');
-         if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'files/' + B.get ('project', 'id'));
+         if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'f');
       });
    }],
 
@@ -980,7 +979,7 @@ B.mrespond ([
          B.call (x, 'rem', 'edit', 'file');
          B.call (x, 'add', 'files', {name: newName}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
          B.call (x, 'read', 'project');
-         if (B.get ('file', 'name') === oldName) B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + encodeURIComponent (newName));
+         if (B.get ('file', 'name') === oldName) B.call (x, 'navigate', 'f/' + encodeURIComponent (newName));
       });
    }],
 
@@ -1008,7 +1007,7 @@ B.mrespond ([
          if (options.cb) return options.cb (uploaded);
          B.call (x, 'read', 'project');
          B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
-         if (total === 1 && done === total) B.call (x, 'navigate', 'files/' + B.get ('project', 'id') + '/' + encodeURIComponent (name));
+         if (total === 1 && done === total) B.call (x, 'navigate', 'f/' + encodeURIComponent (name));
       }
 
       dale.go (files, function (file, index) {
@@ -1604,36 +1603,21 @@ views.main = function () {
 
          // Header
          (function () {
-            if (view === 'login') return;
-            return B.view ([['file', 'full'], ['mobile']], function (full, mobile) {return ['div', {
-               class: full || mobile && view === 'files' ? 'dn' : 'absolute flex right-0 top-0',
+            if (view === 'login' || view === 'files') return;
+            return B.view ('mobile', function (mobile) {return ['div', {
+               class: 'absolute flex right-0 top-0',
                style: style ({
-                  gap: view === 'files' ? '0.5rem' : '1.5rem',
-                  margin: view === 'files' ? '0.75rem 1.5rem 0 0' : 'calc(1.5rem - 2vh) 1.5rem 0 0',
+                  gap: '1.5rem',
+                  margin: 'calc(1.5rem - 2vh) 1.5rem 0 0',
                })
             }, [
-
-               // Settings
-               B.view ([['show', 'settings'], ['view'], ['user', 'anonymous']], function (showSettings, view, anonymous) {
-                  if (view !== 'files' || anonymous) return ['span'];
-                  return ['button', {
-                     class: css.button + ' bg-mid-gray f6 relative',
-                     style: style ({padding: '0.5rem 0.875rem'}),
-                     onclick: B.ev ('set', ['show', 'settings'], ! B.get ('show', 'settings'))
-                  }, [
-                     views.tooltip ('9', 'below'),
-                     ['i', {class: 'bi mr1 ' + (showSettings ? 'bi-check-lg' : 'bi-wrench-adjustable mr1')}],
-                     showSettings ? 'Done with this' : 'Settings'
-                  ]];
-               }),
 
                // Account and logout
                B.view ([['user', 'mode'], ['user', 'email'], ['user', 'anonymous'], ['search', 'project']], function (mode, email, anonymous, search) {
                   if (view === 'projects' && search !== undefined) return ['span'];
                   var logout = ['button', {
                      // Without a session, the projects list covers the header; this keeps Login clickable.
-                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple ' + (view === 'files' ? 'f6' : 'f5 pa2 ph3') + (anonymous ? ' relative z-1' : ''),
-                     style: view === 'files' ? style ({padding: '0.5rem 0.875rem'}) : undefined,
+                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple f5 pa2 ph3' + (anonymous ? ' relative z-1' : ''),
                      onclick: anonymous ? B.ev ('navigate', 'login') : B.ev ('logout', []),
                      title: email || '',
                   }, [
@@ -2539,41 +2523,6 @@ views.files = function () {
                }],
             ] : []];
          }),
-         B.view ([['file', 'full'], ['show', 'pane']], function (full, pane) {return ['div', {class: full || mobile && pane === 'right' ? 'dn' : 'flex flex-shrink-0 items-center mb2' + (mobile ? ' ph3 pt2' : '')}, [
-            ['span', {
-               class: 'f2 fw7 lh-solid mr3 pointer relative',
-               onclick: B.ev ('navigate', 'projects'),
-            }, ['‹', views.tooltip ('B', 'below')]],
-            ['span', {class: 'f4 fw7'}, project.name],
-            B.view (['project', 'size'], function (projectSize) {
-               projectSize = projectSize || {};
-               return ['span', {class: 'flex items-center'}, [
-                  projectSize.bytes ? ['span', {
-                     class: 'fw7 ml2' + (mobile && projectSize.history ? ' pointer' : ''),
-                     onclick: mobile && projectSize.history ? B.ev ('clear', 'history') : undefined,
-                     style: style ({
-                        'font-size': '0.875rem',
-                     }),
-                  }, '(' + size (projectSize.bytes) + ')'] : '',
-                  projectSize.history && ! mobile ? ['button', {
-                     class: 'bg-vorange bn br-pill f7 fw6 ml2 pointer vdeepnavy',
-                     onclick: B.ev ('clear', 'history'),
-                     style: style ({
-                        padding: '0.25rem 0.75rem',
-                     }),
-                     title: 'Remove all past versions of this project',
-                     type: 'button',
-                  }, 'Clear (' + size (projectSize.history) + ')'] : '',
-               ]];
-            }),
-            mobile && ! B.get ('user', 'anonymous') ? ['button', {
-               class: css.button + ' bg-mid-gray f6 ml-auto',
-               onclick: B.ev (['set', ['show', 'settings'], true], ['set', ['show', 'pane'], 'right']),
-               style: style ({padding: '0.5rem 0.625rem'}),
-               title: 'Settings',
-               type: 'button',
-            }, ['i', {class: 'bi bi-wrench-adjustable'}]] : '',
-         ]]}),
          ['div', {
             id: 'panes',
             style: style ({
@@ -2587,6 +2536,34 @@ views.files = function () {
          }, [
             // Left pane
             flipCard ('overflow-hidden', function () {return [
+               ['div', {class: views.projectColor (project.name) + ' br3 flex flex-shrink-0 items-center mb3 ph3 pv2'}, [
+                  ['span', {
+                     class: 'f2 fw7 lh-solid mr3 pointer relative',
+                     onclick: B.ev ('navigate', 'projects'),
+                  }, ['‹', views.tooltip ('B', 'below')]],
+                  ['span', {class: 'f4 fw7'}, project.name],
+                  B.view (['project', 'size'], function (projectSize) {
+                     projectSize = projectSize || {};
+                     return ['span', {class: 'flex items-center'}, [
+                        projectSize.bytes ? ['span', {
+                           class: 'fw7 ml2' + (mobile && projectSize.history ? ' pointer' : ''),
+                           onclick: mobile && projectSize.history ? B.ev ('clear', 'history') : undefined,
+                           style: style ({
+                              'font-size': '0.875rem',
+                           }),
+                        }, '(' + size (projectSize.bytes) + ')'] : '',
+                        projectSize.history && ! mobile ? ['button', {
+                           class: 'bg-vorange bn br-pill f7 fw6 ml2 pointer vdeepnavy',
+                           onclick: B.ev ('clear', 'history'),
+                           style: style ({
+                              padding: '0.25rem 0.75rem',
+                           }),
+                           title: 'Remove all past versions of this project',
+                           type: 'button',
+                        }, 'Clear (' + size (projectSize.history) + ')'] : '',
+                     ]];
+                  }),
+               ]],
                project.read ? '' : ['div', {class: 'flex flex-shrink-0 mb3'}, [
                   ['button', {
                      class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vdeepnavy',
@@ -2623,7 +2600,7 @@ views.files = function () {
                      return ['div', {
                         class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
                         id: active ? 'selected-file' : undefined,
-                        onclick: B.ev (['navigate', 'files/' + B.get ('project', 'id') + '/' + file.name], ['set', ['show', 'pane'], 'right']),
+                        onclick: B.ev (['navigate', 'f/' + encodeURIComponent (file.name)], ['set', ['show', 'pane'], 'right']),
                         style: style ({
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
                            padding: '0.5rem 0.625rem',

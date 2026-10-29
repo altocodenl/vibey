@@ -960,14 +960,15 @@ if (mode === 'server') {
                   return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
                }],
                {
-                  tag: 'Anonymous UUID root serves app without redirect',
+                  tag: 'Anonymous UUID root redirects to login',
                   method: 'get',
                   host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
                   path: '/',
                   headers: {cookie: ''},
-                  code: 200,
+                  code: 302,
                   apres: function (s, rq, rs) {
-                     return assert (['location', rs.headers.location, undefined, teishi.test.equal]);
+                     var location = new URL (rs.headers.location);
+                     return assert (['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/' + s.projectSubdomain, teishi.test.equal]);
                   },
                },
                ['Anonymous cannot list files on UUID subdomain', 'get', '/project', 404, function (s, rq, rs) {

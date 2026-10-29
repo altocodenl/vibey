@@ -1055,6 +1055,38 @@ var routes = [
 
       if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== session.csrf) return reply (rs, 403, {error: 'Invalid csrf token'});
 
+      if (rq.subdomain && matchRoute ([['get', '/'], ['get', /^\/f\/.+/]])) {
+         if (rq.url !== '/' && ! validProjectPath (rq.url.replace (/^\/f\//, ''))) return reply (rs, 400, {error: 'Invalid path'});
+
+         var [owner, grants] = await redis ([
+            ['hget', 'project:' + rq.projectId, 'owner'],
+            ['sunion', 'accessTo:' + (rq.user ? rq.user.id : 'PUBLIC'), 'accessTo:PUBLIC']
+         ]);
+         var allowed = owner && rq.url === '/' ?
+            owner === (rq.user && rq.user.id) || dale.stop (grants, true, function (grant) {
+               var [verb, projectId] = grant.split (':');
+               return projectId === rq.projectId && (verb === 'read' || verb === 'write');
+            }) :
+            await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.projectId, 'read', rq.url.replace (/^\/f\//, ''));
+
+         if (! allowed) {
+            if (rq.user) return reply (rs, 404, fourohfour, 'html');
+
+            var base  = new URL (CONFIG.baseURL);
+            var state = crypto.randomBytes (32).toString ('hex');
+            return reply (rs, 302, '', {
+               location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.rawurl || rq.url)) + '&state=' + state,
+               'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
+                  expires: new Date (Date.now () + 10 * 60 * 1000),
+                  httponly: true,
+                  path: '/',
+                  samesite: 'Lax',
+                  secure: true,
+               })
+            });
+         }
+      }
+
       rs.next ();
 
       if (rq.user && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
@@ -1676,7 +1708,8 @@ var routes = [
 
       await project.write (newProject.id, 'main.md', '# ' + rq.body.name + '\n\n');
 
-      reply (rs, 200, {id: newProject.id});
+      var subdomain = rq.user.username + '--' + rq.body.name.toLowerCase ().replace (/-/g, '--').replace (/ /g, '-');
+      reply (rs, 200, {id: newProject.id, subdomain: rq.user.username && subdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/) ? subdomain : undefined});
    }],
 
    ['put', '/project', async function (rq, rs) {
@@ -1816,24 +1849,6 @@ var routes = [
       var path = rq.data.params [0];
       if (! validProjectPath (path)) {
          return reply (rs, 400, {error: 'Invalid path'});
-      }
-      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.projectId, 'read', path)) {
-
-         if (! rq.user) {
-            var base  = new URL (CONFIG.baseURL);
-            var state = crypto.randomBytes (32).toString ('hex');
-            return reply (rs, 302, '', {
-               location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (rq.rawurl || rq.url)) + '&state=' + state,
-               'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
-                  expires: new Date (Date.now () + 10 * 60 * 1000),
-                  httponly: true,
-                  path: '/',
-                  samesite: 'Lax',
-                  secure: true,
-               })
-            });
-         }
-         else return reply (rs, 404, fourohfour, 'html');
       }
 
       if (rq.projectRedirect) return reply (rs, 302, '', {
