@@ -370,7 +370,6 @@ edit file newName "<new name>"
      project id <id>
              name "<project name>"
              slot <integer|numeric string|"null"|undefined> // "null" is the edit selector's None option
-expand <filename> <messageId> <true|undefined>
 extendClient <true|undefined>
 file actions <false|true>
      full <false|true>
@@ -419,13 +418,16 @@ projects 1 created <date>
            slot <integer|undefined>
            subdomain <subdomain|undefined>
          ...
+returnTo "</auth/project/... path>" // Set from `#/login/<path>`; opened instead of the projects view once the user logs in
 search content count <integer>
                current <integer>
                query <text|undefined>
        file <text|undefined>
        project <text|undefined>
 show account <true|undefined>
+     message <filename> <messageId> <true|undefined>
      pane <left|right|undefined>
+     projectDetails <true|undefined>
      settings <false|true>
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"

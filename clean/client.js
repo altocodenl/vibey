@@ -75,6 +75,10 @@ var newFileName = function (name, type) {
    return name;
 }
 
+var filePath = function (name) {
+   return name.split ('/').map (encodeURIComponent).join ('/');
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -124,6 +128,7 @@ document.addEventListener ('visibilitychange', function () {
    if (document.hidden || ! B.get ('user', 'loginLinkRequested')) return;
    B.call ('get', '/auth/user', function (x, error, rs) {
       if (error || ! rs.body.csrf) return;
+      if (B.get ('returnTo')) return window.location.href = B.get ('returnTo');
       B.call (x, 'set', 'user', rs.body);
       B.call (x, 'read', 'projects');
       B.call (x, 'navigate', 'projects');
@@ -146,6 +151,8 @@ var content, editor;
 
 // *** RESPONDERS ***
 
+var baseHost = document.querySelector ('meta[name="base-host"]').content;
+
 B.mrespond ([
 
    // *** TEST ***
@@ -158,12 +165,11 @@ B.mrespond ([
    // *** NAVIGATION ***
 
    ['navigate', '*', function (x) {
-      // Code navigates to files/<projectId>[/<file>]: on the host, this opens the project's subdomain; on a project, the URL shows it as f[/<file>].
-      if (x.path [0] === 'projects' && window.location.host !== document.querySelector ('meta[name="base-host"]').content) return window.location.href = window.location.protocol + '//' + document.querySelector ('meta[name="base-host"]').content + '/#/projects';
+      if (inc (['projects', 'settings'], x.path [0]) && window.location.host !== baseHost) return window.location.href = window.location.protocol + '//' + baseHost + '/#/' + x.path [0];
       var match = x.path [0].match (/^files\/([^/]+)(?:\/(.*))?$/);
       if (match) {
-         var path = match [2] ? 'f/' + encodeURIComponent (decodeURIComponent (match [2])) : 'f';
-         if (window.location.host === document.querySelector ('meta[name="base-host"]').content) {
+         var path = match [2] ? 'f/' + filePath (decodeURIComponent (match [2])) : 'f';
+         if (window.location.host === baseHost) {
             var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
                if (project.id === match [1]) return project;
             }) || {id: match [1]};
@@ -176,12 +182,17 @@ B.mrespond ([
       else                               window.location.hash = '#/' + x.path;
    }],
 
+   ['go', 'back', function (x) {
+      if (document.referrer) return history.back ();
+      B.call (x, 'navigate', 'projects');
+   }],
+
    ['read', 'hash', function (x) {
       var hash = window.location.hash.slice (2).split ('/');
-      var subdomain = window.location.host !== document.querySelector ('meta[name="base-host"]').content ? window.location.hostname.split ('.') [0] : undefined;
+      var subdomain = window.location.host !== baseHost ? window.location.hostname.split ('.') [0] : undefined;
 
       var authViews   = ['login', 'verify'];
-      var loggedViews = ['projects', 'f'];
+      var loggedViews = ['projects', 'f', 'settings'];
 
       if (subdomain && hash [0] !== 'f') return B.call (x, 'navigate', 'f');
       if (! subdomain && hash [0] === 'f') return B.call (x, 'navigate', 'projects');
@@ -189,6 +200,12 @@ B.mrespond ([
       if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
 
       if (hash [0] === 'verify' && hash [1]) return B.call (x, 'verify', hash [1]);
+
+      if (hash [0] === 'login' && /^\/auth\/project\//.test (decodeURIComponent (hash [1] || ''))) {
+         if (B.get ('user', 'csrf')) return window.location.href = decodeURIComponent (hash [1]);
+         B.call (x, 'set', 'returnTo', decodeURIComponent (hash [1]));
+         return B.call (x, 'navigate', 'login');
+      }
 
       if (B.get ('user', 'mode') === 'cloud') {
          if (inc (authViews,   hash [0]) &&   B.get ('user', 'csrf')) return B.call (x, 'navigate', 'projects');
@@ -198,6 +215,8 @@ B.mrespond ([
       }
 
       if (hash.length > 1 && hash [0] !== 'f') return B.call (x, 'navigate', 'projects');
+
+      if (hash [0] === 'settings' && B.get ('user', 'anonymous')) return B.call (x, 'navigate', 'login');
 
       if (hash [0] === 'f') {
 
@@ -214,11 +233,11 @@ B.mrespond ([
          });
          if (! defaultFile && files && files.length) defaultFile = files [0].name;
 
-         if (! file && defaultFile !== '') return B.call (x, 'navigate', 'f/' + encodeURIComponent (defaultFile));
+         if (! file && defaultFile !== '') return B.call (x, 'navigate', 'f/' + filePath (defaultFile));
 
          if (files && files.length && ! dale.stop (files, true, function (f) {
             if (f.name === file) return true;
-         })) return B.call (x, 'navigate', 'f/' + encodeURIComponent (defaultFile));
+         })) return B.call (x, 'navigate', 'f/' + filePath (defaultFile));
 
          B.call (x, 'set', ['file', 'name'], file);
 
@@ -295,6 +314,12 @@ B.mrespond ([
       if (ev.key === 'Meta') return B.call ('set', ['key', 'command'], true);
 
       if (B.get ('user', 'admin')) shortcut ('L', ev, x, 'test', 'all');
+
+      if (B.get ('view') === 'settings') {
+         shortcut ('9', ev, x, 'go', 'back');
+         shortcut ('b', ev, x, 'go', 'back');
+      }
+      else if (! B.get ('user', 'anonymous')) shortcut ('9', ev, x, 'navigate', 'settings');
    }],
 
    [/^(keyup|blur)$/, '*', function (x, ev) {
@@ -325,7 +350,7 @@ B.mrespond ([
          }
 
          B.call (x, 'set', 'user', rs.body);
-         if (window.location.host === document.querySelector ('meta[name="base-host"]').content) B.call (x, 'read', 'projects');
+         if (window.location.host === baseHost) B.call (x, 'read', 'projects');
          B.call (x, 'read', 'hash');
       });
    }],
@@ -351,6 +376,7 @@ B.mrespond ([
             B.call (x, 'snackbar', 'error', 'Invalid or expired login link');
             return B.call (x, 'navigate', 'login');
          }
+         if (B.get ('returnTo')) return window.location.href = B.get ('returnTo');
          B.call (x, 'set', 'user', rs.body);
          B.call (x, 'read', 'projects');
          B.call (x, 'navigate', 'projects');
@@ -466,13 +492,14 @@ B.mrespond ([
       B.call (x, 'snackbar', 'yellow', 'Preparing download...', 'keep');
       B.call (x, 'post', '/project/run', {read: true, command: 'cd /project && python3 -m zipfile -c /dev/stdout . | base64 -w 0'}, function (x, error, rs) {
          if (error || rs.body.code) return B.call (x, 'snackbar', 'error', 'Failed to download project');
-         var bytes = Uint8Array.from (atob (rs.body.stdout), function (c) {return c.charCodeAt (0)});
+         var bytes = Uint8Array.fromBase64 (rs.body.stdout);
+         rs.body.stdout = undefined;
          var stamp = new Date ().toISOString ().slice (0, 19).replace (/[-:]/g, '').replace ('T', '-');
          var link = document.createElement ('a');
          link.download = 'vibey-backup-' + stamp + '-' + project.name + '.zip';
          link.href = URL.createObjectURL (new Blob ([bytes], {type: 'application/zip'}));
          link.click ();
-         URL.revokeObjectURL (link.href);
+         setTimeout (function () {URL.revokeObjectURL (link.href)}, 60000);
          B.call (x, 'snackbar', 'clear');
       });
    }],
@@ -609,7 +636,6 @@ B.mrespond ([
 
       if (B.get ('mobile') && B.get ('show', 'pane') === 'right') shortcut ('b', ev, x, 'rem', 'show', 'pane');
       else                                                        shortcut ('b', ev, x, 'navigate', 'projects');
-      shortcut ('9', ev, x, 'set', ['show', 'settings'], ! B.get ('show', 'settings'));
       shortcut ('\\', ev, x, 'set', ['file', 'full'], ! B.get ('file', 'full'));
 
       if (B.get ('new', 'file') === undefined) {
@@ -657,7 +683,7 @@ B.mrespond ([
             var next = ev.key === 'j' ? index + 1 : index - 1;
             if (next < 0) next = files.length - 1;
             if (next >= files.length) next = 0;
-            return B.call (x, 'navigate', 'f/' + encodeURIComponent (files [next].name));
+            return B.call (x, 'navigate', 'f/' + filePath (files [next].name));
          }
       }
 
@@ -737,7 +763,7 @@ B.mrespond ([
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
-         var rs = await fetch ('/f/' + encodeURIComponent (name));
+         var rs = await fetch ('/f/' + filePath (name) + '?raw=1');
          if (! rs.ok) throw rs;
          var newContent = new Uint8Array (await rs.arrayBuffer ());
          if (newContent.indexOf (0) === -1) {
@@ -786,7 +812,7 @@ B.mrespond ([
 
       var link = document.createElement ('a');
       link.download = file.name.split ('/').pop ();
-      link.href = '/f/' + encodeURIComponent (file.name);
+      link.href = '/f/' + filePath (file.name) + '?raw=1';
       document.body.appendChild (link);
       link.click ();
       link.remove ();
@@ -901,7 +927,7 @@ B.mrespond ([
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem ' + (New ? 'creating' : 'saving') + ' the file');
 
          if (New) {
-            B.call (x, 'navigate', 'f/' + encodeURIComponent (name));
+            B.call (x, 'navigate', 'f/' + filePath (name));
             B.call (x, 'read', 'project');
          }
          if (! New && B.get ('file', 'name') === name) content = newContent;
@@ -923,7 +949,7 @@ B.mrespond ([
       B.call (x, 'write', 'file', name, '', 'new');
 
       B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
-      if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'f/' + encodeURIComponent (name));
+      if (B.get ('file', 'name') === name) B.call (x, 'navigate', 'f/' + filePath (name));
 
       B.call (x, 'rem', 'new', 'file');
       if (B.get ('mobile')) B.call (x, 'set', ['show', 'pane'], 'right');
@@ -979,7 +1005,7 @@ B.mrespond ([
          B.call (x, 'rem', 'edit', 'file');
          B.call (x, 'add', 'files', {name: newName}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
          B.call (x, 'read', 'project');
-         if (B.get ('file', 'name') === oldName) B.call (x, 'navigate', 'f/' + encodeURIComponent (newName));
+         if (B.get ('file', 'name') === oldName) B.call (x, 'navigate', 'f/' + filePath (newName));
       });
    }],
 
@@ -1007,7 +1033,7 @@ B.mrespond ([
          if (options.cb) return options.cb (uploaded);
          B.call (x, 'read', 'project');
          B.call (x, 'add', 'files', {name}); // Put the file in files temporarily until the list of projects is refreshed, so we can navigate to it.
-         if (total === 1 && done === total) B.call (x, 'navigate', 'f/' + encodeURIComponent (name));
+         if (total === 1 && done === total) B.call (x, 'navigate', 'f/' + filePath (name));
       }
 
       dale.go (files, function (file, index) {
@@ -1256,7 +1282,7 @@ B.mrespond ([
          };
          if (! ids.length || stale ()) return cb ();
          if (present (ids [0])) return appendMessages (x, name, ids.slice (1), cb);
-         B.call (x, 'get', '/project/message/' + ids [0] + '/' + name, function (x, error, rs) {
+         B.call (x, 'get', '/project/message/' + ids [0] + '/' + filePath (name), function (x, error, rs) {
             if (error || stale ()) return cb ();
             if (! present (ids [0])) {
                content += '\n' + rs.body.message;
@@ -1279,7 +1305,7 @@ B.mrespond ([
             if (B.get ('pending', 'requests', key) !== interval) return clearInterval (interval);
             if (inFlight) return;
             inFlight = true;
-            B.call (x, 'get', '/project/message/' + id + '/' + name, function (x, error, rs) {
+            B.call (x, 'get', '/project/message/' + id + '/' + filePath (name), function (x, error, rs) {
                if (error || B.get ('pending', 'requests', key) !== interval) return inFlight = false;
                if (B.get ('file', 'name') !== name || type (content) !== 'string') return inFlight = false;
 
@@ -2044,17 +2070,6 @@ views.projects = function () {
                                     gap: '0.5rem',
                                  }),
                               }, [
-                                 ['span', {
-                                    class: 'flex items-center justify-center pointer',
-                                    onclick: B.ev ('download', 'project', project),
-                                    style: style ({
-                                       'border-radius': '0.5rem',
-                                       'font-size': '1.25rem',
-                                       height: '2.5rem',
-                                       width: '2.5rem',
-                                    }),
-                                    title: 'Download',
-                                 }, ['i', {class: 'bi bi-download'}]],
                                  project.owner !== B.get ('user', 'id') ? '' : ['span', {
                                     class: 'flex items-center justify-center pointer',
                                     onclick: B.ev ('set', ['edit', 'project'], {
@@ -2367,8 +2382,8 @@ var localPaths = function (html, folder) {
          if (part === '..') parts.pop ();
          else if (part !== '.' && part !== '') parts.push (part);
       });
-      if (tag.toLowerCase () === 'a') return prefix + '#/f/' + encodeURIComponent (parts.join ('/')) + '"';
-      return prefix + '/f/' + encodeURIComponent (parts.join ('/')) + '"';
+      if (tag.toLowerCase () === 'a') return prefix + '#/f/' + filePath (parts.join ('/')) + '"';
+      return prefix + '/f/' + filePath (parts.join ('/')) + '"';
    });
 }
 
@@ -2400,21 +2415,12 @@ views.files = function () {
       });
    }
 
-   var flipCard = function (frontClass, front, back) {
-      return B.view ([['mobile'], ['show', 'settings']], function (mobile, showSettings) {
+   var pane = function (paneClass, contents) {
+      return B.view ('mobile', function (mobile) {
          return ['div', {
-            class: 'bg-vdeepnavy bn border-box flex flex-column ' + (showSettings ? 'overflow-auto' : frontClass),
+            class: 'bg-vdeepnavy bn border-box flex flex-column ' + paneClass,
             style: paneStyle (mobile),
-         }, showSettings ? [
-            ['div', {class: 'flex items-center justify-between mb3'}, [
-               ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
-               ['span', {
-                  class: 'f3 light-blue pointer relative',
-                  onclick: B.ev (['set', ['show', 'settings'], false], ['rem', 'show', 'pane']),
-               }, [views.tooltip ('9', 'below'), '×']],
-            ]],
-            type (back) === 'function' ? back () : back,
-         ] : type (front) === 'function' ? front () : front];
+         }, contents ()];
       });
    }
 
@@ -2535,35 +2541,66 @@ views.files = function () {
             }),
          }, [
             // Left pane
-            flipCard ('overflow-hidden', function () {return [
-               ['div', {class: views.projectColor (project.name) + ' br3 flex flex-shrink-0 items-center mb3 ph3 pv2'}, [
-                  ['span', {
-                     class: 'f2 fw7 lh-solid mr3 pointer relative',
-                     onclick: B.ev ('navigate', 'projects'),
-                  }, ['‹', views.tooltip ('B', 'below')]],
-                  ['span', {class: 'f4 fw7'}, project.name],
-                  B.view (['project', 'size'], function (projectSize) {
-                     projectSize = projectSize || {};
-                     return ['span', {class: 'flex items-center'}, [
+            pane ('overflow-hidden', function () {return [
+               B.view ([['project', 'size'], ['show', 'projectDetails']], function (projectSize, details) {
+                  projectSize = projectSize || {};
+                  return ['div', {class: views.projectColor (project.name) + ' br3 flex-shrink-0 mb3 ph3 pv2 relative'}, [
+                     ['div', {class: 'flex items-center'}, [
+                        ['span', {
+                           class: 'f2 fw7 lh-solid mr3 pointer relative',
+                           onclick: B.ev ('navigate', 'projects'),
+                        }, ['‹', views.tooltip ('B', 'below')]],
+                        ['span', {class: 'f4 fw7'}, project.name],
+                        B.get ('user', 'anonymous') ? '' : ['span', {
+                           class: 'f4 ml-auto pointer relative',
+                           onclick: B.ev ('navigate', 'settings'),
+                           title: 'Settings',
+                        }, [['i', {class: 'bi bi-wrench-adjustable'}], views.tooltip ('9', 'below')]],
+                     ]],
+                     details ? ['div', {
+                        class: 'flex flex-wrap items-center mb3 mt2',
+                        style: style ({
+                           gap: '0.5rem',
+                        }),
+                     }, [
+                        ['button', {
+                           class: 'bg-vdeepnavy bn br-pill f7 fw6 pointer vnearwhite',
+                           onclick: B.ev ('download', 'project', project),
+                           style: style ({
+                              padding: '0.25rem 0.75rem',
+                           }),
+                           title: 'Download project as zip',
+                           type: 'button',
+                        }, [['i', {class: 'bi bi-download mr1'}], 'Download']],
                         projectSize.bytes ? ['span', {
-                           class: 'fw7 ml2' + (mobile && projectSize.history ? ' pointer' : ''),
-                           onclick: mobile && projectSize.history ? B.ev ('clear', 'history') : undefined,
+                           class: 'fw7',
                            style: style ({
                               'font-size': '0.875rem',
                            }),
-                        }, '(' + size (projectSize.bytes) + ')'] : '',
-                        projectSize.history && ! mobile ? ['button', {
-                           class: 'bg-vorange bn br-pill f7 fw6 ml2 pointer vdeepnavy',
+                        }, size (projectSize.bytes)] : '',
+                        projectSize.history ? ['button', {
+                           class: 'bg-vorange bn br-pill f7 fw6 pointer vdeepnavy',
                            onclick: B.ev ('clear', 'history'),
                            style: style ({
                               padding: '0.25rem 0.75rem',
                            }),
                            title: 'Remove all past versions of this project',
                            type: 'button',
-                        }, 'Clear (' + size (projectSize.history) + ')'] : '',
-                     ]];
-                  }),
-               ]],
+                        }, 'Clear history (' + size (projectSize.history) + ')'] : '',
+                     ]] : '',
+                     project.read ? '' : ['span', {
+                        'aria-expanded': details ? 'true' : 'false',
+                        class: 'absolute f2 fw7 lh-solid pointer',
+                        onclick: B.ev ('set', ['show', 'projectDetails'], details ? undefined : true),
+                        style: style ({
+                           bottom: '0.5rem',
+                           right: '0.75rem',
+                           transform: 'rotate(' + (details ? '90' : '-90') + 'deg)',
+                        }),
+                        title: details ? 'Hide project details' : 'Show project details',
+                     }, '‹'],
+                  ]];
+               }),
                project.read ? '' : ['div', {class: 'flex flex-shrink-0 mb3'}, [
                   ['button', {
                      class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer relative vdeepnavy',
@@ -2600,7 +2637,7 @@ views.files = function () {
                      return ['div', {
                         class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
                         id: active ? 'selected-file' : undefined,
-                        onclick: B.ev (['navigate', 'f/' + encodeURIComponent (file.name)], ['set', ['show', 'pane'], 'right']),
+                        onclick: B.ev (['navigate', 'f/' + filePath (file.name)], ['set', ['show', 'pane'], 'right']),
                         style: style ({
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
                            padding: '0.5rem 0.625rem',
@@ -2641,7 +2678,7 @@ views.files = function () {
                ]],
             ]}, []),
             // Right pane
-            flipCard ('overflow-auto', function () {return B.view ([['file'], ['mobile']], function (file, mobile) {
+            pane ('overflow-auto', function () {return B.view ([['file'], ['mobile']], function (file, mobile) {
                if (! file) return ['div'];
 
                var isChat = !! file.name.match (/^chat\/.+\.md$/);
@@ -2698,6 +2735,13 @@ views.files = function () {
                         }, ['i', {class: 'bi bi-chevron-' + (file.actions ? 'left' : 'right')}]],
                      ]],
                      ['div', {class: 'flex items-center ml-auto'}, [
+                        ['a', {
+                           class: 'bg-transparent br2 f6 fw6 mr2 no-underline pointer vgray',
+                           href: '/f/' + filePath (file.name),
+                           style: style ({padding: '0.25rem 0.75rem'}),
+                           target: '_blank',
+                           title: 'Open file directly',
+                        }, [['i', {class: 'bi bi-link-45deg mr1'}], 'Link']],
                         ! isChat && isMd && ! project.read ? ['div', {class: 'flex'}, [
                            ['span', {
                               class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
@@ -2750,7 +2794,7 @@ views.files = function () {
                         loop: true,
                         playsinline: true,
                         preload: 'metadata',
-                        src: '/f/' + encodeURIComponent (file.name),
+                        src: '/f/' + filePath (file.name),
                         onerror: B.ev ('snackbar', 'error', 'There was a problem loading the video'),
                         style: style ({'object-fit': 'contain'}),
                      }],
@@ -2759,7 +2803,7 @@ views.files = function () {
                      ['img', {
                         alt: file.name,
                         class: 'absolute h-100 left-0 top-0 w-100',
-                        src: '/f/' + encodeURIComponent (file.name),
+                        src: '/f/' + filePath (file.name),
                         onerror: B.ev ('snackbar', 'error', 'There was a problem loading the image'),
                         style: style ({'object-fit': 'contain'}),
                      }],
@@ -2767,7 +2811,7 @@ views.files = function () {
                   isPdf ? ['div', {class: 'flex-auto relative'}, [
                      ['object', {
                         class: 'absolute bn h-100 left-0 top-0 w-100',
-                        data: '/f/' + encodeURIComponent (file.name),
+                        data: '/f/' + filePath (file.name),
                         title: file.name,
                         type: 'application/pdf',
                      }, [
@@ -2839,173 +2883,6 @@ views.files = function () {
                      ]];
                   }) : '',
                ]];
-            })}, function () {return B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
-               pkce = pkce || {};
-               var account = pkce.account || {};
-               if (pkce.apiKey) return views.modal ({
-                  'aria-label': 'Add API key',
-                  'aria-modal': 'true',
-                  role: 'dialog',
-               }, [
-                  ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, (pkce.apiKey === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' API key'],
-                  ['input', {
-                     class: css.input + ' f6 mb3 w-100',
-                     oninput: B.ev ('set', ['pkce', 'code']),
-                     placeholder: pkce.apiKey === 'anthropic' ? 'sk-ant-...' : 'sk-...',
-                     type: 'password',
-                     value: pkce.code || '',
-                  }],
-                  ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
-                     ['button', {
-                        class: css.button + ' f6 flex-auto',
-                        disabled: ! (pkce.code || '').trim (),
-                        onclick: B.ev ('save', 'apiKey', pkce.apiKey, pkce.code || ''),
-                     }, 'Save'],
-                     ['button', {
-                        class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
-                        onclick: B.ev ('rem', [], 'pkce'),
-                        type: 'button',
-                     }, 'Cancel'],
-                  ]],
-               ]);
-               if (account.confirm && ! account.provider) return views.modal ({
-                  'aria-label': 'Connect account',
-                  'aria-modal': 'true',
-                  role: 'dialog',
-               }, [
-                  ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, 'Connect ' + (account.confirm === 'anthropic' ? 'Anthropic' : 'OpenAI')],
-                  ['p', {class: 'lh-copy mb3 mt0 vnearwhite'}, 'Here’s what will happen:'],
-                  ['ol', {class: 'lh-copy mb4 mt0 pl3 vlightblue'}, account.confirm === 'anthropic' ? [
-                     ['li', 'Click the button below to be taken to Claude\'s login page.'],
-                     ['li', 'Come back and paste the code you got.'],
-                  ] : [
-                     ['li', 'Click the button below to be taken to OpenAI\'s login page.'],
-                     ['li', 'You’ll be taken to a broken page with a URL that starts with "localhost:1455...". This is expected.'],
-                     ['li', 'Copy that entire URL, come back and paste it here.'],
-                  ]],
-                  ((credentials || {}) [account.confirm] || {}).account
-                     ? ['p', {class: 'lh-copy mb4 mt0 vpurple'}, 'Completing this login will replace your currently connected account for this provider.']
-                     : '',
-                  ['div', {
-                     class: 'flex flex-wrap',
-                     style: style ({gap: '0.75rem'}),
-                  }, [
-                     ['button', {
-                        class: (css.button.replace ('bg-vblue', account.confirm === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
-                        disabled: !! account.loading,
-                        onclick: B.ev ('start', 'pkce', account.confirm),
-                        type: 'button',
-                     }, account.loading ? 'Opening browser...' : 'Start login'],
-                     ['button', {
-                        class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
-                        disabled: !! account.loading,
-                        onclick: B.ev ('rem', [], 'pkce'),
-                        type: 'button',
-                     }, 'Cancel'],
-                  ]],
-               ]);
-               if (account.provider) return ['div', [
-                  ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (account.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
-                  ['input', {
-                     class: css.input + ' f6 mb2 w-100',
-                     oninput: B.ev ('set', ['pkce', 'code']),
-                     placeholder: 'Paste code here...',
-                     type: 'text',
-                     value: pkce.code || '',
-                  }],
-                  ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
-                     ['button', {
-                        class: css.button + ' f6 flex-auto',
-                        disabled: ! (pkce.code || '').trim (),
-                        onclick: B.ev ('complete', 'pkce', account.provider, pkce.code || ''),
-                     }, 'Submit'],
-                     ['button', {
-                        class: css.button + ' f6',
-                        style: style ({'background-color': css.colors.vborderblue}),
-                        onclick: B.ev ('rem', [], 'pkce'),
-                     }, 'Cancel'],
-                  ]],
-               ]];
-               return ['div', [dale.go (['anthropic', 'openai'], function (provider) {
-                  var configured = dale.fil ((credentials || {}) [provider] || {}, undefined, function (present, name) {
-                     if (present) return name;
-                  }).sort ();
-                  return ['section', {class: 'mb4'}, [
-                     ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, provider === 'anthropic' ? 'Anthropic' : 'OpenAI'],
-                     configured.length ? ['div', {class: 'mb3'}, dale.go (configured, function (name) {
-                        return ['div', {class: 'flex items-center mb2', style: style ({gap: '0.75rem'})}, [
-                           ['span', {class: 'f6 vlightblue'}, [
-                              ['i', {class: 'bi bi-check-circle mr2 vgreen'}],
-                              (name === 'account' ? 'Account' : name === 'apiKey' ? 'API key' : name) + ' added',
-                           ]],
-                           ['button', {
-                              class: 'bg-vred bn br2 f6 fw6 ml3 pointer vnearwhite',
-                              onclick: B.ev ('remove', 'credential', provider, name),
-                              style: style ({padding: '0.5rem 0.75rem'}),
-                              type: 'button',
-                           }, 'Remove'],
-                        ]];
-                     })] : ['p', {class: 'f6 mb3 mt0 vgray'}, 'No credentials added'],
-                     ['div', {
-                        class: 'flex flex-wrap',
-                        style: style ({gap: '0.75rem'}),
-                     }, [
-                        ['button', {
-                           class: (css.button.replace ('bg-vblue', provider === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
-                           disabled: !! account.loading,
-                           onclick: B.ev ('set', 'pkce', {account: {confirm: provider}}),
-                           type: 'button',
-                        }, account.loading === provider ? 'Opening browser...' : inc (configured, 'account') ? 'Add new account' : 'Add account'],
-                        ['button', {
-                           class: 'bg-transparent br2 f6 flex-auto fw6 pa3 pointer',
-                           onclick: B.ev ('set', 'pkce', {apiKey: provider}),
-                           style: style ({
-                              border: '0.125rem solid ' + (provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen),
-                              color: provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen,
-                           }),
-                           type: 'button',
-                        }, inc (configured, 'apiKey') ? 'Add new API key' : 'Add API key'],
-                     ]],
-                  ]];
-               }),
-               B.view (['user', 'username'], function (username) {
-                  return ['form', {
-                     class: 'mb4',
-                     onsubmit: B.ev ('update', 'user', {raw: '(event.preventDefault (), {username: this.elements.username.value})'}),
-                  }, [
-                     ['label', {class: 'db f6 mb2 vgray', for: 'username-input'}, 'Username'],
-                     ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
-                        ['input', {
-                           autocapitalize: 'none',
-                           autocomplete: 'username',
-                           class: css.input + ' f6 flex-auto',
-                           id: 'username-input',
-                           name: 'username',
-                           required: true,
-                           spellcheck: false,
-                           style: style ({'min-width': 0}),
-                           type: 'text',
-                           value: username || '',
-                        }],
-                        ['button', {
-                           class: css.button + ' f6',
-                           type: 'submit',
-                        }, 'Save'],
-                     ]],
-                  ]];
-               }),
-               B.view (['user', 'settings'], function (settings) {
-                  settings = settings || {};
-                  return ['label', {class: 'f6 flex items-center vgray'}, [
-                     ['input', {
-                        checked: !! settings.vi,
-                        class: 'mr2',
-                        onchange: B.ev ('update', 'user', {settings: {... settings, vi: ! settings.vi}}),
-                        type: 'checkbox',
-                     }],
-                     'vi mode',
-                  ]];
-               })]];
             })}),
          ]],
 
@@ -3234,6 +3111,188 @@ var modelCredential = function (model, credentials) {
    return model.requireAPIKey
       ? (creds.apiKey ? 'apiKey' : undefined)
       : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined;
+}
+
+views.settings = function () {
+   return ['div', {class: 'bg-vmidnight border-box min-vh-100 pa3 pa4-ns'}, [
+      ['div', {class: 'bg-vdeepnavy br3 center mw7 pa4'}, [
+         ['div', {class: 'flex items-center mb3'}, [
+            ['span', {
+               class: 'f2 fw7 lh-solid mr3 pointer relative vnearwhite',
+               onclick: B.ev ('go', 'back'),
+            }, ['‹', views.tooltip ('B', 'below')]],
+            ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
+         ]],
+         B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
+            pkce = pkce || {};
+            var account = pkce.account || {};
+            if (pkce.apiKey) return views.modal ({
+               'aria-label': 'Add API key',
+               'aria-modal': 'true',
+               role: 'dialog',
+            }, [
+               ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, (pkce.apiKey === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' API key'],
+               ['input', {
+                  class: css.input + ' f6 mb3 w-100',
+                  oninput: B.ev ('set', ['pkce', 'code']),
+                  placeholder: pkce.apiKey === 'anthropic' ? 'sk-ant-...' : 'sk-...',
+                  type: 'password',
+                  value: pkce.code || '',
+               }],
+               ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
+                  ['button', {
+                     class: css.button + ' f6 flex-auto',
+                     disabled: ! (pkce.code || '').trim (),
+                     onclick: B.ev ('save', 'apiKey', pkce.apiKey, pkce.code || ''),
+                  }, 'Save'],
+                  ['button', {
+                     class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
+                     onclick: B.ev ('rem', [], 'pkce'),
+                     type: 'button',
+                  }, 'Cancel'],
+               ]],
+            ]);
+            if (account.confirm && ! account.provider) return views.modal ({
+               'aria-label': 'Connect account',
+               'aria-modal': 'true',
+               role: 'dialog',
+            }, [
+               ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, 'Connect ' + (account.confirm === 'anthropic' ? 'Anthropic' : 'OpenAI')],
+               ['p', {class: 'lh-copy mb3 mt0 vnearwhite'}, 'Here’s what will happen:'],
+               ['ol', {class: 'lh-copy mb4 mt0 pl3 vlightblue'}, account.confirm === 'anthropic' ? [
+                  ['li', 'Click the button below to be taken to Claude\'s login page.'],
+                  ['li', 'Come back and paste the code you got.'],
+               ] : [
+                  ['li', 'Click the button below to be taken to OpenAI\'s login page.'],
+                  ['li', 'You’ll be taken to a broken page with a URL that starts with "localhost:1455...". This is expected.'],
+                  ['li', 'Copy that entire URL, come back and paste it here.'],
+               ]],
+               ((credentials || {}) [account.confirm] || {}).account
+                  ? ['p', {class: 'lh-copy mb4 mt0 vpurple'}, 'Completing this login will replace your currently connected account for this provider.']
+                  : '',
+               ['div', {
+                  class: 'flex flex-wrap',
+                  style: style ({gap: '0.75rem'}),
+               }, [
+                  ['button', {
+                     class: (css.button.replace ('bg-vblue', account.confirm === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
+                     disabled: !! account.loading,
+                     onclick: B.ev ('start', 'pkce', account.confirm),
+                     type: 'button',
+                  }, account.loading ? 'Opening browser...' : 'Start login'],
+                  ['button', {
+                     class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
+                     disabled: !! account.loading,
+                     onclick: B.ev ('rem', [], 'pkce'),
+                     type: 'button',
+                  }, 'Cancel'],
+               ]],
+            ]);
+            if (account.provider) return ['div', [
+               ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (account.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
+               ['input', {
+                  class: css.input + ' f6 mb2 w-100',
+                  oninput: B.ev ('set', ['pkce', 'code']),
+                  placeholder: 'Paste code here...',
+                  type: 'text',
+                  value: pkce.code || '',
+               }],
+               ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
+                  ['button', {
+                     class: css.button + ' f6 flex-auto',
+                     disabled: ! (pkce.code || '').trim (),
+                     onclick: B.ev ('complete', 'pkce', account.provider, pkce.code || ''),
+                  }, 'Submit'],
+                  ['button', {
+                     class: css.button + ' f6',
+                     style: style ({'background-color': css.colors.vborderblue}),
+                     onclick: B.ev ('rem', [], 'pkce'),
+                  }, 'Cancel'],
+               ]],
+            ]];
+            return ['div', [dale.go (['anthropic', 'openai'], function (provider) {
+               var configured = dale.fil ((credentials || {}) [provider] || {}, undefined, function (present, name) {
+                  if (present) return name;
+               }).sort ();
+               return ['section', {class: 'mb4'}, [
+                  ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, provider === 'anthropic' ? 'Anthropic' : 'OpenAI'],
+                  configured.length ? ['div', {class: 'mb3'}, dale.go (configured, function (name) {
+                     return ['div', {class: 'flex items-center mb2', style: style ({gap: '0.75rem'})}, [
+                        ['span', {class: 'f6 vlightblue'}, [
+                           ['i', {class: 'bi bi-check-circle mr2 vgreen'}],
+                           (name === 'account' ? 'Account' : name === 'apiKey' ? 'API key' : name) + ' added',
+                        ]],
+                        ['button', {
+                           class: 'bg-vred bn br2 f6 fw6 ml3 pointer vnearwhite',
+                           onclick: B.ev ('remove', 'credential', provider, name),
+                           style: style ({padding: '0.5rem 0.75rem'}),
+                           type: 'button',
+                        }, 'Remove'],
+                     ]];
+                  })] : ['p', {class: 'f6 mb3 mt0 vgray'}, 'No credentials added'],
+                  ['div', {
+                     class: 'flex flex-wrap',
+                     style: style ({gap: '0.75rem'}),
+                  }, [
+                     ['button', {
+                        class: (css.button.replace ('bg-vblue', provider === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
+                        disabled: !! account.loading,
+                        onclick: B.ev ('set', 'pkce', {account: {confirm: provider}}),
+                        type: 'button',
+                     }, account.loading === provider ? 'Opening browser...' : inc (configured, 'account') ? 'Add new account' : 'Add account'],
+                     ['button', {
+                        class: 'bg-transparent br2 f6 flex-auto fw6 pa3 pointer',
+                        onclick: B.ev ('set', 'pkce', {apiKey: provider}),
+                        style: style ({
+                           border: '0.125rem solid ' + (provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen),
+                           color: provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen,
+                        }),
+                        type: 'button',
+                     }, inc (configured, 'apiKey') ? 'Add new API key' : 'Add API key'],
+                  ]],
+               ]];
+            }),
+            B.view (['user', 'username'], function (username) {
+               return ['form', {
+                  class: 'mb4',
+                  onsubmit: B.ev ('update', 'user', {raw: '(event.preventDefault (), {username: this.elements.username.value})'}),
+               }, [
+                  ['label', {class: 'db f6 mb2 vgray', for: 'username-input'}, 'Username'],
+                  ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
+                     ['input', {
+                        autocapitalize: 'none',
+                        autocomplete: 'username',
+                        class: css.input + ' f6 flex-auto',
+                        id: 'username-input',
+                        name: 'username',
+                        required: true,
+                        spellcheck: false,
+                        style: style ({'min-width': 0}),
+                        type: 'text',
+                        value: username || '',
+                     }],
+                     ['button', {
+                        class: css.button + ' f6',
+                        type: 'submit',
+                     }, 'Save'],
+                  ]],
+               ]];
+            }),
+            B.view (['user', 'settings'], function (settings) {
+               settings = settings || {};
+               return ['label', {class: 'f6 flex items-center vgray'}, [
+                  ['input', {
+                     checked: !! settings.vi,
+                     class: 'mr2',
+                     onchange: B.ev ('update', 'user', {settings: {... settings, vi: ! settings.vi}}),
+                     type: 'checkbox',
+                  }],
+                  'vi mode',
+               ]];
+            })]];
+         }),
+      ]],
+   ]];
 }
 
 views.chat = function (read) {
@@ -3498,7 +3557,7 @@ views.chat = function (read) {
                }
                body = message.slice (body.index + body [0].length).replace (/\n$/, '');
                var originalLength = body.length;
-               var expandKey = ['expand', file.name, messageId];
+               var expandKey = ['show', 'message', file.name, messageId];
                var truncatedBody;
                if (originalLength > 10000 && ! media) {
                   var firstEnd = body.lastIndexOf ('\n', 50);
@@ -3831,7 +3890,7 @@ views.chat = function (read) {
                         : 'Add an AI provider to chat.'],
                      ['button', {
                         class: 'bg-vgreen black bn br2 f7 flex-shrink-0 ph2 pv1 pointer',
-                        onclick: B.ev ('set', ['show', 'settings'], true),
+                        onclick: B.ev ('navigate', 'settings'),
                         type: 'button',
                      }, 'Open settings'],
                   ] : []];

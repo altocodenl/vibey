@@ -42,6 +42,7 @@ var Redis  = require ('redis').createClient ({db: CONFIG.redis?.db});
 var aws4  = require ('aws4');
 var mime  = require ('mime');
 var hitit = require ('hitit');
+var marked = require ('marked');
 
 var {inc, last, type} = teishi;
 
@@ -1196,7 +1197,7 @@ var routes = [
       if (url.origin !== base.protocol + '//' + subdomain + '.' + base.host) return reply (rs, 400, {error: 'Invalid returnUrl'});
       if (type (rq.data.query.state) !== 'string' || rq.data.query.state.length === 0) return reply (rs, 400, {error: 'Invalid state'});
 
-      if (! rq.user) return reply (rs, 302, '', {location: CONFIG.baseURL + '/#/login/' + encodeURIComponent (rq.url)});
+      if (! rq.user) return reply (rs, 302, '', {location: CONFIG.baseURL + '/#/login/' + encodeURIComponent ('/auth/project/' + subdomain + '?returnUrl=' + encodeURIComponent (url.href) + '&state=' + encodeURIComponent (rq.data.query.state))});
 
       var code = crypto.randomBytes (32).toString ('hex');
       await redis ([
@@ -1865,9 +1866,43 @@ var routes = [
       }
 
       var buffer = file.stdout || Buffer.alloc (0);
+      var markdown = /\.md$/i.test (path) && ! (rq.data.query && rq.data.query.raw);
+      if (markdown) buffer = Buffer.from (lith.g ([
+         ['!DOCTYPE HTML'],
+         ['html', [
+            ['head', [
+               ['meta', {name: 'viewport', content: 'width=device-width,initial-scale=1'}],
+               ['meta', {charset: 'utf-8'}],
+               ['title', Path.basename (path)],
+               ['style', [
+                  ['body', {
+                     'font-family': 'sans-serif',
+                     'line-height': '1.5',
+                     margin: '0 auto',
+                     'max-width': '48rem',
+                     padding: '2rem 1rem',
+                  }],
+                  ['.raw', {
+                     'background-color': '#4a69bd',
+                     'border-radius': '0.5rem',
+                     color: '#f5f7ff',
+                     padding: '0.5rem 1rem',
+                     position: 'fixed',
+                     right: '1rem',
+                     'text-decoration': 'none',
+                     top: '1rem',
+                  }],
+               ]],
+            ]],
+            ['body', [
+               ['a', {class: 'raw', download: Path.basename (path), href: '/f/' + path.split ('/').map (encodeURIComponent).join ('/') + '?raw=1'}, 'Download'],
+               ['LITERAL', marked.parse (buffer.toString (), {breaks: true})],
+            ]],
+         ]],
+      ]));
       var headers = {
          'access-control-allow-origin': '*',
-         'content-type': mime.lookup (path) || 'application/octet-stream',
+         'content-type': markdown ? 'text/html' : mime.lookup (path) || 'application/octet-stream',
          'cache-control': 'private, no-cache',
          'x-content-type-options': 'nosniff',
       };

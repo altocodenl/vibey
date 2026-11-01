@@ -886,6 +886,26 @@ if (mode === 'server') {
                   var base = new URL (CONFIG.baseURL);
                   return '/auth/project/' + s.projectSubdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/f/main.md') + '&state=';
                }, 400, assertBody ({error: 'Invalid state'})],
+               ['Get project session code without session redirects to login', 'get', function (s) {
+                  var base = new URL (CONFIG.baseURL);
+                  return '/auth/project/' + s.projectSubdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/f/main.md?foo=bar') + '&state=foo';
+               }, 302, function (s, rq, rs) {
+                  var base = new URL (CONFIG.baseURL);
+                  var returnUrl = base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/f/main.md?foo=bar';
+                  if (! assert (['location', rs.headers.location, CONFIG.baseURL + '/#/login/' + encodeURIComponent ('/auth/project/' + s.projectSubdomain + '?returnUrl=' + encodeURIComponent (returnUrl) + '&state=foo'), teishi.test.equal])) return false;
+                  s.loginReturnPath = decodeURIComponent (rs.headers.location.split ('#/login/') [1]);
+                  return true;
+               }, {cookie: ''}],
+               ['Get project session code from login return path', 'get', function (s) {return s.loginReturnPath}, 302, function (s, rq, rs) {
+                  var base = new URL (CONFIG.baseURL);
+                  var location = new URL (rs.headers.location);
+                  return assert ([
+                     ['origin', location.origin, base.protocol + '//' + s.projectSubdomain + '.' + base.host, teishi.test.equal],
+                     ['path', location.pathname, '/f/main.md', teishi.test.equal],
+                     ['foo', location.searchParams.get ('foo'), 'bar', teishi.test.equal],
+                     ['sessionCode', location.searchParams.get ('sessionCode'), /^[a-f0-9]{64}$/, teishi.test.match],
+                  ]);
+               }],
                ['Get project session code', 'get', function (s) {return s.authProjectPath}, 302, function (s, rq, rs) {
                   var base = new URL (CONFIG.baseURL);
                   var location = new URL (rs.headers.location);
@@ -987,7 +1007,7 @@ if (mode === 'server') {
                   s.headers.cookie = s.hostCookie + '; ' + rs.headers ['set-cookie'] [0].split (';') [0];
                   return true;
                }, {cookie: cookie ('project-state') + '="foo"'}],
-               ['Read file on readable subdomain', 'get', '/f/main.md', 200, assertBody ('# el norte\n\n')],
+               ['Read file on readable subdomain', 'get', '/f/main.md?raw=1', 200, assertBody ('# el norte\n\n')],
                {
                   tag: 'Readable root serves app without redirect',
                   method: 'get',
@@ -1034,7 +1054,7 @@ if (mode === 'server') {
             ['Read parent traversal path', 'get', '/f/' + encodeURIComponent ('../main.md'), 400, assertBody ({error: 'Invalid path'})],
             ['Read path with null byte', 'get', '/f/' + encodeURIComponent ('main.md\0'), 400, assertBody ({error: 'Invalid path'})],
             ['Get file that is not there', 'get', '/f/' + encodeURIComponent ('doc/whatevs.md'), 404],
-            ['Get main file', 'get', '/f/' + encodeURIComponent ('main.md'), 200, function (s, rq, rs) {
+            ['Get main file', 'get', '/f/' + encodeURIComponent ('main.md') + '?raw=1', 200, function (s, rq, rs) {
                return assert ([
                   ['body', rs.body, '# el norte\n\n', teishi.test.equal],
                   ['content-type', rs.headers ['content-type'], /text\/markdown/, teishi.test.match],
@@ -1055,7 +1075,7 @@ if (mode === 'server') {
             }],
             ['Edit main file', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'el norte', newText: 'El Norte!'}}, 200, assertBody ({})],
             waitForCommits ('List commits after edit', 3, "Edit 'main.md'"),
-            ['Get main file after edit', 'get', '/f/' + encodeURIComponent ('main.md'), 200, assertBody ('# El Norte!\n\n')],
+            ['Get main file after edit', 'get', '/f/' + encodeURIComponent ('main.md') + '?raw=1', 200, assertBody ('# El Norte!\n\n')],
             ['Edit main file (old text not found)', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'this is not in the file', newText: 'whatever'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text not found/, teishi.test.match]);
             }],
@@ -1066,7 +1086,7 @@ if (mode === 'server') {
             ['Overwrite file (noop)', 'post', '/project/write', function (s) {return {path: 'main.md', content: '# el norte\n\n'}}, 200, assertBody ({})],
             waitForCommits ('List commits after noop write', 4, "Write 'main.md'"),
             ['Write empty file', 'post', '/project/write', function (s) {return {path: 'doc/empty.md', content: ''}}, 200, assertBody ({})],
-            ['Read back empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, assertBody ('')],
+            ['Read back empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md') + '?raw=1', 200, assertBody ('')],
             ['Reject base64 file write', 'post', '/project/write', function (s) {return {path: 'doc/binary.txt', content: 'aGVsbG8=', base64: true}}, 400],
             ['Write text file with multipart', 'post', '/project/write', function (s) {
                return {multipart: [
@@ -1106,7 +1126,7 @@ if (mode === 'server') {
                },
             },
             ['Write file with spaces in name', 'post', '/project/write', function (s) {return {path: 'doc/come back.md', content: 'hello spaces'}}, 200, assertBody ({})],
-            ['Read file with spaces in name', 'get', '/f/' + encodeURIComponent ('doc/come back.md'), 200, assertBody ('hello spaces')],
+            ['Read file with spaces in name', 'get', '/f/' + encodeURIComponent ('doc/come back.md') + '?raw=1', 200, assertBody ('hello spaces')],
             ['Run a command with pipe', 'post', '/project/run', function (s) {return {command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {command: 'printf foo', read: true}}, 200, assertBody ({stdout: 'foo'})],
             ['Run a command with change and output', 'post', '/project/run', function (s) {return {command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: 'foo\n'})],
@@ -1153,10 +1173,10 @@ if (mode === 'server') {
             }),
 
             ['Append at EOF of empty file', 'post', '/project/edit', function (s) {return {path: 'doc/empty.md', oldText: '[EOF]', newText: 'first message\n'}}, 200, assertBody ({})],
-            ['Read file after append to empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, assertBody ('first message\n')],
+            ['Read file after append to empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md') + '?raw=1', 200, assertBody ('first message\n')],
             ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, assertBody ({})],
             waitForCommits ('List commits after appends', 13, "Edit 'doc/empty.md'"),
-            ['Read file after second append', 'get', '/f/' + encodeURIComponent ('doc/empty.md'), 200, function (s, rq, rs, next) {
+            ['Read file after second append', 'get', '/f/' + encodeURIComponent ('doc/empty.md') + '?raw=1', 200, function (s, rq, rs, next) {
                if (! assertBody ('first message\nsecond message\n') (s, rq, rs)) return false;
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
@@ -1168,7 +1188,7 @@ if (mode === 'server') {
                s.messageId = rs.body.id;
                return assert (['message id', rs.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match]);
             }],
-            ['Read new chat message', 'get', '/f/' + encodeURIComponent ('chat/nested/test.md'), 200, function (s, rq, rs) {
+            ['Read new chat message', 'get', '/f/' + encodeURIComponent ('chat/nested/test.md') + '?raw=1', 200, function (s, rq, rs) {
                s.chatContent = rs.body;
                return assert ([
                   ['head marker', rs.body.indexOf ('\nəəə head ' + s.messageId + '\n'), 0, teishi.test.equal],
@@ -1200,7 +1220,7 @@ if (mode === 'server') {
                   ['distinct id', rs.body.id === s.messageId, false, teishi.test.equal],
                ]);
             }],
-            ['Read chat with appended reply', 'get', '/f/' + encodeURIComponent ('chat/nested/test.md'), 200, function (s, rq, rs, next) {
+            ['Read chat with appended reply', 'get', '/f/' + encodeURIComponent ('chat/nested/test.md') + '?raw=1', 200, function (s, rq, rs, next) {
                var appended = rs.body.slice (s.chatContent.length);
                if (! assert ([
                   ['original message preserved', rs.body.slice (0, s.chatContent.length), s.chatContent, teishi.test.equal],
@@ -1239,7 +1259,7 @@ if (mode === 'server') {
                   next (null, rs);
                }) ();
             }],
-            ['Read file after container has been turned off', 'get', '/f/' + encodeURIComponent ('main.md'), 200, assertBody ('# el norte\n\n')],
+            ['Read file after container has been turned off', 'get', '/f/' + encodeURIComponent ('main.md') + '?raw=1', 200, assertBody ('# el norte\n\n')],
             ['Stop and remove container for next test', 'post', '/project/run', function (s) {return {command: 'true'}}, 200, function (s, rq, rs, next) {
                (async function () {
                   await run ('docker', 'stop', 'vibey-project-' + s.projectId);
@@ -1255,7 +1275,7 @@ if (mode === 'server') {
                   next (null, rs);
                }) ();
             }],
-            ['Read file after container has been removed', 'get', '/f/' + encodeURIComponent ('main.md'), 200, assertBody ('# el norte\n\n')],
+            ['Read file after container has been removed', 'get', '/f/' + encodeURIComponent ('main.md') + '?raw=1', 200, assertBody ('# el norte\n\n')],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {
@@ -1720,7 +1740,7 @@ if (mode === 'server') {
             ['Anonymous lists full public project files', 'get', '/project', 200, function (s, rq, rs) {
                return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md', 'notes.md', 'src/app.js'], teishi.test.equal]);
             }],
-            ['Anonymous reads full public project file', 'get', '/f/notes.md', 200, assertBody ('Notes')],
+            ['Anonymous reads full public project file', 'get', '/f/notes.md?raw=1', 200, assertBody ('Notes')],
             ['Anonymous cannot read access.md', 'get', '/f/vibey/access.md', 302],
             ['Anonymous cannot write', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 403],
             useProject ('publicPartial'),
@@ -1741,7 +1761,7 @@ if (mode === 'server') {
                ]);
             }],
             projectLogin ('B on publicFull', 'publicFull'),
-            ['B reads full public project file', 'get', '/f/notes.md', 200, assertBody ('Notes')],
+            ['B reads full public project file', 'get', '/f/notes.md?raw=1', 200, assertBody ('Notes')],
             ['B cannot write to public project', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 404],
             accessAs ('a'),
             ['A deletes full public project', 'delete', function (s) {return '/project/' + s.publicFullId}, 200],
