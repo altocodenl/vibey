@@ -1,5 +1,137 @@
 # Vibey development notes
 
+## 2026-11-01
+
+Ideas that are houndingme:
+- Add a chat on the side: why and how? Need to avoid the back and forth when interacting with an app, such as destek or anything else with an ui. The side chat still needs to map to a file and that's great. How do we invoke a "throwaway" or quick chat that doesn't require us to create it a new?
+- Change the colors of chats: make the text black or white, and keep the colors on the background but maintain good contrast; add a light mode from 6 to 6 of the local timezone.
+
+I need to move to vibey 95% of the way. Find a way to make it work all the time. Patch the small things right away. Up next:
+- Personal blog.
+- Change the vibey frontend.
+- Destek.
+- Password manager.
+
+Why not make vibey source available, or ask for royalties if it is used by other providers? Because we offer an alternative to other providers ourselves; as long as we offer a reasonable service at a reasonable price, we will have more than enough demand to cover costs. We charge for the relationship and the trust, not for the knowledge. And licensing our technology to big companies would warp our incentives.
+
+Idea of an app that I would build with vibey: the good stuff:
+- No anonymous, log in with email.
+- You post what you like: artist, song, album, writer, book. Later to be expanded to other categories. When you post, you can also create the entry for the first time.
+- The system helps you discover: 1) things you'd like interesting based on what you like and what others with similar taste like; 2) like minded people.
+
+Vibey's moat is the lack of moat.
+
+Small app to give the 80/20 of tagaway inside a project:
+- Detect duplicates & near duplicates
+- Allow to tag
+- Query by tag
+
+Small password manager inside vibey:
+- Encrypt symmetrically with a passphrase
+- Access the whole thing inside an UI inside vibey
+- Command-line: allow to query for one secret, or a set of secrets, from the command line, with you entering the passphrase (allow for nested query format, as in aws.ses.secret)
+
+Wonderful article:
+https://newsletter.signoz.io/p/ai-isnt-replacing-sres-its-deskilling
+"Today’s discussion agenda is not whether AI replaces SREs, but whether AI is quietly making SREs less capable and whether anyone will notice anything before the next novel outage hits. The foundational framework for this entire debate comes from a 1983 research paper that’s eerily prescient."
+"In 1983, a cognitive psychologist named Lisanne Bainbridge published a paper called Ironies of Automation. It became one of the most cited papers in human factors research, and its core argument is almost uncomfortably relevant today."
+" The findings were paradoxical and revealed that the more you automate a process, the more critical the human operator becomes during the rare moments automation fails and the less practice they get, and the worse they become at exactly those interventions."
+"If human SREs (okay, now we have to use adjectives like human 🥹) only engage with Tier 3 incidents, i.e. the novel, never-before-seen outages, where do they build the intuition to handle them?"
+"In medicine, a recent study found that endoscopists who used AI assistance for polyp detection saw their unassisted detection rates drop from 28% to 22% after a period of AI use. They got worse at the thing they were supposed to be experts in, not because they forgot the theory, but because they stopped exercising the skill."
+"Somewhere over the past year, AI stopped being a tool I occasionally reached for and became the first thing I reach for, always. My instinct now is to offload as much as possible and apply my own thinking only where it’s absolutely unavoidable. The problem is that these moments are becoming the only exercises my brain gets, and I can feel the rust."
+Questions for myself:
+- Where/when/how can I sacrifice speed to stop rusting myself, and actually keep on getting better instead of rusting?
+- How could I remove more noise from data and code representations so that I can do more by myself without having to prompt the lifting of a finger?
+
+another expression of fast+expensive+small vs slow+cheap+big memory: llm weights (slow, big) vs llm context (fast, small)
+
+Perhaps the "empty space" of a program is the possibilities left open for someone who uses it. The solid space is what the program determines, the open space is what runtime paths explore.
+
+I need to rethink the colors. The text in the chat having those colors feels wrong. The colors must be there, but not in the text, just in the bubbles.
+
+For forwarding traffic from engines: it can go to any project, not just the projects that are on that engine! Unless it's *direct* traffic, without going through the vibey host, which then can indeed be linked directly to a project local to that engine.
+
+claude:
+```
+  Closest relatives
+
+  - Lotus Notes (1989). It's the one that feels most like vibey. Each Notes database worked like a project: documents, discussions, email and end-user apps lived in one replicated place. Access was an ACL stored inside that database, and companies ran their own Domino servers. IBM paid about $3.5B for Lotus mostly to get Notes. It was also loved by the "human glue" people who build their own small apps. It died when it got clunky and the web overtook it. Vibey's advantage is that it's native to the web.
+  - HyperCard (1987). A stack was a document and an app at the same time. Ordinary people built real software with it because it was playful, not because it was powerful. That's your "empowerment through fun." It came free on every Mac, and Myst and the first wiki both trace back to it. Apple neglected it to death, so the lesson is about who owns the substrate. That's your open-source point.
+  - Basecamp / 37signals (2004). Every project gets one place for messages, to-dos, files and docs. In your words, the tools come to the project. It's a small team with flat pricing that grows slowly and stays profitable, and lately it's been leaving the cloud and selling software you own (ONCE). The ethos is very close to yours, though Basecamp has no computer inside the project.
+```
+
+https://www.youtube.com/watch?v=Lp1PXQjjbow
+Lecture 8: Ray Ozzie: Collaboration Software
+Really interesting lecture by Ray Ozzie.
+
+https://borretti.me/article/the-education-of-a-doomer
+"I don’t think using AI to write is analogous to calculators, or search engines, or other such things. There are only finitely many things you can automate. And once you’ve automated writing, there’s no higher-order activity to move to. People think “the ideas are mine, the writing is the AI”, i.e., they feed the AI a list of rambling bullet points that the AI massages into a blog post, or a paper, or whatever. And they think that step is “mere writing”, while their composition of the bullet points was “thinking”. But they are wrong, because writing is thinking. And so, by letting the AI write, you are giving up most of what makes up thinking."
+
+Will AI augment human thought or will it replace it?
+
+## 2026-10-30
+
+- The main snags when working with AI:
+   - Have what you build go beyond your local computer.
+   - Coordinate with multiple humans and agents.
+   - Use multiple AI providers.
+
+TODO
+- Download in project
+- Put link to standalone file
+- Serve markdown as html, with an icon+link to download it raw (?raw=...)
+
+- TODO
+   - small
+      - Remove unnecessarily initialized keys from the state
+      - How to put chats inside folders? and main.md should refer to the one relative to the chat folder! When creating a chat, let's just do it as chat- instead of chat/ . No need to migrate. So, if it starts with chat- and ends with .md, it is a chat.
+      - And it's probably a good idea to not expand folders by default.
+      - Put descriptions on top of tool uses, rather than as a separate message
+      - more padding at the bottom of the DNA list to avoid overlap of the last with the search bar
+      - {"error":"anthropic account token refresh failed, please reconnect: \"Timed out after 60 seconds, request aborted.\""}, this doesn't show in the chat, just the console!
+      - don't lose chat editor status when switching to To with keyboard shortcut
+      - update gauges as we go
+      - light mode with the same high contrast
+      - check links between projects
+      - Fix pin: allow for local user, when clicking + also allow to pin existing without the edit
+      - first command + I to switch to view (the first time it doesn't work)
+      - client.js and client_extend.js
+      - Fix annoying overwrite message when starting a new document.
+      - Fix esc escaping full mode in vi mode (we should intercept it if we're in full mode and in normal mode in the editor)
+      - Make panes take full height, put project (with details as expansion) in left pane, move settings to projects page as a wrench, show sessions
+      - Status bar:
+         - If creator and no projects pinned, tell that you can click on one of the slots to create a project.
+         - If no creator access, don't show the shell, just the dna list.
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - demos
+      - devops: notification project to see alerts
+      - engine
+         - support engines without provisioning (BYOE)
+         - provision engines
+         - Port mapping from the project to the engine: allow to run ina. port. Check for contention within the engine. Then auto-modify nginx to allow for direct access. Allow direct access with mappings of URLs, per individual file and also per folder/prefix (forbid dots).
+   - access
+      - email to project
+      - token/api hooks
+      - email hooks (token in an email address)
+   - apps
+   - chat
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - tabs
+      - open sqlite files
+   - project
+      - subdomain per project
+      - fix autogit
+      - autobackup
+      - explore alternative to docker to reduce command latency (50ms base)
+   - tests: local mode, client tests: auth, project, files, chat, access
+
+
+
 ## 2026-10-29
 
 If I go back to the idea of ac;tools (github.com/altocodenl/actools), destek is the second half (4-7), while the first half (id, file, db) is essentially provided by vibey (if vibey lets you run a DB). Vibey also gives you the runtime. So, in the vibey substrate, if you add a db and destek, you essentially have all the services you need for your runtime, including running your own runtime. It's coming full circle.
@@ -315,7 +447,7 @@ Run /some/weird/docker/path/bin/bash
 ## 2026-10-22
 
 Presentation on vibey:
-- Don't start with why.
+- Don't start with why, start with why now.
 - Start with what has changed now because of AI: 1) most production is now communication (chat); 2) many people can create their own custom software quickly and cheaply (server).
 - Next slide extends the previous to the right: put chat and server in the web, so that it can be everywhere: computer, mobile, someone else, always running.
 - How it works: start with shell view. Create a project.
