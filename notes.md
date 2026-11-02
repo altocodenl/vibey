@@ -1,8 +1,13 @@
 # Vibey development notes
 
+## 2026-11-02
+
+The problem with wildcard domains: the challenge is done through dns, not through http (like it is for non-wildcard domains).
+
+
 ## 2026-11-01
 
-Ideas that are houndingme:
+Ideas that are hounding me:
 - Add a chat on the side: why and how? Need to avoid the back and forth when interacting with an app, such as destek or anything else with an ui. The side chat still needs to map to a file and that's great. How do we invoke a "throwaway" or quick chat that doesn't require us to create it a new?
 - Change the colors of chats: make the text black or white, and keep the colors on the background but maintain good contrast; add a light mode from 6 to 6 of the local timezone.
 
