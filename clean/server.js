@@ -878,7 +878,11 @@ var routes = [
          rq.test = true;
       }
 
-      if ((rq.headers.host || '').toLowerCase () !== new URL (CONFIG.baseURL).host) rq.subdomain = (rq.headers.host || '').toLowerCase ().split ('.') [0];
+      var host = (rq.headers.host || '').toLowerCase ().replace (/:\d+$/, ''), baseHost = new URL (CONFIG.baseURL).hostname;
+      if (host !== baseHost) {
+         if (! host.endsWith ('.' + baseHost) || host.slice (0, - baseHost.length - 1).includes ('.')) return reply (rs, 404);
+         rq.subdomain = host.slice (0, - baseHost.length - 1);
+      }
 
       if (rq.subdomain) {
 
