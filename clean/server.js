@@ -377,7 +377,6 @@ var validProjectPath = function (path) {
       });
 };
 
-// Project names appear in URLs as /p/<user>/<name>, with each space as `-` and each dash as `--`. A name can't be a UUID (a UUID in that slot is a project id), can't have two spaces in a row or a space next to a dash (those would decode ambiguously), and can't have `/` or `?` (the server decodes the whole URL before routing).
 var validProjectName = function (name) {
    return ! /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test (name) && ! / {2}| -|- |[/?]/.test (name);
 };
@@ -401,7 +400,7 @@ var allowOp = async function (userId, projectId, op, prefix) {
       if (verb !== 'write' && verb !== op) return;
 
       var scope = parts.join (':');
-      return ! scope || (type (prefix) === 'string' && prefix.startsWith (scope));
+      return ! scope || (type (prefix) === 'string' && (scope.startsWith ('APP:') ? prefix === scope : prefix.startsWith (scope)));
    });
 };
 
@@ -873,6 +872,8 @@ var routes = [
 
    ['all', '*', async function (rq, rs) {
 
+      if (rq.method === 'head') rq.method = 'get';
+
       if (rq.headers ['x-test'] === '1') {
          if (CONFIG.baseURL !== 'http://localhost:5353') return reply (rs, 403, {error: 'Not a local request'});
          rq.test = true;
@@ -887,19 +888,25 @@ var routes = [
       if (rq.subdomain) {
 
          var slug = (s) => s.toLowerCase ().replace (/-/g, '--').replace (/ /g, '-');
+         var appMatch = rq.subdomain.match (/^(\d{1,5})--(.+)$/);
+         if (appMatch) {
+            rq.appPort = appMatch [1];
+            rq.url = '/p/' + appMatch [1] + rq.url;
+         }
+         var projectSubdomain = appMatch ? appMatch [2] : rq.subdomain;
 
-         if (validUuid.test (rq.subdomain)) {
-            var project = await redis ('hgetall', 'project:' + rq.subdomain);
+         if (validUuid.test (projectSubdomain)) {
+            var project = await redis ('hgetall', 'project:' + projectSubdomain);
             var owner = project ? await redis ('hgetall', 'user:' + project.owner) : undefined;
             if (project && ! owner && ! CONFIG.cloud) owner = {};
             if (owner) {
-               rq.projectId = rq.subdomain;
+               rq.projectId = projectSubdomain;
                var readableSubdomain = owner.username + '--' + slug (project.name);
                if (owner.username && readableSubdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/)) rq.projectRedirect = readableSubdomain;
             }
          }
          else {
-            var subdomain = rq.subdomain.split ('--');
+            var subdomain = projectSubdomain.split ('--');
             var username = subdomain [0], projectName = subdomain.slice (1).join ('--');
             var ownerId = await redis ('get', 'username:' + username);
             var projects = ownerId ? await getForUser (ownerId, 'project') : undefined;
@@ -970,13 +977,13 @@ var routes = [
                expires: new Date (Date.now () + CONFIG.cookie.expires * 1000),
                httponly: true,
                path: '/',
-               samesite: 'Lax',
+               samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
                secure: true,
             }),
             cicek.cookie.write (cookie ('project-state'), false, {
                httponly: true,
                path: '/',
-               samesite: 'Lax',
+               samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
                secure: true,
             })
          ]);
@@ -1006,7 +1013,7 @@ var routes = [
       var matchRoute = function (routes) {
          return dale.stop (routes, true, function (endpoint) {
             if (type (endpoint [1]) === 'string') endpoint [1] = new RegExp ('^' + cicek.escape (endpoint [1]) + '$');
-            return rq.method === endpoint [0] && !! rq.url.match (endpoint [1]);
+            return (endpoint [0] === 'all' || rq.method === endpoint [0]) && !! rq.url.match (endpoint [1]);
          });
       }
 
@@ -1029,6 +1036,7 @@ var routes = [
          ['post', '/project/edit'],
          ['post', '/project/run'],
          ['post', '/project/message'],
+         ['all', /^\/p\/\d+\//],
       ];
 
       var publicPath = matchRoute ([
@@ -1043,8 +1051,10 @@ var routes = [
          ['get', '/project'],
          ['get', /^\/f\/.+/],
          ['get', /^\/project\/message\/.+/],
+         ['all', /^\/p\/\d+\//],
       ]);
 
+      if (! rq.appPort && rq.url.match (/^\/p\//)) return reply (rs, 404);
       if (! rq.subdomain && matchRoute (projectRoutes)) return reply (rs, 404);
       if (rq.subdomain && ! matchRoute ([... staticRoutes, ... projectRoutes, ['get', '/auth/user']])) return reply (rs, 404);
 
@@ -1052,7 +1062,7 @@ var routes = [
          if (sessionId) return reply (rs, 403, {error: 'Invalid session'}, {'set-cookie': cicek.cookie.write (cookie (rq.projectId ? 'project' : 'host'), false, {
             httponly: true,
             path: '/',
-            samesite: 'Lax',
+            samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
             secure: true,
          })});
          else           return reply (rs, 403, {error: 'No session'});
@@ -1085,7 +1095,7 @@ var routes = [
                   expires: new Date (Date.now () + 10 * 60 * 1000),
                   httponly: true,
                   path: '/',
-                  samesite: 'Lax',
+                  samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
                   secure: true,
                })
             });
@@ -1201,7 +1211,7 @@ var routes = [
       if (url.origin !== base.protocol + '//' + subdomain + '.' + base.host) return reply (rs, 400, {error: 'Invalid returnUrl'});
       if (type (rq.data.query.state) !== 'string' || rq.data.query.state.length === 0) return reply (rs, 400, {error: 'Invalid state'});
 
-      if (! rq.user) return reply (rs, 302, '', {location: CONFIG.baseURL + '/#/login/' + encodeURIComponent ('/auth/project/' + subdomain + '?returnUrl=' + encodeURIComponent (url.href) + '&state=' + encodeURIComponent (rq.data.query.state))});
+      if (! rq.user) return reply (rs, 302, '', {location: rq.data.query.optional ? url.href : CONFIG.baseURL + '/#/login/' + encodeURIComponent ('/auth/project/' + subdomain + '?returnUrl=' + encodeURIComponent (url.href) + '&state=' + encodeURIComponent (rq.data.query.state))});
 
       var code = crypto.randomBytes (32).toString ('hex');
       await redis ([
@@ -1216,20 +1226,21 @@ var routes = [
       if (! rq.user) {
          if (! rq.projectId) return reply (rs, 403);
          var grants = await redis ('smembers', 'accessTo:PUBLIC');
-         if (dale.stop (grants, true, function (grant) {
+         var isPublic = dale.stop (grants, true, function (grant) {
             var [verb, projectId] = grant.split (':');
             return verb === 'read' && projectId === rq.projectId;
-         })) return reply (rs, 200, {anonymous: true, mode: 'cloud'});
+         });
+         if (isPublic && rq.data.cookie && rq.data.cookie [cookie ('project-state')]) return reply (rs, 200, {anonymous: true, mode: 'cloud'});
          var base  = new URL (CONFIG.baseURL);
          var state = crypto.randomBytes (32).toString ('hex');
          return reply (rs, 403, {
-            location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + '/') + '&state=' + state
+            location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + '/') + '&state=' + state + (isPublic ? '&optional=1' : '')
          }, {
             'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
                expires: new Date (Date.now () + 10 * 60 * 1000),
                httponly: true,
                path: '/',
-               samesite: 'Lax',
+               samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
                secure: true,
             })
          });
@@ -1299,6 +1310,7 @@ var routes = [
          if (/-\p{M}/u.test (username)) return reply (rs, 400, {error: 'A combining mark cannot follow a dash'});
 
          if (validUuid.test (username)) return reply (rs, 400, {error: 'Username cannot be a UUID'});
+         if (/^\d+$/.test (username)) return reply (rs, 400, {error: 'Username cannot be only digits'});
 
          rq.body.username = username;
          // Local mode has no signup flow.
@@ -1464,7 +1476,7 @@ var routes = [
          expires: new Date (Date.now () + 1000 * 60 * 60 * 24 * 365 * 10),
          httponly: true,
          path: '/',
-         samesite: 'Lax',
+         samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
          secure: true,
       })});
    }],
@@ -1505,7 +1517,7 @@ var routes = [
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (cookie ('host'), false, {
          httponly: true,
          path: '/',
-         samesite: 'Lax',
+         samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
          secure: true,
       })});
    }],
@@ -1556,7 +1568,7 @@ var routes = [
       reply (rs, 200, {}, {'set-cookie': cicek.cookie.write (cookie ('host'), false, {
          httponly: true,
          path: '/',
-         samesite: 'Lax',
+         samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
          secure: true,
       })});
    }],
@@ -1815,8 +1827,39 @@ var routes = [
       });
       if (access && ! access.length) return reply (rs, 404);
 
-      var result = await project.run (rq.projectId, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true});
+      var [result, sockets] = await Promise.all ([
+         project.run (rq.projectId, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true}),
+         project.run (rq.projectId, 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null', {catch: true}),
+      ]);
       if (result.code) return reply (rs, 500, {error: 'Could not list files'});
+
+      var apps = [];
+      dale.go ((sockets.stdout || '').toString ().split ('\n'), function (line) {
+         var fields = line.trim ().split (/\s+/);
+         if (fields [3] !== '0A') return;
+         var port = parseInt (fields [1].split (':').pop (), 16);
+         if (access && ! dale.stop (access, true, function (grant) {
+            var scope = grant.split (':').slice (1).join (':');
+            return ! scope || scope === 'APP:' + port;
+         })) return;
+         if (! inc (apps, port)) apps.push (port);
+      });
+      apps.sort (function (a, b) {
+         return a - b;
+      });
+
+      if (apps.length) {
+         var probe = await project.run (rq.projectId, dale.go (apps, function (port) {
+            return 'curl -sI -o /dev/null -m 1 -w "' + port + ' %{http_code}\\n" http://127.0.0.1:' + port + '/';
+         }).join (' & ') + ' & wait', {catch: true});
+         var http = dale.fil ((probe.stdout || '').toString ().split ('\n'), undefined, function (line) {
+            var [port, code] = line.split (' ');
+            if (code && code !== '000') return parseInt (port);
+         });
+         apps = dale.fil (apps, undefined, function (port) {
+            if (inc (http, port)) return port;
+         });
+      }
 
       var files = dale.fil ((result.stdout || '').toString ().split ('\0'), undefined, function (line) {
          if (! line) return;
@@ -1839,6 +1882,7 @@ var routes = [
          return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
       });
       return reply (rs, 200, {
+         apps,
          files,
          project: {
             access,
@@ -1919,6 +1963,86 @@ var routes = [
       rs.log.responseHeaders = headers;
       rs.writeHead (rs.log.code, headers);
       rs.end (cached ? undefined : buffer);
+      return cicek.apres (rs);
+   }],
+
+   ['all', /^\/p\/(\d+)(\/.*)$/, async function (rq, rs) {
+      var port = rq.data.params [0], url = rq.rawurl || rq.data.params [1];
+
+      if (rq.projectRedirect && (port + '--' + rq.projectRedirect).length <= 63) return reply (rs, 302, '', {
+         location: new URL (CONFIG.baseURL).protocol + '//' + port + '--' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (url)
+      });
+
+      if (! await allowOp (rq.user ? rq.user.id : 'PUBLIC', rq.projectId, rq.method === 'get' ? 'read' : 'write', 'APP:' + port)) {
+         if (rq.user || rq.method !== 'get') return reply (rs, 404, fourohfour, 'html');
+
+         var base  = new URL (CONFIG.baseURL);
+         var state = crypto.randomBytes (32).toString ('hex');
+         return reply (rs, 302, '', {
+            location: CONFIG.baseURL + '/auth/project/' + rq.subdomain + '?returnUrl=' + encodeURIComponent (base.protocol + '//' + rq.headers.host + encodeURI (url)) + '&state=' + state,
+            'set-cookie': cicek.cookie.write (cookie ('project-state'), state, {
+               expires: new Date (Date.now () + 10 * 60 * 1000),
+               httponly: true,
+               path: '/',
+               samesite: CONFIG.baseURL === 'http://localhost:5353' ? 'None' : 'Lax',
+               secure: true,
+            })
+         });
+      }
+
+      try {
+         var body = await new Promise (function (resolve, reject) {
+            var bodyChunks = [];
+            rq.on ('data', function (chunk) {bodyChunks.push (chunk)});
+            rq.on ('end', function () {resolve (Buffer.concat (bodyChunks))});
+            rq.on ('error', reject);
+         });
+      }
+      catch (error) {
+         return reply (rs, 400, {error: 'Could not read request body'});
+      }
+
+      var cookies = dale.fil (rq.data.cookie, undefined, function (v, k) {
+         if (k !== cookie ('project') && k !== cookie ('project-state')) return k + '=' + v;
+      });
+      var headers = dale.fil (rq.headers, undefined, function (v, k) {
+         if (! inc (['connection', 'content-length', 'cookie', 'expect', 'host', 'x-csrf'], k)) return '-H ' + Path.quote (k + ': ' + v);
+      });
+
+      var chunks = [];
+      var result = await project.run (rq.projectId, [
+         'curl -sS -i --http1.1 -X', Path.quote (rq.method.toUpperCase ()),
+         ... headers,
+         cookies.length ? '-H ' + Path.quote ('cookie: ' + cookies.join ('; ')) : '',
+         '-H ' + Path.quote ('host: ' + rq.headers.host),
+         '-H ' + Path.quote ('x-forwarded-proto: ' + new URL (CONFIG.baseURL).protocol.slice (0, -1)),
+         '-H expect:',
+         body.length ? '--data-binary @-' : '',
+         Path.quote ('http://127.0.0.1:' + port + encodeURI (url)),
+      ], {
+         catch: true,
+         input: body.length ? body : undefined,
+         stdout: function (chunk) {chunks.push (chunk)},
+      });
+      if (result.code === 7) return reply (rs, 502, {error: 'Nothing is listening on port ' + port});
+      if (result.code) return reply (rs, 502, {error: 'App request failed'});
+
+      var output = Buffer.concat (chunks), split = output.indexOf ('\r\n\r\n');
+      var lines = output.slice (0, split).toString ().split ('\r\n');
+      var responseHeaders = {};
+      dale.go (lines.slice (1), function (line) {
+         var colon = line.indexOf (':'), k = line.slice (0, colon).trim ().toLowerCase (), v = line.slice (colon + 1).trim ();
+         if (inc (['connection', 'keep-alive', 'transfer-encoding'], k)) return;
+         responseHeaders [k] = responseHeaders [k] === undefined ? v : [].concat (responseHeaders [k], v);
+      });
+      var buffer = output.slice (split + 4);
+      responseHeaders ['content-length'] = buffer.length;
+
+      rs.log.code = parseInt (lines [0].split (' ') [1]);
+      rs.log.responseBody = buffer.length;
+      rs.log.responseHeaders = responseHeaders;
+      rs.writeHead (rs.log.code, responseHeaders);
+      rs.end (buffer);
       return cicek.apres (rs);
    }],
 
@@ -2066,6 +2190,7 @@ var routes = [
          ? (creds.apiKey ? 'apiKey' : undefined)
          : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined);
 
+      var refreshError;
       if (auth === 'account' && Date.now () >= creds.account.expires) {
          var refreshBody = {
             client_id: aiFlavor === 'anthropic' ? Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString () : 'app_EMoamEEZ73f0CkXaXp7hrann',
@@ -2089,13 +2214,15 @@ var routes = [
             });
          }
          catch (error) {
-            return reply (rs, 400, {error: aiFlavor + ' account token refresh failed, please reconnect: ' + JSON.stringify (error.body || error.error)});
+            refreshError = aiFlavor + ' account token refresh failed, please reconnect: ' + JSON.stringify (error.body || error.error);
          }
-         creds.account.access = tokenData.access_token;
-         creds.account.expires = Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000;
-         if (tokenData.refresh_token) creds.account.refresh = tokenData.refresh_token;
-         if (tokenData.id_token) creds.account.idToken = tokenData.id_token;
-         await redis ('hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials));
+         if (! refreshError) {
+            creds.account.access = tokenData.access_token;
+            creds.account.expires = Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000;
+            if (tokenData.refresh_token) creds.account.refresh = tokenData.refresh_token;
+            if (tokenData.id_token) creds.account.idToken = tokenData.id_token;
+            await redis ('hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials));
+         }
       }
 
       if (aiModel && ! auth) return reply (rs, 400, {
@@ -2124,6 +2251,22 @@ var routes = [
 
       redis ('hset', 'project:' + rq.projectId, 'last', now ());
 
+      if (refreshError) {
+         var errorId = crypto.randomUUID ();
+         result = await project.edit (rq.projectId, rq.body.file, '[EOF]', '\n' + [
+            'əəə head ' + errorId,
+            'from ' + rq.body.to,
+            'id ' + errorId,
+            't-end ' + now (),
+            't-start ' + now (),
+            'to ' + id,
+            'əəə body ' + errorId,
+            refreshError,
+         ].join ('\n'));
+         if (result.code) return reply (rs, 400, result);
+         return reply (rs, 200, {id: id, responseId: errorId});
+      }
+
       if (rq.body.to !== 'shell' && ! rq.body.to.match (/^ai-/)) return reply (rs, 200, {id: id});
 
       var responseId = crypto.randomUUID ();
@@ -2141,7 +2284,14 @@ var routes = [
          '',
       ].join ('\n');
 
-      var output = '', oldBody = 'əəə body ' + responseId + '\n', usage;
+      var output = '', oldBody = 'əəə body ' + responseId + '\n', usage, writtenUsage, messageTo = id;
+      var tokenLines = function (usage) {
+         return usage ? [
+            'tokens-in ' + usage.fresh,
+            'tokens-cache ' + usage.cache,
+            'tokens-out ' + usage.output,
+         ] : [];
+      };
       var editQueue = Promise.resolve (), editError;
       var cancelled = false;
       var processFile = function (messageId) {
@@ -2207,11 +2357,19 @@ var routes = [
 
       var streamEdit = function () {
          var newBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
+         var headUsage = usage;
          editQueue = editQueue.then (async function () {
             if (editError) return;
-            var result = await project.edit (rq.projectId, rq.body.file, oldBody, newBody, Math.random () > 0.05);
+            var headTail = function (usage) {
+               return ['t-start ' + tStart].concat (tokenLines (usage), ['credential ' + auth, 'to ' + messageTo, '']).join ('\n');
+            };
+            var updateHead = headUsage && ! teishi.eq (headUsage, writtenUsage);
+            var oldText = updateHead ? headTail (writtenUsage) + oldBody : oldBody;
+            var newText = updateHead ? headTail (headUsage) + newBody : newBody;
+            var result = await project.edit (rq.projectId, rq.body.file, oldText, newText, Math.random () > 0.05);
             if (result.code) throw result;
             oldBody = newBody;
+            if (updateHead) writtenUsage = headUsage;
          }).catch (function (error) {
             editError = error;
             clog ({priority: 'important', type: 'Stream persistence error', error: formatError (error), responseId});
@@ -2367,6 +2525,19 @@ var routes = [
                if (event.type === 'stream_event' && event.event) {
                   var partial = event.event;
                   if (partial.type === 'message_start') lastFullText = '';
+                  if (partial.type === 'message_start' && partial.message && partial.message.usage) {
+                     var start = partial.message.usage;
+                     usage = {
+                        cache: start.cache_read_input_tokens || 0,
+                        fresh: start.input_tokens + (start.cache_creation_input_tokens || 0),
+                        output: start.output_tokens || 0,
+                     };
+                  }
+                  if (partial.type === 'message_delta' && partial.usage && usage) usage = {
+                     cache: usage.cache,
+                     fresh: usage.fresh,
+                     output: partial.usage.output_tokens,
+                  };
                   if (partial.type === 'content_block_delta' && partial.delta.type === 'text_delta') {
                      lastFullText += partial.delta.text;
                      return partial.delta.text;
@@ -2608,11 +2779,7 @@ var routes = [
             'id ' + responseId,
             't-end ' + now (),
             't-start ' + tStart,
-         ].concat (usage ? [
-            'tokens-in ' + usage.fresh,
-            'tokens-cache ' + usage.cache,
-            'tokens-out ' + usage.output,
-         ] : []).join ('\n');
+         ].concat (tokenLines (usage)).join ('\n');
 
          var parseToolCall = function (text) {
             var start = /^tool-call:.*$/m.exec (text);
@@ -2709,10 +2876,8 @@ var routes = [
             output = output.slice (0, toolCallIndex);
             if (! toolCall.error) {
                output = output.trimEnd ();
-               output += (output ? '\n\n' : '') + toolCall.description;
                var toolCallLines = toolCallText.split ('\n');
                if (toolCall.op === 'read' || toolCall.op === 'run') toolCallLines = toolCallLines.slice (0, 3);
-               toolCallLines.splice (1, 1);
                toolCallText = toolCallLines.join ('\n');
             }
          }
@@ -2731,6 +2896,8 @@ var routes = [
             tStart = now ();
             output = body || '';
             usage = undefined;
+            writtenUsage = undefined;
+            messageTo = to;
             editQueue = Promise.resolve ();
             editError = undefined;
             oldBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
@@ -2750,7 +2917,7 @@ var routes = [
          // Append the successor before finishing this message, so pollers never see a finished chain end early.
          if (toolCall) var toolHead = await startMessage ('shell', responseId, toolCallText + '\n\nResult:\n');
 
-         result = await project.edit (rq.projectId, rq.body.file, oldHead, newHead);
+         result = await project.edit (rq.projectId, rq.body.file, [oldHead].concat (tokenLines (writtenUsage)).join ('\n'), newHead);
          if (result.code) throw result;
          redis ('hset', 'project:' + rq.projectId, 'last', now ());
          if (! toolCall) break;
@@ -3026,6 +3193,12 @@ cicek.apres = function (rs) {
    });
    cicek.Apres (rs);
 }
+
+var cicekFork = cicek.fork;
+cicek.fork = function (request, response, route) {
+   if (! /^\d{1,5}--/.test (request.headers.host || '')) return cicekFork (request, response, route);
+   route [2].apply (route [2], [request, response].concat (route.slice (3)));
+};
 
 var server = cicek.listen ({port: CONFIG.port}, dale.go (routes, function (route) {
    var fn = route [2];

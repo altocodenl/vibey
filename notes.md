@@ -1,9 +1,78 @@
 # Vibey development notes
 
+## 2026-11-03
+
+Subdomain deploy sequence
+- Set up the wildcard DNS and cert.
+- Deploy the nginx change with Host passthrough.
+- Check that curl -H 'Host: x.app.buildwithvibey.com' reaches the current app.
+- Change the nginx config for <user> server
+- Revert the two deploy.sh lines and deploy.
+
+- DONE
+   - Subdomain (!)
+   - Press enter to login
+   - Remove unnecessarily initialized keys from the state
+   - Chat: make it .chat.md to be what indicates a chat, so we can put chats in subfolders
+   - {"error":"anthropic account token refresh failed, please reconnect: \"Timed out after 60 seconds, request aborted.\""}, this doesn't show in the chat, just the console. Move to the chat.
+   - More padding at the bottom of the DNA list to avoid overlap of the last with the search bar
+   - First command + I to switch to view should work, the first time it doesn't work.
+   - Fix annoying overwrite message when starting a new document.
+   - Fix esc escaping full mode in vi mode (we should intercept it if we're in full mode and in normal mode in the editor)
+   - Don't lose chat editor state when switching to To with keyboard shortcut
+   - Put descriptions on top of tool uses, rather than as a separate message
+   - Status bar:
+      - If creator and no projects pinned, tell that you can click on one of the slots to create a project.
+      - If no creator access, don't show the shell, just the dna list.
+   - Update LLM gauges as we go
+   - First version of app (!)
+
+TODO now:
+- light mode with the same high contrast
+
+Email to the project can be handled from access. Email to a subdomain should have a path (I wonder where). Then, if that path requires permissions, put the token in the subject.
+
+Having /p/<port> for GET and POST solves apps!
+- Make the list project endpoint also check for who's listening in all ports, return a list.
+- Display those ports as apps, at the top of the files list
+- When you open it, open /p/... in a frame. An even better idea from claude: use per-port subdomains, so apps can use absolute paths.
+- Relative paths and write methods also go in there, proxied.
+- The /p method is a proxy through curl that first checks for access.
+- Access: <who> <read|write> APP:<portNumber> (the only restriction is you cannot have files that are named like that that you want to create a special access rule for)
+- The Link button works too, it just opens the app standalone. The auth system is the same, the access system is the sam.
+
+- TODO
+   - demos
+   - devops
+      - destek to list logs and have alerts
+      - renew wildcard subdomain automatically
+   - engine
+      - support engines without provisioning (BYOE)
+      - provision engines
+      - Port mapping from the project to the engine: allow to run in a port. Check for contention within the engine. Then auto-modify nginx to allow for direct access. Allow direct access with mappings of URLs, per individual file and also per folder/prefix (forbid dots).
+   - access
+      - email to project
+      - token/api hooks
+   - chat
+      - Update LLM usage gauges as we go
+      - enable an agent calling another agent
+      - cron file
+   - file
+      - Don't expand folders by default
+      - tabs
+      - open sqlite files
+   - project
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - autobackup
+      - explore alternative to docker to reduce command latency (50ms base)
+   - tests: local mode, client tests: auth, project, files, chat, access
+
 ## 2026-11-02
 
 The problem with wildcard domains: the challenge is done through dns, not through http (like it is for non-wildcard domains).
-
 
 ## 2026-11-01
 

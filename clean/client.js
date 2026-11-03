@@ -67,11 +67,11 @@ var shortcut = function (key, ev, x, verb, path, arg) {
    return B.call (x, verb, path, arg);
 }
 
-// The path a new file or chat gets: `.md` is added when the name has no extension, and chats go under `chat/`.
+// The path a new file or chat gets: `.md` is added when the name has no extension, and chats end in `.chat.md`.
 var newFileName = function (name, type) {
    name = name.trim ();
+   if (type === 'chat') return name.match (/\.chat\.md$/) ? name : name + '.chat.md';
    if (! name.match (/\.[a-z]{2,3}$/i)) name += '.md';
-   if (type === 'chat') name = 'chat/' + name;
    return name;
 }
 
@@ -235,7 +235,8 @@ B.mrespond ([
 
          if (! file && defaultFile !== '') return B.call (x, 'navigate', 'f/' + filePath (defaultFile));
 
-         if (files && files.length && ! dale.stop (files, true, function (f) {
+         var isApp = /^APP:\d+$/.test (file) && inc (B.get ('apps') || [], parseInt (file.slice (4)));
+         if (files && files.length && ! isApp && ! dale.stop (files, true, function (f) {
             if (f.name === file) return true;
          })) return B.call (x, 'navigate', 'f/' + filePath (defaultFile));
 
@@ -278,7 +279,7 @@ B.mrespond ([
       var body = teishi.inc (['get', 'delete'], x.verb) ? ''   : arg1;
       var cb   = teishi.inc (['get', 'delete'], x.verb) ? arg1 : arg2;
 
-      if (B.get ('user', 'csrf')) headers ['x-csrf'] = B.get ('user', 'csrf');
+      if (B.get ('user', 'csrf') && x.verb !== 'get') headers ['x-csrf'] = B.get ('user', 'csrf');
 
       if (B.get ('test')) headers ['x-test'] = 1;
 
@@ -368,6 +369,12 @@ B.mrespond ([
 
          if (B.get ('test')) B.call (x, 'set', ['test', 'loginLink'], rs.body.loginLink);
       });
+   }],
+
+   ['keydown', '*', function (x, ev) {
+      if (B.get ('view') !== 'login') return;
+
+      if (ev.key === 'Enter' && c ('#login') && ! c ('#login').disabled) return B.call (x, 'login', B.get ('user', 'email'));
    }],
 
    ['verify', '*', function (x) {
@@ -637,6 +644,7 @@ B.mrespond ([
       if (B.get ('mobile') && B.get ('show', 'pane') === 'right') shortcut ('b', ev, x, 'rem', 'show', 'pane');
       else                                                        shortcut ('b', ev, x, 'navigate', 'projects');
       shortcut ('\\', ev, x, 'set', ['file', 'full'], ! B.get ('file', 'full'));
+      if (ev.key === 'Escape' && B.get ('file', 'full') && ! (editor && editor.hasFocus ())) return B.call (x, 'set', ['file', 'full'], false);
 
       if (B.get ('new', 'file') === undefined) {
          if (ev.metaKey && ev.key === 's') {
@@ -647,7 +655,7 @@ B.mrespond ([
             shortcut ('o', ev, x, 'scroll', 'chat', -1);
             shortcut ('i', ev, x, 'scroll', 'chat', 1);
          }
-         else shortcut ('i', ev, x, 'set', ['file', 'mode'], B.get ('file', 'mode') === 'edit' ? 'view' : 'edit');
+         else shortcut ('i', ev, x, 'set', ['file', 'mode'], (B.get ('file', 'mode') || 'edit') === 'edit' ? 'view' : 'edit');
          if (ev.metaKey && ev.key === 'e') {
             ev.preventDefault ();
             B.call (x, 'set', ['new', 'file'], '');
@@ -727,6 +735,7 @@ B.mrespond ([
          B.call (x, 'set', ['project', 'read'], access && ! dale.stop (access, true, function (grant) {
             return grant.split (':') [0] === 'write';
          }) ? true : undefined);
+         B.call (x, 'set', 'apps', rs.body.apps);
          B.call (x, 'set', 'files', rs.body.files);
 
          // Second line: bytes that clearing history would free, measured against a fresh single-commit repository.
@@ -759,7 +768,7 @@ B.mrespond ([
          return edit.file === name;
       })) return;
 
-      if (/\.(avif|bmp|gif|jpe?g|png|webp|pdf|mp4)$/i.test (name)) return;
+      if (/^APP:\d+$/.test (name) || /\.(avif|bmp|gif|jpe?g|png|webp|pdf|mp4)$/i.test (name)) return;
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
@@ -776,7 +785,7 @@ B.mrespond ([
          }
          if (B.get ('file', 'name') !== name) return;
          content = newContent;
-         if (type (content) === 'string' && /^chat\/.+\.md$/.test (name) && ! (B.get ('message', 'to') || '').trim ()) {
+         if (type (content) === 'string' && /\.chat\.md$/.test (name) && ! (B.get ('message', 'to') || '').trim ()) {
             var entries = content.split (/^əəə head [0-9a-f-]{36}\n/im).slice (1).reverse ();
             var recipient = dale.stopNot (entries, undefined, function (entry) {
                var body = entry.match (/^əəə body [0-9a-f-]{36}\n/im);
@@ -794,7 +803,7 @@ B.mrespond ([
             B.call (x, 'set', ['message', 'to'], recipient);
          }
          B.call (x, 'change', 'file');
-         if (/^chat\/.+\.md$/.test (name)) requestAnimationFrame (function () {
+         if (/\.chat\.md$/.test (name)) requestAnimationFrame (function () {
             if (B.get ('view') !== 'files' || B.get ('file', 'name') !== name) return;
             var messages = c ('.messages') [0];
             if (messages) messages.scrollTop = messages.scrollHeight;
@@ -821,7 +830,7 @@ B.mrespond ([
    ['edit', 'file', function (x, name, newContent) {
       var chunks = function (before, after) {
          if (before === after) return [];
-         if (! before || before === '[EOF]') return [{content: after}];
+         if (! before || before === '[EOF]') return [{overwrite: true, content: after}];
 
          var lines = function (text) {
             return text.match (/[^\n]*\n|[^\n]+$/g) || [];
@@ -1099,6 +1108,9 @@ B.mrespond ([
 
       if (c ('#chat-editor')) {
          editor = CodeMirror (c ('#chat-editor'), {
+            extraKeys: {
+               'Cmd-D': false,
+            },
             keyMap: B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default',
             lineWrapping: true,
             mode: 'markdown',
@@ -1134,8 +1146,13 @@ B.mrespond ([
    ['change', ['file', 'full'], {match: B.changeResponder}, function (x) {
       var full = !! B.get ('file', 'full');
       if (full === !! document.fullscreenElement) return;
-      if (full) document.documentElement.requestFullscreen ().catch (function () {});
-      else      document.exitFullscreen ();
+      if (full) document.documentElement.requestFullscreen ().then (function () {
+         if (navigator.keyboard && B.get ('user', 'settings', 'vi')) navigator.keyboard.lock (['Escape']);
+      }).catch (function () {});
+      else {
+         if (navigator.keyboard) navigator.keyboard.unlock ();
+         document.exitFullscreen ();
+      }
    }],
 
    ['highlight', 'content', function (x) {
@@ -1211,9 +1228,9 @@ B.mrespond ([
       if (B.get ('message', 'cancelling', id)) return;
 
       var head = content.match (new RegExp (
-         '^əəə head ' + id + '\\n[\\s\\S]*?^əəə body ' + id + '\\n', 'im'
+         '^əəə head ' + id + '\\n(?:(?!əəə (?:head|body) )[^\\n]*\\n)*?pending 1\\n', 'im'
       ));
-      if (! head || ! /^pending 1$/m.test (head [0])) return;
+      if (! head) return;
 
       B.call (x, 'set', ['message', 'cancelling', id], true);
       B.call (x, 'post', '/project/edit', {
@@ -1260,7 +1277,7 @@ B.mrespond ([
    ['change', [/^(content|file|view)$/], {match: B.changeResponder}, function (x) {
       var name = B.get ('file', 'name') || '';
       var pending = [];
-      if (B.get ('view') === 'files' && /^chat\/.+\.md$/.test (name) && type (content) === 'string') {
+      if (B.get ('view') === 'files' && /\.chat\.md$/.test (name) && type (content) === 'string') {
          var heads = /^əəə head ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n([\s\S]*?)^əəə body \1\n/gim;
          var match;
          while ((match = heads.exec (content))) {
@@ -1318,9 +1335,10 @@ B.mrespond ([
                if (updated !== content) {
                   var body = rs.body.message.match (/^əəə body [0-9a-f-]{36}\n/im);
                   var finished = body && ! /^pending 1$/m.test (rs.body.message.slice (0, body.index));
+                  var exited = /\nExit code: -?\d+\s*$/.test (rs.body.message) && ! /\nExit code: -?\d+\s*$/.test (content.slice (head.index, end));
                   content = updated;
                   B.call (x, 'change', 'content');
-                  if (finished) B.call (x, 'read', 'project', true);
+                  if (finished || exited) B.call (x, 'read', 'project', true);
                }
                appendMessages (x, name, rs.body.next, function () {
                   inFlight = false;
@@ -1373,7 +1391,7 @@ B.mrespond ([
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem sending the message');
          if (B.get ('file', 'name') !== name) return;
          if (B.get ('message', 'body') === body) B.call (x, 'set', ['message', 'body'], '');
-         B.call (x, 'read', 'file');
+         B.call (x, 'read', 'project');
       });
    }],
 
@@ -1400,7 +1418,7 @@ B.mrespond ([
 
    ['upload', 'message', function (x, files) {
       var chat = B.get ('file', 'name');
-      if (! files || ! files.length || ! /^chat\/.+\.md$/.test (chat || '')) return;
+      if (! files || ! files.length || ! /\.chat\.md$/.test (chat || '')) return;
       files = Array.from (files); // Copy: the file input clears its live list right after this call.
 
       // Files go to everyone or as a reply: sending them to the shell or AI would start one run per file.
@@ -1744,6 +1762,7 @@ views.login = function () {
                ['button', {
                   class: css.join (emailValid ? 'bg-vgreen' : 'bg-mid-gray', emailValid ? css.button.replace ('white', 'vdeepnavy') : css.button, 'db w-100').replace ('bg-vblue', ''),
                   disabled: ! emailValid,
+                  id: 'login',
                   onclick: B.ev ('login', user.email),
                }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Let me in') : 'Enter your email'],
             ]]
@@ -1847,7 +1866,7 @@ views.projects = function () {
    var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
 
    return B.view ([['mobile'], ['projects'], ['user', 'email'], ['search', 'project'], ['user', 'creator'], ['user', 'anonymous']], function (mobile, projects, email, search, creator, anonymous) {
-      var columnWidth = mobile ? '95vw' : search !== undefined || anonymous ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
+      var columnWidth = mobile ? '95vw' : search !== undefined || ! creator ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
       var emailHue = dale.go ((email || '').split (''), function (c) { return c.charCodeAt (0); }).reduce (function (a, b) { return a + b; }, 0) % 360;
 
       if (! projects) return ['div', {
@@ -1874,7 +1893,7 @@ views.projects = function () {
          }],
 
          // Logo; on mobile, the size of the logout button and level with it.
-         mobile && (search !== undefined || anonymous) ? '' : ['div', {style: style ({
+         mobile && (search !== undefined || ! creator) ? '' : ['div', {style: style ({
             left: '1.5rem',
             position: 'fixed',
             top: mobile ? 'calc(2.5rem - 2vh)' : 'calc(1.5rem - 2vh)',
@@ -1894,8 +1913,8 @@ views.projects = function () {
 
          // Spiral slots or project list
          B.view (['search', 'project'], function (search) {
-            // Without a session there's no spiral, only the list of public projects.
-            if (search === undefined && anonymous) search = '';
+            // Without creator access there's no spiral, only the list of projects (the public ones, without a session).
+            if (search === undefined && ! creator) search = '';
             return ['div', {class: 'relative' + (search !== undefined ? ' self-start' : ''), style: style ({
                height: search === undefined ? vw (containerHeight + 48 + (mobile ? 72 : 48)) : 'auto',
                width: search === undefined ? vw (containerWidth) : '100vw',
@@ -1953,9 +1972,12 @@ views.projects = function () {
 
                      // Status bar
                      B.view (['hover', 'project'], function (project) {
-                        if (creator && ! project) return ['div'];
+                        var pinned = dale.stop (projects, true, function (project) {
+                           return !! project.slot;
+                        });
+                        if (! project && pinned) return ['div'];
                         return ['div', {
-                           class: ('absolute ba border-box flex flex-column items-center justify-center vborderblue-border ' + (creator ? views.projectColor (project.name) : 'bg-vmidnight vlightblue')).split (' ').sort ().join (' '),
+                           class: ('absolute ba border-box flex flex-column items-center justify-center vborderblue-border ' + (project ? views.projectColor (project.name) : 'bg-vmidnight vlightblue')).split (' ').sort ().join (' '),
                            style: style ({
                               'border-width': '0.09375rem',
                               'border-radius': vw (slotBorderRadius),
@@ -1965,17 +1987,7 @@ views.projects = function () {
                               top: vw (barBottom - barHeight),
                               width: vw (barWidth),
                            }),
-                        }, ! creator ? B.view ([['user', 'creatorRequest'], ['user', 'mode']], function (request, mode) {
-                           return ['div', {class: 'border-box pa2 tc w-100'}, [
-                              mode === 'cloud' ? ['button', {
-                                 class: (css.button + ' f7' + (request ? ' o-60' : '')).split (' ').sort ().join (' '),
-                                 disabled: !! request,
-                                 onclick: B.ev ('request', 'creator'),
-                                 type: 'button',
-                              }, request === 'pending' ? 'Requesting...' : request === 'sent' ? 'Request sent' : 'Request creator access'] : '',
-                              ['p', {class: 'lh-copy mb0 mt2'}, 'Or ask a creator to share a project with you.'],
-                           ]];
-                        }) : [
+                        }, ! project ? ['p', {class: 'lh-copy ma0 pa2 tc'}, 'Click on a slot to create a project.'] : [
                            ['span', {
                               class: 'fw6',
                               style: style ({'font-size': '120%'}),
@@ -1995,6 +2007,7 @@ views.projects = function () {
                   if (search !== undefined) return ['div', {
                      class: 'flex flex-column relative w-100',
                      style: style ({
+                        'padding-bottom': 'calc(4vh + ' + vw (mobile ? 72 : 48) + ')',
                         'padding-top': '16vh',
                      }),
                   }, [
@@ -2008,7 +2021,25 @@ views.projects = function () {
                            top: '2vh',
                            'z-index': '1',
                         }),
-                     }, [
+                     }, ! creator ? B.view ([['user', 'creatorRequest'], ['user', 'mode']], function (request, mode) {
+                        return ['div', {
+                           class: 'bg-vmidnight flex items-center justify-center ph3 tc vlightblue',
+                           style: style ({
+                              border: '0.09375rem solid ' + css.colors.vborderblue,
+                              'border-radius': '0.75rem',
+                              flex: 1,
+                              gap: '0.75rem',
+                           }),
+                        }, [
+                           mode === 'cloud' ? ['button', {
+                              class: (css.button + ' f7' + (request ? ' o-60' : '')).split (' ').sort ().join (' '),
+                              disabled: !! request,
+                              onclick: B.ev ('request', 'creator'),
+                              type: 'button',
+                           }, request === 'pending' ? 'Requesting...' : request === 'sent' ? 'Request sent' : 'Request creator access'] : '',
+                           ['span', {class: 'lh-copy'}, 'Or ask a creator to share a project with you.'],
+                        ]];
+                     }) : [
                         ['div', {
                            class: 'bg-vmidnight flex items-center justify-center pointer relative vlightblue',
                            onclick: B.ev ('rem', 'search', 'project'),
@@ -2390,13 +2421,14 @@ var localPaths = function (html, folder) {
 views.files = function () {
 
    var iconAndName = function (name) {
+      if (name.match (/^APP:\d+$/)) return [['i', {class: 'bi bi-window mr1 vlightblue'}], 'Port ' + name.slice (4)];
       var parts = name.split ('/');
       var styled = [];
       dale.go (parts, function (part, index) {
          if (index > 0) styled.push (['span', {class: 'vgray'}, ' / ']);
          styled.push (part);
       });
-      if (name.match ('^chat/')) return [['i', {class: 'bi bi-chat-left-dots mr1 vpurple'}], styled];
+      if (name.match (/\.chat\.md$/)) return [['i', {class: 'bi bi-chat-left-dots mr1 vpurple'}], styled];
       if (name.match (/\.md$/)) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], styled];
       return styled;
    }
@@ -2551,11 +2583,6 @@ views.files = function () {
                            onclick: B.ev ('navigate', 'projects'),
                         }, ['‹', views.tooltip ('B', 'below')]],
                         ['span', {class: 'f4 fw7'}, project.name],
-                        B.get ('user', 'anonymous') ? '' : ['span', {
-                           class: 'f4 ml-auto pointer relative',
-                           onclick: B.ev ('navigate', 'settings'),
-                           title: 'Settings',
-                        }, [['i', {class: 'bi bi-wrench-adjustable'}], views.tooltip ('9', 'below')]],
                      ]],
                      details ? ['div', {
                         class: 'flex flex-wrap items-center mb3 mt2',
@@ -2587,6 +2614,11 @@ views.files = function () {
                            title: 'Remove all past versions of this project',
                            type: 'button',
                         }, 'Clear history (' + size (projectSize.history) + ')'] : '',
+                        B.get ('user', 'anonymous') ? '' : ['span', {
+                           class: 'f4 pointer relative',
+                           onclick: B.ev ('navigate', 'settings'),
+                           title: 'Settings',
+                        }, [['i', {class: 'bi bi-wrench-adjustable'}], views.tooltip ('9', 'below')]],
                      ]] : '',
                      project.read ? '' : ['span', {
                         'aria-expanded': details ? 'true' : 'false',
@@ -2621,16 +2653,27 @@ views.files = function () {
                      }, [views.tooltip ('U', 'below'), '×']];
                   }),
                ]],
-               B.view ([['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file']], function (files, current, pending, search) {
+               B.view ([['apps'], ['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file']], function (apps, files, current, pending, search) {
                   if (! files) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
-                  if (! files.length) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, 'No files yet.'];
+                  if (! files.length && ! (apps || []).length) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, 'No files yet.'];
                   var pattern = search && new RegExp (search, search === search.toLowerCase () ? 'i' : '');
                   var currentIndex = dale.stopNot (files, undefined, function (f, k) {
                      if (f.name === current) return k;
                   });
                   var prevIndex = currentIndex !== undefined ? (currentIndex === 0 ? files.length - 1 : currentIndex - 1) : undefined;
                   var nextIndex = currentIndex !== undefined ? (currentIndex >= files.length - 1 ? 0 : currentIndex + 1) : undefined;
-                  return ['div', {class: 'flex-auto overflow-y-auto'}, dale.fil (files, undefined, function (file, index) {
+                  return ['div', {class: 'flex-auto overflow-y-auto'}, [dale.go (apps || [], function (port) {
+                     var active = current === 'APP:' + port;
+                     return ['div', {
+                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
+                        id: active ? 'selected-file' : undefined,
+                        onclick: B.ev (['navigate', 'f/APP:' + port], ['set', ['show', 'pane'], 'right']),
+                        style: style ({
+                           'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
+                           padding: '0.5rem 0.625rem',
+                        }),
+                     }, iconAndName ('APP:' + port)];
+                  }), dale.fil (files, undefined, function (file, index) {
                      if (pattern && ! file.name.match (pattern)) return;
                      var active = file.name === current;
                      var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
@@ -2650,7 +2693,7 @@ views.files = function () {
                         ]],
                         ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
                      ]];
-                  })];
+                  })]];
                }),
                ['div', {class: 'flex-shrink-0 mt3 relative w-100'}, [
                   views.tooltip ('S', 'corner'),
@@ -2681,15 +2724,17 @@ views.files = function () {
             pane ('overflow-auto', function () {return B.view ([['file'], ['mobile']], function (file, mobile) {
                if (! file) return ['div'];
 
-               var isChat = !! file.name.match (/^chat\/.+\.md$/);
+               var isChat = !! file.name.match (/\.chat\.md$/);
 
                // In read-only projects, markdown is always rendered.
                var mode = project.read ? 'view' : file.mode || 'edit';
 
+               var isApp = /^APP:\d+$/.test (file.name);
+               var appUrl = isApp ? window.location.protocol + '//' + file.name.slice (4) + '--' + window.location.host + '/' : undefined;
                var isImage = /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (file.name);
                var isPdf = /\.pdf$/i.test (file.name);
                var isVideo = /\.mp4$/i.test (file.name);
-               var isBinary = isImage || isPdf || isVideo || content instanceof Uint8Array;
+               var isBinary = isApp || isImage || isPdf || isVideo || content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
 
                var fileHeader = ['div', {class: 'flex items-center mb2'}, [
@@ -2725,7 +2770,7 @@ views.files = function () {
                            }),
                            title: 'Download file',
                         }, [['i', {class: 'bi bi-download mr1'}], 'Download']] : '',
-                        ['button', {
+                        isApp ? '' : ['button', {
                            'aria-expanded': file.actions ? 'true' : 'false',
                            'aria-label': file.actions ? 'Hide file actions' : 'Show file actions',
                            class: 'bg-transparent bn br-pill pointer pv1 vnearwhite',
@@ -2737,7 +2782,7 @@ views.files = function () {
                      ['div', {class: 'flex items-center ml-auto'}, [
                         ['a', {
                            class: 'bg-transparent br2 f6 fw6 mr2 no-underline pointer vgray',
-                           href: '/f/' + filePath (file.name),
+                           href: isApp ? appUrl : '/f/' + filePath (file.name),
                            style: style ({padding: '0.25rem 0.75rem'}),
                            target: '_blank',
                            title: 'Open file directly',
@@ -2797,6 +2842,13 @@ views.files = function () {
                         src: '/f/' + filePath (file.name),
                         onerror: B.ev ('snackbar', 'error', 'There was a problem loading the video'),
                         style: style ({'object-fit': 'contain'}),
+                     }],
+                  ]] :
+                  isApp ? ['div', {class: 'flex-auto relative'}, [
+                     ['iframe', {
+                        class: 'absolute bn h-100 left-0 top-0 w-100',
+                        src: appUrl,
+                        title: file.name,
                      }],
                   ]] :
                   isImage ? ['div', {class: 'flex-auto relative'}, [
@@ -2999,12 +3051,12 @@ views.files = function () {
                   newType === 'chat' ? ['span', {
                      class: 'absolute f5 fw6 vmidblue',
                      style: style ({
-                        left: '2.5rem',
                         'pointer-events': 'none',
+                        right: '1rem',
                         top: '50%',
                         transform: 'translateY(-50%)',
                      }),
-                  }, 'chat/'] : '',
+                  }, '.chat.md'] : '',
                   ['i', {
                      class: 'absolute bi bi-pencil vmidblue',
                      style: style ({
@@ -3024,7 +3076,8 @@ views.files = function () {
                         'border-radius': '0.75rem',
                         color: css.rgba (css.colors.vlightblue, 0.8),
                         height: '3rem',
-                        'padding-left': newType === 'chat' ? '5.25rem' : '2.5rem',
+                        'padding-left': '2.5rem',
+                        'padding-right': newType === 'chat' ? '6.5rem' : '1rem',
                      }),
                      type: 'text',
                      value: newFile,
@@ -3316,6 +3369,8 @@ views.chat = function (read) {
       if (! match) return;
       var op = match [1];
       var rest = b.slice (match [0].length);
+      var description = rest.match (/^(?!path: |command: )(.+)\n/);
+      if (description) rest = rest.slice (description [0].length);
       var resultSplit = rest.indexOf ('\n\nResult:\n');
       var header = resultSplit === -1 ? rest : rest.slice (0, resultSplit);
       var result = resultSplit === -1 ? '' : rest.slice (resultSplit + '\n\nResult:\n'.length);
@@ -3323,6 +3378,7 @@ views.chat = function (read) {
       var exitCode = exitMatch ? parseInt (exitMatch [1]) : undefined;
       if (exitMatch) result = result.slice (0, exitMatch.index);
       var tool = {
+         description: description ? description [1] : undefined,
          exitCode: exitCode,
          op: op,
          result: result.replace (/\n+$/, ''),
@@ -3373,6 +3429,12 @@ views.chat = function (read) {
       return ['div', {
          class: 'code overflow-hidden',
       }, [
+         tool.description ? ['div', {
+            class: 'f6 lh-copy sans-serif vlightblue',
+            style: style ({
+               padding: '0.375rem 0.625rem',
+            }),
+         }, tool.description] : '',
          ['div', {
             class: 'f7 flex fw7 items-center',
             style: style ({
@@ -3526,15 +3588,15 @@ views.chat = function (read) {
                var cancelled = head.match (/^cancelled (.+)$/m);
                var time = head.match (/^t (.+)$/m) || start;
                var timeLabel = time ? ago (time [1]) : '';
-               var tokenLabel = end ? dale.fil (['cache', 'in', 'out'], undefined, function (name) {
+               var tokenLabel = dale.fil (['cache', 'in', 'out'], undefined, function (name) {
                   var tokens = head.match (new RegExp ('^tokens-' + name + ' (\\d+)$', 'm'));
                   if (tokens) return size (Number (tokens [1])).replace (/B$/, '') + 't' + {cache: 'c', in: 'i', out: 'o'} [name];
-               }).join (' + ') : '';
+               }).join (' + ');
                var model = dale.stopNot (models, undefined, function (m) {
                   if (from === 'ai-' + m.model) return m;
                });
                var usageLabel = '', costLabel = '';
-               if (end && model && ! /^pending 1$/m.test (head)) {
+               if (model) {
                   var tokensIn = head.match (/^tokens-in (\d+)$/m);
                   var tokensCache = head.match (/^tokens-cache (\d+)$/m);
                   var tokensOut = head.match (/^tokens-out (\d+)$/m);

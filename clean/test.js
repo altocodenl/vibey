@@ -312,7 +312,7 @@ if (mode === 'server') {
                ['Verify login again', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   if (! assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="[a-f0-9]{64}"; Expires=.+ ' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10) + ' .+ HttpOnly; Path=\\/; SameSite=Lax;'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="[a-f0-9]{64}"; Expires=.+ ' + (parseInt (new Date ().toISOString ().slice (0, 4)) + 10) + ' .+ HttpOnly; Path=\\/; SameSite=None;'), teishi.test.match],
                      ['csrf token', rs.body.csrf, 'string']
                   ])) return false;
                   s.headers.cookie = getCookie (rs.headers);
@@ -477,7 +477,7 @@ if (mode === 'server') {
                ['Logout', 'post', '/auth/logout', {}, 200, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=None'), teishi.test.match],
                   ]);
                }],
                ['Logout again', 'post', '/auth/logout', {}, 403, assertBody ({error: 'Invalid session'})],
@@ -514,7 +514,7 @@ if (mode === 'server') {
                ['Private route with invalid session', 'get', '/auth/user', 403, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=None'), teishi.test.match],
                      ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
                   ]);
                }, {cookie: cookie ('host') + '="foo"'}],
@@ -584,13 +584,13 @@ if (mode === 'server') {
                   return assert ([
                      ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=None'), teishi.test.match],
                   ]);
                }],
                ['Delete account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
                   return assert ([
                      ['cookie', getCookie (rs.headers), 'string'],
-                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=Lax'), teishi.test.match],
+                     ['cookie', getCookie (rs.headers), new RegExp (cookie ('host') + '="false"; HttpOnly; Path=\\/; SameSite=None'), teishi.test.match],
                   ]);
                }],
                ['List sessions after delete', 'get', '/auth/list', 403, assertBody ({error: 'Invalid session'})],
@@ -928,7 +928,7 @@ if (mode === 'server') {
                   if (! assert ([
                      ['location', rs.headers.location, '/f/main.md', teishi.test.equal],
                      ['referrer-policy', rs.headers ['referrer-policy'], 'no-referrer', teishi.test.equal],
-                     ['project cookie', rs.headers ['set-cookie'] [0], new RegExp ('^' + cookie ('project') + '="[a-f0-9]{64}"; Expires=.+; HttpOnly; Path=\\/; SameSite=Lax; Secure'), teishi.test.match],
+                     ['project cookie', rs.headers ['set-cookie'] [0], new RegExp ('^' + cookie ('project') + '="[a-f0-9]{64}"; Expires=.+; HttpOnly; Path=\\/; SameSite=None; Secure'), teishi.test.match],
                      ['state cookie cleared', rs.headers ['set-cookie'] [1], new RegExp ('^' + cookie ('project-state') + '=("false"|false)'), teishi.test.match],
                   ])) return false;
                   s.headers.cookie = s.hostCookie + '; ' + rs.headers ['set-cookie'] [0].split (';') [0];
@@ -989,6 +989,21 @@ if (mode === 'server') {
                   apres: function (s, rq, rs) {
                      var location = new URL (rs.headers.location);
                      return assert (['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/' + s.projectSubdomain, teishi.test.equal]);
+                  },
+               },
+               {
+                  tag: 'Anonymous user on private project requires project login',
+                  method: 'get',
+                  host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/auth/user',
+                  headers: {cookie: cookie ('project-state') + '="foo"'},
+                  code: 403,
+                  apres: function (s, rq, rs) {
+                     var location = new URL (rs.body.location);
+                     return assert ([
+                        ['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/' + s.projectSubdomain, teishi.test.equal],
+                        ['optional', location.searchParams.get ('optional'), null, teishi.test.equal],
+                     ]);
                   },
                },
                ['Anonymous cannot list files on UUID subdomain', 'get', '/project', 404, function (s, rq, rs) {
@@ -1737,6 +1752,39 @@ if (mode === 'server') {
                ]);
             }],
             useProject ('publicFull'),
+            {
+               tag: 'Anonymous user on public project tries optional project login',
+               method: 'get',
+               host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/auth/user',
+               code: 403,
+               apres: function (s, rq, rs) {
+                  var base = new URL (CONFIG.baseURL);
+                  var location = new URL (rs.body.location);
+                  if (! assert ([
+                     ['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/' + s.projectSubdomain, teishi.test.equal],
+                     ['returnUrl', location.searchParams.get ('returnUrl'), base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/', teishi.test.equal],
+                     ['optional', location.searchParams.get ('optional'), '1', teishi.test.equal],
+                     ['cookie', getCookie (rs.headers), new RegExp ('^' + cookie ('project-state') + '='), teishi.test.match],
+                  ])) return false;
+                  s.optionalLoginPath = location.pathname + location.search;
+                  s.optionalStateCookie = getCookie (rs.headers).split (';') [0];
+                  return true;
+               },
+            },
+            ['Optional project login without session returns to project', 'get', function (s) {return s.optionalLoginPath}, 302, function (s, rq, rs) {
+               var base = new URL (CONFIG.baseURL);
+               return assert (['location', rs.headers.location, base.protocol + '//' + s.projectSubdomain + '.' + base.host + '/', teishi.test.equal]);
+            }],
+            {
+               tag: 'Anonymous user on public project after optional project login',
+               method: 'get',
+               host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/auth/user',
+               headers: function (s) {return {cookie: s.optionalStateCookie}},
+               code: 200,
+               apres: assertBody ({anonymous: true, mode: 'cloud'}),
+            },
             ['Anonymous lists full public project files', 'get', '/project', 200, function (s, rq, rs) {
                return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md', 'notes.md', 'src/app.js'], teishi.test.equal]);
             }],
@@ -1750,6 +1798,14 @@ if (mode === 'server') {
             ['Anonymous reads partial public project file', 'get', '/f/chat/one.txt', 200, assertBody ('one')],
             ['Anonymous cannot read outside partial public prefix', 'get', '/f/main.md', 302],
             accessAs ('b'),
+            ['B gets session code from optional project login', 'get', function (s) {return s.optionalLoginPath}, 302, function (s, rq, rs) {
+               var base = new URL (CONFIG.baseURL);
+               var location = new URL (rs.headers.location);
+               return assert ([
+                  ['origin', location.origin, base.protocol + '//' + s.publicFull + '.' + base.host, teishi.test.equal],
+                  ['sessionCode', location.searchParams.get ('sessionCode'), /^[a-f0-9]{64}$/, teishi.test.match],
+               ]);
+            }],
             ['B sees public projects without slots', 'get', '/projects', 200, function (s, rq, rs) {
                var listed = dale.fil (rs.body, undefined, function (p) {
                   if (p.id === s.publicFullId || p.id === s.publicPartialId) return p;
