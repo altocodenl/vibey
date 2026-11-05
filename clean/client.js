@@ -1352,6 +1352,23 @@ B.mrespond ([
          clearInterval (interval);
          B.call (x, 'rem', ['pending', 'requests'], key);
       });
+
+      clearTimeout (B.get ('pending', 'idle'));
+      B.call (x, 'mset', ['pending', 'idle'], undefined);
+      var name = B.get ('file', 'name') || '';
+      if (pending.length || B.get ('view') !== 'files' || ! /\.chat\.md$/.test (name) || type (content) !== 'string') return;
+      var ids = content.match (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/gim);
+      if (! ids) return;
+      var lastId = ids [ids.length - 1].slice ('əəə head '.length);
+      var timer = setTimeout (function () {
+         if (B.get ('pending', 'idle') !== timer || B.get ('file', 'name') !== name) return;
+         B.call (x, 'get', '/project/message/' + lastId + '/' + filePath (name), function (x, error, rs) {
+            if (error || B.get ('pending', 'idle') !== timer || B.get ('file', 'name') !== name) return;
+            if (! rs.body.next.length) return B.call (x, 'change', ['pending', 'messages']);
+            appendMessages (x, name, rs.body.next, function () {});
+         });
+      }, 2000);
+      B.call (x, 'mset', ['pending', 'idle'], timer);
    }],
 
    // Before views redraw: remember whether the chat was at the bottom, since large appends (tool calls) grow it by more than the threshold.
@@ -1392,6 +1409,18 @@ B.mrespond ([
          if (B.get ('file', 'name') !== name) return;
          if (B.get ('message', 'body') === body) B.call (x, 'set', ['message', 'body'], '');
          B.call (x, 'read', 'project');
+      });
+   }],
+
+   ['update', 'access', function (x) {
+      B.call (x, 'post', '/project/message', {
+         body: 'vibey access',
+         file: 'vibey/access.chat.md',
+         to: 'shell',
+      }, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem updating access');
+         B.call (x, 'read', 'project');
+         B.call (x, 'navigate', 'f/' + filePath ('vibey/access.chat.md'));
       });
    }],
 
@@ -2845,6 +2874,13 @@ views.files = function () {
                            title: file.full ? 'Exit full screen' : 'Full screen',
                            type: 'button',
                         }, [views.tooltip ('\\', 'below'), ['i', {class: 'bi bi-' + (file.full ? 'fullscreen-exit' : 'fullscreen') + ' mr1'}], 'Full']],
+                        file.name === 'vibey/access.md' && ! project.read ? ['button', {
+                           class: 'bg-vgreen bn br2 f6 fw6 ml2 pointer vdeepnavy',
+                           onclick: B.ev ('update', 'access'),
+                           style: style ({padding: '0.25rem 0.75rem'}),
+                           title: 'Sync access from vibey/access.md',
+                           type: 'button',
+                        }, [['i', {class: 'bi bi-arrow-repeat mr1'}], 'Update access']] : '',
                      ]],
                   ]];
 
@@ -3389,7 +3425,7 @@ views.chat = function (read) {
    };
 
    var parseToolResult = function (b) {
-      var match = b.match (/^tool-call: (edit|read|run|write)(?:\n|$)/);
+      var match = b.match (/^tool-call: (agent|edit|read|run|write)(?:\n|$)/);
       if (! match) return;
       var op = match [1];
       var rest = b.slice (match [0].length);
@@ -3407,6 +3443,20 @@ views.chat = function (read) {
          op: op,
          result: result.replace (/\n+$/, ''),
       };
+      if (op === 'agent') {
+         tool.calls = dale.go (b.split ('\n\nResult:\n') [0].split (/^tool-call: agent\n/m).slice (1), function (block) {
+            var lines = block.split ('\n');
+            var to = lines [2] && lines [2].startsWith ('to: ');
+            return {
+               description: lines [0],
+               message: lines.slice (to ? 3 : 2).join ('\n').replace (/\n+$/, ''),
+               path: (lines [1] || '').replace (/^path: /, ''),
+               to: to ? lines [2].slice (4) : '',
+            };
+         });
+         tool.results = tool.result ? tool.result.split ('\n') : [];
+         return tool;
+      }
       if (op === 'run') {
          var cmdMatch = header.match (/^command: (.+)/);
          tool.command = cmdMatch ? cmdMatch [1] : '';
@@ -3435,12 +3485,14 @@ views.chat = function (read) {
 
    var renderToolResult = function (tool) {
       var icons = {
+         agent: 'bi-robot',
          edit: 'bi-pencil',
          read: 'bi-eye',
          run: 'bi-terminal',
          write: 'bi-file-earmark-plus',
       };
       var opColors = {
+         agent: css.colors.vturquoise,
          edit: css.colors.vorange,
          read: css.colors.vlightblue,
          run: css.colors.vpurple,
@@ -3449,6 +3501,64 @@ views.chat = function (read) {
       var color = opColors [tool.op];
       var border = css.rgba (color, 0.2);
       var ok = tool.exitCode === 0;
+
+      if (tool.op === 'agent') return ['div', {class: 'code overflow-hidden'}, dale.go (tool.calls, function (call, index) {
+         var result = tool.results [index];
+         var started = result !== undefined && (teishi.parse (result) || {}).id;
+         return ['div', {
+            style: style ({
+               'border-top': index ? '0.0625rem solid ' + border : 'none',
+            }),
+         }, [
+            call.description ? ['div', {
+               class: 'f6 lh-copy sans-serif vlightblue',
+               style: style ({
+                  padding: '0.375rem 0.625rem',
+               }),
+            }, call.description] : '',
+            ['div', {
+               class: 'f7 flex fw7 items-center',
+               style: style ({
+                  'background-color': css.rgba (color, 0.15),
+                  color: color,
+                  gap: '0.375rem',
+                  padding: '0.375rem 0.625rem',
+               }),
+            }, [
+               ['i', {class: 'bi ' + icons.agent}],
+               ['span', {class: 'flex-shrink-0'}, 'agent'],
+               ['span', {
+                  class: 'f7 fw5 truncate',
+                  style: style ({
+                     color: css.colors.vgray,
+                     'min-width': 0,
+                  }),
+               }, call.path],
+               call.to ? ['i', {class: 'bi bi-arrow-right flex-shrink-0'}] : '',
+               call.to ? ['span', {class: 'flex-shrink-0'}, call.to] : '',
+            ]],
+            call.message ? ['div', {
+               class: 'f7',
+               style: style ({
+                  'border-top': '0.0625rem solid ' + border,
+                  'max-height': '12rem',
+                  'overflow-y': 'auto',
+                  padding: '0.375rem 0.625rem',
+               }),
+            }, ['pre', {class: 'ma0 overflow-x-auto vnearwhite'}, call.message]] : '',
+            result !== undefined ? ['div', {
+               class: 'f7 fw7 tr',
+               style: style ({
+                  'border-top': '0.0625rem solid ' + border,
+                  color: started ? css.colors.vgreen : css.colors.vred,
+                  padding: '0.25rem 0.625rem',
+               }),
+            }, [
+               ['i', {class: 'bi mr1 ' + (started ? 'bi-check-circle' : 'bi-x-circle')}],
+               started ? 'started' : result,
+            ]] : '',
+         ]];
+      })];
 
       return ['div', {
          class: 'code overflow-hidden',

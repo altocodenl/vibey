@@ -285,7 +285,7 @@ var models = [
    {provider: 'anthropic', model: 'opus-4.6', canonical: 'claude-opus-4-6', window: 1000000, priceCache: 0.5, priceIn: 5,  priceOut: 25},
 ];
 
-var systemPrompt = fs.readFileSync ('prompt.md', 'utf8');
+var systemPrompt = fs.readFileSync ('prompt.md', 'utf8').replace ('AI_TARGETS', dale.go (models, function (m) {return 'ai-' + m.model}).join (', '));
 
 // *** AUTH HELPERS ***
 
@@ -389,7 +389,7 @@ var allowOp = async function (userId, projectId, op, prefix) {
 
    var [owner, grants] = await redis ([
       ['hget', 'project:' + projectId, 'owner'],
-      ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
+      prefix === 'vibey/access.md' ? ['smembers', 'accessTo:' + userId] : ['sunion', 'accessTo:' + userId, 'accessTo:PUBLIC']
    ]);
    if (! owner) return false;
    if (owner === userId) return true;
@@ -400,7 +400,8 @@ var allowOp = async function (userId, projectId, op, prefix) {
       if (verb !== 'write' && verb !== op) return;
 
       var scope = parts.join (':');
-      return ! scope || (type (prefix) === 'string' && (scope.startsWith ('APP:') ? prefix === scope : prefix.startsWith (scope)));
+      if (type (prefix) === 'string' && inc (prefix.split ('/'), '.git')) return verb === 'write' && ! scope;
+      return ! scope || (type (prefix) === 'string' && (scope.startsWith ('APP:') ? prefix === scope : ! /^APP:\d+$/.test (prefix) && prefix.startsWith (scope)));
    });
 };
 
@@ -617,7 +618,7 @@ project.write = async function (id, path, content, noCommit) {
 project.edit = async function (id, path, oldText, newText, noCommit) {
 
    var lockKey = 'lock:edit:' + id + ':' + path;
-   await lock (lockKey, 10);
+   await lock (lockKey, 10, 10);
 
    if (oldText === '[EOF]') {
       var result = await project.run (id, 'cat >> ' + Path.quote (path), {input: newText, catch: true, commit: noCommit ? false : 'Edit ' + Path.quote (path)});
@@ -902,7 +903,7 @@ var routes = [
             if (owner) {
                rq.projectId = projectSubdomain;
                var readableSubdomain = owner.username + '--' + slug (project.name);
-               if (owner.username && readableSubdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/)) rq.projectRedirect = readableSubdomain;
+               if (owner.username && readableSubdomain.match (/^[a-z0-9][a-z0-9\-]{0,54}[a-z0-9]$/)) rq.projectRedirect = readableSubdomain;
             }
          }
          else {
@@ -1020,6 +1021,7 @@ var routes = [
       var staticRoutes = [
          ['get', '/'],
          ['get', /^\/assets\/.+/],
+         ['get', '/cell.js'],
          ['get', '/client.js'],
          ['get', '/favicon.svg'],
          ['get', /^\/icon\/icon-(?:180|192|512)\.png$/],
@@ -1656,7 +1658,7 @@ var routes = [
       dale.go (projects, function (project, k) {
          project.ownerUsername = usernames [k] || undefined;
          var subdomain = project.ownerUsername + '--' + project.name.toLowerCase ().replace (/-/g, '--').replace (/ /g, '-');
-         if (project.ownerUsername && subdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/)) project.subdomain = subdomain;
+         if (project.ownerUsername && subdomain.match (/^[a-z0-9][a-z0-9\-]{0,54}[a-z0-9]$/)) project.subdomain = subdomain;
       });
 
       reply (rs, 200, dale.go (projects.sort (function (a, b) {
@@ -1726,7 +1728,7 @@ var routes = [
       await project.write (newProject.id, 'main.md', '# ' + rq.body.name + '\n\n');
 
       var subdomain = rq.user.username + '--' + rq.body.name.toLowerCase ().replace (/-/g, '--').replace (/ /g, '-');
-      reply (rs, 200, {id: newProject.id, subdomain: rq.user.username && subdomain.match (/^[a-z0-9][a-z0-9\-]{0,61}[a-z0-9]$/) ? subdomain : undefined});
+      reply (rs, 200, {id: newProject.id, subdomain: rq.user.username && subdomain.match (/^[a-z0-9][a-z0-9\-]{0,54}[a-z0-9]$/) ? subdomain : undefined});
    }],
 
    ['put', '/project', async function (rq, rs) {
@@ -1827,6 +1829,8 @@ var routes = [
       });
       if (access && ! access.length) return reply (rs, 404);
 
+      var accessFile = await allowOp (userId, rq.projectId, 'read', 'vibey/access.md');
+
       var [result, sockets] = await Promise.all ([
          project.run (rq.projectId, "find /project -type f -not -path '/project/.git/*' -printf '%s %T@ %P\\0'", {catch: true}),
          project.run (rq.projectId, 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null', {catch: true}),
@@ -1867,9 +1871,10 @@ var routes = [
          var second = line.indexOf (' ', first + 1);
          var name = line.slice (second + 1);
          if (! validProjectPath (name)) return;
-         if (! rq.user && name === 'vibey/access.md') return;
+         if (name === 'vibey/access.md' && ! accessFile) return;
          if (access && ! dale.stop (access, true, function (grant) {
-            return name.startsWith (grant.split (':').slice (1).join (':'));
+            var scope = grant.split (':').slice (1).join (':');
+            return ! scope.startsWith ('APP:') && ! /^APP:\d+$/.test (name) && name.startsWith (scope);
          })) return;
 
          return {
@@ -2002,8 +2007,9 @@ var routes = [
          return reply (rs, 400, {error: 'Could not read request body'});
       }
 
-      var cookies = dale.fil (rq.data.cookie, undefined, function (v, k) {
-         if (k !== cookie ('project') && k !== cookie ('project-state')) return k + '=' + v;
+      var cookies = dale.fil ((rq.headers.cookie || '').split (/;\s*/), undefined, function (pair) {
+         var name = pair.split ('=') [0];
+         if (pair && name !== cookie ('project') && name !== cookie ('project-state')) return pair;
       });
       var headers = dale.fil (rq.headers, undefined, function (v, k) {
          if (! inc (['connection', 'content-length', 'cookie', 'expect', 'host', 'x-csrf'], k)) return '-H ' + Path.quote (k + ': ' + v);
@@ -2143,9 +2149,21 @@ var routes = [
 
    ['post', '/project/message', async function (rq, rs) {
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'name', 'to'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['base64', 'body', 'file', 'from', 'name', 'reply', 'to'], 'eachOf', teishi.test.equal],
          ['base64', rq.body.base64, ['boolean', 'undefined'], 'oneOf'],
          ['file', rq.body.file, 'string'],
+         ['from', rq.body.from, ['string', 'undefined'], 'oneOf'],
+         ['from', rq.body.from, undefined, function () {
+            if (rq.body.from === undefined || /^[^\n]+$/.test (rq.body.from)) return true;
+            return ['from must be a single line'];
+         }],
+         ['reply', rq.body.reply, ['string', 'undefined'], 'oneOf'],
+         ['reply', rq.body.reply, undefined, function () {
+            if (rq.body.reply === undefined) return true;
+            if (rq.body.from === undefined) return ['reply requires from'];
+            if (/^[^\n]+$/.test (rq.body.reply)) return true;
+            return ['reply must be a single line'];
+         }],
          ['body', rq.body.body, 'string'],
          ['body without marker lines', rq.body.body, /^(?![\s\S]*(^|\n)əəə (head|body))/, teishi.test.match],
          ['body', rq.body.body, undefined, function () {
@@ -2186,7 +2204,7 @@ var routes = [
          ? JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}')
          : {};
       var creds = credentials [aiFlavor] || {};
-      var auth = aiModel && (aiModel.requireAPIKey
+      var auth = aiModel && (rq.test ? 'test' : aiModel.requireAPIKey
          ? (creds.apiKey ? 'apiKey' : undefined)
          : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined);
 
@@ -2234,9 +2252,10 @@ var routes = [
       var message = dale.fil ([
          'əəə head ' + id,
          rq.body.base64 ? 'base64 1' : undefined,
-         'from ' + rq.user.id,
+         'from ' + (rq.body.from || rq.user.id),
          'id ' + id,
          rq.body.name !== undefined ? 'name ' + rq.body.name : undefined,
+         rq.body.reply !== undefined ? 'reply ' + rq.body.reply : undefined,
          't ' + now (),
          'to ' + rq.body.to,
          'əəə body ' + id,
@@ -2320,7 +2339,7 @@ var routes = [
                   '^əəə head ' + messageId + '\n(?:(?!əəə (?:head|body) )[^\n]*\n)*cancelled .+$', 'im'
                ).test (chat.stdout.toString ('utf8'))) return;
                cancelled = true;
-               var result = await project.run (executionProjectId, 'bash -c ' + Path.quote (
+               var result = proc.fake ? {code: 0} : await project.run (executionProjectId, 'bash -c ' + Path.quote (
                   'read -r pid < ' + Path.quote (pidFile)
                   + ' && kill -KILL -- "-$pid"'
                ), {catch: true});
@@ -2355,11 +2374,16 @@ var routes = [
          });
       };
 
+      var streamPending = false;
       var streamEdit = function () {
-         var newBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
-         var headUsage = usage;
+         if (streamPending) return;
+         streamPending = true;
          editQueue = editQueue.then (async function () {
+            await new Promise (function (resolve) {setTimeout (resolve, 20)});
+            streamPending = false;
             if (editError) return;
+            var newBody = 'əəə body ' + responseId + '\n' + output.replace (/^əəə (head|body)/gm, '> əəə $1');
+            var headUsage = usage;
             var headTail = function (usage) {
                return ['t-start ' + tStart].concat (tokenLines (usage), ['credential ' + auth, 'to ' + messageTo, '']).join ('\n');
             };
@@ -2389,6 +2413,7 @@ var routes = [
             shellProject = projectCall [1];
             shellCommand = projectCall [2];
             if (shellProject !== rq.projectId) {
+               if (! validUuid.test (shellProject) || ! await redis ('exists', 'project:' + shellProject)) return reply (rs, 404);
                var access = await project.read (shellProject, '/project/vibey/access.md');
                var allowed = ! access.code && access.stdout.toString ('utf8').split (/\r?\n/).some (function (line) {
                   var grant = /^(\S+)\s+write$/.exec (line.trim ());
@@ -2440,6 +2465,22 @@ var routes = [
          redis ('hset', 'project:' + rq.projectId, 'last', now ());
          return;
       }
+
+      var postMessage = function (body) {
+         return new Promise (function (resolve) {
+            hitit.one ({}, {
+               port:    CONFIG.port,
+               method:  'post',
+               path:    '/project/message',
+               headers: dale.obj ({cookie: rq.headers.cookie, host: rq.headers.host, 'x-csrf': rq.headers ['x-csrf'], 'x-test': rq.headers ['x-test']}, function (v, k) {if (v !== undefined) return [k, v]}),
+               body:    body,
+               code:    200,
+            }, function (error, rdata) {
+               if (error) return resolve ({code: 1, error: JSON.stringify (error.body || error.error)});
+               resolve ({code: 0, stdout: JSON.stringify (rdata.body)});
+            });
+         });
+      };
 
       var toolDone;
       for (var turn = 0; ; turn++) {
@@ -2509,7 +2550,7 @@ var routes = [
          }
 
          var buffer = '', aiStderr = '';
-         var lastFullText = '';
+         var lastFullText = '', messageBreak = false;
          var codexProc, codexError, codexItem, codexDone = false;
          var codexSend = function (message) {
             codexProc.stdin.write (JSON.stringify (message) + '\n');
@@ -2524,7 +2565,10 @@ var routes = [
                var event = JSON.parse (line);
                if (event.type === 'stream_event' && event.event) {
                   var partial = event.event;
-                  if (partial.type === 'message_start') lastFullText = '';
+                  if (partial.type === 'message_start') {
+                     lastFullText = '';
+                     messageBreak = !! output;
+                  }
                   if (partial.type === 'message_start' && partial.message && partial.message.usage) {
                      var start = partial.message.usage;
                      usage = {
@@ -2540,7 +2584,9 @@ var routes = [
                   };
                   if (partial.type === 'content_block_delta' && partial.delta.type === 'text_delta') {
                      lastFullText += partial.delta.text;
-                     return partial.delta.text;
+                     var separator = messageBreak ? '\n\n' : '';
+                     messageBreak = false;
+                     return separator + partial.delta.text;
                   }
                }
                if (event.type === 'result' && event.usage) {
@@ -2644,102 +2690,122 @@ var routes = [
 
          prompt += '\nCurrent chat file: ' + JSON.stringify (rq.body.file) + '\n';
 
-         var temp = await project.run (rq.projectId, 'umask 077; mktemp -d /home/vibey/.vibey-ai.XXXXXXXXXX', {catch: true});
-         if (temp.code) throw temp;
-         var configDir = temp.stdout.trim ();
+         if (rq.test) var aiResult = await new Promise (function (resolve) {
+            var proc = new (require ('events')) (), words = 0;
+            var script = turn === 0 && /^fake-output:\n/.test (rq.body.body) ? rq.body.body.slice ('fake-output:\n'.length) : undefined;
+            proc.fake = true;
+            watchCancellation (proc);
+            var interval = setInterval (function () {
+               if (! cancelled) {
+                  output += script !== undefined ? script : (words ? ' ' : '') + 'word' + words;
+                  streamEdit ();
+                  if (script === undefined && ++words < 1000) return;
+               }
+               clearInterval (interval);
+               proc.emit ('exit');
+               proc.emit ('close');
+               resolve (cancelled ? {code: null, signal: 'SIGKILL'} : {code: 0});
+            }, 1);
+         });
+         else {
+            var temp = await project.run (rq.projectId, 'umask 077; mktemp -d /home/vibey/.vibey-ai.XXXXXXXXXX', {catch: true});
+            if (temp.code) throw temp;
+            var configDir = temp.stdout.trim ();
 
-         try {
-            var dockerArgs = ['exec', '-i'];
-            var command;
+            try {
+               var dockerArgs = ['exec', '-i'];
+               var command;
 
-            if (aiFlavor === 'openai') {
-               var codexAuth = JSON.stringify (auth === 'apiKey'
-                  ? {auth_mode: 'apikey', OPENAI_API_KEY: creds.apiKey}
-                  : {
-                     auth_mode: 'chatgpt',
-                     last_refresh: new Date ().toISOString (),
-                     tokens: {
-                        access_token: creds.account.access,
-                        refresh_token: creds.account.refresh,
-                        id_token: creds.account.idToken || '',
-                        account_id: creds.account.accountId || '',
-                     },
-                  });
-               var result = await project.write (rq.projectId, configDir + '/auth.json', codexAuth, 'noCommit');
-               if (result.code) throw result;
-
-               dockerArgs.push ('-e', 'CODEX_HOME=' + configDir);
-               command = 'exec codex app-server --stdio -c ' + Path.quote ('sandbox_mode="danger-full-access"');
-            }
-
-            if (aiFlavor === 'anthropic') {
-               if (auth === 'account') {
-                  var claudeAuth = JSON.stringify ({claudeAiOauth: {
-                     accessToken: creds.account.access,
-                     clientId: Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString (),
-                     expiresAt: creds.account.expires,
-                     refreshToken: creds.account.refresh,
-                  }});
-                  var result = await project.write (rq.projectId, configDir + '/.credentials.json', claudeAuth, 'noCommit');
+               if (aiFlavor === 'openai') {
+                  var codexAuth = JSON.stringify (auth === 'apiKey'
+                     ? {auth_mode: 'apikey', OPENAI_API_KEY: creds.apiKey}
+                     : {
+                        auth_mode: 'chatgpt',
+                        last_refresh: new Date ().toISOString (),
+                        tokens: {
+                           access_token: creds.account.access,
+                           refresh_token: creds.account.refresh,
+                           id_token: creds.account.idToken || '',
+                           account_id: creds.account.accountId || '',
+                        },
+                     });
+                  var result = await project.write (rq.projectId, configDir + '/auth.json', codexAuth, 'noCommit');
                   if (result.code) throw result;
+
+                  dockerArgs.push ('-e', 'CODEX_HOME=' + configDir);
+                  command = 'exec codex app-server --stdio -c ' + Path.quote ('sandbox_mode="danger-full-access"');
                }
 
-               var credentialPath = configDir + '/credential';
-               var result = await project.write (
-                  rq.projectId, credentialPath,
-                  auth === 'apiKey' ? creds.apiKey : creds.account.access,
-                  'noCommit'
-               );
-               if (result.code) throw result;
+               if (aiFlavor === 'anthropic') {
+                  if (auth === 'account') {
+                     var claudeAuth = JSON.stringify ({claudeAiOauth: {
+                        accessToken: creds.account.access,
+                        clientId: Buffer.from ('OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl', 'base64').toString (),
+                        expiresAt: creds.account.expires,
+                        refreshToken: creds.account.refresh,
+                     }});
+                     var result = await project.write (rq.projectId, configDir + '/.credentials.json', claudeAuth, 'noCommit');
+                     if (result.code) throw result;
+                  }
 
-               dockerArgs.push ('-e', 'CLAUDE_CONFIG_DIR=' + configDir);
-               command = 'unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;'
-                  + ' credential=$(cat ' + Path.quote (credentialPath) + ') || exit 1;'
-                  + ' export ' + (auth === 'apiKey' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN') + '="$credential";'
-                  + ' unset credential;'
-                  + ' exec claude -p --model ' + Path.quote (aiModel.canonical)
-                  + ' --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions';
+                  var credentialPath = configDir + '/credential';
+                  var result = await project.write (
+                     rq.projectId, credentialPath,
+                     auth === 'apiKey' ? creds.apiKey : creds.account.access,
+                     'noCommit'
+                  );
+                  if (result.code) throw result;
+
+                  dockerArgs.push ('-e', 'CLAUDE_CONFIG_DIR=' + configDir);
+                  command = 'unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;'
+                     + ' credential=$(cat ' + Path.quote (credentialPath) + ') || exit 1;'
+                     + ' export ' + (auth === 'apiKey' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN') + '="$credential";'
+                     + ' unset credential;'
+                     + ' exec claude -p --model ' + Path.quote (aiModel.canonical)
+                     + ' --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions';
+               }
+
+               dockerArgs.push ('vibey-project-' + rq.projectId, 'sh', '-c', groupedCommand (command));
+
+               var aiResult = await run ('docker', ... dockerArgs, {
+                  catch: true,
+                  input: aiFlavor === 'openai' ? undefined : prompt,
+                  onSpawn: function (proc) {
+                     watchCancellation (proc);
+                     if (aiFlavor !== 'openai') return;
+                     codexProc = proc;
+                     proc.stdin.on ('error', function (error) {
+                        codexError = 'Codex stdin error: ' + error.message;
+                     });
+                     codexSend ({
+                        id: 1, method: 'initialize',
+                        params: {
+                           clientInfo: {name: 'vibey', version: '1.0.0'},
+                           capabilities: null,
+                        },
+                     });
+                  },
+                  stderr: function (chunk) {
+                     aiStderr += chunk;
+                  },
+                  stdout: function (chunk) {
+                     buffer += chunk;
+                     var lines = buffer.split ('\n');
+                     buffer = lines.pop ();
+                     processLines (lines);
+                  },
+               });
+            }
+            finally {
+               try {
+                  var cleanup = await project.run (rq.projectId, 'rm -rf -- ' + Path.quote (configDir), {catch: true});
+                  if (cleanup.code) throw cleanup;
+               }
+               catch (error) {
+                  clog ({priority: 'important', type: 'AI credentials cleanup error', error: formatError (error), responseId});
+               }
             }
 
-            dockerArgs.push ('vibey-project-' + rq.projectId, 'sh', '-c', groupedCommand (command));
-
-            var aiResult = await run ('docker', ... dockerArgs, {
-               catch: true,
-               input: aiFlavor === 'openai' ? undefined : prompt,
-               onSpawn: function (proc) {
-                  watchCancellation (proc);
-                  if (aiFlavor !== 'openai') return;
-                  codexProc = proc;
-                  proc.stdin.on ('error', function (error) {
-                     codexError = 'Codex stdin error: ' + error.message;
-                  });
-                  codexSend ({
-                     id: 1, method: 'initialize',
-                     params: {
-                        clientInfo: {name: 'vibey', version: '1.0.0'},
-                        capabilities: null,
-                     },
-                  });
-               },
-               stderr: function (chunk) {
-                  aiStderr += chunk;
-               },
-               stdout: function (chunk) {
-                  buffer += chunk;
-                  var lines = buffer.split ('\n');
-                  buffer = lines.pop ();
-                  processLines (lines);
-               },
-            });
-         }
-         finally {
-            try {
-               var cleanup = await project.run (rq.projectId, 'rm -rf -- ' + Path.quote (configDir), {catch: true});
-               if (cleanup.code) throw cleanup;
-            }
-            catch (error) {
-               clog ({priority: 'important', type: 'AI credentials cleanup error', error: formatError (error), responseId});
-            }
          }
 
          if (buffer) processLines ([buffer]);
@@ -2786,10 +2852,11 @@ var routes = [
             if (! start) return;
 
             var lines = text.slice (start.index).split ('\n');
-            var op = /^tool-call: (read|write|edit|run)(?: ([^\s:]+))?$/.exec (lines [0]);
-            if (! op) return {error: 'Expected tool-call: read|write|edit|run [projectId]'};
+            var op = /^tool-call: (read|write|edit|run|agent)(?: ([^\s:]+))?$/.exec (lines [0]);
+            if (! op) return {error: 'Expected tool-call: read|write|edit|run|agent [projectId]'};
             var projectId = op [2] || rq.projectId;
             op = op [1];
+            if (op === 'agent' && projectId !== rq.projectId) return {error: 'agent only works on the current project'};
 
             var description = lines [1];
             if (! description || ! description.trim ()) return {error: 'Expected a description on line 2'};
@@ -2812,6 +2879,17 @@ var routes = [
                return call;
             }
 
+            if (op === 'agent') {
+               var to = lines [3] && lines [3].startsWith ('to: ');
+               call.to = to ? lines [3].slice (4) : rq.body.to;
+               var rest = lines.slice (to ? 4 : 3);
+               var next = rest.findIndex (function (line) {return /^tool-call: agent/.test (line)});
+               call.body = rest.slice (0, next === -1 ? rest.length : next).join ('\n');
+               if (next !== -1) call.more = parseToolCall (rest.slice (next).join ('\n'));
+               if (call.more && call.more.error) return call.more;
+               return call;
+            }
+
             if (lines [3] !== 'old text:') {
                return {error: 'Expected old text: on line 4'};
             }
@@ -2831,6 +2909,7 @@ var routes = [
                   if (call.op !== 'run' && ! validProjectPath (call.path)) {
                      return {code: 1, error: 'Invalid path'};
                   }
+                  if (! validUuid.test (target) || ! await redis ('exists', 'project:' + target)) return {code: 1, error: 'Access denied'};
                   var access = await project.read (target, '/project/vibey/access.md');
                   var allowed = ! access.code && dale.stop (
                      access.stdout.toString ('utf8').split (/\r?\n/), true,
@@ -2849,6 +2928,17 @@ var routes = [
                if (call.op === 'read') return await project.read (target, call.path);
                if (call.op === 'write') return await project.write (target, call.path, call.content);
                if (call.op === 'edit') return await project.edit (target, call.path, call.oldText, call.newText);
+               if (call.op === 'agent') {
+                  var calls = [];
+                  for (var next = call; next; next = next.more) calls.push (next);
+                  var results = await dale.async (calls, function (agentCall) {
+                     return postMessage ({body: agentCall.body, file: agentCall.path, from: rq.body.to, reply: rq.body.file, to: agentCall.to});
+                  }, {concurrent: true});
+                  return {
+                     code: dale.stop (results, true, function (result) {return !! result.code}) ? 1 : 0,
+                     stdout: dale.go (results, function (result) {return result.stdout || result.error}).join ('\n'),
+                  };
+               }
                if (call.op === 'run' && call.command.trim () === 'vibey access') {
                   var result = await project.access (target);
                   if (onOutput) onOutput (result.stdout || result.error || '');
@@ -2915,9 +3005,10 @@ var routes = [
          };
 
          // Append the successor before finishing this message, so pollers never see a finished chain end early.
+         var finishedHead = [oldHead].concat (tokenLines (writtenUsage)).join ('\n');
          if (toolCall) var toolHead = await startMessage ('shell', responseId, toolCallText + '\n\nResult:\n');
 
-         result = await project.edit (rq.projectId, rq.body.file, [oldHead].concat (tokenLines (writtenUsage)).join ('\n'), newHead);
+         result = await project.edit (rq.projectId, rq.body.file, finishedHead, newHead);
          if (result.code) throw result;
          redis ('hset', 'project:' + rq.projectId, 'last', now ());
          if (! toolCall) break;
@@ -2938,10 +3029,31 @@ var routes = [
          if (editError) throw editError;
          // Finished once the next AI message is appended (or now, if this is the last turn).
          toolDone = [toolHead, toolHead.replace ('\npending 1\n', '\nt-end ' + now () + '\n')];
-         if (turn < 49) continue;
+         for (var waits = toolCall.op === 'agent' && ! toolResult.code, next = toolCall; waits && next; next = next.more) waits = /^ai-/.test (next.to);
+         if (turn < 49 && ! waits) continue;
          await project.edit (rq.projectId, rq.body.file, toolDone [0], toolDone [1]);
          redis ('hset', 'project:' + rq.projectId, 'last', now ());
          break;
+      }
+
+      if (rq.body.reply) {
+         var sameChat = rq.body.reply === rq.body.file;
+         var replyChat = await project.read (rq.projectId, rq.body.reply);
+         var heads = {};
+         dale.go ((replyChat.code ? '' : replyChat.stdout.toString ('utf8')).split (/^əəə head /m).slice (1), function (entry) {
+            var head = entry.slice (0, entry.search (/^əəə body /m));
+            var field = function (name) {return (head.match (new RegExp ('^' + name + ' (.+)$', 'm')) || []) [1]};
+            heads [field ('id')] = {from: field ('from'), pending: field ('pending'), reply: field ('reply'), to: field ('to')};
+         });
+         var pending = dale.fil (heads, undefined, function (head) {
+            if (! head.pending) return;
+            while (heads [head.to]) head = heads [head.to];
+            if (head.reply && head.from === rq.body.from) return head;
+         }).length;
+         if (! sameChat || ! pending) {
+            var replied = await postMessage ({body: sameChat ? 'All agents finished.' : output.replace (/^əəə (head|body)/gm, '> əəə $1'), file: rq.body.reply, from: sameChat ? 'shell' : rq.body.to, to: rq.body.from});
+            if (replied.code) clog ({priority: 'important', type: 'Agent reply error', error: replied.error, responseId});
+         }
       }
    }],
 

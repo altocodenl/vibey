@@ -2,7 +2,7 @@ FROM node:24.22.1-alpine
 
 ENV TZ=UTC
 
-RUN apk add --no-cache redis bash docker-cli
+RUN apk add --no-cache redis bash docker-cli iptables
 
 RUN apk add --no-cache --virtual .build-deps build-base curl\
  && mkdir /tmp/mon && cd /tmp/mon \

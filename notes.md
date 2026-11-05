@@ -1,5 +1,79 @@
 # Vibey development notes
 
+Missing tool calls:
+- agent -> agent:
+- script -> agent: vibey ai <model> <prompt in one line, no quotes>   . email -> agent can be done if an email can call a script.
+- email -> script: in the subject?
+
+Agent to agent could be through the script! But what happens to credentials, in that case? Where would the script get the AI credentials from? I think the most elegant design for agent to agent is a simple POST /message from the endpoint itself, a sort of recursive call. For script -> agent, whether live or by cron, default to the AI credentials of the owner of the project, since there are no other live credentials, as in when someone sends an agent call that triggers an agent.
+
+I'm amazed at how elegant it is to use http calls to make an agent call agents, then get called by them. And the possibility of running them elsewhere. The entire machinery of chat is available!
+
+- Cron design:
+   - "<time selector>" <command>
+   - timezone <integer offset off UTC>
+   - Readable time selectors:
+      - Day of the week: `Monday` (defaults to midnight plus 30-90 minutes)
+      - Day of the month: `1st`, `2nd`, `18th`
+      - Time: `6:00`, `18:00`
+      - Time interval that's less than a day: `5m`, `1h`, `3h`, `6h30m` . If not modulo day, resets at midnight.
+      - Day of the week + time: `"Monday 6:00", "Friday 18:00"
+      - Day of the week + time interval: "Tuesday 5m"
+      - Day of the month + time or time interval: `3rd 18:00`, "18th 5m"
+   - Works by encoding in cron format and rewriting the entire cron file.
+
+Email design:
+- Access: have an "email" verb, that means "receive email". From are email addresses, or tokens. As long as we can trust the `from` field, or improve that later...
+- Emails should be able to call scripts and agents. But how? We can put it in cron! Getting an email is like a cron entry, which can then have a script that runs, checks for something, then can call an agent.
+- The email gets appended to inbox.chat.md
+
+- TODO
+   - demos
+   - devops
+      - destek to list logs and have alerts
+      - renew wildcard subdomain automatically
+   - engine
+      - support engines without provisioning (BYOE)
+      - provision engines
+      - Port mapping from the project to the engine: allow to run in a port. Check for contention within the engine. Then auto-modify nginx to allow for direct access. Allow direct access with mappings of URLs, per individual file and also per folder/prefix (forbid dots).
+   - access
+      - email to project
+      - token/api hooks
+   - chat
+      - call agent from shell
+      - cron
+   - file
+      - Don't expand folders by default
+      - tabs
+      - open sqlite files
+   - project
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - autobackup
+      - CSRF tokens to prevent CSRF attacks between projects (outside from Vibey is already covered by headers): support GET /auth/user, change promopt
+      - explore alternative to docker to reduce command latency (50ms base)
+   - tests: local mode, client tests
+
+DONE
+- Call agent from agent (!)
+- Button on vibey/access.md to send a message to vibey/access.chat.md to update access (also on vibey/cron.md later)
+- Update readme and server tests to cover gaps, including AI calls (!).
+- Security improvements:
+   - .git locked down: only owners and whole-project writers can read or write paths with a .git segment, including nested repos.
+   - access.md private: only the owner and people whose own grant covers it can read or list it. Public projects no longer expose it to logged-in strangers or anonymous visitors.
+   - App and file scopes separated: a file prefix can't grant an app (e.g. A no longer matches APP:3000), and app grants don't list files.
+   - Project IDs checked: vibey project <id> and AI tool calls reject IDs that aren't UUIDs or don't exist, so writers can't create containers at will.
+   - Docs updated: literal prefix matching, ending a folder prefix with /, and the new access.md rule.
+   - Block project containers from private networks.
+
+Had two ideas while asleep:
+- Tool call descriptions shown live in a public page. It'd be fun to see, but it could be a security nightmare if the LLMs put sensitive data in the description. The fear factor is larger than the fun factor, so shelved.
+- A forum for vibey questions. On waking up, I wondered: instead of a vibey app, why not make it a chat instead?
+
+Don't fight the web.
+
 ## 2026-11-03
 
 Subdomain deploy sequence

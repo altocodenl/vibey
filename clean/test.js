@@ -154,11 +154,75 @@ if (mode === 'server') {
             return '__Host-' + CONFIG.cookie.name + '-' + type;
          }
 
+         var projectHost = function (s) {
+            return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname;
+         }
+
+         var appHost = function (s) {
+            return '3000--' + projectHost (s);
+         }
+
+         var projectCookie = function (s) {
+            var match = (s.headers.cookie || '').match (new RegExp (cookie ('project') + '="[0-9a-f]+"'));
+            return match ? match [0] + '; ' : '';
+         }
+
+         var projectFetch = function (s, path, body) {
+            return fetch ('http://' + projectHost (s) + ':' + CONFIG.port + path, body ? {
+               body: JSON.stringify (body),
+               headers: {... s.headers, 'content-type': 'application/json', 'x-csrf': s.projectCsrf},
+               method: 'POST',
+            } : {headers: s.headers}).then (function (response) {
+               return response.ok ? response.json () : null;
+            });
+         }
+
+         var projectRaw = function (s, path) {
+            return fetch ('http://' + projectHost (s) + ':' + CONFIG.port + '/f/' + encodeURIComponent (path) + '?raw=1', {headers: s.headers}).then (function (response) {
+               return response.ok ? response.text () : '';
+            });
+         }
+
+         var agentScript = function (calls) {
+            return 'fake-output:\n' + dale.go (calls, function (call) {
+               return ['tool-call: agent', call.description, 'path: ' + call.path].concat (call.to ? ['to: ' + call.to] : [], [call.body]).join ('\n');
+            }).join ('\n');
+         }
+
+         var agentsDone = function (path, check) {
+            return function (s) {
+               return projectRaw (s, path).then (function (text) {
+                  return ! /^pending 1$/m.test (text) && check (text);
+               });
+            };
+         }
+
+         var count = function (text, regex) {
+            return (text.match (regex) || []).length;
+         }
+
+         var waitFor = function (tag, check) {
+            return [tag, 'get', '/', 200, function (s, rq, rs, next) {
+               var started = Date.now ();
+               var attempt = async function () {
+                  if (await check (s)) return next (null, rs);
+                  if (Date.now () - started > 10000) return next ('Timed out: ' + tag);
+                  setTimeout (attempt, 50);
+               }
+               attempt ().catch (next);
+            }];
+         }
+
          // *** PUBLIC ***
 
          suites.public = dale.go ([
             ['get', '/'],
+            ['get', '/cell.js'],
             ['get', '/favicon.svg'],
+            ['get', '/manifest.json'],
+            ... dale.go ([180, 192, 512], function (size) {
+               return ['get', '/icon/icon-' + size + '.png'];
+            }),
             ... dale.go (['normalize.css/normalize', 'tachyons/css/tachyons.min', 'bootstrap-icons/font/bootstrap-icons.min'], function (v) {
                return ['get', '/assets/' + v + (v.match (/\.woff\d?$/) ? '' : '.css')];
             }),
@@ -170,6 +234,25 @@ if (mode === 'server') {
             if (route [0] === 'get') return ['Get public route: ' + route [1], 'get', route [1], 200];
             return ['Post public route: ' + route [1], 'post', route [1], {test: 'hello'}, 200];
          });
+
+         // *** ROUTING ***
+
+         suites.routing = [
+            {tag: 'HEAD on public route', method: 'head', path: '/', code: 200, apres: function (s, rq, rs) {
+               return assert (['empty body', rs.body === '' || rs.body === undefined, true, teishi.test.equal]);
+            }},
+            {tag: 'Host outside base domain', method: 'get', host: new URL (CONFIG.baseURL).hostname, headers: {host: 'example.org:' + CONFIG.port}, path: '/', code: 404},
+            {tag: 'Nested subdomain', method: 'get', host: 'a.b.' + new URL (CONFIG.baseURL).hostname, path: '/', code: 404},
+            dale.go ([['get', '/f/main.md'], ['get', '/project'], ['post', '/project/run']], function (route) {
+               return {tag: 'Project route on host: ' + route.join (' '), method: route [0], host: new URL (CONFIG.baseURL).hostname, path: route [1], body: route [0] === 'post' ? {command: 'true'} : '', code: 404};
+            }),
+            dale.go ([['get', '/projects'], ['get', '/auth/list'], ['post', '/auth/login']], function (route) {
+               return {tag: 'Host route on subdomain: ' + route.join (' '), method: route [0], host: 'anything.' + new URL (CONFIG.baseURL).hostname, path: route [1], body: route [0] === 'post' ? {email: 'hello@example.com'} : '', code: 404};
+            }),
+            {tag: 'App path on subdomain without port', method: 'get', host: 'anything.' + new URL (CONFIG.baseURL).hostname, path: '/p/3000/', code: 404},
+            ['Reject dots in asset path', 'get', '/assets/normalize.css/../normalize.css/normalize.css', 400],
+            ['Missing asset', 'get', '/assets/nothing.css', 404],
+         ];
 
          // *** TEST ***
 
@@ -238,7 +321,6 @@ if (mode === 'server') {
             }),
             ['Set settings before invalid requests', 'put', '/auth/user', {settings: {vi: true}}, 200, assertBody ({settings: {vi: true}})],
             dale.go ([
-               {},
                {settings: null},
                {settings: []},
                {settings: 'vi'},
@@ -257,6 +339,7 @@ if (mode === 'server') {
             ], function (body, index) {
                return ['Reject invalid settings #' + index, 'put', '/auth/user', body, 400];
             }),
+            ['Reject update without settings or username', 'put', '/auth/user', {}, 400, assertBody ({error: 'Provide settings or username'})],
             CONFIG.cloud ? [
                ['Set settings without session', 'put', '/auth/user', {settings: {}}, 403, assertBody ({error: 'No session'}), {cookie: ''}],
                ['Set settings with invalid CSRF', 'put', '/auth/user', {settings: {}}, 403, assertBody ({error: 'Invalid csrf token'}), {'x-csrf': 'invalid'}],
@@ -304,6 +387,9 @@ if (mode === 'server') {
                if (! CONFIG.cloud) return ['Call auth path in local mode', 'post', path, {}, 404, assertBody ({error: 'Not in cloud mode'})];
             }),
             CONFIG.cloud ? [
+               ['Login with an extra key', 'post', '/auth/login', {email: 'hello@example.com', extra: true}, 400, function (s, rq, rs) {
+                  return assert (['error', rs.body.error, /keys of body/, teishi.test.match]);
+               }],
                ['Login', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
                   s.loginLink = rs.body.loginLink;
                   return true;
@@ -319,6 +405,20 @@ if (mode === 'server') {
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
+               ['Request first login link', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
+                  s.firstLoginLink = rs.body.loginLink;
+                  return true;
+               }],
+               ['Request second login link with uppercase email', 'post', '/auth/login', {email: 'HELLO@Example.com'}, 200, function (s, rq, rs, next) {
+                  redis ('get', 'loginLink:' + rs.body.loginLink).then (function (email) {
+                     if (! assert (['link email', email, 'hello@example.com', teishi.test.equal])) return next (new Error (validationError));
+                     next (null, rs);
+                  }, next);
+               }],
+               ['Verify replaced login link', 'get', function (s) {return '/auth/verify/' + s.firstLoginLink}, 403, function (s, rq, rs, next) {
+                  if (! assert (['body', rs.body, {error: 'Invalid login link', loginLink: s.firstLoginLink}, teishi.test.equal])) return false;
+                  redis ('del', 'rateLimit:login:hello@example.com').then (function () {next (null, rs)}, next);
+               }],
                ['Request creator access', 'post', '/creator/request', {}, 200],
                ['Request creator access again', 'post', '/creator/request', {}, 200],
                ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
@@ -326,6 +426,7 @@ if (mode === 'server') {
                ['Get user', 'get', '/auth/user', 200, function (s, rq, rs) {
                   return assert ([
                      ['body', rs.body, 'object'],
+                     ['body.admin', rs.body.admin, undefined, teishi.test.equal],
                      ['body.count', rs.body.count, 'integer'],
                      ['body.creator', rs.body.creator, true, teishi.test.equal],
                      ['body.credentials', rs.body.credentials, {}, teishi.test.equal],
@@ -335,6 +436,39 @@ if (mode === 'server') {
                      ['body.username', rs.body.username, 'hello', teishi.test.equal],
                   ]);
                }],
+               ['Age host session', 'get', '/', 200, function (s, rq, rs, next) {
+                  s.agedSession = s.headers.cookie.match (/"([0-9a-f]+)"/) [1];
+                  redis ([
+                     ['hset', 'session-h:' + s.agedSession, 'expires', new Date (Date.now () + 60000).toISOString ()],
+                     ['hset', 'session-h:' + s.agedSession, 'last', JSON.stringify ({date: '2000-01-01T00:00:00.000Z', ip: 'aged'})],
+                  ]).then (function () {next (null, rs)}, next);
+               }, {cookie: ''}],
+               ['Request with aged session', 'get', '/auth/user', 200],
+               ['Request refreshes session', 'get', '/', 200, function (s, rq, rs, next) {
+                  redis ('hmget', 'session-h:' + s.agedSession, 'expires', 'last').then (function (session) {
+                     if (! assert ([
+                        ['expires extended', new Date (session [0]).getTime () > Date.now () + 3600000, true, teishi.test.equal],
+                        ['last updated', JSON.parse (session [1]).date === '2000-01-01T00:00:00.000Z', false, teishi.test.equal],
+                     ])) return next (new Error (validationError));
+                     next (null, rs);
+                  }, next);
+               }, {cookie: ''}],
+               ['Admin flag for admin', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert (['body.admin', rs.body.admin, true, teishi.test.equal]);
+               }, adminHeaders],
+               ['Non-admin cannot grant creator access', 'post', '/creator/grant', {email: 'foo@example.com', grant: true}, 403, assertBody ({error: 'Not admin'})],
+               ['Non-admin cannot download tests', 'get', '/test.js', 403, assertBody ({error: 'Not admin'})],
+               ['Request creator access as creator', 'post', '/creator/request', {}, 409, assertBody ({error: 'Already a creator'})],
+               ['Request creator access with a body', 'post', '/creator/request', {extra: true}, 400, function (s, rq, rs) {
+                  return assert (['error', rs.body.error, /body should be equal to/, teishi.test.match]);
+               }],
+               ['Revoke creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: false}, 200, adminHeaders],
+               ['Get user after revocation', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert (['body.creator', rs.body.creator, false, teishi.test.equal]);
+               }],
+               ['Create project after revocation', 'post', '/project', {name: 'not allowed'}, 403, assertBody ({error: 'Please request creator access'})],
+               ['Revoke creator access for nonexisting account', 'post', '/creator/grant', {email: 'nobody@example.com', grant: false}, 404, adminHeaders],
+               ['Restore creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
                // Both creation paths allocate usernames; collisions use the first available suffix.
                usernameAccount ('hello@example.net', 'hello-example'),
                usernameAccount ('hello@example.org', 'hello-example-1'),
@@ -388,6 +522,7 @@ if (mode === 'server') {
                   ['\u0301用户', 'Username must start with a letter or number'],
                   ['hello-', 'Username cannot end with a dash'],
                   ['用户-\u0301名', 'A combining mark cannot follow a dash'],
+                  ['12345', 'Username cannot be only digits'],
                   ['c79f2829-1086-43f2-b477-88abbcdbda11', 'Username cannot be a UUID'],
                ], function (test) {
                   // Rejection must preserve settings as well as the username.
@@ -610,6 +745,24 @@ if (mode === 'server') {
             ] : [],
          ];
 
+         var hostLogin = function (tag, email) {
+            return [
+               ['Login ' + tag, 'post', '/auth/login', {email}, 200, function (s, rq, rs) {
+                  s.loginLink = rs.body.loginLink;
+                  return true;
+               }],
+               ['Verify ' + tag, 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
+                  s.headers.cookie = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  return true;
+               }],
+            ];
+         }
+
+         var sessionId = function (s, type) {
+            return s.headers.cookie.match (new RegExp (cookie (type) + '="([0-9a-f]+)"')) [1];
+         }
+
          // Asks the host for a code to open a session on `subdomain`, which comes back to `path` on that subdomain.
          var mintSessionCode = function (tag, subdomain, state, path) {
             return ['Mint session code ' + tag, 'get', function (s) {
@@ -687,20 +840,35 @@ if (mode === 'server') {
             ['Create project without a name', 'post', '/project', {}, 400, assertBody ({error: 'name should have as type string but instead is undefined with type undefined'})],
             ['Create project with a short name', 'post', '/project', {name: 'a'}, 400, assertBody ({error: 'length of name should be in range {"max":500,"min":2} but instead is 1'})],
             ['Reject 501-character project name', 'post', '/project', {name: 'A'.repeat (501)}, 400],
+            dale.go ([0, 6, '3', 1.5], function (slot) {
+               return ['Reject slot ' + JSON.stringify (slot), 'post', '/project', {name: 'slotted', slot}, 400, function (s, rq, rs) {
+                  return assert (['error', rs.body.error, /slot should be/, teishi.test.match]);
+               }];
+            }),
             ['Create project with 500-character name', 'post', '/project', {name: 'A'.repeat (500)}, 200, function (s, rq, rs) {
                s.longNameProjectId = rs.body.id;
-               return true;
+               return assert (['subdomain', rs.body.subdomain, undefined, teishi.test.equal]);
             }],
             ['Retain case on creation', 'get', '/projects', 200, function (s, rq, rs) {
-               return assert (['name', rs.body [0].name, 'A'.repeat (500), teishi.test.equal]);
+               return assert ([
+                  ['name', rs.body [0].name, 'A'.repeat (500), teishi.test.equal],
+                  ['subdomain', rs.body [0].subdomain, undefined, teishi.test.equal],
+               ]);
             }],
             ['Reject lowercase duplicate of long name', 'post', '/project', {name: 'a'.repeat (500)}, 409, assertBody ({error: 'There is already a project with that name'})],
             ['Delete long-name fixture', 'delete', function (s) {
                return '/project/' + s.longNameProjectId;
             }, 200],
-            ['Create project', 'post', '/project', {name: 'el norte'}, 200],
+            ['Create project', 'post', '/project', {name: 'el norte'}, 200, function (s, rq, rs) {
+               if (! CONFIG.cloud) return true;
+               return assert (['subdomain', rs.body.subdomain, /^[a-z0-9-]+--el-norte$/, teishi.test.match]);
+            }],
             ['List projects after creation', 'get', '/projects', 200, function (s, rq, rs) {
                if (! assert (['length', rs.body.length, 1, teishi.test.equal])) return false;
+               if (CONFIG.cloud && ! assert ([
+                  ['ownerUsername', rs.body [0].ownerUsername, 'string'],
+                  function () {return ['subdomain', rs.body [0].subdomain, rs.body [0].ownerUsername + '--el-norte', teishi.test.equal]},
+               ])) return false;
                s.projectId = rs.body [0].id;
                return true;
             }],
@@ -720,6 +888,19 @@ if (mode === 'server') {
                s.secondProjectId = rs.body [0].id;
                return true;
             }],
+            ['Create project taking another project\'s slot', 'post', '/project', {name: 'slot thief', slot: 3}, 200, function (s, rq, rs) {
+               s.slotThiefId = rs.body.id;
+               return true;
+            }],
+            ['Taken slot moves to the new project', 'get', '/projects', 200, function (s, rq, rs) {
+               var slots = dale.obj (rs.body, function (p) {return [p.id, p.slot]});
+               return assert ([
+                  ['new project slot', slots [s.slotThiefId], 3, teishi.test.equal],
+                  ['second project slot', slots [s.secondProjectId], undefined, teishi.test.equal],
+               ]);
+            }],
+            ['Delete slot thief', 'delete', function (s) {return '/project/' + s.slotThiefId}, 200],
+            ['Restore second project slot', 'put', '/project', function (s) {return {id: s.secondProjectId, name: 'second', slot: 3}}, 200],
             ['Rename project', 'put', '/project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Rename nonexistent project', 'put', '/project', {id: 'nonexistent', name: 'whatever'}, 404],
             ['Rename project (noop)', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
@@ -1051,11 +1232,34 @@ if (mode === 'server') {
                      return true;
                   },
                },
+               dale.go ([
+                  ['without csrf', function (s) {return ''}],
+                  ['with invalid csrf', function (s) {return 'invalid'}],
+                  ['with host csrf', function (s) {return s.headers ['x-csrf']}],
+               ], function (entry) {
+                  return {
+                     tag: 'Write on subdomain ' + entry [0],
+                     method: 'post',
+                     host: function (s) {return s.projectSubdomain + '.' + new URL (CONFIG.baseURL).hostname},
+                     path: '/project/write',
+                     headers: function (s) {return {'x-csrf': entry [1] (s)}},
+                     body: {path: 'csrf.md', content: 'forbidden'},
+                     code: 403,
+                     apres: assertBody ({error: 'Invalid csrf token'}),
+                  };
+               }),
+               ['Rejected csrf writes left no file', 'get', '/f/csrf.md', 404],
             ] : [],
             ['List files', 'post', '/project/run', function (s) {return {command: 'find . -type f -not -path \'./.git/*\''}}, 200, assertBody ({stdout: './main.md\n'})],
             ['Run command without command', 'post', '/project/run', function (s) {return {}}, 400, assertBody ({error: 'command should have as type string but instead is undefined with type undefined'})],
             ['Run command that fails', 'post', '/project/run', function (s) {return {command: 'exit 1'}}, 200, function (s, rq, rs) {
                return assert (['body.code', rs.body.code, 1, teishi.test.equal]);
+            }],
+            ['Sync access without access.md', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['code', rs.body.code, 1, teishi.test.equal],
+                  ['error', rs.body.error, /No such file or directory/, teishi.test.match],
+               ]);
             }],
             waitForCommits ('List commits when there is only the initial commit', 1, "Write 'main.md'"),
             {
@@ -1068,6 +1272,13 @@ if (mode === 'server') {
             ['Read absolute path', 'get', '/f/' + encodeURIComponent ('/main.md'), 400, assertBody ({error: 'Invalid path'})],
             ['Read parent traversal path', 'get', '/f/' + encodeURIComponent ('../main.md'), 400, assertBody ({error: 'Invalid path'})],
             ['Read path with null byte', 'get', '/f/' + encodeURIComponent ('main.md\0'), 400, assertBody ({error: 'Invalid path'})],
+            dale.go (['/main.md', '../main.md', 'doc//main.md', 'doc/./main.md'], function (path) {
+               return [
+                  ['Write to invalid path ' + path, 'post', '/project/write', {path, content: 'x'}, 404],
+                  ['Edit invalid path ' + path, 'post', '/project/edit', {path, oldText: 'el', newText: 'EL'}, 404],
+                  ['Message to invalid path ' + path, 'post', '/project/message', {file: path, body: 'hi', to: 'all'}, 404],
+               ];
+            }),
             ['Get file that is not there', 'get', '/f/' + encodeURIComponent ('doc/whatevs.md'), 404],
             ['Get main file', 'get', '/f/' + encodeURIComponent ('main.md') + '?raw=1', 200, function (s, rq, rs) {
                return assert ([
@@ -1085,6 +1296,22 @@ if (mode === 'server') {
             }],
             ['Edit file without path', 'post', '/project/edit', function (s) {return {oldText: 'a', newText: 'b'}}, 400, assertBody ({error: 'path should have as type string but instead is undefined with type undefined'})],
             ['Edit file without oldText', 'post', '/project/edit', function (s) {return {path: 'main.md', newText: 'b'}}, 400, assertBody ({error: 'oldText should have as type string but instead is undefined with type undefined'})],
+            ['Edit file without newText', 'post', '/project/edit', {path: 'main.md', oldText: 'a'}, 400, assertBody ({error: 'newText should have as type string but instead is undefined with type undefined'})],
+            ['Edit with an extra key', 'post', '/project/edit', {path: 'main.md', oldText: 'a', newText: 'b', extra: true}, 400, function (s, rq, rs) {
+               return assert (['error', rs.body.error, /keys of body/, teishi.test.match]);
+            }],
+            ['Edit missing file', 'post', '/project/edit', {path: 'missing.md', oldText: 'a', newText: 'b'}, 400, function (s, rq, rs) {
+               return assert ([
+                  ['code', rs.body.code, 'integer'],
+                  ['error', rs.body.error, /missing\.md/, teishi.test.match],
+               ]);
+            }],
+            ['Write below a file', 'post', '/project/write', {path: 'main.md/below.md', content: 'x'}, 400, function (s, rq, rs) {
+               return assert ([
+                  ['code', rs.body.code, 'integer'],
+                  ['error', rs.body.error, /File exists|Not a directory/, teishi.test.match],
+               ]);
+            }],
             ['Edit main file (old text found multiple times)', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'e', newText: 'E'}}, 400, function (s, rq, rs) {
                return assert (['body.error', rs.body.error, /Old text found .+ times/, teishi.test.match]);
             }],
@@ -1144,6 +1371,18 @@ if (mode === 'server') {
             ['Read file with spaces in name', 'get', '/f/' + encodeURIComponent ('doc/come back.md') + '?raw=1', 200, assertBody ('hello spaces')],
             ['Run a command with pipe', 'post', '/project/run', function (s) {return {command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {command: 'printf foo', read: true}}, 200, assertBody ({stdout: 'foo'})],
+            ['Run command with an extra key', 'post', '/project/run', {command: 'true', extra: true}, 400, function (s, rq, rs) {
+               return assert (['error', rs.body.error, /keys of body/, teishi.test.match]);
+            }],
+            ['Read project timestamp', 'get', '/projects', 200, function (s, rq, rs) {
+               s.projectLast = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.projectId) return p.last});
+               return assert (['last', s.projectLast, 'string']);
+            }],
+            ['Read-only command', 'post', '/project/run', {command: 'cat main.md', read: true}, 200],
+            ['Read-only command keeps timestamp', 'get', '/projects', 200, function (s, rq, rs) {
+               var last = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.projectId) return p.last});
+               return assert (['last', last, s.projectLast, teishi.test.equal]);
+            }],
             ['Run a command with change and output', 'post', '/project/run', function (s) {return {command: 'echo foo > doc/another.md && cat doc/another.md'}}, 200, assertBody ({stdout: 'foo\n'})],
             waitForCommits ('List commits after command with change and output', 9, "Run 'echo foo > doc/another.md && cat doc/another.md'"),
             ['Stop project container', 'get', '/', 200, function (s, rq, rs, next) {
@@ -1199,6 +1438,185 @@ if (mode === 'server') {
                }) ();
             }],
 
+            ['Get main file rendered', 'get', '/f/main.md', 200, function (s, rq, rs) {
+               return assert ([
+                  ['content-type', rs.headers ['content-type'], /text\/html/, teishi.test.match],
+                  ['content-security-policy', rs.headers ['content-security-policy'], /^sandbox /, teishi.test.match],
+                  ['title', rs.body, /<title>main\.md<\/title>/, teishi.test.match],
+                  ['heading', rs.body, /<h1[^>]*>el norte<\/h1>/, teishi.test.match],
+                  ['download link', rs.body, /href="\/f\/main\.md\?raw=1"/, teishi.test.match],
+               ]);
+            }],
+            ['Rendered download link encodes path', 'get', '/f/' + encodeURIComponent ('doc/come back.md'), 200, function (s, rq, rs) {
+               return assert (['download link', rs.body, /href="\/f\/doc\/come%20back\.md\?raw=1"/, teishi.test.match]);
+            }],
+            ['Read file for etag', 'get', '/f/main.md?raw=1', 200, function (s, rq, rs) {
+               s.etag = rs.headers.etag;
+               return assert (['etag', s.etag, 'string']);
+            }],
+            {tag: 'Unchanged file is not modified', method: 'get', host: projectHost, path: '/f/main.md?raw=1', headers: function (s) {return {'if-none-match': s.etag}}, code: 304},
+            {tag: 'HEAD on project file', method: 'head', host: projectHost, path: '/f/main.md?raw=1', code: 200, apres: function (s, rq, rs) {
+               return assert ([
+                  ['content-length', rs.headers ['content-length'], '12', teishi.test.equal],
+                  ['empty body', rs.body === '' || rs.body === undefined, true, teishi.test.equal],
+               ]);
+            }},
+            ['Write SVG file', 'post', '/project/write', {path: 'icon.svg', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>'}, 200],
+            ['Get SVG file', 'get', '/f/icon.svg', 200, function (s, rq, rs) {
+               return assert ([
+                  ['content-type', rs.headers ['content-type'], /image\/svg\+xml/, teishi.test.match],
+                  ['content-security-policy', rs.headers ['content-security-policy'], 'sandbox allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts', teishi.test.equal],
+               ]);
+            }],
+
+            ['Write video', 'post', '/project/write', {path: 'clip.mp4', content: '0123456789'}, 200],
+            ['Write empty video', 'post', '/project/write', {path: 'empty.mp4', content: ''}, 200],
+            dale.go ([
+               ['full video', {}, 200, '0123456789'],
+               ['video range', {range: 'bytes=2-5'}, 206, '2345', 'bytes 2-5/10'],
+               ['open-ended video range', {range: 'bytes=7-'}, 206, '789', 'bytes 7-9/10'],
+               ['suffix video range', {range: 'bytes=-3'}, 206, '789', 'bytes 7-9/10'],
+               ['video range past the end', {range: 'bytes=4-100'}, 206, '456789', 'bytes 4-9/10'],
+               ['video range with if-range', {range: 'bytes=2-5', 'if-range': 'whatever'}, 200, '0123456789'],
+            ], function (test) {
+               return {
+                  tag: 'Read ' + test [0],
+                  method: 'get',
+                  host: projectHost,
+                  path: '/f/clip.mp4',
+                  headers: test [1],
+                  code: test [2],
+                  raw: true,
+                  apres: function (s, rq, rs) {
+                     return assert ([
+                        ['body', rs.body.toString (), test [3], teishi.test.equal],
+                        ['content-type', rs.headers ['content-type'], 'video/mp4', teishi.test.equal],
+                        ['accept-ranges', rs.headers ['accept-ranges'], 'bytes', teishi.test.equal],
+                        ['content-range', rs.headers ['content-range'], test [4], teishi.test.equal],
+                     ]);
+                  },
+               };
+            }),
+            dale.go ([
+               ['start past the end', 'clip.mp4', 'bytes=10-', 'bytes */10'],
+               ['empty suffix', 'clip.mp4', 'bytes=-0', 'bytes */10'],
+               ['empty video', 'empty.mp4', 'bytes=0-', 'bytes */0'],
+            ], function (test) {
+               return {
+                  tag: 'Reject video range: ' + test [0],
+                  method: 'get',
+                  host: projectHost,
+                  path: '/f/' + test [1],
+                  headers: {range: test [2]},
+                  code: 416,
+                  apres: function (s, rq, rs) {
+                     return assert (['content-range', rs.headers ['content-range'], test [3], teishi.test.equal]);
+                  },
+               };
+            }),
+            ['Read empty video', 'get', '/f/empty.mp4', 200, function (s, rq, rs) {
+               return assert (['content-length', rs.headers ['content-length'], '0', teishi.test.equal]);
+            }],
+            ['Read missing video', 'get', '/f/missing.mp4', 404],
+
+            ['Write script', 'post', '/project/write', {path: 'run.sh', content: 'echo one\n'}, 200],
+            ['Make script executable', 'post', '/project/run', {command: 'chmod 755 run.sh'}, 200],
+            ['Overwrite script', 'post', '/project/write', {path: 'run.sh', content: 'echo two\n'}, 200],
+            ['Edit script', 'post', '/project/edit', {path: 'run.sh', oldText: 'two', newText: 'three'}, 200],
+            ['Script keeps its mode', 'post', '/project/run', {command: 'stat -c %a run.sh && ./run.sh', read: true}, 200, assertBody ({stdout: '755\nthree\n'})],
+
+            ['Write message without body marker', 'post', '/project/write', {path: 'chat/broken.md', content: '\nəəə head 11111111-1111-1111-1111-111111111111\nfrom x\n'}, 200],
+            ['Read message without body marker', 'get', '/project/message/11111111-1111-1111-1111-111111111111/chat/broken.md', 404],
+
+            ['Write app', 'post', '/project/write', {path: 'app.js', content: [
+               'require ("http").createServer (function (rq, rs) {',
+               '   var body = "";',
+               '   rq.on ("data", function (chunk) {body += chunk});',
+               '   rq.on ("end", function () {',
+               '      rs.writeHead (201, {"content-type": "application/json", "set-cookie": ["a=1", "b=2"], "x-app": "yes"});',
+               '      rs.end (JSON.stringify ({body, cookie: rq.headers.cookie, csrf: rq.headers ["x-csrf"], host: rq.headers.host, method: rq.method, proto: rq.headers ["x-forwarded-proto"], url: rq.url}));',
+               '   });',
+               '}).listen (3000);',
+            ].join ('\n')}, 200],
+            ['Start app', 'post', '/project/run', {command: 'nohup node app.js < /dev/null > /dev/null 2>&1 & for i in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:3000/ && exit 0; sleep 0.1; done; exit 1', read: true}, 200, function (s, rq, rs) {
+               return assert (['code', rs.body.code, undefined, teishi.test.equal]);
+            }],
+            ['List files with app', 'get', '/project', 200, function (s, rq, rs) {
+               return assert ([
+                  ['apps', rs.body.apps, [3000], teishi.test.equal],
+                  ['project id', rs.body.project.id, s.projectId, teishi.test.equal],
+                  ['project name', rs.body.project.name, CONFIG.cloud ? 'el norte' : 'el norte!', teishi.test.equal],
+                  ['project owner', rs.body.project.ownerId, 'string'],
+                  ['owner access', rs.body.project.access, undefined, teishi.test.equal],
+                  ['project subdomain', rs.body.project.subdomain, CONFIG.cloud ? s.projectSubdomain : undefined, teishi.test.equal],
+               ]);
+            }],
+            {
+               tag: 'Proxy GET to app',
+               method: 'get',
+               host: appHost,
+               path: '/hello?x=1',
+               headers: function (s) {return {cookie: projectCookie (s) + 'foo=bar', 'x-csrf': 'secret'}},
+               code: 201,
+               apres: function (s, rq, rs) {
+                  var body = type (rs.body) === 'string' ? JSON.parse (rs.body) : rs.body;
+                  return assert ([
+                     ['x-app', rs.headers ['x-app'], 'yes', teishi.test.equal],
+                     ['set-cookie', rs.headers ['set-cookie'], ['a=1', 'b=2'], teishi.test.equal],
+                     ['method', body.method, 'GET', teishi.test.equal],
+                     ['url', body.url, '/hello?x=1', teishi.test.equal],
+                     ['vibey cookies stripped', body.cookie, 'foo=bar', teishi.test.equal],
+                     ['csrf stripped', body.csrf, undefined, teishi.test.equal],
+                     ['host', body.host, /^3000--/, teishi.test.match],
+                     ['proto', body.proto, new URL (CONFIG.baseURL).protocol.slice (0, -1), teishi.test.equal],
+                  ]);
+               },
+            },
+            {
+               tag: 'Proxy POST body to app',
+               method: 'post',
+               host: appHost,
+               path: '/submit',
+               body: 'hello',
+               code: 201,
+               apres: function (s, rq, rs) {
+                  var body = type (rs.body) === 'string' ? JSON.parse (rs.body) : rs.body;
+                  return assert ([
+                     ['method', body.method, 'POST', teishi.test.equal],
+                     ['body', body.body, 'hello', teishi.test.equal],
+                  ]);
+               },
+            },
+            CONFIG.cloud ? [
+               {tag: 'Anonymous POST to private app', method: 'post', host: appHost, path: '/submit', headers: {cookie: ''}, body: 'hello', code: 404},
+               {
+                  tag: 'Anonymous GET to private app redirects to login',
+                  method: 'get',
+                  host: appHost,
+                  path: '/hello',
+                  headers: {cookie: ''},
+                  code: 302,
+                  apres: function (s, rq, rs) {
+                     var location = new URL (rs.headers.location);
+                     return assert (['location', location.origin + location.pathname, CONFIG.baseURL + '/auth/project/3000--' + s.projectSubdomain, teishi.test.equal]);
+                  },
+               },
+               {
+                  tag: 'Redirect UUID app subdomain to readable',
+                  method: 'get',
+                  host: function (s) {return '3000--' + s.projectId + '.' + new URL (CONFIG.baseURL).hostname},
+                  path: '/hello?x=1',
+                  code: 302,
+                  apres: function (s, rq, rs) {
+                     var base = new URL (CONFIG.baseURL);
+                     return assert (['location', rs.headers.location, base.protocol + '//3000--' + s.projectSubdomain + '.' + base.host + '/hello?x=1', teishi.test.equal]);
+                  },
+               },
+            ] : [],
+            ['Stop app', 'get', '/', 200, function (s, rq, rs, next) {
+               run ('docker', 'stop', 'vibey-project-' + s.projectId).then (function () {next (null, rs)}, next);
+            }],
+
             ['Post message to new chat in missing folder', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', body: 'Hello everyone!', to: 'all'}}, 200, function (s, rq, rs) {
                s.messageId = rs.body.id;
                return assert (['message id', rs.body.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, teishi.test.match]);
@@ -1228,6 +1646,24 @@ if (mode === 'server') {
             ['Reject name with a slash', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: 'aGk=', name: 'a/b.png', to: 'all'}}, 400],
             ['Reject invalid base64 body', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: 'not base64!', to: 'all'}}, 400],
             ['Reject base64 message to shell', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: 'aGk=', to: 'shell'}}, 400],
+            dale.go ([
+               ['head marker at start', 'əəə head 00000000-0000-0000-0000-000000000000\nhi'],
+               ['body marker after a newline', 'hi\nəəə body 00000000-0000-0000-0000-000000000000'],
+            ], function (test) {
+               return ['Reject message with ' + test [0], 'post', '/project/message', {file: 'chat/nested/test.md', body: test [1], to: 'all'}, 400, function (s, rq, rs) {
+                  return assert (['error', rs.body.error, /body without marker lines/, teishi.test.match]);
+               }];
+            }),
+            dale.go ([
+               ['unknown recipient', {body: 'hi', to: 'nobody'}, /to must be all, shell, /],
+               ['missing recipient', {body: 'hi'}, /to should have as type string/],
+               ['name with a newline', {base64: true, body: 'aGk=', name: 'a\nb.png', to: 'all'}, /name must be a file name without slashes or newlines/],
+               ['extra key', {body: 'hi', extra: true, to: 'all'}, /keys of body/],
+            ], function (test) {
+               return ['Reject message with ' + test [0], 'post', '/project/message', {file: 'chat/nested/test.md', ... test [1]}, 400, function (s, rq, rs) {
+                  return assert (['error', rs.body.error, test [2], teishi.test.match]);
+               }];
+            }),
             ['Post base64 reply to existing message', 'post', '/project/message', function (s) {return {file: 'chat/nested/test.md', base64: true, body: Buffer.from ('Hello back!').toString ('base64'), name: 'hello.txt', to: s.messageId}}, 200, function (s, rq, rs) {
                s.replyId = rs.body.id;
                return assert ([
@@ -1264,6 +1700,174 @@ if (mode === 'server') {
                   ['reply head', rs.body.message.indexOf ('əəə head ' + s.replyId + '\n'), 0, teishi.test.equal],
                   ['reply body', rs.body.message.endsWith ('əəə body ' + s.replyId + '\n' + Buffer.from ('Hello back!').toString ('base64')), true, teishi.test.equal],
                   ['next', rs.body.next, [], teishi.test.equal],
+               ]);
+            }],
+            ['Send command to shell', 'post', '/project/message', {file: 'chat/shell.md', body: 'echo out; echo err >&2', to: 'shell'}, 200, function (s, rq, rs) {
+               s.shellResponseId = rs.body.responseId;
+               return assert (['response id', s.shellResponseId, 'string']);
+            }],
+            waitFor ('Wait for shell response', function (s) {
+               return projectFetch (s, '/project/message/' + s.shellResponseId + '/chat/shell.md').then (function (body) {
+                  return body && /^t-end /m.test (body.message);
+               });
+            }),
+            ['Read shell response', 'get', function (s) {return '/project/message/' + s.shellResponseId + '/chat/shell.md'}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['from shell', rs.body.message, /^from shell$/m, teishi.test.match],
+                  ['not pending', /^pending /m.test (rs.body.message), false, teishi.test.equal],
+                  ['stdout', rs.body.message, /^out$/m, teishi.test.match],
+                  ['stderr', rs.body.message, /^err$/m, teishi.test.match],
+               ]);
+            }],
+            ['Send long command to shell', 'post', '/project/message', {file: 'chat/shell.md', body: 'sleep 30; echo late', to: 'shell'}, 200, function (s, rq, rs) {
+               s.shellResponseId = rs.body.responseId;
+               return true;
+            }],
+            waitFor ('Wait for shell process', function (s) {
+               return projectFetch (s, '/project/run', {command: 'test -e /tmp/vibey-process-' + s.shellResponseId, read: true}).then (function (body) {
+                  return body && body.code === undefined;
+               });
+            }),
+            ['Cancel shell command', 'post', '/project/edit', function (s) {
+               return {path: 'chat/shell.md', oldText: 'əəə head ' + s.shellResponseId + '\n', newText: 'əəə head ' + s.shellResponseId + '\ncancelled ' + new Date ().toISOString () + '\n'};
+            }, 200],
+            waitFor ('Wait for shell process to be killed', function (s) {
+               return projectFetch (s, '/project/run', {command: 'test -e /tmp/vibey-process-' + s.shellResponseId, read: true}).then (function (body) {
+                  return body && body.code === 1;
+               });
+            }),
+            ['Cancelled command did not finish', 'get', function (s) {return '/project/message/' + s.shellResponseId + '/chat/shell.md'}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['cancelled', rs.body.message, /^cancelled /m, teishi.test.match],
+                  ['no t-end', /^t-end /m.test (rs.body.message), false, teishi.test.equal],
+                  ['no late output', /^late$/m.test (rs.body.message), false, teishi.test.equal],
+               ]);
+            }],
+
+            ['Send message to AI', 'post', '/project/message', {file: 'chat/ai.md', body: 'Hello AI', to: 'ai-opus-5.5'}, 200, function (s, rq, rs) {
+               s.aiResponseId = rs.body.responseId;
+               return assert (['response id', s.aiResponseId, 'string']);
+            }],
+            waitFor ('Wait for AI response', function (s) {
+               return projectFetch (s, '/project/message/' + s.aiResponseId + '/chat/ai.md').then (function (body) {
+                  return body && /^t-end /m.test (body.message);
+               });
+            }),
+            ['Read AI response', 'get', function (s) {return '/project/message/' + s.aiResponseId + '/chat/ai.md'}, 200, function (s, rq, rs) {
+               var words = Array.from ({length: 1000}, function (v, k) {return 'word' + k}).join (' ');
+               return assert ([
+                  ['from ai', rs.body.message, /^from ai-opus-5\.5$/m, teishi.test.match],
+                  ['credential', rs.body.message, /^credential test$/m, teishi.test.match],
+                  ['not pending', /^pending /m.test (rs.body.message), false, teishi.test.equal],
+                  ['body', rs.body.message.endsWith ('əəə body ' + s.aiResponseId + '\n' + words), true, teishi.test.equal],
+               ]);
+            }],
+            ['Read AI chat has system prompt', 'get', '/f/' + encodeURIComponent ('chat/ai.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert (['system prompt', rs.body, /^from systemPrompt$/m, teishi.test.match]);
+            }],
+            ['Send message to AI to cancel', 'post', '/project/message', {file: 'chat/ai.md', body: 'Hello again', to: 'ai-opus-5.5'}, 200, function (s, rq, rs) {
+               s.aiResponseId = rs.body.responseId;
+               return true;
+            }],
+            waitFor ('Wait for AI to start streaming', function (s) {
+               return projectFetch (s, '/project/message/' + s.aiResponseId + '/chat/ai.md').then (function (body) {
+                  return body && /word0/.test (body.message);
+               });
+            }),
+            ['Cancel AI response', 'post', '/project/edit', function (s) {
+               return {path: 'chat/ai.md', oldText: 'əəə head ' + s.aiResponseId + '\n', newText: 'əəə head ' + s.aiResponseId + '\ncancelled ' + new Date ().toISOString () + '\n'};
+            }, 200],
+            waitFor ('Wait for AI to stop', function (s) {
+               return projectFetch (s, '/project/message/' + s.aiResponseId + '/chat/ai.md').then (function (body) {
+                  if (! body) return false;
+                  if (body.message !== s.aiLast) {
+                     s.aiLast = body.message;
+                     s.aiChanged = Date.now ();
+                     return false;
+                  }
+                  return Date.now () - s.aiChanged > 500;
+               });
+            }),
+            ['Cancelled AI response did not finish', 'get', function (s) {return '/project/message/' + s.aiResponseId + '/chat/ai.md'}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['cancelled', rs.body.message, /^cancelled /m, teishi.test.match],
+                  ['no t-end', /^t-end /m.test (rs.body.message), false, teishi.test.equal],
+                  ['no last word', /word999$/.test (rs.body.message), false, teishi.test.equal],
+               ]);
+            }],
+
+            ['Reject reply without from', 'post', '/project/message', {file: 'chat/agents.md', body: 'hi', reply: 'chat/agents.md', to: 'all'}, 400],
+            ['Reject from with newline', 'post', '/project/message', {file: 'chat/agents.md', body: 'hi', from: 'ai-gpt-6\nto all', to: 'all'}, 400],
+            ['Reject reply with newline', 'post', '/project/message', {file: 'chat/agents.md', body: 'hi', from: 'ai-gpt-6', reply: 'a\nb', to: 'all'}, 400],
+            ['Post message with from', 'post', '/project/message', {file: 'chat/from.md', body: 'hi', from: 'ai-gpt-6', to: 'all'}, 200],
+            ['Message with from keeps it', 'get', '/f/' + encodeURIComponent ('chat/from.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert (['from', rs.body, /^from ai-gpt-6$/m, teishi.test.match]);
+            }],
+
+            ['Start two agents in the same chat', 'post', '/project/message', {file: 'chat/agents.md', to: 'ai-opus-5.5', body: agentScript ([
+               {description: 'Start A', path: 'chat/agents.md', body: 'fake-output:\nresult A'},
+               {description: 'Start B', path: 'chat/agents.md', body: 'fake-output:\nresult B'},
+            ])}, 200],
+            waitFor ('Wait for agents and wake to finish', agentsDone ('chat/agents.md', function (text) {
+               return /^All agents finished\.$/m.test (text) && count (text, /^from ai-opus-5\.5$/gm) === 6;
+            })),
+            ['Agents ran and woke the caller once', 'get', '/f/' + encodeURIComponent ('chat/agents.md') + '?raw=1', 200, function (s, rq, rs) {
+               var shellId = (rs.body.match (/^əəə head (\S+)\nfrom shell$/m) || []) [1];
+               return assert ([
+                  ['tool call and wake note from shell', count (rs.body, /^from shell$/gm), 2, teishi.test.equal],
+                  ['two started calls', count (rs.body, /^\{"id":"[0-9a-f-]{36}","responseId":"[0-9a-f-]{36}"\}$/gm), 2, teishi.test.equal],
+                  ['exit code', rs.body, /^Exit code: 0$/m, teishi.test.match],
+                  ['two requests', count (rs.body, /^reply chat\/agents\.md$/gm), 2, teishi.test.equal],
+                  ['result A', rs.body, /^əəə body [0-9a-f-]{36}\nresult A$/m, teishi.test.match],
+                  ['result B', rs.body, /^əəə body [0-9a-f-]{36}\nresult B$/m, teishi.test.match],
+                  ['one wake', count (rs.body, /^All agents finished\.$/gm), 1, teishi.test.equal],
+                  ['wake note from shell', rs.body, /^from shell\nid [0-9a-f-]{36}\nt \S+\nto ai-opus-5\.5\nəəə body [0-9a-f-]{36}\nAll agents finished\.$/m, teishi.test.match],
+                  ['caller turn ended at the agent call', new RegExp ('^to ' + shellId + '$', 'm').test (rs.body), false, teishi.test.equal],
+               ]);
+            }],
+
+            ['Start an agent in another chat', 'post', '/project/message', {file: 'chat/agents-caller.md', to: 'ai-opus-5.5', body: agentScript ([
+               {description: 'Start C', path: 'chat/agents-other.md', body: 'fake-output:\nresult C'},
+            ])}, 200],
+            waitFor ('Wait for cross-chat agent and wake to finish', agentsDone ('chat/agents-caller.md', function (text) {
+               return /^əəə body [0-9a-f-]{36}\nresult C$/m.test (text) && /word999/.test (text);
+            })),
+            ['Other chat has the request', 'get', '/f/' + encodeURIComponent ('chat/agents-other.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert ([
+                  ['request from caller', rs.body, /^from ai-opus-5\.5$/m, teishi.test.match],
+                  ['reply line', rs.body, /^reply chat\/agents-caller\.md$/m, teishi.test.match],
+                  ['result', rs.body, /^əəə body [0-9a-f-]{36}\nresult C$/m, teishi.test.match],
+               ]);
+            }],
+            ['Caller chat got the result, not a wake note', 'get', '/f/' + encodeURIComponent ('chat/agents-caller.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert ([
+                  ['result posted to caller', rs.body, /^from ai-opus-5\.5\nid [0-9a-f-]{36}\nt \S+\nto ai-opus-5\.5\nəəə body [0-9a-f-]{36}\nresult C$/m, teishi.test.match],
+                  ['no wake note', /^All agents finished\.$/m.test (rs.body), false, teishi.test.equal],
+               ]);
+            }],
+
+            ['Agent call to all keeps the turn going', 'post', '/project/message', {file: 'chat/agents-all.md', to: 'ai-opus-5.5', body: agentScript ([
+               {description: 'Note for everyone', path: 'chat/agents-all.md', to: 'all', body: 'note'},
+            ])}, 200],
+            waitFor ('Wait for caller to continue', agentsDone ('chat/agents-all.md', function (text) {
+               return /word999/.test (text);
+            })),
+            ['Caller continued after the tool call', 'get', '/f/' + encodeURIComponent ('chat/agents-all.md') + '?raw=1', 200, function (s, rq, rs) {
+               var shellId = (rs.body.match (/^əəə head (\S+)\nfrom shell$/m) || []) [1];
+               return assert ([
+                  ['note posted', rs.body, /^to all\nəəə body [0-9a-f-]{36}\nnote$/m, teishi.test.match],
+                  ['continuation replies to shell', rs.body, new RegExp ('^to ' + shellId + '$', 'm'), teishi.test.match],
+               ]);
+            }],
+
+            ['Agent call to another project fails', 'post', '/project/message', {file: 'chat/agents-bad.md', to: 'ai-opus-5.5', body: 'fake-output:\ntool-call: agent 00000000-0000-4000-8000-000000000000\nStart\npath: chat/x.md\nhi'}, 200],
+            waitFor ('Wait for failed agent call', agentsDone ('chat/agents-bad.md', function (text) {
+               return /word999/.test (text);
+            })),
+            ['Failed agent call reports the error', 'get', '/f/' + encodeURIComponent ('chat/agents-bad.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert ([
+                  ['error', rs.body, /^agent only works on the current project$/m, teishi.test.match],
+                  ['exit code', rs.body, /^Exit code: 1$/m, teishi.test.match],
                ]);
             }],
 
@@ -1334,7 +1938,34 @@ if (mode === 'server') {
                   return true;
                }],
             ] : [],
-            CONFIG.cloud ? ['Delete account', 'post', '/auth/delete', {}, 200] : [],
+            CONFIG.cloud ? [
+               projectLogin ('owner before host session expiry', 'projectId'),
+               ['Expire host session', 'get', '/', 200, function (s, rq, rs, next) {
+                  s.expiredProjectSession = sessionId (s, 'project');
+                  redis ('hset', 'session-h:' + sessionId (s, 'host'), 'expires', new Date (Date.now () - 1000).toISOString ()).then (function () {next (null, rs)}, next);
+               }, {cookie: ''}],
+               ['Expired host session rejects project session', 'post', '/project/run', {command: 'true'}, 403, function (s, rq, rs, next) {
+                  if (! assert ([
+                     ['body', rs.body, {error: 'Invalid session'}, teishi.test.equal],
+                     ['cookie', getCookie (rs.headers), new RegExp ('^' + cookie ('project') + '=("false"|false)'), teishi.test.match],
+                  ])) return false;
+                  redis ('exists', 'session-p:' + s.expiredProjectSession).then (function (exists) {
+                     if (! assert (['project session deleted', exists, 0, teishi.test.equal])) return next (new Error (validationError));
+                     next (null, rs);
+                  }, next);
+               }],
+               hostLogin ('after host session expiry', 'hello@example.com'),
+               projectLogin ('owner before logout', 'projectId'),
+               ['Logout deletes project sessions', 'post', '/auth/logout', {}, 200, function (s, rq, rs, next) {
+                  redis ('exists', 'session-p:' + sessionId (s, 'project')).then (function (exists) {
+                     if (! assert (['project session deleted', exists, 0, teishi.test.equal])) return next (new Error (validationError));
+                     next (null, rs);
+                  }, next);
+               }],
+               ['Project session after logout', 'post', '/project/run', {command: 'true'}, 403, assertBody ({error: 'Invalid session'})],
+               hostLogin ('to delete account', 'hello@example.com'),
+               ['Delete account', 'post', '/auth/delete', {}, 200],
+            ] : [],
          ];
 
          // *** ACCESS ***
@@ -1450,6 +2081,7 @@ if (mode === 'server') {
             accessSync,
 
             ['A reads file on readable subdomain', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
+            ['A reads .git as owner', 'get', accessFile ('.git/HEAD'), 200, assertBody ('ref: refs/heads/main\n')],
             ['A reads nested file on readable subdomain', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('original')],
             ['Missing file on readable subdomain', 'get', accessFile ('missing.txt'), 404],
             dale.go ([
@@ -1485,13 +2117,23 @@ if (mode === 'server') {
             // B already existed when the grants were synced.
             accessAs ('b'),
             ['B sees shared project', 'get', '/projects', 200, function (s, rq, rs) {
-               return assert (['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal]);
+               return assert ([
+                  ['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal],
+                  ['read-only', rs.body [0].read, true, teishi.test.equal],
+               ]);
             }],
             projectLogin ('B on shared project', 'accessProject'),
             ['B lists files', 'get', '/project', 200, function (s, rq, rs) {
                return assert (['outside file visible', inc (dale.go (rs.body.files, function (f) {return f.name}), 'outside.txt'), true, teishi.test.equal]);
             }],
             ['B reads file', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
+            ['B lists access.md with own whole-project grant', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['access.md visible', inc (dale.go (rs.body.files, function (f) {return f.name}), 'vibey/access.md'), true, teishi.test.equal]);
+            }],
+            ['B reads access.md with own whole-project grant', 'get', accessFile ('vibey/access.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert (['access.md', rs.body, /^access-b@example\.com read\n/, teishi.test.match]);
+            }],
+            ['B cannot read .git as reader', 'get', accessFile ('.git/HEAD'), 404],
             {
                tag: 'Project name under a user who does not own it',
                method: 'get',
@@ -1529,7 +2171,10 @@ if (mode === 'server') {
             // C signs up after being invited: verification must transfer the grant.
             accessLogin ('c'),
             ['C sees shared project', 'get', '/projects', 200, function (s, rq, rs) {
-               return assert (['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal]);
+               return assert ([
+                  ['project ids', dale.go (rs.body, function (p) {return p.id}), [s.accessProjectId], teishi.test.equal],
+                  ['writable', rs.body [0].read, undefined, teishi.test.equal],
+               ]);
             }],
             projectLogin ('C on shared project', 'accessProject'),
             accessWrite ('outside.txt', 'written by C', 200),
@@ -1551,6 +2196,7 @@ if (mode === 'server') {
                return {command: 'printf "command by C" > outside.txt'};
             }, 200],
             ['C command changed file', 'get', accessFile ('outside.txt'), 200, assertBody ('command by C')],
+            ['C reads .git as whole-project writer', 'get', accessFile ('.git/HEAD'), 200, assertBody ('ref: refs/heads/main\n')],
             ['C cannot rename project', 'put', '/project', function (s) {
                return {id: s.accessProjectId, name: 'not the owner'};
             }, 404],
@@ -1573,6 +2219,7 @@ if (mode === 'server') {
             ['C sends scoped message', 'post', '/project/message', function (s) {
                return {file: 'chat/thread.md', to: 'all', body: 'Still allowed'};
             }, 200],
+            accessWrite ('chat/.git/config', 'forbidden', 404),
             dale.go (['outside.txt', 'chatty/outside.txt'], function (path) {
                return [
                   ['C cannot read ' + path, 'get', accessFile (path), 404],
@@ -1609,6 +2256,7 @@ if (mode === 'server') {
             ['B reads scoped file', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
             ['B cannot read outside scope', 'get', accessFile ('outside.txt'), 404],
             ['B cannot read prefix lookalike', 'get', accessFile ('chatty/outside.txt'), 404],
+            ['B cannot read access.md outside scope', 'get', accessFile ('vibey/access.md'), 404],
             useSession ('A on shared project'),
             ['A retains write outside prefix', 'post', '/project/edit', function (s) {
                return {path: 'outside.txt', oldText: 'command by C', newText: 'owner still writes'};
@@ -1631,6 +2279,10 @@ if (mode === 'server') {
                   }],
                ];
             }),
+            accessWrite ('vibey/access.md', 'access-c@example.com write chat/\nPUBLIC write\n', 200),
+            ['Sync with PUBLIC write fails', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
+               return assert (['sync error', rs.body.error, 'PUBLIC can only be granted read at line: PUBLIC write', teishi.test.equal]);
+            }],
             useSession ('B on shared project'),
             ['B keeps scoped read after failed syncs', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
 
@@ -1660,8 +2312,29 @@ if (mode === 'server') {
                return assert (['target id', s.accessTargetId, 'string']);
             }],
             projectLogin ('A on target project', 'accessTarget'),
+            {
+               tag: 'Project session does not carry over to another project',
+               method: 'post',
+               host: function (s) {return s.accessTarget + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/project/write',
+               headers: function (s) {
+                  var session = s.projectSessions ['A on shared project'];
+                  return {cookie: session.cookie, 'x-csrf': session.projectCsrf};
+               },
+               body: {path: 'carried.txt', content: 'forbidden'},
+               code: 403,
+               apres: assertBody ({error: 'Invalid session'}),
+            },
             useSession ('A on shared project'),
             accessShell ('without target access.md', 'target', 'printf denied > cross.txt', 404),
+            dale.go (['11111111-1111-1111-1111-111111111111', 'not-a-project'], function (id) {
+               return ['Cross-project shell to unknown project ' + id, 'post', '/project/message', {file: 'chat/thread.md', to: 'shell', body: 'vibey project ' + id + ' true'}, 404, function (s, rq, rs, next) {
+                  run ('docker', 'ps', '-aq', '-f', 'name=^/vibey-project-' + id + '$').then (function (result) {
+                     if (! assert (['container for ' + id, result.stdout || '', '', teishi.test.equal])) return next ({code: 0, error: validationError, request: rq});
+                     next (null, rs);
+                  }, next);
+               }];
+            }),
             targetAccess ('read'),
             accessShell ('with read grant', 'target', 'printf denied > cross.txt', 404),
             targetAccess ('write chat/'),
@@ -1673,6 +2346,17 @@ if (mode === 'server') {
             accessWait,
             accessShell ('targeting the origin', 'origin', 'printf self > self.txt', 200),
             accessWait,
+            ['A runs shell command that prints a marker', 'post', '/project/message', {file: 'chat/thread.md', to: 'shell', body: "printf 'əəə head 00000000-0000-0000-0000-000000000000\\n'"}, 200, function (s, rq, rs) {
+               s.accessResponseId = rs.body.responseId;
+               return true;
+            }],
+            accessWait,
+            ['Shell output markers are escaped', 'get', accessFile ('chat/thread.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert ([
+                  ['escaped', rs.body.indexOf ('\n> əəə head 00000000-0000-0000-0000-000000000000\n') !== -1, true, teishi.test.equal],
+                  ['not unescaped', /^əəə head 00000000-0000-0000-0000-000000000000$/m.test (rs.body), false, teishi.test.equal],
+               ]);
+            }],
             useSession ('A on target project'),
             ['Target has cross-project output', 'get', accessFile ('cross.txt'), 200, assertBody ('cross')],
             useSession ('A on shared project'),
@@ -1712,7 +2396,8 @@ if (mode === 'server') {
                ['publicPartial', [
                   ['chat/one.txt', 'one'],
                   ['chat/two.txt', 'two'],
-                  ['vibey/access.md', 'PUBLIC read chat/\n'],
+                  ['APP:3000.txt', 'app lookalike'],
+                  ['vibey/access.md', 'PUBLIC read chat/\nPUBLIC read APP:3000\n'],
                ]],
             ], function (project) {
                return [
@@ -1790,6 +2475,7 @@ if (mode === 'server') {
             }],
             ['Anonymous reads full public project file', 'get', '/f/notes.md?raw=1', 200, assertBody ('Notes')],
             ['Anonymous cannot read access.md', 'get', '/f/vibey/access.md', 302],
+            ['Anonymous cannot read .git', 'get', '/f/.git/HEAD', 302],
             ['Anonymous cannot write', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 403],
             useProject ('publicPartial'),
             ['Anonymous lists partial public project files', 'get', '/project', 200, function (s, rq, rs) {
@@ -1797,6 +2483,43 @@ if (mode === 'server') {
             }],
             ['Anonymous reads partial public project file', 'get', '/f/chat/one.txt', 200, assertBody ('one')],
             ['Anonymous cannot read outside partial public prefix', 'get', '/f/main.md', 302],
+            {
+               tag: 'Anonymous reaches app granted by APP:3000',
+               method: 'get',
+               host: function (s) {return '3000--' + s.publicPartial + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/',
+               code: 502,
+               apres: assertBody ({error: 'Nothing is listening on port 3000'}),
+            },
+            {
+               tag: 'APP:3000 does not grant other ports',
+               method: 'get',
+               host: function (s) {return '3001--' + s.publicPartial + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/',
+               code: 302,
+            },
+            useSession ('A on publicPartial'),
+            ['A grants PUBLIC a file prefix that APP:3000 starts with', 'post', '/project/write', {path: 'vibey/access.md', content: 'PUBLIC read A\n'}, 200],
+            ['Sync file prefix grant', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
+               return assert (['sync error', rs.body.error, undefined, teishi.test.equal]);
+            }],
+            ['Switch to anonymous again', 'get', '/', 200, function (s) {
+               delete s.headers.cookie;
+               delete s.headers ['x-csrf'];
+               delete s.projectCsrf;
+               return true;
+            }],
+            {
+               tag: 'File prefix does not grant apps',
+               method: 'get',
+               host: function (s) {return '3000--' + s.publicPartial + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/',
+               code: 302,
+            },
+            ['File prefix lists app lookalike file', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['APP:3000.txt'], teishi.test.equal]);
+            }],
+            ['File prefix reads app lookalike file', 'get', '/f/APP:3000.txt', 200, assertBody ('app lookalike')],
             accessAs ('b'),
             ['B gets session code from optional project login', 'get', function (s) {return s.optionalLoginPath}, 302, function (s, rq, rs) {
                var base = new URL (CONFIG.baseURL);
@@ -1818,6 +2541,11 @@ if (mode === 'server') {
             }],
             projectLogin ('B on publicFull', 'publicFull'),
             ['B reads full public project file', 'get', '/f/notes.md?raw=1', 200, assertBody ('Notes')],
+            ['B cannot read access.md on public project', 'get', '/f/vibey/access.md', 404],
+            ['B does not list access.md on public project', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md', 'notes.md', 'src/app.js'], teishi.test.equal]);
+            }],
+            ['B cannot read .git on public project', 'get', '/f/.git/HEAD', 404],
             ['B cannot write to public project', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 404],
             accessAs ('a'),
             ['A deletes full public project', 'delete', function (s) {return '/project/' + s.publicFullId}, 200],
@@ -1832,15 +2560,16 @@ if (mode === 'server') {
             ['B cannot list revoked project files', 'get', '/project', 404],
             ['B cannot read revoked file', 'get', accessFile ('chat/inside.txt'), 404],
             accessAs ('a'),
-            ['A deletes shared project', 'delete', function (s) {return '/project/' + s.accessProjectId}, 200],
+            ['Delete A while C still has access', 'post', '/auth/delete', {}, 200],
+            accessAs ('c'),
+            ['C no longer sees project', 'get', '/projects', 200, assertBody ([])],
+            useSession ('C on shared project'),
+            ['C cannot list deleted owner\'s project', 'get', '/project', 404],
+            accessAs ('c'),
+            ['Delete C', 'post', '/auth/delete', {}, 200],
             accessAs ('b'),
             ['B no longer sees project', 'get', '/projects', 200, assertBody ([])],
             ['Delete B', 'post', '/auth/delete', {}, 200],
-            accessAs ('c'),
-            ['C no longer sees project', 'get', '/projects', 200, assertBody ([])],
-            ['Delete C', 'post', '/auth/delete', {}, 200],
-            accessAs ('a'),
-            ['Delete A', 'post', '/auth/delete', {}, 200],
          ] : [];
 
          suites.all = Object.values (suites);
