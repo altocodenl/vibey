@@ -1,7 +1,37 @@
 # Vibey development notes
 
+## 2026-11-06
+
+shell -> agent can be simply done as a command interpreted by the host, that triggers the same recursive https call to the endpoint itself.
+
+Cron should also have a "start" time, when the container starts, chiefly to start apps. This means that all containers should come back up after a host restart, instead of lazily turning them on at the first call that hits them.
+
+shell -> agent: use the credentials of whomever calls the shell. Only resort to the AI credentials of the owner if the call comes from a cron.
+
+How to identify the call of a cron that goes to vibey host? How do we know it comes from the project itself? Idea: when generating the actual cronfile, put a random cryptostrong token at the top of the cronfile, in a comment. Any calls that cron does to `vibey cron` will call a local script (it has to be local, not in the host, like in normal shell calls) that makes an https call to the host, sending this token and the command, as well as the project id. Then, what does the host do when it gets the call? It goes to the project itself and reads the token on top of the cronfile; if there's a match, the command is interpreted as a shell call, just as if a user had done it, except the `from` is `cron`. This means that the project id also has to be stored at the top of the cronfile.
+
+What you can call from cron: normal commands, in which case there's no need to involve the host. As for host commands, it's just to call an agent (the rest of the tool calls can be done with normal calls). Or perhaps as well vibey access. Anything that is a pseudo command that the host interprets should be able to come from cron.
+
+What we need, operationally, is not email but notifications. A way to send notifications to a user, from a project, into their vibey. I'd like to be pinged only on certain events; this is something that I could configure. So it's also a call. `vibey notify`.
+
+The `from` is always a someone: human, ai, cron. The to can be a someone for top-level calls, calls that are not responding to any other call. When a call responds to another call, the `to` is the id of the call that triggered the response. It's beautiful. I just realized it is like that.
+
+To not expand folders by default, keep an object of prefixes, which if in that object, that prefix is expanded.
+
+Claude suggests putting a single node in front of every project, so that all commands can go to it without the latency of calling docker. That's a brilliant idea. Each worker would have a pipe to each process.
+
+When working on a laptop, I want a quick chat on the side when editing a doc, to see the changes while I discuss them with an agent.
+
+TODO new:
+- Readme on structure of chat
+- Start all containers on server restart
+- Notifications
+- Chat on the side, and fast toggle on mobile
+
+## 2026-11-05
+
 Missing tool calls:
-- agent -> agent:
+- agent -> agent: recursive https call.
 - script -> agent: vibey ai <model> <prompt in one line, no quotes>   . email -> agent can be done if an email can call a script.
 - email -> script: in the subject?
 
@@ -20,6 +50,7 @@ I'm amazed at how elegant it is to use http calls to make an agent call agents, 
       - Day of the week + time: `"Monday 6:00", "Friday 18:00"
       - Day of the week + time interval: "Tuesday 5m"
       - Day of the month + time or time interval: `3rd 18:00`, "18th 5m"
+      - "start" (on server start)
    - Works by encoding in cron format and rewriting the entire cron file.
 
 Email design:
