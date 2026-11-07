@@ -1,5 +1,80 @@
 # Vibey development notes
 
+## 2026-11-07
+
+RTFM: read this fine manual. Dreamt about actually doing an online manual that's readable, like an HTML slide deck.
+
+Maybe the x2 USP is:
+- Have a project in one place.
+- Build your own software.
+
+Two related things that are emerging:
+- Have an agent in each project, to stream data back and forth from the host. If we do this, we can also improve the edit logic.
+- Switch most calls to streams, so we don't buffer full responses in memory. But wait: this would blow up cache. This means it'd be better to treat small files (<10mb) as buffer + etag, and over 10mb just as a pure stream that never caches. Perhaps, even better: let's switch it to 50mb, since 10mb might be too small for some pictures.
+
+Reworking the `run` function:
+- stdout or stderr can now be: `undefined`, a string `'buffer'`, a stream or a callback. If `undefined`, stdout & stderr are collected onto strings, using utf8 encoding. If `'buffer'`, a new buffer is returned with the bytes. If a stream, the content is piped to it. If a callback, the raw chunks are passed.
+- As before, when everything's done, the promise resolves.
+
+DONE:
+- Fix buffered output of large binary files.
+
+Current list of calls to `run`:
+
+```
+  Buffered string (output += chunk, UTF-8-safe since the fix)
+  - project.run via POST /project/run
+  - GET /project: find, /proc/net/tcp, curl probes
+  - project.write / project.edit (including every streamEdit)
+  - Message setup: mkdir && touch
+  - AI helpers: mktemp -d, rm -rf configDir, cancellation kill, rm -f pidfile
+  - Background: git commit, project.backup (ls-files, find, git log)
+  - Container restart: docker run, docker start
+  - project.video size check (test -f; wc -c)
+  - Direct Docker management: docker run (POST /project), stop/rm/volume rm (DELETE /project, /auth/delete, startup cleanup, /test/cleanup), docker ps
+
+  Buffered bytes (a callback collects Buffers, then Buffer.concat)
+  - project.read, used by GET /f/*, GET /project/message, project.access, access.md checks, chat and main.md reads in the AI loop, watchCancellation polling every 100 ms
+  - App proxy curl -i (ALL /p/:port/*)
+
+  Streamed callback (each chunk is handled as it arrives; still decoded per chunk, so the UTF-8 bug remains here)
+  - Shell command: stdout and stderr, as output += chunk
+  - Tool run: stdout and stderr, as chunk.toString ('utf8')
+  - AI process: stdout as buffer += chunk (split into lines), stderr as aiStderr += chunk
+
+  Piped to the client (not through run)
+  - project.video: a raw child.spawn, with stdout piped to rs
+
+  Input (stdin)
+  - Whole string or Buffer, then closed: project.write, project.edit, proxy request body, Claude prompt
+  - Kept open and written through onSpawn: Codex JSON-RPC
+```
+
+Thinking how to have the agent (server) on the project, with the client on the server that talks to it. `remoteRun` should have the same interface as `run`.
+
+I really don't want to use a unix socket, but I don't know why. It's based on intuition and ignorance. But without a socket, we have to fire the go binary and pay 50ms every time. But the alternative to the socket is a long-lived stdio pipe.
+
+So, unix socket vs stdio pipe. Both are channels, but one is named and one is not.
+
+```
+⏺ Unix socket
+  - Keeping runs apart: free, since each run is its own connection.
+  - Flow control: free, by pausing that run's socket.
+  - Who can connect: anything that can reach the path, so it needs the handshake and the key.
+  - Lifecycle: a daemon in the container, with a stale socket file to clean up at startup.
+  - Local vs remote: a mounted directory locally, a forwarded socket remotely.
+
+  Stdio pipe
+  - Keeping runs apart: a run ID in each frame.
+  - Flow control: per-run credits, or one slow run stalls the rest.
+  - Who can connect: only the process that spawned it, so no auth is needed.
+  - Lifecycle: spawned by the host; it dies when the pipe closes.
+  - Local vs remote: the same command, with ssh host in front for remote.
+```
+
+Sockets are addressable by name (or port number, I finally get that now). But, when the client starts the process, you can just use a stdio pipe. The stdio pipe requires no extra security and is the same for ssh and without.
+
+
 ## 2026-11-06
 
 shell -> agent can be simply done as a command interpreted by the host, that triggers the same recursive https call to the endpoint itself.
