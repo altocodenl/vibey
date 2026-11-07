@@ -1341,7 +1341,9 @@ if (mode === 'server') {
                // Hitit requires a file path to send arbitrary binary bytes unchanged.
                s.uploadDir = fs.mkdtempSync (path.join (os.tmpdir (), 'vibey-upload-'));
                var file = path.join (s.uploadDir, 'upload.bin');
-               fs.writeFileSync (file, Buffer.from ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]));
+               s.binary = Buffer.alloc (300000);
+               for (var i = 0; i < s.binary.length; i++) s.binary [i] = i % 256;
+               fs.writeFileSync (file, s.binary);
                return {multipart: [
                   {name: 'path', value: 'doc/binary.bin'},
                   {name: 'file', path: file, contentType: 'application/octet-stream'},
@@ -1359,7 +1361,8 @@ if (mode === 'server') {
                code: 200,
                raw: true,
                apres: function (s, rq, rs) {
-                  var expected = Buffer.from ([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03]);
+                  var expected = s.binary;
+                  delete s.binary;
                   return assert ([
                      ['content-type', rs.headers ['content-type'], /application\/octet-stream/, teishi.test.match],
                      ['body length', rs.body.length, expected.length, teishi.test.equal],
@@ -1371,6 +1374,9 @@ if (mode === 'server') {
             ['Read file with spaces in name', 'get', '/f/' + encodeURIComponent ('doc/come back.md') + '?raw=1', 200, assertBody ('hello spaces')],
             ['Run a command with pipe', 'post', '/project/run', function (s) {return {command: 'cat main.md | grep norte'}}, 200, assertBody ({stdout: '# el norte\n'})],
             ['Run a command whose output has no trailing newline', 'post', '/project/run', function (s) {return {command: 'printf foo', read: true}}, 200, assertBody ({stdout: 'foo'})],
+            ['Run a command with large multibyte output', 'post', '/project/run', {command: 'yes € | head -n 100000 | tr -d "\\n"', read: true}, 200, function (s, rq, rs) {
+               return assert (['stdout', rs.body.stdout === '€'.repeat (100000), true, teishi.test.equal]);
+            }],
             ['Run command with an extra key', 'post', '/project/run', {command: 'true', extra: true}, 400, function (s, rq, rs) {
                return assert (['error', rs.body.error, /keys of body/, teishi.test.match]);
             }],
@@ -1518,6 +1524,23 @@ if (mode === 'server') {
                return assert (['content-length', rs.headers ['content-length'], '0', teishi.test.equal]);
             }],
             ['Read missing video', 'get', '/f/missing.mp4', 404],
+            ['Write large video', 'post', '/project/run', {command: 'head -c 50000000 /dev/zero > big.mp4', read: true}, 200],
+            ['Disconnect from video midstream', 'get', '/', 200, function (s, rq, rs, next) {
+               var controller = new AbortController ();
+               fetch ('http://' + projectHost (s) + ':' + CONFIG.port + '/f/big.mp4', {headers: s.headers, signal: controller.signal}).then (function (response) {
+                  return response.body.getReader ().read ().then (function (chunk) {
+                     if (! assert (['first chunk', chunk.done, false, teishi.test.equal])) return next ('No data before disconnect');
+                     controller.abort ();
+                     next (null, rs);
+                  });
+               }).catch (next);
+            }],
+            waitFor ('Wait for video process to stop', function (s) {
+               return projectFetch (s, '/project/run', {command: 'pgrep -f [c]reateReadStream', read: true}).then (function (body) {
+                  return body && body.code === 1;
+               });
+            }),
+            ['Remove large video', 'post', '/project/run', {command: 'rm big.mp4', read: true}, 200],
 
             ['Write script', 'post', '/project/write', {path: 'run.sh', content: 'echo one\n'}, 200],
             ['Make script executable', 'post', '/project/run', {command: 'chmod 755 run.sh'}, 200],
@@ -1717,6 +1740,21 @@ if (mode === 'server') {
                   ['not pending', /^pending /m.test (rs.body.message), false, teishi.test.equal],
                   ['stdout', rs.body.message, /^out$/m, teishi.test.match],
                   ['stderr', rs.body.message, /^err$/m, teishi.test.match],
+               ]);
+            }],
+            ['Send multibyte command to shell', 'post', '/project/message', {file: 'chat/shell.md', body: 'yes € | head -n 30000 | tr -d "\\n"; echo', to: 'shell'}, 200, function (s, rq, rs) {
+               s.shellResponseId = rs.body.responseId;
+               return assert (['response id', s.shellResponseId, 'string']);
+            }],
+            waitFor ('Wait for multibyte shell response', function (s) {
+               return projectFetch (s, '/project/message/' + s.shellResponseId + '/chat/shell.md').then (function (body) {
+                  return body && /^t-end /m.test (body.message);
+               });
+            }),
+            ['Read multibyte shell response', 'get', function (s) {return '/project/message/' + s.shellResponseId + '/chat/shell.md'}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['stdout', rs.body.message.includes ('€'.repeat (30000)), true, teishi.test.equal],
+                  ['no replacement characters', rs.body.message.includes ('�'), false, teishi.test.equal],
                ]);
             }],
             ['Send long command to shell', 'post', '/project/message', {file: 'chat/shell.md', body: 'sleep 30; echo late', to: 'shell'}, 200, function (s, rq, rs) {

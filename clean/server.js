@@ -175,63 +175,75 @@ var redis = function (command) {
 
 var run = async function (... args) {
 
-   if (type (last (args)) === 'object') {
-      var command = teishi.copy (args.slice (0, -1));
-      var options = last (args);
-   }
-   else var command = teishi.copy (args), options = {};
+   if (type (last (args)) === 'object') var command = args.slice (0, -1), options = last (args);
+   else                                 var command = args,               options = {};
 
-   var id = cicek.pseudorandom (), t = Date.now ();
+   var id = cicek.pseudorandom (), t = Date.now (), output = {};
+
+   clog ({type: 'Command request', id, command: command.join (' ')});
 
    return new Promise (function (resolve, reject) {
 
-      var proc = child.spawn (command [0], command.slice (1), options);
+      var onError = function (error) {
+         output.code = -1;
+         output.error = output.error ? [].concat (output.error, formatError (error)) : formatError (error);
+      }
 
-      clog ({type: 'Command request', id, command: command.join (' ')});
+      var proc = child.spawn (command [0], command.slice (1), options);
+      if (options.onSpawn) options.onSpawn (proc);
 
       if (options.input !== undefined) {
          proc.stdin.write (options.input);
          proc.stdin.end ();
-      }
-
-      var output = {};
-      var wait = 3;
-
-      var done = function () {
-         if (--wait > 0) return;
-         var logOutput = dale.obj (output, function (v, k) {
-            if (options [k]) return [k, '[callback]'];
-            if (k === 'stdout' && v.length) return [k, '[' + v.length + ' characters]'];
-            return [k, v];
-         });
-         var ms = Date.now () - t;
-         clog ({type: 'Command response', id, command: command.join (' '), ms, ... logOutput});
-         if (! output.code || options.catch) resolve (output);
-         else reject (output);
+         proc.stdin.on ('error', onError);
       }
 
       dale.go (['stdout', 'stderr'], function (k) {
-         proc [k].on ('data', function (chunk) {
-            if (options [k]) options [k] (chunk);
-            else {
-               if (output [k] === undefined) output [k] = '';
-               output [k] += chunk;
-            }
+         proc [k].on ('error', onError);
+
+         if (type (options [k]) === 'object' && type (options [k].write) === 'function') {
+            var stop = function () {
+               if (proc.exitCode === null && proc.signalCode === null) proc.kill ();
+            };
+            options [k].on ('close', stop);
+            options [k].on ('error', function (error) {
+               onError (error);
+               stop ();
+            });
+            proc [k].pipe (options [k], {end: false});
+         }
+
+         else if (type (options [k]) === 'function') {
+            proc [k].setEncoding ('utf8');
+            return proc [k].on ('data', options [k]);
+         }
+
+         else proc [k].on ('data', function (chunk) {
+            if (output [k] === undefined) output [k] = [];
+            output [k].push (chunk);
          });
-         proc [k].on ('end', done);
       });
 
-      proc.on ('error', function (error) {
-         output.code  = -1;
-         output.error = formatError (error);
-         done ();
-      });
-      proc.on ('exit', function (code, signal) {
-         if (code !== null) output.code = code;
+      proc.on ('error', onError);
+      proc.on ('close', function (code, signal) {
+         if (code !== null && output.code === undefined) output.code = code;
          if (signal !== null) output.signal = signal;
-         done ();
+
+         dale.go (['stdout', 'stderr'], function (k) {
+            if (output [k] === undefined) return;
+            output [k] = Buffer.concat (output [k]);
+            if (options [k] === undefined) output [k] = output [k].toString ('utf8');
+         });
+
+         clog ({type: 'Command response', id, command: command.join (' '), ms: Date.now () - t, ... dale.obj (output, function (v, k) {
+            if (k === 'stdout' || options [k] === 'buffer') v = '[' + Buffer.byteLength (v) + ' bytes]';
+            return [k, v];
+         })});
+
+         if (output.code === 0 || options.catch) resolve (output);
+         else reject (output);
       });
-      if (options.onSpawn) options.onSpawn (proc);
+
    });
 }
 
@@ -403,7 +415,7 @@ var allowOp = async function (userId, projectId, op, prefix) {
       if (type (prefix) === 'string' && inc (prefix.split ('/'), '.git')) return verb === 'write' && ! scope;
       return ! scope || (type (prefix) === 'string' && (scope.startsWith ('APP:') ? prefix === scope : ! /^APP:\d+$/.test (prefix) && prefix.startsWith (scope)));
    });
-};
+}
 
 var projectAccessCleanup = async function (id) {
    var members = await redis ('smembers', 'accessBy:' + id);
@@ -415,14 +427,14 @@ var projectAccessCleanup = async function (id) {
       }),
       ['del', 'accessBy:' + id]
    ];
-};
+}
 
 project.access = async function (id) {
    var file = await project.read (id, '/project/vibey/access.md');
    if (file.code) return file;
 
    var invalidEntry;
-   var entries = dale.fil (file.stdout.toString ('utf8').split (/\r?\n/), undefined, function (line) {
+   var entries = dale.fil (file.stdout.split (/\r?\n/), undefined, function (line) {
       line = line.trim ();
       // Project grants (`project:<originId> ...`) are read on every cross-project call, not synced.
       if (! line || line.startsWith ('#') || line.startsWith ('project:')) return;
@@ -473,7 +485,7 @@ project.access = async function (id) {
    ]);
 
    return {code: 0, stdout: 'Access synced for: ' + (emails.join (', ') || '(none)') + '\n'};
-};
+}
 
 Path.quote = function (path) {
    return "'" + path.replace (/'/g, "'\\''") + "'";
@@ -515,10 +527,9 @@ project.run = async function (id, command, options) {
    return result;
 }
 
-project.read = async function (id, path) {
-   var chunks = [];
-   var result = await project.run (id, 'cat ' + Path.quote (path), {catch: true, stdout: function (chunk) {chunks.push (chunk)}});
-   return result.code ? {code: result.code, error: result.stderr} : {stdout: Buffer.concat (chunks)};
+project.read = async function (id, path, mode) {
+   var result = await project.run (id, 'cat ' + Path.quote (path), {catch: true, stdout: mode});
+   return result.code ? {code: result.code, error: result.stderr} : {stdout: result.stdout || (mode === 'buffer' ? Buffer.alloc (0) : '')};
 }
 
 project.video = async function (rq, rs, id, path) {
@@ -558,7 +569,7 @@ project.video = async function (rq, rs, id, path) {
       code = 206;
       headers ['content-range'] = 'bytes ' + start + '-' + end + '/' + size;
    }
-   var length = size ? end - start + 1 : 0, sent = 0, failed = false;
+   var length = size ? end - start + 1 : 0, sent = 0;
    headers ['content-length'] = length;
    var script = [
       'if (Number (process.argv [3]) < 0) process.exit (0);',
@@ -567,42 +578,27 @@ project.video = async function (rq, rs, id, path) {
       'process.stdout.on ("error", function () {process.exit (1)});',
       'stream.pipe (process.stdout);',
    ].join ('\n');
-   var proc = child.spawn ('docker', [
-      'exec', 'vibey-project-' + id, 'node', '-e', script, path, String (start), String (end),
-   ]);
    var begin = function () {
       rs.log.code = code;
       rs.log.responseBody = length;
       rs.log.responseHeaders = headers;
       rs.writeHead (code, headers);
    };
-   var fail = function () {
-      if (failed || rs.destroyed) return;
-      failed = true;
-      proc.stdout.unpipe (rs);
-      if (rs.headersSent) rs.destroy ();
-      else reply (rs, 500);
-   };
-   proc.stderr.resume ();
-   proc.on ('error', fail);
-   proc.stdout.on ('error', fail);
-   proc.stdout.on ('data', function (chunk) {
-      sent += chunk.length;
-      if (! failed && ! rs.destroyed && ! rs.headersSent) begin ();
+   var result = await run ('docker', 'exec', 'vibey-project-' + id, 'node', '-e', script, path, String (start), String (end), {
+      catch: true,
+      stdout: rs,
+      onSpawn: function (proc) {
+         proc.stdout.on ('data', function (chunk) {
+            sent += chunk.length;
+            if (! rs.destroyed && ! rs.headersSent) begin ();
+         });
+      },
    });
-   proc.stdout.pipe (rs, {end: false});
-   rs.on ('close', function () {
-      proc.stdout.unpipe (rs);
-      proc.stdout.destroy ();
-      proc.kill ();
-   });
-   proc.on ('close', function (exitCode) {
-      if (failed || rs.destroyed) return;
-      if (exitCode !== 0 || sent !== length) return fail ();
-      if (! rs.headersSent) begin ();
-      rs.end (function () {cicek.apres (rs)});
-   });
-};
+   if (rs.destroyed) return;
+   if (result.code !== 0 || sent !== length) return rs.headersSent ? rs.destroy () : reply (rs, 500);
+   if (! rs.headersSent) begin ();
+   rs.end (function () {cicek.apres (rs)});
+}
 
 project.write = async function (id, path, content, noCommit) {
    // Writes go through a rename, since truncating a file that a concurrent git add is reading crashes git (SIGBUS).
@@ -1911,14 +1907,14 @@ var routes = [
 
       if (/\.mp4$/i.test (path)) return project.video (rq, rs, rq.projectId, '/project/' + path);
 
-      var file = await project.read (rq.projectId, '/project/' + path);
+      var file = await project.read (rq.projectId, '/project/' + path, 'buffer');
       if (file.code) {
          if (file.code === 1 && file.error && file.error.match ('No such file or directory')) return reply (rs, 404, fourohfour, 'html');
          clog ({priority: 'important', type: 'Read file error', error: formatError (file)});
          return reply (rs, 500);
       }
 
-      var buffer = file.stdout || Buffer.alloc (0);
+      var buffer = file.stdout;
       var markdown = /\.md$/i.test (path) && ! (rq.data.query && rq.data.query.raw);
       if (markdown) buffer = Buffer.from (lith.g ([
          ['!DOCTYPE HTML'],
@@ -2015,7 +2011,6 @@ var routes = [
          if (! inc (['connection', 'content-length', 'cookie', 'expect', 'host', 'x-csrf'], k)) return '-H ' + Path.quote (k + ': ' + v);
       });
 
-      var chunks = [];
       var result = await project.run (rq.projectId, [
          'curl -sS -i --http1.1 -X', Path.quote (rq.method.toUpperCase ()),
          ... headers,
@@ -2028,12 +2023,12 @@ var routes = [
       ], {
          catch: true,
          input: body.length ? body : undefined,
-         stdout: function (chunk) {chunks.push (chunk)},
+         stdout: 'buffer',
       });
       if (result.code === 7) return reply (rs, 502, {error: 'Nothing is listening on port ' + port});
       if (result.code) return reply (rs, 502, {error: 'App request failed'});
 
-      var output = Buffer.concat (chunks), split = output.indexOf ('\r\n\r\n');
+      var output = result.stdout || Buffer.alloc (0), split = output.indexOf ('\r\n\r\n');
       var lines = output.slice (0, split).toString ().split ('\r\n');
       var responseHeaders = {};
       dale.go (lines.slice (1), function (line) {
@@ -2135,7 +2130,7 @@ var routes = [
          });
          return reply (rs, 500);
       }
-      var text = (result.stdout || Buffer.alloc (0)).toString ('utf8');
+      var text = result.stdout;
       var head = text.match (new RegExp ('^əəə head ' + messageId + '\\n', 'im'));
       if (! head) return reply (rs, 404);
       var rest = text.slice (head.index + head [0].length);
@@ -2337,7 +2332,7 @@ var routes = [
                if (ended || chat.code) return;
                if (! new RegExp (
                   '^əəə head ' + messageId + '\n(?:(?!əəə (?:head|body) )[^\n]*\n)*cancelled .+$', 'im'
-               ).test (chat.stdout.toString ('utf8'))) return;
+               ).test (chat.stdout)) return;
                cancelled = true;
                var result = proc.fake ? {code: 0} : await project.run (executionProjectId, 'bash -c ' + Path.quote (
                   'read -r pid < ' + Path.quote (pidFile)
@@ -2415,7 +2410,7 @@ var routes = [
             if (shellProject !== rq.projectId) {
                if (! validUuid.test (shellProject) || ! await redis ('exists', 'project:' + shellProject)) return reply (rs, 404);
                var access = await project.read (shellProject, '/project/vibey/access.md');
-               var allowed = ! access.code && access.stdout.toString ('utf8').split (/\r?\n/).some (function (line) {
+               var allowed = ! access.code && access.stdout.split (/\r?\n/).some (function (line) {
                   var grant = /^(\S+)\s+write$/.exec (line.trim ());
                   return grant && grant [1] === 'project:' + rq.projectId;
                });
@@ -2486,7 +2481,7 @@ var routes = [
       for (var turn = 0; ; turn++) {
          var chat = await project.read (rq.projectId, rq.body.file);
          if (chat.code) throw chat;
-         var transcript = chat.stdout.toString ('utf8');
+         var transcript = chat.stdout;
          if (toolDone) transcript = transcript.replace (toolDone [0], toolDone [1]);
          var entries = transcript.split (/^əəə head /im).slice (1);
          var lastMain = undefined, hasSystemPrompt = false;
@@ -2521,7 +2516,7 @@ var routes = [
             throw main;
          }
          if (! main.code) {
-            var mainBody = main.stdout.toString ('utf8').replace (/^əəə (head|body)/gm, '> əəə $1');
+            var mainBody = main.stdout.replace (/^əəə (head|body)/gm, '> əəə $1');
             if (mainBody !== lastMain) {
                var mainId = crypto.randomUUID ();
                var mainMessage = [
@@ -2912,7 +2907,7 @@ var routes = [
                   if (! validUuid.test (target) || ! await redis ('exists', 'project:' + target)) return {code: 1, error: 'Access denied'};
                   var access = await project.read (target, '/project/vibey/access.md');
                   var allowed = ! access.code && dale.stop (
-                     access.stdout.toString ('utf8').split (/\r?\n/), true,
+                     access.stdout.split (/\r?\n/), true,
                      function (line) {
                         var grant = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line.trim ());
                         if (! grant || grant [1] !== 'project:' + rq.projectId) return;
@@ -3020,7 +3015,7 @@ var routes = [
          if (cancelled) {
             return await streamCommit ();
          }
-         if (toolCall.op !== 'run' && toolResult.stdout) output += toolResult.stdout.toString ('utf8');
+         if (toolCall.op !== 'run' && toolResult.stdout) output += toolResult.stdout;
          if (toolResult.error) output += '\n' + toolResult.error;
          if (toolResult.signal) output += '\nSignal: ' + toolResult.signal;
          output += '\nExit code: ' + (toolResult.code || 0);
@@ -3040,7 +3035,7 @@ var routes = [
          var sameChat = rq.body.reply === rq.body.file;
          var replyChat = await project.read (rq.projectId, rq.body.reply);
          var heads = {};
-         dale.go ((replyChat.code ? '' : replyChat.stdout.toString ('utf8')).split (/^əəə head /m).slice (1), function (entry) {
+         dale.go ((replyChat.code ? '' : replyChat.stdout).split (/^əəə head /m).slice (1), function (entry) {
             var head = entry.slice (0, entry.search (/^əəə body /m));
             var field = function (name) {return (head.match (new RegExp ('^' + name + ' (.+)$', 'm')) || []) [1]};
             heads [field ('id')] = {from: field ('from'), pending: field ('pending'), reply: field ('reply'), to: field ('to')};
