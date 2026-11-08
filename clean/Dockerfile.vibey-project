@@ -10,6 +10,8 @@ RUN adduser -D -h /home/vibey vibey && echo 'vibey ALL=(ALL) NOPASSWD:ALL' >> /e
 
 RUN mkdir /project && chown vibey:vibey /project
 
+COPY agent.js /agent.js
+
 WORKDIR /project
 
 USER vibey

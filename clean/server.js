@@ -30,7 +30,10 @@ catch (error) {
 var child   = require ('child_process')
 var cluster = require ('cluster');
 var crypto  = require ('crypto');
+var decoder = require ('string_decoder');
+var events  = require ('events');
 var Path    = require ('path');
+var stream  = require ('stream');
 var util    = require ('util');
 
 var dale   = require ('dale');
@@ -379,6 +382,131 @@ var setUsername = async function (id, value, generate) {
 
 var project = {};
 
+var agents = {};
+
+project.agentRun = function (id, command, options) {
+   var agent = agents [id];
+   if (! agent) {
+      agent = agents [id] = {
+         buffer: Buffer.alloc (0),
+         next: 0,
+         proc: child.spawn ('docker', ['exec', '-i', id, 'node', '/agent.js']),
+         runs: {},
+         stderr: [],
+      };
+      agent.proc.on ('error', function () {});
+      agent.proc.stdin.on ('error', function () {});
+      agent.proc.stderr.on ('data', function (chunk) {
+         agent.stderr.push (chunk);
+      });
+      agent.proc.stdout.on ('data', function (chunk) {
+         agent.buffer = Buffer.concat ([agent.buffer, chunk]);
+         while (agent.buffer.length >= 9 && agent.buffer.length >= 9 + agent.buffer.readUInt32BE (5)) {
+            var end = 9 + agent.buffer.readUInt32BE (5), entry = agent.runs [agent.buffer.readUInt32BE (1)];
+            if (entry) entry.onFrame (String.fromCharCode (agent.buffer [0]), agent.buffer.subarray (9, end));
+            agent.buffer = agent.buffer.subarray (end);
+         }
+      });
+      agent.proc.on ('close', function () {
+         if (agents [id] === agent) delete agents [id];
+         var stderr = Buffer.concat (agent.stderr).toString ();
+         dale.go (agent.runs, function (entry) {
+            entry.onLost (stderr);
+         });
+      });
+   }
+   var runId = agent.next++, output = {}, done;
+   var send = function (kind, payload, callback) {
+      payload = Buffer.from (payload || '');
+      var head = Buffer.alloc (9);
+      head.write (kind);
+      head.writeUInt32BE (runId, 1);
+      head.writeUInt32BE (payload.length, 5);
+      agent.proc.stdin.write (Buffer.concat ([head, payload]), callback);
+   };
+   var decoders = {
+      stderr: new decoder.StringDecoder ('utf8'),
+      stdout: new decoder.StringDecoder ('utf8'),
+   };
+
+   var proc = new events.EventEmitter ();
+   proc.exitCode = null;
+   proc.signalCode = null;
+   proc.stderr = new events.EventEmitter ();
+   proc.stdout = new events.EventEmitter ();
+   proc.stdin = new stream.Writable ({
+      final: function (callback) {
+         send ('I', '', callback);
+      },
+      write: function (chunk, encoding, callback) {
+         send ('i', chunk, callback);
+      },
+   });
+   proc.kill = function (signal) {
+      if (! done) send ('k', JSON.stringify ({signal: signal || 'SIGTERM'}));
+   };
+
+   var deliver = function (k, chunk) {
+      proc [k].emit ('data', chunk);
+      var target = options [k];
+      var credit = function () {
+         if (! done) send ('c', JSON.stringify ({bytes: chunk.length}));
+      };
+      if (type (target) === 'object' && type (target.write) === 'function') {
+         if (target.write (chunk)) credit ();
+         else target.once ('drain', credit);
+         return;
+      }
+      if (type (target) === 'function') target (decoders [k].write (chunk));
+      else (output [k] = output [k] || []).push (chunk);
+      credit ();
+   };
+
+   return new Promise (function (resolve, reject) {
+      var finish = function (exit) {
+         done = true;
+         delete agent.runs [runId];
+         Object.assign (output, exit);
+         dale.go (['stdout', 'stderr'], function (k) {
+            if (output [k] === undefined) return;
+            output [k] = Buffer.concat (output [k]);
+            if (options [k] === undefined) output [k] = output [k].toString ('utf8');
+         });
+         proc.exitCode = output.code === undefined ? null : output.code;
+         proc.signalCode = output.signal || null;
+         proc.emit ('exit', proc.exitCode, proc.signalCode);
+         proc.emit ('close', proc.exitCode, proc.signalCode);
+         if (output.code === 0 || options.catch) resolve (output);
+         else reject (output);
+      };
+
+      dale.go (['stdout', 'stderr'], function (k) {
+         var target = options [k];
+         if (type (target) !== 'object' || type (target.write) !== 'function') return;
+         target.on ('close', function () {proc.kill ()});
+         target.on ('error', function () {proc.kill ()});
+      });
+
+      agent.runs [runId] = {
+         onFrame: function (kind, payload) {
+            if (kind === 's') {
+               proc.pid = JSON.parse (payload).pid;
+               if (options.onSpawn) options.onSpawn (proc);
+            }
+            if (kind === 'o') deliver ('stdout', payload);
+            if (kind === 'e') deliver ('stderr', payload);
+            if (kind === 'x') finish (JSON.parse (payload));
+         },
+         onLost: function (stderr) {
+            finish ({code: -1, error: {error: 'AgentExited', stderr: stderr}});
+         },
+      };
+
+      send ('r', JSON.stringify ({command: command, cwd: options.cwd, env: options.env}));
+      if (options.input !== undefined) proc.stdin.end (options.input);
+   });
+};
+
 var validProjectPath = function (path) {
    return type (path) === 'string' &&
       ! path.startsWith ('/') &&
@@ -495,8 +623,8 @@ project.run = async function (id, command, options) {
    id = 'vibey-project-' + id;
    if (type (command) === 'array') command = command.join (' ');
 
-   var result = await run ('docker', 'exec', '-i', id, 'sh', '-c', command, {... options, 'catch': true});
-   if (result.code === 1 && result.stderr && result.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
+   var result = await project.agentRun (id, ['sh', '-c', command], {... options, 'catch': true});
+   if (result.error && result.error.error === 'AgentExited' && result.error.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
       var recreate = await run ('docker', 'run', '--init', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
       if (recreate.code) {
          var restart = await run ('docker', 'start', id, {catch: true});
@@ -584,7 +712,7 @@ project.video = async function (rq, rs, id, path) {
       rs.log.responseHeaders = headers;
       rs.writeHead (code, headers);
    };
-   var result = await run ('docker', 'exec', 'vibey-project-' + id, 'node', '-e', script, path, String (start), String (end), {
+   var result = await project.agentRun ('vibey-project-' + id, ['node', '-e', script, path, String (start), String (end)], {
       catch: true,
       stdout: rs,
       onSpawn: function (proc) {
@@ -2708,7 +2836,7 @@ var routes = [
             var configDir = temp.stdout.trim ();
 
             try {
-               var dockerArgs = ['exec', '-i'];
+               var aiArgs = ['env'];
                var command;
 
                if (aiFlavor === 'openai') {
@@ -2727,7 +2855,7 @@ var routes = [
                   var result = await project.write (rq.projectId, configDir + '/auth.json', codexAuth, 'noCommit');
                   if (result.code) throw result;
 
-                  dockerArgs.push ('-e', 'CODEX_HOME=' + configDir);
+                  aiArgs.push ('CODEX_HOME=' + configDir);
                   command = 'exec codex app-server --stdio -c ' + Path.quote ('sandbox_mode="danger-full-access"');
                }
 
@@ -2751,7 +2879,7 @@ var routes = [
                   );
                   if (result.code) throw result;
 
-                  dockerArgs.push ('-e', 'CLAUDE_CONFIG_DIR=' + configDir);
+                  aiArgs.push ('CLAUDE_CONFIG_DIR=' + configDir);
                   command = 'unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;'
                      + ' credential=$(cat ' + Path.quote (credentialPath) + ') || exit 1;'
                      + ' export ' + (auth === 'apiKey' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN') + '="$credential";'
@@ -2760,9 +2888,9 @@ var routes = [
                      + ' --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions';
                }
 
-               dockerArgs.push ('vibey-project-' + rq.projectId, 'sh', '-c', groupedCommand (command));
+               aiArgs.push ('sh', '-c', groupedCommand (command));
 
-               var aiResult = await run ('docker', ... dockerArgs, {
+               var aiResult = await project.agentRun ('vibey-project-' + rq.projectId, aiArgs, {
                   catch: true,
                   input: aiFlavor === 'openai' ? undefined : prompt,
                   onSpawn: function (proc) {
