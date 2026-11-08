@@ -1,5 +1,105 @@
 # Vibey development notes
 
+## 2026-11-08
+
+Vibey needs more to become an all-seeing aleph of different projects. Going back to the project view is super clunky, especially for switches you do all the time. Two ideas:
+- At the top of the normal (inside a project) view, have up to seven icons/buttons that take you to the last seven projects you opened.
+- Make the projects view (outside a project) have the same shape as the inner view: on the left there's the list of projects, on the right more details, and you can navigate up and down.
+The mobile view hints at still making this modal, with a quick way to go back. The computer view could have the icons on top, but on the phone they're too expensive, they need to be accessible back on the outer view as top places.
+
+If I were to do 95% of my computing in vibey, what would have to be there?
+- Inbox
+- Chat
+- Document repository
+- Agent
+- Editor
+- Terminal
+- Code repository
+(note that the top three are just for communicating with other humans)
+
+Notifications: it is necessary to have a central place for them. There's N projects, but just one human. The central problem is: where do these notifications live? They should live in the host, since the host is the only one that can mix data from projects.
+
+The chat as replacement for forums and email chains, with a bit of client to manipulate it (show replies, better search). This is key. So chat would be four things, not three. Besides actual chat, AI and shell, it would also be email. Makes sense. It's all communication.
+
+Having calls with stdin/stdout/stderr all the way is extending the unix ideal.
+
+Sequence of what I'm doing: vibey, cell, todis. vibey inside has an app, destek.
+
+Ideal song for the vibey demo: TMBG's No One Knows My Plan.
+
+What's stopping me from moving my blog, altocode's blog, and my open source into vibey is that I still don't have BYOE engines, so I cannot forward traffic from a domain except by hardcoding rules in nginx. This will change this upcoming week.
+
+Inbox:
+- Each new chain is a new file, inside `email/`.
+- Attachments land as files with the same name as the email, plus a `-<attachment name>`, like we do now with chats.
+- Each new chain has a date, plus the subject, plus a disambiguator (if necessary), as their name.
+- Each chain is a chat, **with the format of a chat**. Triple schwas. This is the core equivalence: an email chain is a chat!
+- If this nails the representation of the email chain, then all that's left is how to get the emails and how to send them back. From a UX perspective, replying to an email can be like replying to a message in the chat.
+
+Chat:
+- Almost already there. With good polling, and a good way to search and jump around, it can definitely be good enough.
+
+Document repository:
+- Need a way to 1) search across an entire project; 2) search across projects (from the host).
+
+Agent, editor, terminal: good enough, can improve but it's usable.
+
+Code repository: I need to hide folders by default, that's what's preventing me from copying large amounts of data into the project. Also autobackup would be nice.
+
+If I had to summarize what hit me between yesterday and today:
+- Projects are hard to find and are too far from each other. Need to be able to see them all at a glance, search across them, switch effortlessly between them.
+- Your inbox can be a bunch of chats, if chats can do better.
+
+Take any and all radical bets, but you need to keep the going concern always. `main` should be always running.
+
+The demo has to be an alexandrian sequence.
+
+Think vibey da capo, from the UX. How does it look when you land without an account? How can you see the public projects, or jump to make your own? How do you see a project that someone shared with you? How do you switch between two of them?
+
+DONE:
+- agent mode, for massive speedup of commands (!)
+- Treat media files consistently everywhere in the client
+- Allow to upload multiple files at once
+
+- TODO
+   - unclassified
+      - Link messages in chat, go to whoever you replied to, also show replies at the bottom. This is key, to jump around. Also allow to reply to message in the chat.
+      - Poll last message of the chat all the time, so we get updates.
+      - Readme on structure of chat
+      - Start all containers on server restart
+      - Chat on the side, and fast toggle on mobile
+      - new view
+   - demos
+   - notifications
+   - devops
+      - destek to list logs and have alerts
+      - renew wildcard subdomain automatically
+   - engine
+      - support engines without provisioning (BYOE)
+      - provision engines
+      - Port mapping from the project to the engine: allow to run in a port. Check for contention within the engine. Then auto-modify nginx to allow for direct access. Allow direct access with mappings of URLs, per individual file and also per folder/prefix (forbid dots).
+   - access
+      - email to project
+      - api tokens
+   - chat
+      - call agent from shell
+      - cron
+   - file
+      - Don't expand folders by default
+      - tabs
+      - open sqlite files
+   - project
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - autobackup
+      - CSRF tokens to prevent CSRF attacks between projects (outside from Vibey is already covered by headers): support GET /auth/user, change prompt
+   - tests: local mode, client tests
+
+https://patrickcollison.com/fast
+This is influencing me more than I care to admit. Having LLMs now really makes the case for this too.
+
 ## 2026-11-07
 
 RTFM: read this fine manual. Dreamt about actually doing an online manual that's readable, like an HTML slide deck.
@@ -96,12 +196,6 @@ To not expand folders by default, keep an object of prefixes, which if in that o
 Claude suggests putting a single node in front of every project, so that all commands can go to it without the latency of calling docker. That's a brilliant idea. Each worker would have a pipe to each process.
 
 When working on a laptop, I want a quick chat on the side when editing a doc, to see the changes while I discuss them with an agent.
-
-TODO new:
-- Readme on structure of chat
-- Start all containers on server restart
-- Notifications
-- Chat on the side, and fast toggle on mobile
 
 ## 2026-11-05
 
@@ -268,10 +362,11 @@ I need to move to vibey 95% of the way. Find a way to make it work all the time.
 
 Why not make vibey source available, or ask for royalties if it is used by other providers? Because we offer an alternative to other providers ourselves; as long as we offer a reasonable service at a reasonable price, we will have more than enough demand to cover costs. We charge for the relationship and the trust, not for the knowledge. And licensing our technology to big companies would warp our incentives.
 
-Idea of an app that I would build with vibey: the good stuff:
+Idea of an app that I would build with vibey: thegoodstuff:
 - No anonymous, log in with email.
 - You post what you like: artist, song, album, writer, book. Later to be expanded to other categories. When you post, you can also create the entry for the first time.
 - The system helps you discover: 1) things you'd like interesting based on what you like and what others with similar taste like; 2) like minded people.
+- An album is linked to an artist, a song to an album, etc. So the goodthings are linked in themselves.
 
 Vibey's moat is the lack of moat.
 
