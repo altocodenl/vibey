@@ -36,8 +36,9 @@ var run = async function (... args) {
 
          if (typeof options [k] === 'object' && typeof options [k].write === 'function') {
             var stop = function () {
+               if (proc.exitCode !== null || proc.signalCode !== null) return;
                if (! options.detached) {
-                  if (proc.exitCode === null && proc.signalCode === null) proc.kill ();
+                  proc.kill ();
                   return;
                }
                try {

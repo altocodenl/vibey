@@ -401,9 +401,15 @@ project.agentRun = function (id, command, options) {
       });
       agent.proc.stdout.on ('data', function (chunk) {
          agent.buffer = Buffer.concat ([agent.buffer, chunk]);
+         if (agent.buffer.length >= 9 && agent.buffer.readUInt32BE (5) > 16 * 1024 * 1024) return agent.proc.kill ('SIGKILL');
          while (agent.buffer.length >= 9 && agent.buffer.length >= 9 + agent.buffer.readUInt32BE (5)) {
             var end = 9 + agent.buffer.readUInt32BE (5), entry = agent.runs [agent.buffer.readUInt32BE (1)];
-            if (entry) entry.onFrame (String.fromCharCode (agent.buffer [0]), agent.buffer.subarray (9, end));
+            try {
+               if (entry) entry.onFrame (String.fromCharCode (agent.buffer [0]), agent.buffer.subarray (9, end));
+            }
+            catch (error) {
+               return agent.proc.kill ('SIGKILL');
+            }
             agent.buffer = agent.buffer.subarray (end);
          }
       });
@@ -415,6 +421,7 @@ project.agentRun = function (id, command, options) {
          });
       });
    }
+   clearTimeout (agent.idle);
    var runId = agent.next++, output = {}, done;
    var send = function (kind, payload, callback) {
       payload = Buffer.from (payload || '');
@@ -422,7 +429,7 @@ project.agentRun = function (id, command, options) {
       head.write (kind);
       head.writeUInt32BE (runId, 1);
       head.writeUInt32BE (payload.length, 5);
-      agent.proc.stdin.write (Buffer.concat ([head, payload]), callback);
+      agent.proc.stdin.write (Buffer.concat ([head, payload]), function () {if (callback) callback ()});
    };
    var decoders = {
       stderr: new decoder.StringDecoder ('utf8'),
@@ -439,7 +446,9 @@ project.agentRun = function (id, command, options) {
          send ('I', '', callback);
       },
       write: function (chunk, encoding, callback) {
-         send ('i', chunk, callback);
+         var i = 0;
+         do send ('i', chunk.subarray (i, i + 65536), i + 65536 >= chunk.length ? callback : undefined);
+         while ((i += 65536) < chunk.length);
       },
    });
    proc.kill = function (signal) {
@@ -466,6 +475,10 @@ project.agentRun = function (id, command, options) {
       var finish = function (exit) {
          done = true;
          delete agent.runs [runId];
+         if (! Object.keys (agent.runs).length) agent.idle = setTimeout (function () {
+            if (agents [id] === agent) delete agents [id];
+            agent.proc.stdin.end ();
+         }, 60000);
          Object.assign (output, exit);
          dale.go (['stdout', 'stderr'], function (k) {
             if (output [k] === undefined) return;
@@ -3165,7 +3178,10 @@ var routes = [
             var field = function (name) {return (head.match (new RegExp ('^' + name + ' (.+)$', 'm')) || []) [1]};
             heads [field ('id')] = {from: field ('from'), pending: field ('pending'), reply: field ('reply'), to: field ('to')};
          });
-         var pending = dale.fil (heads, undefined, function (head) {
+         var answered = {};
+         dale.go (heads, function (head) {answered [head.to] = true});
+         var pending = dale.fil (heads, undefined, function (head, id) {
+            if (head.reply && head.from === rq.body.from && ! answered [id]) return head;
             if (! head.pending) return;
             while (heads [head.to]) head = heads [head.to];
             if (head.reply && head.from === rq.body.from) return head;

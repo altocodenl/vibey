@@ -1377,6 +1377,13 @@ if (mode === 'server') {
             ['Run a command with large multibyte output', 'post', '/project/run', {command: 'yes € | head -n 100000 | tr -d "\\n"', read: true}, 200, function (s, rq, rs) {
                return assert (['stdout', rs.body.stdout === '€'.repeat (100000), true, teishi.test.equal]);
             }],
+            ['Forge oversized agent frame', 'post', '/project/run', {command: 'node -e \'var head = Buffer.alloc (9); head.write ("x"); head.writeUInt32BE (0x7fffffff, 5); require ("fs").writeFileSync ("/proc/" + process.argv [1] + "/fd/1", head)\' $PPID', read: true}, 200, function (s, rq, rs) {
+               return assert (['error', rs.body.error && rs.body.error.error, 'AgentExited', teishi.test.equal]);
+            }],
+            ['Forge malformed agent frames', 'post', '/project/run', {command: 'node -e \'var frames = Array.from ({length: 1000}, function (v, id) {var frame = Buffer.alloc (10); frame.write ("x"); frame.writeUInt32BE (id, 1); frame.writeUInt32BE (1, 5); frame.write ("{", 9); return frame}); require ("fs").writeFileSync ("/proc/" + process.argv [1] + "/fd/1", Buffer.concat (frames))\' $PPID', read: true}, 200, function (s, rq, rs) {
+               return assert (['error', rs.body.error && rs.body.error.error, 'AgentExited', teishi.test.equal]);
+            }],
+            ['Run command after forged agent frames', 'post', '/project/run', {command: 'printf foo', read: true}, 200, assertBody ({stdout: 'foo'})],
             ['Run command with an extra key', 'post', '/project/run', {command: 'true', extra: true}, 400, function (s, rq, rs) {
                return assert (['error', rs.body.error, /keys of body/, teishi.test.match]);
             }],
@@ -1843,8 +1850,8 @@ if (mode === 'server') {
             }],
 
             ['Start two agents in the same chat', 'post', '/project/message', {file: 'chat/agents.md', to: 'ai-opus-5.5', body: agentScript ([
-               {description: 'Start A', path: 'chat/agents.md', body: 'fake-output:\nresult A'},
-               {description: 'Start B', path: 'chat/agents.md', body: 'fake-output:\nresult B'},
+               {description: 'Start A', path: 'chat/agents.md', body: 'task A'},
+               {description: 'Start B', path: 'chat/agents.md', body: 'task B'},
             ])}, 200],
             waitFor ('Wait for agents and wake to finish', agentsDone ('chat/agents.md', function (text) {
                return /^All agents finished\.$/m.test (text) && count (text, /^from ai-opus-5\.5$/gm) === 6;
@@ -1856,8 +1863,9 @@ if (mode === 'server') {
                   ['two started calls', count (rs.body, /^\{"id":"[0-9a-f-]{36}","responseId":"[0-9a-f-]{36}"\}$/gm), 2, teishi.test.equal],
                   ['exit code', rs.body, /^Exit code: 0$/m, teishi.test.match],
                   ['two requests', count (rs.body, /^reply chat\/agents\.md$/gm), 2, teishi.test.equal],
-                  ['result A', rs.body, /^əəə body [0-9a-f-]{36}\nresult A$/m, teishi.test.match],
-                  ['result B', rs.body, /^əəə body [0-9a-f-]{36}\nresult B$/m, teishi.test.match],
+                  ['task A', rs.body, /^əəə body [0-9a-f-]{36}\ntask A$/m, teishi.test.match],
+                  ['task B', rs.body, /^əəə body [0-9a-f-]{36}\ntask B$/m, teishi.test.match],
+                  ['agents and wake answered in full', count (rs.body, /word999$/gm), 3, teishi.test.equal],
                   ['one wake', count (rs.body, /^All agents finished\.$/gm), 1, teishi.test.equal],
                   ['wake note from shell', rs.body, /^from shell\nid [0-9a-f-]{36}\nt \S+\nto ai-opus-5\.5\nəəə body [0-9a-f-]{36}\nAll agents finished\.$/m, teishi.test.match],
                   ['caller turn ended at the agent call', new RegExp ('^to ' + shellId + '$', 'm').test (rs.body), false, teishi.test.equal],
