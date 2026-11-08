@@ -660,7 +660,7 @@ project.read = async function (id, path, mode) {
    return result.code ? {code: result.code, error: result.stderr} : {stdout: result.stdout || (mode === 'buffer' ? Buffer.alloc (0) : '')};
 }
 
-project.video = async function (rq, rs, id, path) {
+project.media = async function (rq, rs, id, path) {
    var quoted = Path.quote (path);
    var stat = await project.run (id, 'test -f ' + quoted + ' || exit 44; wc -c < ' + quoted, {catch: true});
    if (rs.destroyed) return;
@@ -670,7 +670,7 @@ project.video = async function (rq, rs, id, path) {
    if (! Number.isSafeInteger (size) || size < 0) return reply (rs, 500);
    var headers = {
       'access-control-allow-origin': '*',
-      'content-type': 'video/mp4',
+      'content-type': mime.lookup (path) || 'application/octet-stream',
       'accept-ranges': 'bytes',
       'cache-control': 'private, no-cache',
       'x-content-type-options': 'nosniff',
@@ -712,7 +712,7 @@ project.video = async function (rq, rs, id, path) {
       rs.log.responseHeaders = headers;
       rs.writeHead (code, headers);
    };
-   var result = await project.agentRun ('vibey-project-' + id, ['node', '-e', script, path, String (start), String (end)], {
+   var result = await project.run (id, 'node -e ' + Path.quote (script) + ' ' + Path.quote (path) + ' ' + start + ' ' + end, {
       catch: true,
       stdout: rs,
       onSpawn: function (proc) {
@@ -2033,7 +2033,7 @@ var routes = [
          location: new URL (CONFIG.baseURL).protocol + '//' + rq.projectRedirect + '.' + new URL (CONFIG.baseURL).host + encodeURI (rq.rawurl || rq.url)
       });
 
-      if (/\.mp4$/i.test (path)) return project.video (rq, rs, rq.projectId, '/project/' + path);
+      if (/\.(m4a|mov|mp3|mp4|ogg|wav|webm)$/i.test (path)) return project.media (rq, rs, rq.projectId, '/project/' + path);
 
       var file = await project.read (rq.projectId, '/project/' + path, 'buffer');
       if (file.code) {
@@ -2836,7 +2836,6 @@ var routes = [
             var configDir = temp.stdout.trim ();
 
             try {
-               var aiArgs = ['env'];
                var command;
 
                if (aiFlavor === 'openai') {
@@ -2855,8 +2854,8 @@ var routes = [
                   var result = await project.write (rq.projectId, configDir + '/auth.json', codexAuth, 'noCommit');
                   if (result.code) throw result;
 
-                  aiArgs.push ('CODEX_HOME=' + configDir);
-                  command = 'exec codex app-server --stdio -c ' + Path.quote ('sandbox_mode="danger-full-access"');
+                  command = 'export CODEX_HOME=' + Path.quote (configDir) + ';'
+                     + ' exec codex app-server --stdio -c ' + Path.quote ('sandbox_mode="danger-full-access"');
                }
 
                if (aiFlavor === 'anthropic') {
@@ -2879,8 +2878,8 @@ var routes = [
                   );
                   if (result.code) throw result;
 
-                  aiArgs.push ('CLAUDE_CONFIG_DIR=' + configDir);
-                  command = 'unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;'
+                  command = 'export CLAUDE_CONFIG_DIR=' + Path.quote (configDir) + ';'
+                     + ' unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;'
                      + ' credential=$(cat ' + Path.quote (credentialPath) + ') || exit 1;'
                      + ' export ' + (auth === 'apiKey' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN') + '="$credential";'
                      + ' unset credential;'
@@ -2888,9 +2887,7 @@ var routes = [
                      + ' --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions';
                }
 
-               aiArgs.push ('sh', '-c', groupedCommand (command));
-
-               var aiResult = await project.agentRun ('vibey-project-' + rq.projectId, aiArgs, {
+               var aiResult = await project.run (rq.projectId, groupedCommand (command), {
                   catch: true,
                   input: aiFlavor === 'openai' ? undefined : prompt,
                   onSpawn: function (proc) {
