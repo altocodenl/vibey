@@ -768,7 +768,7 @@ B.mrespond ([
          return edit.file === name;
       })) return;
 
-      if (/^APP:\d+$/.test (name) || /\.(avif|bmp|gif|jpe?g|png|webp|pdf|mp4)$/i.test (name)) return;
+      if (/^APP:\d+$/.test (name) || /\.(avif|bmp|gif|jpe?g|m4a|mov|mp3|mp4|ogg|pdf|png|wav|webm|webp)$/i.test (name)) return;
 
       try {
          // TODO: replace with c.ajax when cocholate supports responseType
@@ -1689,6 +1689,67 @@ views.spinny = function (color) {
       class: 'b code dib f2 lh-solid spinny tc ' + (color || 'vblue'),
       style: style ({width: '2ch'}),
    }];
+}
+
+views.media = function (name, base64) {
+   var type = {
+      avif: 'image/avif',
+      bmp: 'image/bmp',
+      gif: 'image/gif',
+      jpeg: 'image/jpeg',
+      jpg: 'image/jpeg',
+      m4a: 'audio/mp4',
+      mov: 'video/quicktime',
+      mp3: 'audio/mpeg',
+      mp4: 'video/mp4',
+      ogg: 'audio/ogg',
+      pdf: 'application/pdf',
+      png: 'image/png',
+      wav: 'audio/wav',
+      webm: 'video/webm',
+      webp: 'image/webp',
+   } [(name.match (/\.([^.]+)$/) || ['', '']) [1].toLowerCase ()] || '';
+   var fill = base64 === undefined;
+   var src = fill ? '/f/' + filePath (name) : 'data:' + type + ';base64,' + base64;
+   // Inline, fits the visible chat area (cqh is relative to .messages); 6rem leaves room for the message padding and the caption below.
+   var box = fill ? {class: 'absolute h-100 left-0 top-0 w-100', style: style ({'object-fit': 'contain'})} : {class: 'db mt2 mw-100', style: style ({'max-height': 'calc(100cqh - 6rem)'})};
+   var onerror = B.ev ('snackbar', 'error', 'There was a problem loading ' + name);
+   var element = /^audio\//.test (type) ? ['audio', {
+      class: fill ? 'w-100' : 'db mt2 mw-100',
+      controls: true,
+      onerror: onerror,
+      preload: 'metadata',
+      src: src,
+   }] : /^image\//.test (type) ? ['img', {
+      alt: name,
+      class: box.class,
+      onerror: onerror,
+      src: src,
+      style: box.style,
+   }] : /^video\//.test (type) ? ['video', {
+      autoplay: true,
+      class: box.class,
+      controls: true,
+      loop: true,
+      onerror: onerror,
+      playsinline: true,
+      preload: 'metadata',
+      src: src,
+      style: box.style,
+   }] : type === 'application/pdf' && fill ? ['object', {
+      class: 'absolute bn h-100 left-0 top-0 w-100',
+      data: src,
+      title: name,
+      type: type,
+   }, [
+      ['p', {class: 'vgray'}, 'Your browser cannot display this PDF.'],
+      ['button', {
+         class: css.button,
+         onclick: B.ev ('download', 'file'),
+      }, 'Download PDF'],
+   ]] : undefined;
+   if (! element || ! fill) return element;
+   return ['div', {class: /^audio\//.test (type) ? 'flex flex-auto items-center justify-center' : 'flex-auto relative'}, [element]];
 }
 
 // *** MAIN ***
@@ -2784,10 +2845,8 @@ views.files = function () {
 
                var isApp = /^APP:\d+$/.test (file.name);
                var appUrl = isApp ? window.location.protocol + '//' + file.name.slice (4) + '--' + window.location.host + '/' : undefined;
-               var isImage = /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test (file.name);
-               var isPdf = /\.pdf$/i.test (file.name);
-               var isVideo = /\.mp4$/i.test (file.name);
-               var isBinary = isApp || isImage || isPdf || isVideo || content instanceof Uint8Array;
+               var media = views.media (file.name);
+               var isBinary = isApp || media || content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
 
                var fileHeader = ['div', {class: 'flex items-center mb2'}, [
@@ -2891,48 +2950,13 @@ views.files = function () {
 
                return ['div', {class: 'flex flex-auto flex-column'}, [
                   fileHeader,
-                  isVideo ? ['div', {class: 'flex-auto relative'}, [
-                     ['video', {
-                        autoplay: true,
-                        class: 'absolute h-100 left-0 top-0 w-100',
-                        controls: true,
-                        loop: true,
-                        playsinline: true,
-                        preload: 'metadata',
-                        src: '/f/' + filePath (file.name),
-                        onerror: B.ev ('snackbar', 'error', 'There was a problem loading the video'),
-                        style: style ({'object-fit': 'contain'}),
-                     }],
-                  ]] :
+                  media ? media :
                   isApp ? ['div', {class: 'flex-auto relative'}, [
                      ['iframe', {
                         class: 'absolute bn h-100 left-0 top-0 w-100',
                         src: appUrl,
                         title: file.name,
                      }],
-                  ]] :
-                  isImage ? ['div', {class: 'flex-auto relative'}, [
-                     ['img', {
-                        alt: file.name,
-                        class: 'absolute h-100 left-0 top-0 w-100',
-                        src: '/f/' + filePath (file.name),
-                        onerror: B.ev ('snackbar', 'error', 'There was a problem loading the image'),
-                        style: style ({'object-fit': 'contain'}),
-                     }],
-                  ]] :
-                  isPdf ? ['div', {class: 'flex-auto relative'}, [
-                     ['object', {
-                        class: 'absolute bn h-100 left-0 top-0 w-100',
-                        data: '/f/' + filePath (file.name),
-                        title: file.name,
-                        type: 'application/pdf',
-                     }, [
-                        ['p', {class: 'vgray'}, 'Your browser cannot display this PDF.'],
-                        ['button', {
-                           class: css.button,
-                           onclick: B.ev ('download', 'file'),
-                        }, 'Download PDF'],
-                     ]],
                   ]] :
                   content === undefined ? ['div', {class: 'flex flex-auto items-center justify-center'}, views.spinny ()] :
                   isBinary ? (function () {
@@ -3072,6 +3096,7 @@ views.files = function () {
                      ['input', {
                         hidden: true,
                         id: 'upload-file',
+                        multiple: true,
                         onchange: B.ev ('upload', 'file', {raw: 'this.files'}),
                         type: 'file',
                      }],
@@ -3766,30 +3791,9 @@ views.chat = function (read) {
                var renderBody = function (b) {
                   if (media) {
                      // File messages hold one base64-encoded file; its name gives the type.
-                     var mime = {
-                        avif: 'image/avif',
-                        bmp: 'image/bmp',
-                        gif: 'image/gif',
-                        jpeg: 'image/jpeg',
-                        jpg: 'image/jpeg',
-                        m4a: 'audio/mp4',
-                        mov: 'video/quicktime',
-                        mp3: 'audio/mpeg',
-                        mp4: 'video/mp4',
-                        ogg: 'audio/ogg',
-                        png: 'image/png',
-                        wav: 'audio/wav',
-                        webm: 'video/webm',
-                        webp: 'image/webp',
-                     } [(mediaName.match (/\.([^.]+)$/) || ['', '']) [1].toLowerCase ()] || 'application/octet-stream';
-                     var src = 'data:' + mime + ';base64,' + b;
+                     var player = views.media (mediaName, b);
                      var caption = ['div', {class: 'f6 pv1 vlightblue'}, mediaName + ' (' + size (Math.floor (b.length * 3 / 4)) + ')'];
-                     // Fits the visible chat area (cqh is relative to .messages); 6rem leaves room for the message padding and the caption below.
-                     var fit = style ({'max-height': 'calc(100cqh - 6rem)'});
-                     if (/^image\//.test (mime)) return ['div', [['img', {alt: mediaName, class: 'db mt2 mw-100', src: src, style: fit}], caption]];
-                     if (/^audio\//.test (mime)) return ['div', [['audio', {class: 'db mt2 mw-100', controls: true, src: src}], caption]];
-                     if (/^video\//.test (mime)) return ['div', [['video', {autoplay: true, class: 'db mt2 mw-100', controls: true, loop: true, src: src, style: fit}], caption]];
-                     return caption;
+                     return player ? ['div', [player, caption]] : caption;
                   }
                   if (shell) {
                      var tool = parseToolResult (b);
