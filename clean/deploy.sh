@@ -14,13 +14,18 @@ fi
 HOST="acprod"
 TARGET_FOLDER="/root/vibey"
 REBUILD=0
+CLIENT=0
 for arg in "$@"; do
    [[ "$arg" != "rebuild" ]] || REBUILD=1
+   [[ "$arg" != "client" ]] || CLIENT=1
 done
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-ssh "$HOST" "mkdir -p '$TARGET_FOLDER'"
+if [[ "$CLIENT" == "1" ]]; then
+   ssh "$HOST" "tee '$TARGET_FOLDER/client.js' | docker exec -i vibey-host sh -c 'cat > /app/client.js'" < client.js
+   exit 0
+fi
 rsync -av --exclude node_modules --exclude .git ./ "$HOST:$TARGET_FOLDER/"
 
 ssh "$HOST" "bash -s -- '$TARGET_FOLDER' '$REBUILD'" <<'REMOTE'

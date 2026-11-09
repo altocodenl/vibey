@@ -804,6 +804,17 @@ project.cleanup = async function () {
    process.exit (0);
 }
 
+project.wake = async function () {
+   var volumes = await run ('docker', 'volume', 'ls', '-q', '-f', 'name=vibey-project-', {catch: true});
+   if (volumes.code || ! volumes.stdout.trim ()) return;
+   await dale.async (volumes.stdout.trim ().split ('\n'), async function (id) {
+      var start = await run ('docker', 'start', id, {catch: true});
+      if (! start.code) return;
+      var recreate = await run ('docker', 'run', '--init', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
+      if (recreate.code) clog ({priority: 'important', type: 'Project wake error', id, error: recreate.stderr});
+   }, {concurrent: 10});
+}
+
 // *** BACKUP ***
 
 var backup = {};
@@ -2542,7 +2553,30 @@ var routes = [
          await project.run (rq.projectId, 'true', {catch: true, commit: 'Edit ' + Path.quote (rq.body.file)});
       };
 
+      var postMessage = function (body) {
+         return new Promise (function (resolve) {
+            hitit.one ({}, {
+               port:    CONFIG.port,
+               method:  'post',
+               path:    '/project/message',
+               headers: dale.obj ({cookie: rq.headers.cookie, host: rq.headers.host, 'x-csrf': rq.headers ['x-csrf'], 'x-test': rq.headers ['x-test']}, function (v, k) {if (v !== undefined) return [k, v]}),
+               body:    body,
+               code:    200,
+            }, function (error, rdata) {
+               if (error) return resolve ({code: 1, error: JSON.stringify (error.body || error.error)});
+               resolve ({code: 0, stdout: JSON.stringify (rdata.body)});
+            });
+         });
+      };
+
       if (rq.body.to === 'shell') {
+         var agentCall = /^\s*vibey agent (\S+)\s+([\s\S]+)$/.exec (rq.body.body);
+         if (agentCall) {
+            var agentResult = await postMessage ({body: agentCall [2], file: rq.body.file, from: 'shell', to: 'ai-' + agentCall [1]});
+            if (agentResult.code) return reply (rs, 400, {error: agentResult.error});
+            return reply (rs, 200, {id: id, responseId: JSON.parse (agentResult.stdout).responseId});
+         }
+
          var shellProject = rq.projectId, shellCommand = rq.body.body;
          var projectCall = /^\s*vibey project ([^\s:]+)\s+([\s\S]+)$/.exec (shellCommand);
          if (projectCall) {
@@ -2601,22 +2635,6 @@ var routes = [
          redis ('hset', 'project:' + rq.projectId, 'last', now ());
          return;
       }
-
-      var postMessage = function (body) {
-         return new Promise (function (resolve) {
-            hitit.one ({}, {
-               port:    CONFIG.port,
-               method:  'post',
-               path:    '/project/message',
-               headers: dale.obj ({cookie: rq.headers.cookie, host: rq.headers.host, 'x-csrf': rq.headers ['x-csrf'], 'x-test': rq.headers ['x-test']}, function (v, k) {if (v !== undefined) return [k, v]}),
-               body:    body,
-               code:    200,
-            }, function (error, rdata) {
-               if (error) return resolve ({code: 1, error: JSON.stringify (error.body || error.error)});
-               resolve ({code: 0, stdout: JSON.stringify (rdata.body)});
-            });
-         });
-      };
 
       var toolDone;
       for (var turn = 0; ; turn++) {
@@ -3392,6 +3410,8 @@ dale.go (['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT', 'SIGUSR1', 'SIGUSR2', 'SIGPI
       }
    });
 });
+
+if (cicek.isMaster) project.wake ();
 
 cicek.cluster (undefined, function (worker, code, signal) {
    if (exiting) return;

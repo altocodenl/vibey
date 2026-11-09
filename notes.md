@@ -1,5 +1,61 @@
 # Vibey development notes
 
+## 2026-11-09
+
+https://idlewords.com/2026/10/cloud_rats_and_software_roaches.htm
+"Remember that death is the best form of reinforcement learning."
+
+DONE:
+- Collapse folders by default.
+- Poll the last message of the chat constantly to check for updates.
+- Document .chat.md format.
+- Start all containers on server restart.
+- Link messages in chat, go to whoever you replied to, also show replies at the bottom. This is key, to jump around. Also allow to reply to message in the chat.
+- Fast toggle between files!
+- Switching from blue to green.
+- View mode for HTML.
+- call agent from shell
+
+I think I have it clear now:
+- Make the outer (projects) view be like the inner (project/file) view.
+- Add an area, on both views, on the top left pane, fixed, just below new and delete, with the last 3 files you opened on that session, for fast toggling between projects or files. Just the space that one file currently takes, divided into three squares with minimal indication of what that file is. Use command 1+2+3 as tooltips to switch
+- Add a button to open a side chat, only on desktop (mobile is too small, you can just use the switcher). It should collapse the left pane, so the right pane moves to the left, and the chat is on the right. However, I'm not sure of this. The chat could instead appear on the left pane, just by "flipping" the card. Still, I'm not sure. The format of the chat is so rich it needs full space, even on a wide screen. Let's shelve it for now.
+
+YES, it had to be *green*, not blue. We were monkeys not long ago, the color of foliage is a more natural color.
+
+With the fast access, I don't think we need tabs anymore. Just three spots, the most recent ones. And that's it.
+
+
+
+- TODO
+   - demos
+   - notifications
+   - devops
+      - destek to list logs and have alerts
+      - renew wildcard subdomain automatically
+   - engine
+      - support engines without provisioning (BYOE)
+      - provision engines
+      - Port mapping from the project to the engine: allow to run in a port. Check for contention within the engine. Then auto-modify nginx to allow for direct access. Allow direct access with mappings of URLs, per individual file and also per folder/prefix (forbid dots).
+   - access
+      - email to project
+      - api tokens
+   - file
+      - open sqlite files
+   - project
+      - cron
+      - New project view
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - autobackup
+      - CSRF tokens to prevent CSRF attacks between projects (outside from Vibey is already covered by headers): support GET /auth/user, change prompt
+   - tests: local mode, client tests
+
+
+
+
 ## 2026-11-08
 
 Vibey needs more to become an all-seeing aleph of different projects. Going back to the project view is super clunky, especially for switches you do all the time. Two ideas:

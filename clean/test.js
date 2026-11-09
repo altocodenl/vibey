@@ -1917,6 +1917,30 @@ if (mode === 'server') {
                ]);
             }],
 
+            ['Start an agent from the shell', 'post', '/project/message', {file: 'chat/shell-agent.md', to: 'shell', body: 'vibey agent opus-5.5 fake-output:\nshell agent done'}, 200, function (s, rq, rs) {
+               s.shellAgentResponseId = rs.body.responseId;
+               return assert (['response id', s.shellAgentResponseId, 'string']);
+            }],
+            waitFor ('Wait for shell-started agent to finish', function (s) {
+               return projectFetch (s, '/project/message/' + s.shellAgentResponseId + '/chat/shell-agent.md').then (function (body) {
+                  return body && /^t-end /m.test (body.message);
+               });
+            }),
+            ['Shell started the agent in the same chat', 'get', '/f/' + encodeURIComponent ('chat/shell-agent.md') + '?raw=1', 200, function (s, rq, rs) {
+               return assert ([
+                  ['only the agent request from shell', count (rs.body, /^from shell$/gm), 1, teishi.test.equal],
+                  ['no started call output', /^\{"id":/m.test (rs.body), false, teishi.test.equal],
+                  ['request to agent', rs.body, /^from shell\nid [0-9a-f-]{36}\nt \S+\nto ai-opus-5\.5\nəəə body [0-9a-f-]{36}\nfake-output:\nshell agent done$/m, teishi.test.match],
+                  ['agent answered', rs.body, /^from ai-opus-5\.5$/m, teishi.test.match],
+                  ['agent response', rs.body, /^əəə body [0-9a-f-]{36}\nshell agent done$/m, teishi.test.match],
+                  ['no reply to shell', /^reply /m.test (rs.body), false, teishi.test.equal],
+               ]);
+            }],
+
+            ['Reject unknown agent from the shell', 'post', '/project/message', {file: 'chat/shell-agent.md', to: 'shell', body: 'vibey agent nope hi'}, 400, function (s, rq, rs) {
+               return assert (['error', rs.body.error, /to must be all, shell, /, teishi.test.match]);
+            }],
+
             ['Run a command after container has been turned off', 'post', '/project/run', function (s) {return {command: 'ls doc'}}, 200, function (s, rq, rs, next) {
                if (! assert (['stdout', rs.body.stdout, 'another.md\nbinary.bin\nbinary.txt\ncome back.md\nempty.md\nupload test.txt\n', teishi.test.equal])) return false;
                (async function () {

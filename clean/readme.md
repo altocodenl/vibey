@@ -177,7 +177,40 @@ Tool calls can target another project: `tool-call: read <projectId>` (also write
 
 Shell messages can also target another project: `vibey project <projectId> <command>`. The target's `vibey/access.md` must grant `project:<originId> write`, for the whole project; otherwise, or if the target isn't an existing project ID, returns 404.
 
+Shell messages can also start an agent in the same chat: `vibey agent <model> <body>` posts `<body>` from `shell` to `ai-<model>` and returns `{id, responseId}` with the AI response's id. An unknown model returns 400.
+
 Syncing replaces the project's grants, removing entries no longer present. Invalid entries abort the sync. Grants for unverified recipients remain keyed by email until login verification transfers them to the user ID.
+
+### Chat files
+
+A `.chat.md` is a list of messages. Each one is a head and a body, both marked with the message's UUID:
+
+```
+əəə head <id>
+<key> <value>
+...
+əəə body <id>
+<body>
+```
+
+A body runs until the next `əəə head` line or the end of the file.
+
+Head keys, one per line:
+
+- `base64 1`: binary message; the body is base64 and goes to `all` or a message UUID. `name` gives its file name.
+- `cancelled <ISO date>`: when the reply was stopped; comes with `pending 0`.
+- `credential`: kind of AI credential used for the reply: `account`, `apiKey` or `test`.
+- `from`: user id, `shell`, `ai-<model>`, `systemPrompt` or `main.md`.
+- `id`: the message's UUID.
+- `name`: file name of a `base64` message.
+- `pending 1`: the reply is still being written.
+- `reply`: chat file where the outcome gets posted back.
+- `t`: when a sent message was written.
+- `t-end`, `t-start`: when a reply finished and started.
+- `to`: `all`, `shell`, `ai-<model>`, or the UUID of the message it answers.
+- `tokens-cache`, `tokens-in`, `tokens-out`: AI token usage.
+
+Body lines starting with `əəə head` or `əəə body` are escaped as `> əəə`.
 
 ### API
 
@@ -260,10 +293,12 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `keydown *`: tracks the Command key and handles the global test shortcut:
   - Command+Shift+L: calls `test all` if the logged in user is admin (matches Command plus uppercase `L`).
   - Meta: sets `key.command` to true, showing keyboard shortcut tooltips.
+  - Enter: in the new projects view, calls `create project` when `#create-project` is enabled.
+  - Command+1–3: in the files view, opens the recent file in that position of `recent.files`.
   - Command+9: opens settings when logged in; in settings, Command+9 and Command+B call `go back`.
 - `keyup|blur *`: clears `key.command` when Meta is released or the window loses focus. On blur, if `file.full` is set and focus left the page (not just moved into an embedded frame), sets `file.full` to false, which also exits browser full screen.
 - `test *`: sets `test` to `{enabled: true}`. Loads the client side test suite (`test.js`) only if the logged in user is admin.
-- `navigate <targetPath>`: reads and optionally updates the hash. On a project host, `projects` and `settings` open the main host. Code navigates to projects as `files/<projectId>[/<filename>]`. On the main host, this loads the project's subdomain (from the loaded `projects`, or the project id), at `#/f[/<filename>]`. On a project host, it is turned into `f[/<filename>]` (see `read hash`) before comparing. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
+- `navigate <targetPath>`: reads and optionally updates the hash. On a project host, `new_projects`, `projects` and `settings` open the main host. Code navigates to projects as `files/<projectId>[/<filename>]`. On the main host, this loads the project's subdomain (from the loaded `projects`, or the project id), at `#/f[/<filename>]`. On a project host, it is turned into `f[/<filename>]` (see `read hash`) before comparing. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
 - `go back`: calls `history.back ()` if there is a referrer, otherwise navigates to projects.
 - `read hash`: handles `verify/<loginLink>` and checks that the requested view is reachable by the user. On a project host (when the page's host differs from its `base-host` meta tag), the only view is `files`, at `f/<filename>`, and other hashes navigate to `f`; on the main host, `f` hashes navigate to `projects`. `login/<path>`, with a path under `/auth/project/`, opens the path if logged in; otherwise stores it at `returnTo` and navigates to login. Anonymous users navigating to `settings` go to login. In the files view, sets `project.id` to the subdomain and `file.name` to the filename, and calls `read project` if `files` isn't loaded. Defaults to `main.md`, or the first available file; a filename that isn't in the loaded file list navigates to the default.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
@@ -310,20 +345,20 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 
 #### Files
 
-- `keydown *`: handles shortcuts while in the files view; returns without handling them during uploads. Rename submission shortcuts check for an enabled `#rename-file` button, which the current file rename modal does not provide.
+- `keydown *`: handles shortcuts while in the files view; returns without handling them during uploads.
   - Command+B: on mobile, from the right pane, shows the left pane; otherwise returns to projects.
   - Command+D: when the chat recipient input is present, focuses it and selects its text.
   - In the chat recipient input: Escape blurs it, Enter picks the only or exactly matching option, and ArrowUp/ArrowDown move through the options.
   - Command+Enter: when the chat editor is present, calls `create message` with the current recipient, filename and draft body (the same action as Boom).
   - Command+E: opens file creation; in the creation modal, creates when enabled. In rename, also attempts submission through `#rename-file`.
-  - Enter: creates a file when the creation button is enabled, or attempts rename submission through `#rename-file`.
+  - Enter: creates a file when the creation button is enabled, saves the project edit when `#rename-file` is enabled, or renames the file when `#edit-file` is enabled.
   - Escape: closes the creation or rename modal; exits full screen when the editor doesn't have focus.
   - Command+F: in creation, selects file type.
   - Command+I: outside creation, scrolls down by chat message when the chat is visible, otherwise toggles edit/view mode; in creation, selects chat type.
   - Command+O: outside creation, scrolls up by chat message when the chat is visible.
   - Command+M: outside creation, focuses the chat editor when present.
-  - Command+J: outside creation, selects the next file in the filtered list, wrapping at the end.
-  - Command+K: outside creation, selects the previous file in the filtered list, wrapping at the beginning. Both do nothing when the filter matches no files. On mobile, swiping left or right on the right pane dispatches them.
+  - Command+J: outside creation, selects the next file shown in the left pane (matching the search, or inside expanded folders when not searching), wrapping at the end.
+  - Command+K: outside creation, selects the previous file shown in the left pane, wrapping at the beginning. Both do nothing when the filter matches no files. On mobile, swiping left or right on the right pane dispatches them.
   - Command+R: in creation, opens folder upload.
   - Command+S: outside creation, focuses search.
   - Command+/: toggles content search in chat and text editors; opening focuses and selects the input.
@@ -337,8 +372,9 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `change file.name`: reads the selected file and scrolls its entry into the center of the left pane. Runs at low priority.
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
+- `change show.pane`: on mobile, after rendering, scrolls the window and the shown pane to the top.
 - `read project <noRead>`: sets `files` to `[]` if unset, to avoid concurrent calls. Lists readable project files through `GET /project`, excluding `.git`, and sets `files` with each file's name, size and modification time, plus `apps`, `project.name`, `project.ownerId` and `project.read` (set unless the caller owns the project or has a write grant). After a successful listing, also runs `du -sk /project` through `POST /project/run` with `read: true`, converting KiB to bytes in `project.size.bytes`. This measures disk usage including `.git`; `views.files` displays it as a `size: <size>` pill beside the project title, using the same `size()` formatter as file sizes. The same command then estimates what `clear history` would free: it commits the worktree into a temporary repository (via `GIT_DIR`/`GIT_WORK_TREE`, leaving `/project/.git` untouched), runs `git gc` on it, and prints the difference between both `.git` sizes in bytes, stored (floored at 0) in `project.size.history`. When nonzero, `views.files` shows a `clear history (<size>)` pill after the project size. Failed or denied size requests are silently ignored; command execution requires whole-project write access, and it is skipped when `project.read` is set. Then calls `read clientExtension` and, unless `noRead` is set, reads the selected file.
-- `read file`: clears the global `content` and emits `change file`. If `fileEdits` contains pending edits for this file, returns without fetching potentially stale server content; the edit queue resumes the read when that file's edits finish, provided it is still selected and `content` is undefined. For apps, images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`), PDFs and `mp4` videos (case-insensitive), returns without fetching content; the view loads them directly through `GET /f/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint with `?raw=1` as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or an `ai-<model>` the user has credentials for, otherwise uses `all`, and scrolls to the bottom. Ignores responses if the selected filename has changed.
+- `read file`: unless the file is an app, stores it in `recent.files` with the current time, keeping at most three files and replacing the one opened longest ago. The three appear as buttons above the file list. Then clears the global `content` and emits `change file`. If `fileEdits` contains pending edits for this file, returns without fetching potentially stale server content; the edit queue resumes the read when that file's edits finish, provided it is still selected and `content` is undefined. For apps, images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`), PDFs and `mp4` videos (case-insensitive), returns without fetching content; the view loads them directly through `GET /f/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint with `?raw=1` as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or an `ai-<model>` the user has credentials for, otherwise uses `all`, and scrolls to the bottom. Ignores responses if the selected filename has changed.
 - `edit file <name> <newContent>`: compares global `content` with the full editor text using an internal chunking function. Splits into lines while preserving line endings, uses `B.diff` to group contiguous additions/deletions, and expands each chunk with unchanged lines above/below until its `oldText` is unique. Each chunk's context accounts for preceding chunks. A shared sentinel works around gotoB dropping leading additions during backtracking; remove it once gotoB uses `x > 0 || D > 0` instead of `x > 0`. A diff timeout shows a snackbar without enqueueing edits. Appends chunks with the captured filename to `fileEdits` and immediately advances `content` to the editor text. An initially empty queue starts a recursive, callback-driven drain, keeping the in-flight entry at the head and sending one request at a time through `POST /project/edit`; no timers or separate saving flag. Empty originals and originals exactly `[EOF]` use unconditional `POST /project/write` entries instead. The queue survives file navigation. On failure, logs the error and removes all queued edits for the failed file, retaining other files' edits. If that document is still selected and loaded in the file editor, a native confirmation offers overwriting with its current editor text or discarding edits and loading the server version. Otherwise, shows an error snackbar and rereads the failed file only if it is still selected. Successful requests remove the head and continue draining; deferred reads resume when their file has no remaining edits.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it and refreshes the list after the write succeeds; otherwise, updates the global `content` if the file is still selected.
 - `create file`: creates an empty file from the trimmed name at `new.file`, adding `.md` when it has no extension, or `.chat.md` (unless already present) when `new.type` is `chat`. Temporarily adds it to the file list, closes the creation modal and, on mobile, shows the right pane. The successful write triggers the list refresh. The modal checks for a name conflict against this same final path, so creating never overwrites an existing file or chat.
@@ -347,7 +383,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. Removes the old folder if left empty. On success, closes the rename modal, temporarily adds the new name to `files`, refreshes the list and updates navigation if the renamed file was selected.
 - `download file`: downloads the selected file's server copy through `GET /f/<path>`, with the path URI-encoded. Uses a temporary anchor with the file's basename as its download name; does not require loaded content.
 - `upload file|folder <files> [options]`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and sending file content as multipart without base64 encoding. `options.prefix` writes each file as prefix + file name instead; `options.cb` is called with the written names by index (undefined for failures) instead of refreshing the list and navigating. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
-- `change projects|project|file|show`: recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view; ignores `project.size` and `show` paths other than `show.settings`. Enables Vim bindings when `user.settings.vi` is true and not on mobile, line wrapping and JavaScript/Python/Markdown modes; file editors are read-only while `content` is undefined or `project.read` is set, the chat editor disables `Cmd-D`, and loaded file editor changes call `edit file` with the filename and full editor text, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
+- `change projects|project|file|show`: recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view; ignores `project.size` and `show` paths other than `show.settings`. Enables Vim bindings when `user.settings.vi` is true and not on mobile, line wrapping and JavaScript/Python/Markdown modes; file editors show line numbers, restore the cursor and scroll position stored at `editor.position.<project>.<file>` (opening at the top when there is none) and store them silently on every cursor move and scroll; the chat editor places the cursor at the end of the draft. File editors are read-only while `content` is undefined or `project.read` is set, the chat editor disables `Cmd-D`, and loaded file editor changes call `edit file` with the filename and full editor text, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
 - `change search.content.query`: calls `highlight content`; when search opens in the files view, focuses and selects the input after rendering.
 - `change view`: calls `highlight content` at low priority, after rendering.
 - `change file.full`: enters browser full screen on `document.documentElement` when `file.full` is set, and exits it when unset. Also matches changes to `file` as a whole, so leaving the files view exits full screen. Does nothing if the browser is already in the matching state. Browsers only allow entering full screen from a click or key press; B.call runs synchronously inside those handlers, so the icon and Command+\ qualify. A refused request is ignored and only the in-page layout changes. With `user.settings.vi`, locks Escape through `navigator.keyboard.lock` while in full screen.
@@ -358,8 +394,9 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 
 - `cancel message <id>`: replaces `pending 1` in the message header with `cancelled <ISO timestamp>` and `pending 0` through `POST /project/edit`. Sets `message.cancelling.<id>` while saving and clears it afterward. On success, rereads the selected chat; on failure, shows a snackbar. The server checks for cancellation every 100ms while an AI, shell message or run tool process is active and kills its process group when cancelled.
 - `scroll chat <direction>`: scrolls the visible chat by message, up for negative values and down otherwise. Aligns a partially visible message before advancing to the adjacent one.
+- `scroll message <id>`: smoothly scrolls the message with that lowercased UUID to the top of the chat, if it is rendered.
 - `change content|file|view`: finds chat messages with `pending 1` in their headers and sets `pending.messages` to their `file/messageId` keys. Clears the list outside a loaded chat.
-- `change pending.messages`: starts a 100ms polling interval for each new key and clears intervals for keys no longer pending. Calls `GET /project/message/<messageId>/<file>`, skipping ticks while a request or its follow-up appends are in flight. Checks file and interval before replacing only that message in local `content`, then emits `change content`. Fetches each id in `next` that is not yet in `content` through the same endpoint and appends it in order, so new pending messages start their own polling. When the updated message is no longer pending, refreshes the file list without rereading the chat (`read project` with `noRead`); does not write to the server or recreate the draft editor directly. When no message is pending in the open chat, sets a two-second timeout at `pending.idle` (via `mset`) that reads the last message and appends any ids in `next`, so messages added while nothing is pending, such as agent wake-ups, appear without a reload; if there are none, it emits `change pending.messages` to check again. Each change clears the previous timeout, and a timeout or response that no longer matches `pending.idle` or the open file is ignored.
+- `change pending.messages`: starts a 100ms polling interval for each new key and clears intervals for keys no longer pending. Calls `GET /project/message/<messageId>/<file>`, skipping ticks while a request or its follow-up appends are in flight. Checks file and interval before replacing only that message in local `content`, then emits `change content`. Fetches each id in `next` that is not yet in `content` through the same endpoint and appends it in order, so new pending messages start their own polling. When the updated message is no longer pending, refreshes the file list without rereading the chat (`read project` with `noRead`); does not write to the server or recreate the draft editor directly. When no message is pending in the open chat, polls the chat every two seconds for updates: it rereads the last message and appends any ids in `next`, or rereads the whole chat through `GET /f/<path>?raw=1` when it has no messages yet.
 - `change content|file` (priority `1001`): before views redraw, stores in `message.atBottom` (via `mset`, without a change event) whether the first `.messages` element is within 50px of its bottom. Measuring before rendering keeps large appends, such as tool-call messages, from breaking the stick-to-bottom behaviour.
 - `change content|file` (priority `-1001`): after rendering, scrolls the first `.messages` element to its `scrollHeight` if `message.atBottom` is set.
 - `create message <to> <name> <body>`: posts to `POST /project/message`, trimming the recipient and defaulting it to `all` when blank. Ignores blank messages and files other than the selected one. On mobile, reads the body from the chat editor to include text still being composed. Shows a warning snackbar instead of posting to an AI model without credentials. On success, if the same project and file are selected, clears the draft if unchanged and refreshes the file list and chat. Preserves the draft on failure.
@@ -385,6 +422,10 @@ edit file newName "<new name>"
      project id <id>
              name "<project name>"
              slot <integer|numeric string|"null"|undefined> // "null" is the edit selector's None option
+editor position <project name> <filename> ch <integer>
+                                          left <integer> // Horizontal scroll in pixels
+                                          line <integer>
+                                          top <integer> // Vertical scroll in pixels
 extendClient <true|undefined>
 file actions <false|true>
      full <false|true>
@@ -434,6 +475,7 @@ projects 1 created <date>
            slot <integer|undefined>
            subdomain <subdomain|undefined>
          ...
+recent files <filename> <ISO date> // Up to three recently opened files, excluding apps
 returnTo "</auth/project/... path>" // Set from `#/login/<path>`; opened instead of the projects view once the user logs in
 search content count <integer>
                current <integer>
@@ -441,9 +483,11 @@ search content count <integer>
        file <text|undefined>
        project <text|undefined>
 show account <true|undefined>
+     files <prefix> <true|false|undefined> // Folder prefix ending in `/`, such as `a/b/`; undefined means expanded only if it contains the current file
      message <filename> <messageId> <true|undefined>
      pane <left|right|undefined>
      projectDetails <true|undefined>
+selected project <projectId> // Highlighted project in the new projects view
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
          type "<ok|warning|error>"

@@ -165,7 +165,7 @@ B.mrespond ([
    // *** NAVIGATION ***
 
    ['navigate', '*', function (x) {
-      if (inc (['projects', 'settings'], x.path [0]) && window.location.host !== baseHost) return window.location.href = window.location.protocol + '//' + baseHost + '/#/' + x.path [0];
+      if (inc (['new_projects', 'projects', 'settings'], x.path [0]) && window.location.host !== baseHost) return window.location.href = window.location.protocol + '//' + baseHost + '/#/' + x.path [0];
       var match = x.path [0].match (/^files\/([^/]+)(?:\/(.*))?$/);
       if (match) {
          var path = match [2] ? 'f/' + filePath (decodeURIComponent (match [2])) : 'f';
@@ -192,7 +192,7 @@ B.mrespond ([
       var subdomain = window.location.host !== baseHost ? window.location.hostname.split ('.') [0] : undefined;
 
       var authViews   = ['login', 'verify'];
-      var loggedViews = ['projects', 'f', 'settings'];
+      var loggedViews = ['new_projects', 'projects', 'f', 'settings'];
 
       if (subdomain && hash [0] !== 'f') return B.call (x, 'navigate', 'f');
       if (! subdomain && hash [0] === 'f') return B.call (x, 'navigate', 'projects');
@@ -313,6 +313,12 @@ B.mrespond ([
 
    ['keydown', '*', function (x, ev) {
       if (ev.key === 'Meta') return B.call ('set', ['key', 'command'], true);
+
+      if (B.get ('view') === 'new_projects' && ev.key === 'Enter' && c ('#create-project') && ! c ('#create-project').disabled) return B.call (x, 'create', 'project');
+
+      if (B.get ('view') === 'files') dale.keys (B.get ('recent', 'files') || {}).forEach (function (name, i) {
+         shortcut (String (i + 1), ev, x, 'navigate', 'f/' + filePath (name));
+      });
 
       if (B.get ('user', 'admin')) shortcut ('L', ev, x, 'test', 'all');
 
@@ -639,7 +645,8 @@ B.mrespond ([
       }
 
       if (ev.key === 'Enter' && c ('#create-file') && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
-      if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'rename', 'file');
+      if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'edit', 'project');
+      if (ev.key === 'Enter' && c ('#edit-file') && ! c ('#edit-file').disabled) return B.call (x, 'rename', 'file', B.get ('edit', 'file', 'oldName'), B.get ('edit', 'file', 'newName').trim ());
 
       if (B.get ('mobile') && B.get ('show', 'pane') === 'right') shortcut ('b', ev, x, 'rem', 'show', 'pane');
       else                                                        shortcut ('b', ev, x, 'navigate', 'projects');
@@ -678,8 +685,14 @@ B.mrespond ([
 
             var search = B.get ('search', 'file');
             var pattern = search && new RegExp (search, search === search.toLowerCase () ? 'i' : '');
+            var expand = B.get ('show', 'files') || {};
             files = dale.fil (files, undefined, function (file) {
                if (pattern && ! file.name.match (pattern)) return;
+               var parts = file.name.split ('/');
+               if (! pattern && dale.stop (parts.slice (0, -1), true, function (part, depth) {
+                  var prefix = parts.slice (0, depth + 1).join ('/') + '/';
+                  return ! (expand [prefix] !== undefined ? expand [prefix] : (current || '').indexOf (prefix) === 0);
+               })) return;
                return file;
             });
             if (! files.length) return;
@@ -759,6 +772,22 @@ B.mrespond ([
    ['read', 'file', async function (x) {
       var name = B.get ('file', 'name');
       if (name === undefined || name === '') return;
+
+      if (! /^APP:/.test (name)) {
+         var recent = B.get ('recent', 'files') || {};
+         var names = dale.keys (recent);
+         if (names.indexOf (name) === -1) {
+            if (names.length < 3) names.push (name);
+            else {
+               var oldest = names.reduce (function (a, b) {return recent [a] <= recent [b] ? a : b});
+               names [names.indexOf (oldest)] = name;
+            }
+         }
+         var now = new Date ().toISOString ();
+         B.call (x, 'set', ['recent', 'files'], dale.obj (names, function (key) {
+            return [key, key === name ? now : recent [key]];
+         }));
+      }
 
       content = undefined;
       B.call (x, 'change', 'file');
@@ -1092,13 +1121,26 @@ B.mrespond ([
          editor = CodeMirror (c ('#file-editor'), {
             readOnly: content === undefined || !! B.get ('project', 'read'),
             keyMap: B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default',
+            lineNumbers: true,
             lineWrapping: true,
             mode: name.match (/\.js$/) ? 'javascript' : name.match (/\.py$/) ? 'python' : name.match (/\.md$/) ? 'markdown' : null,
             value: content || '',
          });
 
-         editor.setCursor (editor.lineCount () - 1, Infinity);
+         var position = B.get ('editor', 'position', B.get ('project', 'name'), name);
+         if (position) editor.setCursor (position.line, position.ch);
          editor.focus ();
+         if (position) editor.scrollTo (position.left, position.top);
+         var savePosition = function (cm) {
+            B.call (x, 'mset', ['editor', 'position', B.get ('project', 'name'), name], {
+               ch: cm.getCursor ().ch,
+               left: cm.getScrollInfo ().left,
+               line: cm.getCursor ().line,
+               top: cm.getScrollInfo ().top,
+            });
+         };
+         editor.on ('cursorActivity', savePosition);
+         editor.on ('scroll', savePosition);
          editor.on ('change', function (cm) {
             var newContent = cm.getValue ();
             if (content !== undefined && content !== newContent) B.call (x, 'edit', 'file', B.get ('file', 'name'), newContent);
@@ -1141,6 +1183,12 @@ B.mrespond ([
 
    ['change', 'view', {priority: -1001}, function (x) {
       B.call (x, 'highlight', 'content');
+   }],
+
+   ['change', ['show', 'pane'], {priority: -1000}, function (x) {
+      if (! B.get ('mobile') || ! document.querySelector ('#panes')) return;
+      window.scrollTo (0, 0);
+      document.querySelector ('#panes > ' + (B.get ('show', 'pane') === 'right' ? ':last-child' : ':first-child')).scrollTop = 0;
    }],
 
    ['change', ['file', 'full'], {match: B.changeResponder}, function (x) {
@@ -1274,6 +1322,11 @@ B.mrespond ([
       if (target) viewport.scrollTop += up ? target.top - top : target.bottom - bottom;
    }],
 
+   ['scroll', 'message', function (x, id) {
+      var row = document.getElementById ('message-' + id);
+      if (row) row.scrollIntoView ({behavior: 'smooth', block: 'start'});
+   }],
+
    ['change', [/^(content|file|view)$/], {match: B.changeResponder}, function (x) {
       var name = B.get ('file', 'name') || '';
       var pending = [];
@@ -1284,7 +1337,8 @@ B.mrespond ([
             if (/^pending 1$/m.test (match [2])) pending.push (name + '/' + match [1]);
          }
       }
-      B.call (x, 'set', ['pending', 'messages'], pending);
+      B.call (x, 'mset', ['pending', 'messages'], pending);
+      B.call (x, 'change', ['pending', 'messages']);
    }],
 
    ['change', ['pending', 'messages'], function (x) {
@@ -1357,15 +1411,30 @@ B.mrespond ([
       B.call (x, 'mset', ['pending', 'idle'], undefined);
       var name = B.get ('file', 'name') || '';
       if (pending.length || B.get ('view') !== 'files' || ! /\.chat\.md$/.test (name) || type (content) !== 'string') return;
-      var ids = content.match (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/gim);
-      if (! ids) return;
-      var lastId = ids [ids.length - 1].slice ('əəə head '.length);
+      var ids = content.match (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/gim) || [];
+      var lastId = ids.length ? ids [ids.length - 1].slice ('əəə head '.length) : undefined;
       var timer = setTimeout (function () {
          if (B.get ('pending', 'idle') !== timer || B.get ('file', 'name') !== name) return;
+         var again = function () {
+            if (B.get ('pending', 'idle') === timer) B.call (x, 'change', ['pending', 'messages']);
+         };
+         if (! lastId) return fetch ('/f/' + filePath (name) + '?raw=1').then (function (rs) {
+            return rs.ok ? rs.text () : content;
+         }).then (function (text) {
+            if (B.get ('pending', 'idle') !== timer || B.get ('file', 'name') !== name || text === content) return again ();
+            content = text;
+            B.call (x, 'change', 'content');
+         }, again);
          B.call (x, 'get', '/project/message/' + lastId + '/' + filePath (name), function (x, error, rs) {
-            if (error || B.get ('pending', 'idle') !== timer || B.get ('file', 'name') !== name) return;
-            if (! rs.body.next.length) return B.call (x, 'change', ['pending', 'messages']);
-            appendMessages (x, name, rs.body.next, function () {});
+            if (B.get ('pending', 'idle') !== timer || B.get ('file', 'name') !== name) return;
+            if (error) return again ();
+            var head = content.match (new RegExp ('^əəə head ' + lastId + '\\n', 'im'));
+            var updated = head ? content.slice (0, head.index) + rs.body.message : content;
+            if (updated !== content) {
+               content = updated;
+               B.call (x, 'change', 'content');
+            }
+            appendMessages (x, name, rs.body.next, again);
          });
       }, 2000);
       B.call (x, 'mset', ['pending', 'idle'], timer);
@@ -1533,14 +1602,14 @@ var css = {
          vblack:          '#000000',
          vblue:           '#4a69bd',
          vbrick:          '#ff7a75',
-         vdeepnavy:       '#0f1530',
+         vdeepnavy:       '#0f3015',
          vgold:           '#ffc83d',
          vgray:           '#9aa4bf',
          vgreen:          '#4ade80',
          vlightblue:      '#94b8ff',
          vlightgray:      '#eeeeee',
-         vmidnight:       '#1a1a2e',
-         vnavy:           '#16213e',
+         vmidnight:       '#1a2e1a',
+         vnavy:           '#163e21',
          vnearwhite:      '#f5f7ff',
          vorange:         '#f59e4c',
          vpurple:         '#d4a8ff',
@@ -1559,7 +1628,7 @@ var css = {
          vgreen:          '#15803d',
          vlightblue:      '#2f5fd0',
          vlightgray:      '#1f2433',
-         vmidnight:       '#eef1f8',
+         vmidnight:       '#eef8f1',
          vnavy:           '#dfebe2',
          vnearwhite:      '#141a2e',
          vorange:         '#c2410c',
@@ -2532,6 +2601,124 @@ var localPaths = function (html, folder) {
    });
 }
 
+// On mobile, panes go edge to edge: no rounded corners or shadow, and less padding.
+views.pane = function (paneClass, contents) {
+   return B.view ('mobile', function (mobile) {
+      return ['div', {
+         class: 'bg-vdeepnavy bn border-box flex flex-column ' + paneClass,
+         style: style ({
+            'border-radius': mobile ? undefined : '1.125rem',
+            'box-shadow': mobile ? undefined : [
+               '0.75rem 0.75rem 2.25rem ' + css.rgba (css.colors.vblack, 0.45),
+               '-0.75rem -0.75rem 2.25rem ' + css.rgba (css.colors.vwhite, 0.1),
+               '0.1875rem 0.1875rem 0.5625rem ' + css.rgba (css.colors.vblack, 0.3),
+               '-0.1875rem -0.1875rem 0.5625rem ' + css.rgba (css.colors.vwhite, 0.07),
+            ].join (', '),
+            padding: mobile ? '0.75rem' : '1.5rem',
+         }),
+      }, contents ()];
+   });
+}
+
+views.new_projects = function () {
+   return B.view ([['mobile'], ['projects'], ['selected', 'project'], ['new', 'project'], ['user', 'id']], function (mobile, projects, selected, newProject, userId) {
+      if (! projects) return ['div', {
+         class: 'bg-vmidnight flex flex-wrap items-center justify-center overflow-hidden vh-100',
+         style: style ({gap: '2rem'}),
+      }, dale.go (dale.times (80), () => views.spinny ())];
+
+      var current = dale.stopNot (projects, undefined, function (project) {
+         if (project.id === selected) return project;
+      });
+      var canDelete = current && current.owner === userId;
+      var newName = ((newProject || {}).name || '').trim ();
+      var allowCreation = newName && ! dale.stop (projects, true, function (project) {
+         return project.name === newName;
+      });
+
+      return ['div', {
+         class: 'bg-vmidnight border-box flex flex-column overflow-hidden vh-100',
+         style: style ({
+            padding: mobile ? '0' : '0.75rem 1.5rem 0 1.5rem',
+         }),
+      }, [
+         ['div', {
+            style: style ({
+               'align-self': 'center',
+               display: 'grid',
+               flex: 1,
+               gap: '1.5rem',
+               'grid-template-columns': mobile ? 'minmax(0, 1fr)' : 'minmax(0, 23.6fr) minmax(0, 76.4fr)',
+               'grid-template-rows': 'minmax(0, 1fr)',
+               'min-height': 0,
+               width: mobile ? '100%' : '70%',
+            }),
+         }, [
+            // Left pane
+            views.pane ('overflow-hidden', function () {return [
+               ['div', {class: 'flex flex-shrink-0 items-center mb3'}, [
+                  ['span', {class: 'f4 fw7 vnearwhite'}, 'Projects'],
+               ]],
+               ['div', {class: 'flex flex-shrink-0 mb3'}, [
+                  ['button', {
+                     class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer vdeepnavy',
+                     onclick: B.ev ('set', ['new', 'project'], {slot: undefined}),
+                     style: style ({padding: '0.75rem'}),
+                  }, '+ New'],
+                  ['button', {
+                     'aria-label': 'Delete selected project',
+                     class: 'bg-vred bn br2 fw6 ph3 vnearwhite' + (canDelete ? ' pointer' : ' o-50'),
+                     disabled: ! canDelete,
+                     onclick: canDelete ? B.ev ('remove', 'project', current) : undefined,
+                     style: style ({
+                        'padding-bottom': '0.75rem',
+                        'padding-top': '0.75rem',
+                     }),
+                     title: 'Delete selected project',
+                  }, '×'],
+               ]],
+               newProject === undefined ? '' : ['div', {class: 'flex flex-shrink-0 mb3'}, [
+                  ['input', {
+                     class: 'ba bg-vnavy border-box bw1 f5 flex-auto fw6 mr2 outline-0 ph3 vlightblue vmidblue-border',
+                     id: 'new-project-input',
+                     oninput: B.ev ('set', ['new', 'project', 'name']),
+                     placeholder: 'Name your project',
+                     style: style ({
+                        'border-radius': '0.75rem',
+                        height: '3rem',
+                     }),
+                     type: 'text',
+                     value: newProject.name,
+                  }],
+                  ['button', {
+                     class: 'black bn br2 fw7 ph3 ' + (allowCreation ? 'bg-vgreen pointer' : 'bg-vgray'),
+                     disabled: ! allowCreation,
+                     id: 'create-project',
+                     onclick: B.ev ('create', 'project'),
+                  }, 'Boom'],
+               ]],
+               ['div', {class: 'flex-auto overflow-y-auto'}, dale.go (projects, function (project) {
+                  var active = project.id === selected;
+                  return ['div', {
+                     class: css.join ('br1 fw5 lh-copy pointer', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
+                     onclick: B.ev ('set', ['selected', 'project'], project.id),
+                     style: style ({
+                        'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
+                        padding: '0.5rem 0.625rem',
+                     }),
+                  }, [
+                     ['span', {class: views.projectColor (project.name, true)}, (project.ownerUsername && project.owner !== (userId || 'local') ? project.ownerUsername + '/' : '') + project.name],
+                     ['div', {class: 'f7 mt1 tr vgray'}, project.last ? ago (project.last) : ''],
+                  ]];
+               })],
+            ]}),
+            // Right pane
+            views.pane ('overflow-auto', function () {return []}),
+         ]],
+      ]];
+   });
+}
+
 views.files = function () {
 
    var iconAndName = function (name) {
@@ -2547,28 +2734,7 @@ views.files = function () {
       return styled;
    }
 
-   // On mobile, panes go edge to edge: no rounded corners or shadow, and less padding.
-   var paneStyle = function (mobile) {
-      return style ({
-         'border-radius': mobile ? undefined : '1.125rem',
-         'box-shadow': mobile ? undefined : [
-            '0.75rem 0.75rem 2.25rem ' + css.rgba (css.colors.vblack, 0.45),
-            '-0.75rem -0.75rem 2.25rem ' + css.rgba (css.colors.vwhite, 0.1),
-            '0.1875rem 0.1875rem 0.5625rem ' + css.rgba (css.colors.vblack, 0.3),
-            '-0.1875rem -0.1875rem 0.5625rem ' + css.rgba (css.colors.vwhite, 0.07),
-         ].join (', '),
-         padding: mobile ? '0.75rem' : '1.5rem',
-      });
-   }
-
-   var pane = function (paneClass, contents) {
-      return B.view ('mobile', function (mobile) {
-         return ['div', {
-            class: 'bg-vdeepnavy bn border-box flex flex-column ' + paneClass,
-            style: paneStyle (mobile),
-         }, contents ()];
-      });
-   }
+   var pane = views.pane;
 
    return B.view ([['mobile'], ['project', 'name'], ['project', 'read']], function (mobile, name, read) {
       if (name === undefined) return ['div', {
@@ -2767,9 +2933,51 @@ views.files = function () {
                      }, [views.tooltip ('U', 'below'), '×']];
                   }),
                ]],
-               B.view ([['apps'], ['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file']], function (apps, files, current, pending, search) {
+               B.view ([['recent', 'files'], ['file', 'name']], function (recent, current) {
+                  var names = dale.keys (recent || {});
+                  return ['div', {class: 'flex flex-shrink-0 mb2'}, [0, 1, 2].map (function (i) {
+                     var name = names [i];
+                     return ['button', {
+                        type: 'button',
+                        class: 'bn br2 relative ' + (name === current
+                           ? 'bg-vhighlightblue vnearwhite'
+                           : 'bg-transparent vlightblue') + (name ? ' pointer' : ''),
+                        disabled: ! name,
+                        title: name || '',
+                        onclick: name ? B.ev (['navigate', 'f/' + filePath (name)], ['set', ['show', 'pane'], 'right']) : undefined,
+                        style: style ({
+                           width: '33.333%',
+                           'min-width': 0,
+                           padding: '0.5rem',
+                        }),
+                     }, [
+                        ['span', {class: 'db truncate'}, name ? name.split ('/').pop () : '—'],
+                        name ? views.tooltip (String (i + 1), 'below') : '',
+                     ]];
+                  })];
+               }),
+               B.view ([['apps'], ['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file'], ['show', 'files']], function (apps, files, current, pending, search, expand) {
                   if (! files) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
                   if (! files.length && ! (apps || []).length) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, 'No files yet.'];
+                  expand = expand || {};
+                  var shown = {};
+                  var visible = {};
+                  var folderRow = function (prefix, open) {
+                     var parts = prefix.slice (0, -1).split ('/');
+                     return ['div', {
+                        class: 'br1 flex fw5 items-center lh-copy pointer vlightblue',
+                        onclick: B.ev ('set', ['show', 'files', prefix], ! open),
+                        style: style ({
+                           'border-left': '0.1875rem solid transparent',
+                           padding: '0.5rem 0.625rem',
+                           'padding-left': (0.625 + parts.length - 1) + 'rem',
+                        }),
+                     }, [
+                        ['i', {class: 'bi bi-folder mr1'}],
+                        parts [parts.length - 1],
+                        ['i', {class: 'bi bi-chevron-' + (open ? 'up' : 'down') + ' ml-auto'}],
+                     ]];
+                  };
                   var pattern = search && new RegExp (search, search === search.toLowerCase () ? 'i' : '');
                   var currentIndex = dale.stopNot (files, undefined, function (f, k) {
                      if (f.name === current) return k;
@@ -2789,24 +2997,55 @@ views.files = function () {
                      }, iconAndName ('APP:' + port)];
                   }), dale.fil (files, undefined, function (file, index) {
                      if (pattern && ! file.name.match (pattern)) return;
+                     var parts = file.name.split ('/');
+                     var rows = [];
+                     var folders = dale.go (parts.slice (0, -1), function (part, depth) {
+                        return parts.slice (0, depth + 1).join ('/') + '/';
+                     });
+                     var count = function (prefixes) {
+                        dale.go (prefixes, function (prefix) {
+                           visible [prefix] = (visible [prefix] || 0) + 1;
+                        });
+                     };
+                     var finish = function (rows) {
+                        if (! pattern) dale.go (folders.slice ().reverse (), function (prefix) {
+                           var next = files [index + 1];
+                           if (next && next.name.indexOf (prefix) === 0) return;
+                           if (visible [prefix] > 5) rows.push (folderRow (prefix, true));
+                        });
+                        return rows;
+                     };
+                     var hidden = ! pattern && dale.stop (parts.slice (0, -1), true, function (part, depth) {
+                        var prefix = parts.slice (0, depth + 1).join ('/') + '/';
+                        var open = expand [prefix] !== undefined ? expand [prefix] : (current || '').indexOf (prefix) === 0;
+                        if (! shown [prefix]) {
+                           shown [prefix] = true;
+                           count (folders.slice (0, depth));
+                           rows.push (folderRow (prefix, open));
+                        }
+                        return ! open;
+                     });
+                     if (hidden) return finish (rows);
+                     if (! pattern) count (folders);
                      var active = file.name === current;
                      var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
-                     return ['div', {
+                     return finish (rows.concat ([['div', {
                         class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
                         id: active ? 'selected-file' : undefined,
                         onclick: B.ev (['navigate', 'f/' + filePath (file.name)], ['set', ['show', 'pane'], 'right']),
                         style: style ({
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
                            padding: '0.5rem 0.625rem',
+                           'padding-left': (0.625 + (pattern ? 0 : parts.length - 1)) + 'rem',
                         }),
                      }, [
                         tooltip ? views.tooltip (tooltip, 'right') : '',
                         ['div', {class: 'flex items-center', style: style ({gap: '0.5rem'})}, [
-                           ['span', {class: views.projectColor (file.name, true)}, iconAndName (file.name)],
+                           ['span', {class: views.projectColor (file.name, true)}, iconAndName (pattern ? file.name : parts [parts.length - 1])],
                            (pending || []).some (function (k) {return k.indexOf (file.name) !== -1;}) ? ['span', {style: style ({transform: 'scale(0.75)'})}, views.spinny (active ? 'vnearwhite' : 'vlightblue')] : '',
                         ]],
                         ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
-                     ]];
+                     ]]]));
                   })]];
                }),
                ['div', {class: 'flex-shrink-0 mt3 relative w-100'}, [
@@ -2848,6 +3087,7 @@ views.files = function () {
                var media = views.media (file.name);
                var isBinary = isApp || media || content instanceof Uint8Array;
                var isMd = ! isBinary && file.name.match (/\.md$/);
+               var isHtml = ! isBinary && file.name.match (/\.html?$/);
 
                var fileHeader = ['div', {class: 'flex items-center mb2'}, [
                      mobile ? ['span', {
@@ -2899,7 +3139,7 @@ views.files = function () {
                            target: '_blank',
                            title: 'Open file directly',
                         }, [['i', {class: 'bi bi-link-45deg mr1'}], 'Link']],
-                        ! isChat && isMd && ! project.read ? ['div', {class: 'flex'}, [
+                        ! isChat && (isMd || isHtml) && ! project.read ? ['div', {class: 'flex'}, [
                            ['span', {
                               class: 'br2 f6 fw6 mr2 pointer relative ' + (mode !== 'edit' ? 'bg-vhighlightblue vnearwhite' : 'vgray'),
                               onclick: B.ev ('set', ['file', 'mode'], 'view'),
@@ -2915,7 +3155,7 @@ views.files = function () {
                               }),
                            }, [mode !== 'edit' ? views.tooltip ('I') : '', ['i', {class: 'bi bi-pencil mr1'}], 'Edit']],
                         ]] : ['div'],
-                        isChat || (! isBinary && (! isMd || mode === 'edit')) ? B.view (['search', 'content', 'query'], function (query) {
+                        isChat || (! isBinary && (! (isMd || isHtml) || mode === 'edit')) ? B.view (['search', 'content', 'query'], function (query) {
                            return ['button', {
                               class: 'bn br2 f6 fw6 ml2 pointer relative ' + (query !== undefined ? 'bg-vhighlightblue vnearwhite' : 'bg-transparent vgray'),
                               'aria-expanded': query !== undefined ? 'true' : 'false',
@@ -2945,7 +3185,7 @@ views.files = function () {
 
                if (isChat) return ['div', {class: 'flex flex-auto flex-column'}, [
                   fileHeader,
-                  views.chat (project.read),
+                  views.chat (project.read, file.name, function () {return content}),
                ]];
 
                return ['div', {class: 'flex flex-auto flex-column'}, [
@@ -2967,7 +3207,14 @@ views.files = function () {
                            ['div', {class: 'f6 mt2'}, Math.round (content.length / 1024) + ' KB'],
                         ]],
                      ]];
-                  }) () : (isMd && mode === 'view') ?
+                  }) () : (isHtml && mode === 'view') ? ['div', {class: 'flex-auto relative'}, [
+                     ['iframe', {
+                        class: 'absolute bg-white bn h-100 left-0 top-0 w-100',
+                        sandbox: 'allow-scripts',
+                        srcdoc: content,
+                        title: file.name,
+                     }],
+                  ]] : (isMd && mode === 'view') ?
                      ['div', {
                         class: 'flex-auto lh-copy overflow-auto vgray',
                         opaque: true,
@@ -2977,7 +3224,7 @@ views.files = function () {
                         id: 'file-editor',
                         opaque: true,
                      }],
-                  ! isBinary && (! isMd || mode === 'edit') ? B.view (['search', 'content', 'query'], function (query) {
+                  ! isBinary && (! (isMd || isHtml) || mode === 'edit') ? B.view (['search', 'content', 'query'], function (query) {
                      return query === undefined ? ['div'] : ['div', {class: 'flex-shrink-0 mt3 relative w-100'}, [
                      views.tooltip ('/'),
                      ['i', {
@@ -3227,6 +3474,7 @@ views.files = function () {
                ['button', {
                   class: (allowEdit === true ? 'bg-vgreen' : 'bg-vgray') + ' black bn br2 f5 fw7 mt3 pointer pv3 w-100',
                   disabled: allowEdit !== true,
+                  id: 'edit-file',
                   onclick: B.ev ('rename', 'file', editFile.oldName, name),
                }, {
                   conflict: 'That name\'s taken',
@@ -3433,7 +3681,7 @@ views.settings = function () {
    ]];
 }
 
-views.chat = function (read) {
+views.chat = function (read, name, getContent) {
    var matchesQuery = function (message, query, userId) {
       var body = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
       if (! body) return false;
@@ -3684,12 +3932,17 @@ views.chat = function (read) {
       ]];
    };
 
-   return B.view ('file', function (file) {
-      return ['div', {
+   return ['div', {
          class: 'flex flex-auto flex-column',
          style: style ({'min-height': 0}),
       }, [
          ['style', [
+            ['.chat-message > :first-child', {
+               'margin-top': 0,
+            }],
+            ['.chat-message p', {
+               margin: '0.5em 0',
+            }],
             ['.chat-message pre', {
                'max-width': '100%',
                'overflow-x': 'auto',
@@ -3699,7 +3952,7 @@ views.chat = function (read) {
          // Messages
          B.view ([['mobile'], ['search', 'content', 'query'], ['user', 'id'], ['content']], function (mobile, query, userId) {
             query = query || '';
-            var messages = (type (content) === 'string' ? content : '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1);
+            var messages = (type (getContent ()) === 'string' ? getContent () : '').split (/^əəə head [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\n/im).slice (1);
             messages = dale.fil (messages, undefined, function (message) {
                var body = message.match (/^əəə body [0-9a-f-]{36}\n/im);
                if (body && /^from systemPrompt$/m.test (message.slice (0, body.index))) return;
@@ -3709,16 +3962,18 @@ views.chat = function (read) {
             var messageIndexes = {};
             var messageLevels = {};
             var messageFroms = {};
+            var messageReplies = {};
             var messageCount = 0;
             dale.go (messages, function (message) {
                var id = message.match (/^əəə body ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n/im);
                if (! id) return;
                var key = id [1].toLowerCase ();
-               messageIndexes [key] = String (++messageCount).padStart (4, '0');
+               messageIndexes [key] = String (++messageCount);
                var head = message.slice (0, id.index);
                messageFroms [key] = (head.match (/^from (.+)$/m) || ['', '']) [1];
                var replyTo = head.match (/^to ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/im);
                messageLevels [key] = replyTo ? Math.min ((messageLevels [replyTo [1].toLowerCase ()] || 0) + 1, maxIndent - 1) : 0;
+               if (replyTo) (messageReplies [replyTo [1].toLowerCase ()] = messageReplies [replyTo [1].toLowerCase ()] || []).push (key);
             });
 
             var rendered = dale.fil (messages, undefined, function (message) {
@@ -3778,7 +4033,7 @@ views.chat = function (read) {
                }
                body = message.slice (body.index + body [0].length).replace (/\n$/, '');
                var originalLength = body.length;
-               var expandKey = ['show', 'message', file.name, messageId];
+               var expandKey = ['show', 'message', name, messageId];
                var truncatedBody;
                if (originalLength > 10000 && ! media) {
                   var firstEnd = body.lastIndexOf ('\n', 50);
@@ -3806,10 +4061,11 @@ views.chat = function (read) {
                // Replies indent the whole row, which also narrows the bubble.
                var indent = (messageLevels [messageId.toLowerCase ()] || 0) * (mobile ? 0.5 : 2);
                return ['div', {
-                  class: 'border-box items-start mb4 mw-100 pr3 pv3 relative w-100',
+                  class: 'border-box items-start mb3 mw-100 pr3 pv2 relative w-100',
+                  id: 'message-' + messageId.toLowerCase (),
                   style: style ({
                      display: 'grid',
-                     gap: '0.75rem',
+                     gap: '0.5rem',
                      'grid-template-columns': mobile ? 'max-content minmax(0, 1fr) max-content' : 'max-content minmax(0, 1fr)',
                      'margin-left': indent ? indent + 'rem' : undefined,
                      width: indent ? 'calc(100% - ' + indent + 'rem)' : undefined,
@@ -3833,7 +4089,13 @@ views.chat = function (read) {
                         'min-width': 0,
                      }),
                   }, [
-                     ['span', {class: 'br2 dib ph2 pv1 ' + views.projectColor (fromLabel, true)}, fromLabel],
+                     ['span', {class: 'br2 dib ph2 pv1 ' + views.projectColor (messageIndexes [messageId.toLowerCase ()])}, messageIndexes [messageId.toLowerCase ()]],
+                     ['span', {class: 'br2 dib pv1 ' + views.projectColor (fromLabel, true)}, parentFrom ? [senderLabel (from) + ' -> ', ['button', {
+                        class: 'bn br2 code f6 fw7 lh-solid ph2 pointer pv1 ' + views.projectColor (messageIndexes [replyTo [1].toLowerCase ()]),
+                        onclick: B.ev ('scroll', 'message', replyTo [1].toLowerCase ()),
+                        title: 'Go to message ' + messageIndexes [replyTo [1].toLowerCase ()],
+                        type: 'button',
+                     }, senderLabel (parentFrom)]] : fromLabel],
                      tokenLabel ? ['span', {class: 'br2 dib ph2 pv1 vlightblue'}, tokenLabel] : '',
                      usageLabel ? ['span', {class: 'br2 dib ph2 pv1 vlightblue'}, usageLabel] : '',
                      costLabel ? ['span', {
@@ -3862,15 +4124,12 @@ views.chat = function (read) {
                      }, [['i', {class: 'bi bi-download mr1'}], 'Save']] : ['span'],
                   ]],
                   ['div', {
-                     class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' bl border-box br3 bt chat-message lh-copy mw-100' + (isToolResult ? '' : ' ph3 pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
+                     class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' border-box chat-message lh-copy mw-100' + (isToolResult ? '' : ' pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
                      opaque: true,
                      style: style ({
-                        'border-width': '0.25rem',
                         'font-size': from === userId ? '1.125rem' : undefined,
-                        'grid-column': mobile ? '1 / -1' : '2',
+                        'grid-column': mobile ? '2 / -1' : '2',
                         'grid-row': mobile ? undefined : '2',
-                        'margin-left': mobile ? '1rem' : undefined,
-                        'max-width': mobile ? 'calc(100% - 1rem)' : undefined,
                         'min-width': 0,
                         'overflow-wrap': 'anywhere',
                         width: 'fit-content',
@@ -3896,6 +4155,25 @@ views.chat = function (read) {
                         class: 'f7' + (isToolResult ? ' ph3' : '') + ' pv2',
                      }, '(cancelled ' + ago (cancelled [1]) + ')'] : ['span'],
                   ]],
+                  messageReplies [messageId.toLowerCase ()] ? ['div', {
+                     class: 'code f6 flex flex-wrap fw7 items-center lh-solid ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
+                     style: style ({
+                        gap: '0.5rem',
+                        'grid-column': '2',
+                        'grid-row': '3',
+                        'justify-self': 'start',
+                     }),
+                  }, [
+                     messageReplies [messageId.toLowerCase ()].length === 1 ? 'Reply:' : 'Replies:',
+                     dale.go (messageReplies [messageId.toLowerCase ()], function (reply) {
+                        return ['button', {
+                           class: 'bn br2 code f6 fw7 lh-solid ph2 pointer pv1 ' + views.projectColor (messageIndexes [reply]),
+                           onclick: B.ev ('scroll', 'message', reply),
+                           title: 'Go to message ' + messageIndexes [reply],
+                           type: 'button',
+                        }, messageIndexes [reply]];
+                     }),
+                  ]] : '',
                   ['div', {
                      class: 'br2 code dib f6 fw7 lh-solid ph2 pv1 ' + views.projectColor (timeLabel, true),
                      style: style ({
@@ -4047,7 +4325,7 @@ views.chat = function (read) {
                   }, ['i', {class: 'bi bi-paperclip'}]],
                   ['button', {
                      class: 'bg-vgreen black bn br2 f5 flex-shrink-0 fw7 ph3 pv2 pointer relative',
-                     onclick: B.ev ('create', 'message', message.to, file.name, message.body),
+                     onclick: B.ev ('create', 'message', message.to, name, message.body),
                      type: 'button',
                   }, [views.tooltip ('↵'), 'Boom']],
                ]];
@@ -4097,8 +4375,7 @@ views.chat = function (read) {
                }),
             ]],
          ]],
-      ]];
-   });
+   ]];
 }
 
 // *** ENTRYPOINT ***
