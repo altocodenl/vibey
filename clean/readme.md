@@ -22,9 +22,34 @@ So that what you do with a computer can make the world a more meaningful place.
 
 ## What is vibey?
 
-A single workspace where you can have files, interact with AI and humans, and run your own apps.
+1. A *place* where you can have agents, files and a server, working together. Each place is a *project*.
+2. Vibey lives on the web. This has two consequences:
+   A. You access it through a browser from any device with an internet connection: computer, phone, tablet.
+   B. You can share your place with anyone.
+3. You bring your own AI subscriptions or credentials.
+4. How to use it? A fork in the road!
+   A. Run it locally or in your server. Here are the installation instructions. Vibey is fully open source.
+   B. Set up a subscription to vibey cloud: 10 bucks a month, plus whatever servers you use charged at cost (25 bucks/mo total should be enough).
 
-Available in [cloud version](https://buildwithvibey.com) and local/self-hosted version.
+## How is it different from...
+
+Claude Code/Codex:
+
+1. Your agents are on the web and can do things on a server.
+2. Markdown files are both chat and context.
+3. Use different providers in the same place, even checking each other.
+
+Replit/Lovable:
+
+1. A project is not just an app: documents, chats.
+2. You bring your own AI subscription.
+3. Based on open source and open standards.
+
+OpenClaw:
+
+1. Already on the web.
+2. Considerably more secure by default.
+3. Multi-user.
 
 ## How vibey does it?
 
@@ -512,5 +537,5 @@ user admin <true|undefined>
      mode <local|cloud>
      settings vi <boolean|undefined>
      username "<username>"
-view <login|verify|projects|files|settings>
+view <login|verify|new_projects|projects|files|settings>
 ```

@@ -1,5 +1,69 @@
 # Vibey development notes
 
+## 2026-11-10
+
+Some notes on Alexander - The process of creating life:
+- "If the form were kept constant to your original idea, then the feeling would be insubstantial, and would change. That would not protect or extend the wholeness. Instead of that you hold the feeling constant"
+- "a kind of emotional substance - something more solid than a feeling, but less formed than a thing - is guiding the process of designing and making at every step."
+- "before each step in the process of making it - *before each step* - we must be able to feel its emotional substance. (...) That is what creates the whole, successfully, and allows life to emerge."
+- "If I work towards making a thing which has true feeling, I am necessarily aiming at, conceiving, imagining, and thinking, about the quality of the whole."
+- "It does mean that what is made, to create a whole, must originate from the effort to create feeling in the whole, not from intellect. Intellect is too crude a net to catch the whole."
+
+### What the heck is vibey, really? In four points:
+
+1. A *place* where you can have agents, files and a server, working together. Each place is a *project*.
+2. Vibey lives on the web. This has two consequences:
+   A. You access it through a browser from any device with an internet connection: computer, phone, tablet.
+   B. You can share your place with anyone.
+3. You bring your own AI subscriptions or credentials.
+4. How to use it? A fork in the road!
+   A. Run it locally or in your server. Here are the installation instructions. Vibey is fully open source.
+   B. Set up a subscription to vibey cloud: 10 bucks a month, plus whatever servers you use charged at cost (25 bucks/mo total should be enough).
+
+### How is it different from...
+
+Claude Code/Codex:
+
+1. Your agents are on the web and can do things on a server.
+2. Markdown files are both chat and context.
+3. Use different providers in the same place, even checking each other.
+
+Replit/Lovable:
+
+1. A project is not just an app: documents, chats.
+2. You bring your own AI subscription.
+3. Based on open source and open standards.
+
+OpenClaw:
+
+1. Already on the web.
+2. Considerably more secure by default.
+3. Multi-user.
+
+===
+
+No need to say "unified", that follows naturally.
+
+demos:
+- homepage
+- web research
+- small app
+
+How does it look when you just arrive?
+1. If you just landed and you have no account
+2. Just logged in but not invited to anything
+3. new account invited to a project
+4. upgrade path
+
+https://web.archive.org/web/20220331082929/https://blog.pinboard.in/2011/03/anatomy_of_a_crushing/
+"My immediate response was to try to log into the server and see if there was anything I could to do keep it from falling over. Cegłowski's first law of Internet business teaches: "Never get in the way of people trying to give you money""
+
+vibey:
+Of the seven core functions of an unified digital space, I realize most of them are based around communication:
+- communication with humans: email, chat, documents
+- communication with computers: agent, shell
+- non-communication: editor, server
+
 ## 2026-11-09
 
 https://idlewords.com/2026/10/cloud_rats_and_software_roaches.htm
@@ -24,8 +88,6 @@ I think I have it clear now:
 YES, it had to be *green*, not blue. We were monkeys not long ago, the color of foliage is a more natural color.
 
 With the fast access, I don't think we need tabs anymore. Just three spots, the most recent ones. And that's it.
-
-
 
 - TODO
    - demos
@@ -52,9 +114,6 @@ With the fast access, I don't think we need tabs anymore. Just three spots, the 
       - autobackup
       - CSRF tokens to prevent CSRF attacks between projects (outside from Vibey is already covered by headers): support GET /auth/user, change prompt
    - tests: local mode, client tests
-
-
-
 
 ## 2026-11-08
 
