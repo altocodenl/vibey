@@ -1,5 +1,34 @@
 # Vibey development notes
 
+## 2026-11-11
+
+https://news.ycombinator.com/item?id=50443427
+Val Town is winding down (val.town)
+"cmontella 15 hours ago | next [–]
+
+I remember Steve from my days working on Eve, he was part of that community and always a big proponent of end-user programming. I was happy to see him working on this project but am not surprised it's shutting down.
+Nothing to to do with the quality of Val Town, but making a business in this space is really, really hard. You can't start the business without raising millions (Eve raised $2M, Darklang raised $3.5M, Val Town raised $7M), but it's hard to scale out a proof of concept in the time investors want to start seeing an ROI. It seems to me about 2-3 years is all you get for seed runway, when realistically projects like this should take at minimum 5 years incubating. Darklang extended their runway to ~7-8 years by firing all the devs and keeping just the founder on life support. Ultimately even that wasn't enough.
+But maybe with AI this could work, I dunno.
+What's required to make it all work is a fundamental leap in programming interface design, but the business side doesn't look any different from a typical SaaS. So unless you hit the ball out of the park you're entering the market with an experimental product, then you have to deal with product-market fit even if you have the right product, so you really only have one shot."
+
+https://blog.val.town/winding-down
+"The bad news about our business – that we couldn’t compete in the cloud computing space – is good news for you migrating off: there are many wonderful hosting providers you can migrate to, and today’s LLMs are great at these types of migrations. We have guides for migrating to Cloudflare, Vercel, Netlify, and Render."
+
+The last missing part that's needed for the whole cycle is engine. The rest can come later. Projects need to leave the cocoon of the host, and actually be able to live outside of it. Let's go for it, incrementally.
+- First, pass the project itself to the project function.
+- Some projects can be on the host for now, but most will be in engines.
+- I won't care, at least for, now, if docker is properly secured in BYOE (private network). The calls will be just ssh calls, without assuming anything beyond docker. The commands to create projects will have sane defaults.
+- I will pass agent.js as a compressed node script, to not assume it's there on the project, on every call that initializes it. That means that after an update, agent.js is also updated immediately.
+- Start then with hardcoding an engine in the DB, then creating a project off of it, then sending the (conditional) ssh call to it with agent.
+- We need to build the image in the remote!
+
+engine knownHost
+       id
+       ip
+       owner
+       publicKey
+       privateKey
+
 ## 2026-11-10
 
 Some notes on Alexander - The process of creating life:
