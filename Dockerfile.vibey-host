@@ -2,7 +2,7 @@ FROM node:24.22.1-alpine
 
 ENV TZ=UTC
 
-RUN apk add --no-cache redis bash docker-cli iptables
+RUN apk add --no-cache redis bash docker-cli iptables openssh-client
 
 RUN apk add --no-cache --virtual .build-deps build-base curl\
  && mkdir /tmp/mon && cd /tmp/mon \
@@ -16,7 +16,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --production
 
-COPY server.js cell.js prompt.md client.js test.js ./
+COPY agent.js server.js cell.js prompt.md client.js test.js Dockerfile.vibey-project ./
 COPY icon ./icon
 COPY config.4tx secret.4tx* ./
 

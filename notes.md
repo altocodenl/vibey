@@ -1,5 +1,15 @@
 # Vibey development notes
 
+## 2026-11-12
+
+Readme ideas:
+- Show hn, with comparison of everything that could be related (including glitch, sandstorm).
+- Technical deep dive in the readme. focus on the interesting decisions.
+
+BYOE todos:
+- manage engine view (only if you're creator): list, delete, edit, create
+- CLUD endpoints for engine
+
 ## 2026-11-11
 
 https://news.ycombinator.com/item?id=50443427
