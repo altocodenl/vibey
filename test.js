@@ -76,6 +76,22 @@ if (mode === 'server') {
 
       if (invites.length) await redis ('del', ... invites);
 
+      var seeded = dale.fil (keys, undefined, function (key) {
+         if (key.match (/^engine:test-engine-/) || key === 'project:test-engine-project') return key;
+      });
+
+      if (seeded.length) {
+         var owners = await redis (dale.go (seeded, function (key) {
+            return ['hget', key, 'owner'];
+         }));
+         await redis ([
+            ... dale.go (seeded, function (key, k) {
+               return ['srem', 'owner:' + owners [k], key];
+            }),
+            ['del', ... seeded],
+         ]);
+      }
+
       if (emails.length === 0) return;
 
       var userIds = await redis ('mget', ... emails);
@@ -269,9 +285,8 @@ if (mode === 'server') {
          // *** AUTH ***
 
          // Create an account, check its generated username, then restore the main session.
-         var usernameAccount = function (email, username, grant) {
+         var usernameAccount = function (email, username) {
             return [
-               grant ? ['Create username fixture through creator grant', 'post', '/creator/grant', {email, grant: true}, 200, adminHeaders] : [],
                ['Login username fixture ' + email, 'post', '/auth/login', {email}, 200, function (s, rq, rs) {
                   s.usernameLoginLink = rs.body.loginLink;
                   s.usernameMainSession = {cookie: s.headers.cookie, csrf: s.headers ['x-csrf']};
@@ -311,7 +326,7 @@ if (mode === 'server') {
          };
 
          var authSettings = [
-            dale.go ([{}, {vi: true}, {vi: false}, {}], function (settings, index) {
+            dale.go ([{}, {vi: true}, {vi: false}, {pinned: []}, {pinned: ['a', 'b'], vi: true}, {pinned: ['a'.repeat (9996)]}, {}], function (settings, index) {
                return [
                   ['Set settings #' + index, 'put', '/auth/user', {settings}, 200, assertBody ({settings})],
                   ['Read settings #' + index, 'get', '/auth/user', 200, function (s, rq, rs) {
@@ -336,6 +351,12 @@ if (mode === 'server') {
                {settings: {vi: 'false'}},
                {settings: {vi: []}},
                {settings: {vi: {}}},
+               {settings: {pinned: null}},
+               {settings: {pinned: 'a'}},
+               {settings: {pinned: {}}},
+               {settings: {pinned: [1]}},
+               {settings: {pinned: ['a', null]}},
+               {settings: {pinned: ['a'.repeat (9997)]}},
             ], function (body, index) {
                return ['Reject invalid settings #' + index, 'put', '/auth/user', body, 400];
             }),
@@ -362,13 +383,12 @@ if (mode === 'server') {
                return assert ([
                   ['code', rs.code, 200, teishi.test.equal],
                   ['body.mode', rs.body.mode, 'local', teishi.test.equal],
-                  ['body.creator', rs.body.creator, true, teishi.test.equal],
                   ['body.credentials', rs.body.credentials, 'object'],
                ]);
             }],
-            dale.go (['/creator/grant', '/auth/login'], function (path, k) {
+            dale.go (['/auth/login'], function (path, k) {
                if (CONFIG.cloud) return [
-                  ['Call auth path without email', 'post', path, {}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'}), path === '/creator/grant' ? adminHeaders : {}],
+                  ['Call auth path without email', 'post', path, {}, 400, assertBody ({error: 'email should have as type string but instead is undefined with type undefined'})],
                   dale.go ([undefined, null, 1, '', '1', 'a@a', 'hello@example', 'this@is.not.really.an.emai.l'], function (email, k) {
                      return ['Call auth path with invalid email: #' + (k + 1), 'post', path, {email: email}, 400, function (s, rq, rs) {
                         return assert ([
@@ -380,7 +400,7 @@ if (mode === 'server') {
                               return ['body.error', rs.body.error, /^email should/, teishi.test.match];
                            }
                         ]);
-                     }, path === '/creator/grant' ? adminHeaders : {}];
+                     }];
                   }),
                ];
 
@@ -419,19 +439,18 @@ if (mode === 'server') {
                   if (! assert (['body', rs.body, {error: 'Invalid login link', loginLink: s.firstLoginLink}, teishi.test.equal])) return false;
                   redis ('del', 'rateLimit:login:hello@example.com').then (function () {next (null, rs)}, next);
                }],
-               ['Request creator access', 'post', '/creator/request', {}, 200],
-               ['Request creator access again', 'post', '/creator/request', {}, 200],
-               ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
-               ['Grant creator access for nonexisting account', 'post', '/creator/grant', {email: 'foo@example.com', grant: true}, 200, adminHeaders],
+               ['Request full subscription', 'post', '/subscription/request', {type: 'full'}, 200],
+               ['Request byoe subscription', 'post', '/subscription/request', {type: 'byoe'}, 200],
                ['Get user', 'get', '/auth/user', 200, function (s, rq, rs) {
                   return assert ([
                      ['body', rs.body, 'object'],
                      ['body.admin', rs.body.admin, undefined, teishi.test.equal],
                      ['body.count', rs.body.count, 'integer'],
-                     ['body.creator', rs.body.creator, true, teishi.test.equal],
+                     ['body.creator', rs.body.creator, undefined, teishi.test.equal],
                      ['body.credentials', rs.body.credentials, {}, teishi.test.equal],
                      ['body.csrf', rs.body.csrf, s.headers ['x-csrf'], teishi.test.equal],
                      ['body.email', rs.body.email, 'hello@example.com', teishi.test.equal],
+                     ['body.engines', rs.body.engines, [], teishi.test.equal],
                      ['body.settings', rs.body.settings, {}, teishi.test.equal],
                      ['body.username', rs.body.username, 'hello', teishi.test.equal],
                   ]);
@@ -454,28 +473,35 @@ if (mode === 'server') {
                   }, next);
                }, {cookie: ''}],
                ['Admin flag for admin', 'get', '/auth/user', 200, function (s, rq, rs) {
-                  return assert (['body.admin', rs.body.admin, true, teishi.test.equal]);
+                  return assert ([
+                     ['body.admin', rs.body.admin, true, teishi.test.equal],
+                     ['body.engines [0]', rs.body.engines [0], 'host', teishi.test.equal],
+                  ]);
                }, adminHeaders],
-               ['Non-admin cannot grant creator access', 'post', '/creator/grant', {email: 'foo@example.com', grant: true}, 403, assertBody ({error: 'Not admin'})],
+               ['Set creator flag', 'get', '/auth/user', 200, function (s, rq, rs, next) {
+                  s.creatorUserId = rs.body.id;
+                  redis ('hset', 'user:' + s.creatorUserId, 'creator', 1).then (function () {next (null, rs)}, next);
+               }],
+               ['Creator flag for creator', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert ([
+                     ['body.creator', rs.body.creator, true, teishi.test.equal],
+                  ]);
+               }],
+               ['Unset creator flag', 'get', '/auth/user', 200, function (s, rq, rs, next) {
+                  redis ('hdel', 'user:' + s.creatorUserId, 'creator').then (function () {next (null, rs)}, next);
+               }],
                ['Non-admin cannot download tests', 'get', '/test.js', 403, assertBody ({error: 'Not admin'})],
-               ['Request creator access as creator', 'post', '/creator/request', {}, 409, assertBody ({error: 'Already a creator'})],
-               ['Request creator access with a body', 'post', '/creator/request', {extra: true}, 400, function (s, rq, rs) {
-                  return assert (['error', rs.body.error, /body should be equal to/, teishi.test.match]);
-               }],
-               ['Revoke creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: false}, 200, adminHeaders],
-               ['Get user after revocation', 'get', '/auth/user', 200, function (s, rq, rs) {
-                  return assert (['body.creator', rs.body.creator, false, teishi.test.equal]);
-               }],
-               ['Create project after revocation', 'post', '/project', {name: 'not allowed'}, 403, assertBody ({error: 'Please request creator access'})],
-               ['Revoke creator access for nonexisting account', 'post', '/creator/grant', {email: 'nobody@example.com', grant: false}, 404, adminHeaders],
-               ['Restore creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
-               // Both creation paths allocate usernames; collisions use the first available suffix.
+               ['Request subscription without type', 'post', '/subscription/request', {}, 400],
+               ['Request subscription with invalid type', 'post', '/subscription/request', {type: 'pro'}, 400],
+               ['Request subscription with extra key', 'post', '/subscription/request', {type: 'full', extra: true}, 400],
+               ['Non-admin cannot create a host project', 'post', '/project', {name: 'not allowed'}, 403, assertBody ({error: 'Only the admin can create projects on the host'}), {'x-test': '0'}],
+               // Login allocates usernames; collisions use the first available suffix.
                usernameAccount ('hello@example.net', 'hello-example'),
                usernameAccount ('hello@example.org', 'hello-example-1'),
-               usernameAccount ('hello@example.io', 'hello-example-2', true),
+               usernameAccount ('hello@example.io', 'hello-example-2'),
                usernameAccount ('hello+tag@example.com', 'hello-tag'),
                usernameAccount ('a@example.com', 'a11'),
-               usernameAccount ('ab@example.com', 'ab1', true),
+               usernameAccount ('ab@example.com', 'ab1'),
                usernameAccount ('abc@example.com', 'abc'),
                deleteUsernameAccount ('a@example.com'),
                deleteUsernameAccount ('ab@example.com'),
@@ -501,7 +527,7 @@ if (mode === 'server') {
                ['Set same username', 'put', '/auth/user', {username: 'hello-renamed'}, 200, assertBody ({username: 'hello-renamed'})],
                ['Set username and settings', 'put', '/auth/user', {username: 'hello-renamed', settings: {vi: true}}, 200, assertBody ({username: 'hello-renamed', settings: {vi: true}})],
                ['Reject occupied username', 'put', '/auth/user', {username: 'hello-example'}, 409, assertBody ({error: 'Username already taken'})],
-               ['Reject occupied username from creator grant', 'put', '/auth/user', {username: 'hello-example-2'}, 409, assertBody ({error: 'Username already taken'})],
+               ['Reject another occupied username', 'put', '/auth/user', {username: 'hello-example-2'}, 409, assertBody ({error: 'Username already taken'})],
                ['Reject conflict before changing settings', 'put', '/auth/user', {username: 'hello-example', settings: {vi: false}}, 409, assertBody ({error: 'Username already taken'})],
                dale.go ([
                   null, true, 123, [], {},
@@ -736,8 +762,8 @@ if (mode === 'server') {
                ['Get user in local mode', 'get', '/auth/user', 200, function (s, rq, rs) {
                   return assert ([
                      ['body.mode', rs.body.mode, 'local', teishi.test.equal],
-                     ['body.creator', rs.body.creator, true, teishi.test.equal],
                      ['body.credentials', rs.body.credentials, 'object'],
+                     ['body.engines [0]', rs.body.engines [0], 'host', teishi.test.equal],
                   ]);
                }],
                ['List sessions', 'get', '/auth/list', 404, assertBody ({error: 'Not in cloud mode'})],
@@ -825,7 +851,6 @@ if (mode === 'server') {
             // *** PROJECT (HOST) ***
 
             CONFIG.cloud ? [
-               ['Grant creator access', 'post', '/creator/grant', {email: 'hello@example.com', grant: true}, 200, adminHeaders],
                ['Login', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
                   s.loginLink = rs.body.loginLink;
                   return true;
@@ -840,11 +865,9 @@ if (mode === 'server') {
             ['Create project without a name', 'post', '/project', {}, 400, assertBody ({error: 'name should have as type string but instead is undefined with type undefined'})],
             ['Create project with a short name', 'post', '/project', {name: 'a'}, 400, assertBody ({error: 'length of name should be in range {"max":500,"min":2} but instead is 1'})],
             ['Reject 501-character project name', 'post', '/project', {name: 'A'.repeat (501)}, 400],
-            dale.go ([0, 6, '3', 1.5], function (slot) {
-               return ['Reject slot ' + JSON.stringify (slot), 'post', '/project', {name: 'slotted', slot}, 400, function (s, rq, rs) {
-                  return assert (['error', rs.body.error, /slot should be/, teishi.test.match]);
-               }];
-            }),
+            ['Reject slot', 'post', '/project', {name: 'slotted', slot: 3}, 400, function (s, rq, rs) {
+               return assert (['error', rs.body.error, /keys of body/, teishi.test.match]);
+            }],
             ['Create project with 500-character name', 'post', '/project', {name: 'A'.repeat (500)}, 200, function (s, rq, rs) {
                s.longNameProjectId = rs.body.id;
                return assert (['subdomain', rs.body.subdomain, undefined, teishi.test.equal]);
@@ -874,33 +897,16 @@ if (mode === 'server') {
             }],
             ['Create a second project with the same name', 'post', '/project', {name: 'el norte'}, 409, assertBody ({error: 'There is already a project with that name'})],
             ['Reject differently cased duplicate', 'post', '/project', {name: 'EL NORTE'}, 409, assertBody ({error: 'There is already a project with that name'})],
-            ['Create a second project with another name and a slot', 'post', '/project', {name: 'second', slot: 3}, 200],
+            ['Create a second project with another name', 'post', '/project', {name: 'second'}, 200],
             ['List projects after second project creation', 'get', '/projects', 200, function (s, rq, rs) {
                if (! assert (['length', rs.body.length, 2, teishi.test.equal])) return false;
                if (new Date (rs.body [0].last) < new Date (rs.body [1].last)) {
                   validationError = 'Last project should come first';
                   return false;
                }
-               if (! assert ([
-                  ['second project slot', rs.body [0].slot, 3, teishi.test.equal],
-                  ['first project slot', rs.body [1].slot, undefined, teishi.test.equal],
-               ])) return false;
                s.secondProjectId = rs.body [0].id;
                return true;
             }],
-            ['Create project taking another project\'s slot', 'post', '/project', {name: 'slot thief', slot: 3}, 200, function (s, rq, rs) {
-               s.slotThiefId = rs.body.id;
-               return true;
-            }],
-            ['Taken slot moves to the new project', 'get', '/projects', 200, function (s, rq, rs) {
-               var slots = dale.obj (rs.body, function (p) {return [p.id, p.slot]});
-               return assert ([
-                  ['new project slot', slots [s.slotThiefId], 3, teishi.test.equal],
-                  ['second project slot', slots [s.secondProjectId], undefined, teishi.test.equal],
-               ]);
-            }],
-            ['Delete slot thief', 'delete', function (s) {return '/project/' + s.slotThiefId}, 200],
-            ['Restore second project slot', 'put', '/project', function (s) {return {id: s.secondProjectId, name: 'second', slot: 3}}, 200],
             ['Rename project', 'put', '/project', {name: 'el norte'}, 400, assertBody ({error: 'id should have as type string but instead is undefined with type undefined'})],
             ['Rename nonexistent project', 'put', '/project', {id: 'nonexistent', name: 'whatever'}, 404],
             ['Rename project (noop)', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte'}}, 200],
@@ -948,35 +954,15 @@ if (mode === 'server') {
                   ['Rename project to ' + entry [0], 'put', '/project', function (s) {return {id: s.projectId, name: entry [1]}}, 400, assertBody ({error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'})],
                ];
             }),
-            ['Rename project and set slot', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!', slot: 4}}, 200],
-            ['List projects after setting slot', 'get', '/projects', 200, function (s, rq, rs) {
+            ['Rename project with a slot', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!', slot: 4}}, 400],
+            ['Rename project', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],
+            ['List projects after rename', 'get', '/projects', 200, function (s, rq, rs) {
                return assert ([
                   ['length', rs.body.length, 2, teishi.test.equal],
                   function () {return [
                      ['project id', rs.body [0].id, s.projectId, teishi.test.equal],
                      ['project name', rs.body [0].name, 'el norte!', teishi.test.equal],
-                     ['project slot', rs.body [0].slot, 4, teishi.test.equal],
                   ]}
-               ]);
-            }],
-            ['Rename project and remove slot', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!'}}, 200],
-            ['List projects after removing slot', 'get', '/projects', 200, function (s, rq, rs) {
-               return assert ([
-                  ['length', rs.body.length, 2, teishi.test.equal],
-                  function () {return [
-                     ['project id', rs.body [0].id, s.projectId, teishi.test.equal],
-                     ['project name', rs.body [0].name, 'el norte!', teishi.test.equal],
-                     ['project slot', rs.body [0].slot, undefined, teishi.test.equal],
-                  ]}
-               ]);
-            }],
-            ['Set slot to same value as another project', 'put', '/project', function (s) {return {id: s.projectId, name: 'el norte!', slot: 3}}, 200],
-            ['List projects after slot conflict', 'get', '/projects', 200, function (s, rq, rs) {
-               var first = dale.stopNot (rs.body, undefined, function (p) { if (p.id === s.projectId) return p });
-               var second = dale.stopNot (rs.body, undefined, function (p) { if (p.id === s.secondProjectId) return p });
-               return assert ([
-                  ['first project slot', first.slot, 3, teishi.test.equal],
-                  ['second project slot', second.slot, undefined, teishi.test.equal],
                ]);
             }],
             ['Delete nonexistent project', 'delete', '/project/nonexistent', 404],
@@ -1983,17 +1969,17 @@ if (mode === 'server') {
             }],
             ['Delete project with a removed container', 'delete', function (s) {return '/project/' + s.fourthProjectId}, 200],
             CONFIG.cloud ? [
-               ['Login as non-creator', 'post', '/auth/login', {email: 'user2@example.com'}, 200, function (s, rq, rs) {
+               ['Login as another user', 'post', '/auth/login', {email: 'user2@example.com'}, 200, function (s, rq, rs) {
                   s.user1Headers = {cookie: s.headers.cookie, 'x-csrf': s.headers ['x-csrf']};
                   s.loginLink = rs.body.loginLink;
                   return true;
                }],
-               ['Verify non-creator login', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
+               ['Verify another user login', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
                   s.headers.cookie = getCookie (rs.headers);
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
-               ['Create project as non-creator', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Please request creator access'})],
+               ['Create project as non-admin', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Only the admin can create projects on the host'}), {'x-test': '0'}],
                ['Update another user\'s project', 'put', '/project', function (s) {return {id: s.projectId, name: 'hacked'}}, 404],
                projectLogin ('another user\'s project', 'projectId'),
                ['Read file from another user\'s project', 'get', '/f/' + encodeURIComponent ('main.md'), 404],
@@ -2002,7 +1988,7 @@ if (mode === 'server') {
                ['Edit file in another user\'s project', 'post', '/project/edit', function (s) {return {path: 'main.md', oldText: 'el', newText: 'EL'}}, 404],
                ['Run command on another user\'s project', 'post', '/project/run', function (s) {return {command: 'ls'}}, 404],
                ['Delete another user\'s project', 'delete', function (s) {return '/project/' + s.projectId}, 404],
-               ['Delete non-creator account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
+               ['Delete another user account', 'post', '/auth/delete', {}, 200, function (s, rq, rs) {
                   s.headers.cookie = s.user1Headers.cookie;
                   s.headers ['x-csrf'] = s.user1Headers ['x-csrf'];
                   return true;
@@ -2123,7 +2109,6 @@ if (mode === 'server') {
          }
 
          suites.access = CONFIG.cloud ? [
-            ['Grant A creator status', 'post', '/creator/grant', {email: 'access-a@example.com', grant: true}, 200, adminHeaders],
             accessLogin ('a'),
             accessLogin ('b'),
             accessAs ('a'),
@@ -2447,7 +2432,7 @@ if (mode === 'server') {
             ['A deletes target project', 'delete', function (s) {return '/project/' + s.accessTargetId}, 200],
 
             // PUBLIC grants: one project public as a whole, another only under chat/.
-            ['A creates full public project', 'post', '/project', {name: 'public full', slot: 2}, 200, function (s, rq, rs) {
+            ['A creates full public project', 'post', '/project', {name: 'public full'}, 200, function (s, rq, rs) {
                s.publicFullId = rs.body.id;
                s.publicFull = 'access-a--public-full';
                return true;
@@ -2480,14 +2465,12 @@ if (mode === 'server') {
                   }],
                ];
             }),
-            ['A sees own public projects unflagged, with slot', 'get', '/projects', 200, function (s, rq, rs) {
+            ['A sees own public projects unflagged', 'get', '/projects', 200, function (s, rq, rs) {
                var full = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.publicFullId) return p});
                var partial = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.publicPartialId) return p});
                return assert ([
                   ['full public', full.public, undefined, teishi.test.equal],
                   ['partial public', partial.public, undefined, teishi.test.equal],
-                  ['full slot', full.slot, 2, teishi.test.equal],
-                  ['partial slot', partial.slot, undefined, teishi.test.equal],
                ]);
             }],
             ['Switch to anonymous', 'get', '/', 200, function (s) {
@@ -2496,14 +2479,13 @@ if (mode === 'server') {
                delete s.projectCsrf;
                return true;
             }],
-            ['Anonymous lists public projects without slots', 'get', '/projects', 200, function (s, rq, rs) {
+            ['Anonymous lists public projects', 'get', '/projects', 200, function (s, rq, rs) {
                var listed = dale.fil (rs.body, undefined, function (p) {
                   if (p.id === s.publicFullId || p.id === s.publicPartialId) return p;
                });
                return assert ([
                   ['both listed', listed.length, 2, teishi.test.equal],
                   ['public', dale.go (listed, function (p) {return p.public}), [true, true], teishi.test.equal],
-                  ['slots', dale.go (listed, function (p) {return p.slot}), [undefined, undefined], teishi.test.equal],
                ]);
             }],
             useProject ('publicFull'),
@@ -2599,14 +2581,13 @@ if (mode === 'server') {
                   ['sessionCode', location.searchParams.get ('sessionCode'), /^[a-f0-9]{64}$/, teishi.test.match],
                ]);
             }],
-            ['B sees public projects without slots', 'get', '/projects', 200, function (s, rq, rs) {
+            ['B sees public projects', 'get', '/projects', 200, function (s, rq, rs) {
                var listed = dale.fil (rs.body, undefined, function (p) {
                   if (p.id === s.publicFullId || p.id === s.publicPartialId) return p;
                });
                return assert ([
                   ['both listed', listed.length, 2, teishi.test.equal],
                   ['public', dale.go (listed, function (p) {return p.public}), [true, true], teishi.test.equal],
-                  ['slots', dale.go (listed, function (p) {return p.slot}), [undefined, undefined], teishi.test.equal],
                ]);
             }],
             projectLogin ('B on publicFull', 'publicFull'),
@@ -2641,6 +2622,170 @@ if (mode === 'server') {
             ['B no longer sees project', 'get', '/projects', 200, assertBody ([])],
             ['Delete B', 'post', '/auth/delete', {}, 200],
          ] : [];
+
+         // *** ENGINE ***
+
+         var findEngine = function (engines, id) {
+            return dale.stopNot (engines, undefined, function (engine) {
+               if (engine.id === id) return engine;
+            });
+         }
+
+         var engineLogin = function (who) {
+            return [
+               hostLogin ('engine user ' + who, 'engine-' + who + '@example.com'),
+               ['Read engine user ' + who, 'get', '/auth/user', 200, function (s, rq, rs) {
+                  s.engineUsers = s.engineUsers || {};
+                  s.engineUsers [who] = {cookie: s.headers.cookie, csrf: s.headers ['x-csrf'], id: rs.body.id};
+                  return true;
+               }],
+            ];
+         }
+
+         var engineAs = function (who) {
+            return ['Switch to engine user ' + who, 'get', '/', 200, function (s) {
+               s.headers.cookie = s.engineUsers [who].cookie;
+               s.headers ['x-csrf'] = s.engineUsers [who].csrf;
+               return true;
+            }];
+         }
+
+         var seedEngine = function (who) {
+            return ['Seed engine for ' + who, 'get', '/', 200, function (s, rq, rs, next) {
+               var id = 'test-engine-' + who;
+               redis ([
+                  ['hmset', 'engine:' + id, {
+                     created:    Date.now (),
+                     id:         id,
+                     ip:         '192.0.2.1',
+                     knownHost:  '192.0.2.1 ssh-ed25519 AAAA',
+                     name:       'engine ' + who,
+                     owner:      s.engineUsers [who].id,
+                     privateKey: 'private',
+                     publicKey:  'ssh-ed25519 AAAA',
+                  }],
+                  ['sadd', 'owner:' + s.engineUsers [who].id, 'engine:' + id],
+               ]).then (function () {next (null, rs)}, next);
+            }];
+         }
+
+         suites.engine = [
+            CONFIG.cloud ? [engineLogin ('b'), engineLogin ('a')] : ['Use local user for engines', 'get', '/', 200, function (s) {
+               s.engineUsers = {a: {id: 'local'}};
+               return true;
+            }],
+            CONFIG.cloud ? ['List engines when there are none', 'get', '/engines', 200, assertBody ([])] : [],
+            dale.go ([
+               {},
+               {ip: '127.0.0.1'},
+               {name: 'engine'},
+               {ip: '127.0.0.1', name: 'engine', extra: true},
+               {ip: 1, name: 'engine'},
+               {ip: '127.0.0.1', name: ''},
+               {ip: '127.0.0.1', name: 'A'.repeat (501)},
+            ], function (body, index) {
+               return ['Reject invalid engine #' + index, 'post', '/engine', body, 400];
+            }),
+            dale.go (['', 'localhost', '256.0.0.1', '127.0.0.1:22'], function (ip) {
+               return ['Reject engine IP ' + JSON.stringify (ip), 'post', '/engine', {ip, name: 'engine'}, 400, assertBody ({error: 'Invalid IP'})];
+            }),
+            CONFIG.cloud ? ['Non-admin cannot create an engine', 'post', '/engine', {ip: '127.0.0.1', name: 'engine'}, 403] : [],
+            ['Reject unreachable engine', 'post', '/engine', {ip: '127.0.0.1', name: 'unreachable'}, 400, assertBody ({error: 'Could not reach the engine over ssh'}), CONFIG.cloud ? adminHeaders : {}],
+            ['Unreachable engine is not stored', 'get', '/engines', 200, function (s, rq, rs) {
+               return assert (['unreachable engine', dale.stop (rs.body, true, function (engine) {return engine.name === 'unreachable'}), false, teishi.test.equal]);
+            }, CONFIG.cloud ? adminHeaders : {}],
+            seedEngine ('a'),
+            CONFIG.cloud ? seedEngine ('b') : [],
+            ['List engines', 'get', '/engines', 200, function (s, rq, rs) {
+               var engine = findEngine (rs.body, 'test-engine-a');
+               return assert ([
+                  ['engine', engine, 'object'],
+                  ['ip', engine.ip, '192.0.2.1', teishi.test.equal],
+                  ['name', engine.name, 'engine a', teishi.test.equal],
+                  ['owner', engine.owner, s.engineUsers.a.id, teishi.test.equal],
+                  ['privateKey', engine.privateKey, undefined, teishi.test.equal],
+                  ['publicKey', engine.publicKey, 'ssh-ed25519 AAAA', teishi.test.equal],
+               ]);
+            }],
+            CONFIG.cloud ? ['User lists only own engines', 'get', '/engines', 200, function (s, rq, rs) {
+               return assert (['ids', dale.go (rs.body, function (engine) {return engine.id}), ['test-engine-a'], teishi.test.equal]);
+            }] : [],
+            ['Engines in user', 'get', '/auth/user', 200, function (s, rq, rs) {
+               if (CONFIG.cloud) return assert (['engines', rs.body.engines, ['test-engine-a'], teishi.test.equal]);
+               return assert ([
+                  ['engines [0]', rs.body.engines [0], 'host', teishi.test.equal],
+                  ['includes seeded engine', rs.body.engines.indexOf ('test-engine-a') !== -1, true, teishi.test.equal],
+               ]);
+            }],
+            dale.go ([
+               {},
+               {id: 'test-engine-a'},
+               {name: 'renamed'},
+               {id: 'test-engine-a', name: 'renamed', ip: '127.0.0.1'},
+               {id: 1, name: 'renamed'},
+               {id: 'test-engine-a', name: ''},
+               {id: 'test-engine-a', name: 'A'.repeat (501)},
+            ], function (body, index) {
+               return ['Reject invalid engine rename #' + index, 'put', '/engine', body, 400];
+            }),
+            ['Rename nonexistent engine', 'put', '/engine', {id: 'nonexistent', name: 'renamed'}, 404, assertBody ({error: 'Engine not found'})],
+            CONFIG.cloud ? ['Rename another user\'s engine', 'put', '/engine', {id: 'test-engine-b', name: 'renamed'}, 404, assertBody ({error: 'Engine not found'})] : [],
+            ['Rename engine', 'put', '/engine', {id: 'test-engine-a', name: 'renamed'}, 200],
+            ['List engines after rename', 'get', '/engines', 200, function (s, rq, rs) {
+               return assert (['name', findEngine (rs.body, 'test-engine-a').name, 'renamed', teishi.test.equal]);
+            }],
+            ['Reject non-string engine on project', 'post', '/project', {name: 'on engine', engine: 1}, 400],
+            ['Create project on nonexistent engine', 'post', '/project', {name: 'on engine', engine: 'nonexistent'}, 404, assertBody ({error: 'Engine not found'})],
+            CONFIG.cloud ? [
+               ['Create project on another user\'s engine', 'post', '/project', {name: 'on engine', engine: 'test-engine-b'}, 404, assertBody ({error: 'Engine not found'})],
+               ['Non-admin cannot create a project on explicit host', 'post', '/project', {name: 'on host', engine: 'host'}, 403, assertBody ({error: 'Only the admin can create projects on the host'}), {'x-test': '0'}],
+            ] : [],
+            ['Create project on explicit host', 'post', '/project', {name: 'on host', engine: 'host'}, 200, function (s, rq, rs) {
+               s.hostEngineProjectId = rs.body.id;
+               return true;
+            }],
+            ['Project on explicit host keeps its engine', 'get', '/projects', 200, function (s, rq, rs) {
+               var match = dale.stopNot (rs.body, undefined, function (p) {if (p.id === s.hostEngineProjectId) return p});
+               return assert (['engine', match.engine, 'host', teishi.test.equal]);
+            }],
+            ['Delete project on explicit host', 'delete', function (s) {return '/project/' + s.hostEngineProjectId}, 200],
+            ['Seed project on engine', 'get', '/', 200, function (s, rq, rs, next) {
+               redis ([
+                  ['hmset', 'project:test-engine-project', {engine: 'test-engine-a', id: 'test-engine-project', name: 'on engine', owner: s.engineUsers.a.id}],
+                  ['sadd', 'owner:' + s.engineUsers.a.id, 'project:test-engine-project'],
+               ]).then (function () {next (null, rs)}, next);
+            }],
+            ['Delete engine with a project on it', 'delete', '/engine/test-engine-a', 409, assertBody ({error: 'Delete the projects on this engine first'})],
+            ['Remove seeded project', 'get', '/', 200, function (s, rq, rs, next) {
+               redis ([
+                  ['del', 'project:test-engine-project'],
+                  ['srem', 'owner:' + s.engineUsers.a.id, 'project:test-engine-project'],
+               ]).then (function () {next (null, rs)}, next);
+            }],
+            ['Delete nonexistent engine', 'delete', '/engine/nonexistent', 404, assertBody ({error: 'Engine not found'})],
+            CONFIG.cloud ? ['Delete another user\'s engine', 'delete', '/engine/test-engine-b', 404, assertBody ({error: 'Engine not found'})] : [],
+            ['Delete engine', 'delete', '/engine/test-engine-a', 200],
+            ['Engine is gone', 'get', '/engines', 200, function (s, rq, rs) {
+               return assert (['engine', findEngine (rs.body, 'test-engine-a'), undefined, teishi.test.equal]);
+            }],
+            ['Engine is gone from user', 'get', '/auth/user', 200, function (s, rq, rs) {
+               return assert (['includes deleted engine', rs.body.engines.indexOf ('test-engine-a') !== -1, false, teishi.test.equal]);
+            }],
+            ['Delete engine again', 'delete', '/engine/test-engine-a', 404],
+            CONFIG.cloud ? [
+               ['Delete engine user a', 'post', '/auth/delete', {}, 200],
+               engineAs ('b'),
+               ['B still has its engine', 'get', '/engines', 200, function (s, rq, rs) {
+                  return assert (['ids', dale.go (rs.body, function (engine) {return engine.id}), ['test-engine-b'], teishi.test.equal]);
+               }],
+               ['Delete engine user b', 'post', '/auth/delete', {}, 200],
+               ['Account deletion removes engines', 'get', '/', 200, function (s, rq, rs, next) {
+                  redis ('exists', 'engine:test-engine-b').then (function (exists) {
+                     next (assert (['engine exists', exists, 0, teishi.test.equal]) ? null : validationError, rs);
+                  }, next);
+               }],
+            ] : [],
+         ];
 
          suites.all = Object.values (suites);
 
@@ -2842,11 +2987,10 @@ if (mode === 'client') {
       }, function () {
          return assert ([['loginLink', B.get ('test', 'loginLink'), 'string']]);
       }],
-      ['Verify admin and grant creator', function (next) {
+      ['Verify admin', function (next) {
          B.call ('verify', B.get ('test', 'loginLink'));
          next (1000, 1);
       }, function () {
-         B.call ('post', '/creator/grant', {email: 'projects@example.com', grant: true});
          return assert ([['view', B.get ('view'), 'projects', teishi.test.equal]]);
       }],
       ['Login test user', function (next) {
@@ -2905,7 +3049,7 @@ if (mode === 'client') {
       ['Rename project', function (next) {
          c ('[title="Rename"]') [0].click ();
          setTimeout (function () {
-            var input = c ('.edit-project-input') [0];
+            var input = c ('#edit-project-input');
             input.value = 'renamed';
             c.fire (input, 'input');
          }, 300);

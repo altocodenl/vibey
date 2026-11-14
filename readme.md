@@ -4,22 +4,6 @@
 
 You already have AI. All you need now is files and a server.
 
-## Why vibey?
-
-So that you come alive when you work with computers.
-
-So that your digital workspace feels as comfortable as an old shoe.
-
-So that your digital memory is portable and reliable, now and in five years.
-
-So that you are able to learn and build at the speed of thought.
-
-So that you love your digital workspace and can't wait to get back to it when you're away.
-
-So that you can finally build, plan or learn what you have been dreaming of for a while now.
-
-So that what you do with a computer can make the world a more meaningful place.
-
 ## What is vibey?
 
 1. A *place* where you can have agents, files and a server, working together. Each place is a *project*.
@@ -28,7 +12,7 @@ So that what you do with a computer can make the world a more meaningful place.
    B. You can share your place with anyone.
 3. You bring your own AI subscriptions or credentials.
 4. How to use it? A fork in the road!
-   A. Run it locally or in your server. Here are the installation instructions. Vibey is fully open source.
+   A. Run it locally or in your server. Here are the [installation instructions](#installation). Vibey is fully open source.
    B. Set up a subscription to vibey cloud: 10 bucks a month, plus whatever servers you use charged at cost (25 bucks/mo total should be enough).
 
 ## How is it different from...
@@ -51,6 +35,74 @@ OpenClaw:
 2. Considerably more secure by default.
 3. Multi-user.
 
+Glitch/Sandstorm/Val.town:
+
+1. Includes a full server.
+2. You bring your own AI subscription.
+3. Apps don't need to be ported, any code can run.
+
+## What can I do with vibey?
+
+1. Workflows: run processes with agents, scripts, intervals and API/email triggers.
+2. Communication: interact with colleagues and agents in a shared workspace with chat and files.
+3. Websites: ask an agent to create a website for you. The hosting is already included in vibey.
+4. Apps: create small apps, for internal or external use.
+
+## Installation
+
+### Local
+
+Requires Docker ([installation instructions here](https://docs.docker.com/engine/install)).
+
+#1: download the latest version of vibey from the [releases page](https://github.com/altocodenl/vibey/releases).
+
+#1 alternative: if you have git installed, you can just clone the repo:
+
+```
+git clone https://github.com/altocodenl/vibey.git
+```
+
+#2: Run it, just like that
+
+```
+docker compose up --build
+```
+
+#3: open http://localhost:5353
+
+### Remote
+
+You'll need:
+1. A command line with rsync in your computer.
+2. A Linux server that you can access through SSH, with Docker, Node and rsync installed.
+3. A static IP for the server, with DNS A records for both your domain and its subdomains (`example.com` and `*.example.com`) pointing to it.
+4. A reverse proxy (like Caddy or nginx) with a wildcard HTTPS certificate, forwarding to `127.0.0.1:5353` and keeping the `Host` header. (Please don't run vibey through http, it's a bad idea, especially if you set up AI credentials).
+5. AWS SES credentials.
+
+#1: in `config.4tx`, change `admin` to your email and `email from address` to an address verified in SES.
+
+#2: change the `HOST` and `BASE_URL` variables in `deploy.sh` to that of your server and your domain, respectively.
+
+#3: create `secret.4tx` with your AWS SES credentials:
+
+```
+email ses accessKeyId ...
+          region ...
+          secretAccessKey ...
+```
+
+#4: deploy with:
+
+```
+./deploy.sh prod confirm
+```
+
+#4 alternative: if you need to rebuild the containers, deploy with:
+
+```
+./deploy.sh prod rebuild confirm
+```
+
 ## How vibey does it?
 
 0. Bring your own AI credentials. Vibey works with openai & anthropic (more to come on request).
@@ -62,38 +114,27 @@ OpenClaw:
 6. App: create and host apps that run in your project.
 7. Publish: provide public access to files (text or media) and apps. Point a domain to a project.
 
-## Running vibey yourself
+### Interesting design decisions
 
-```
-docker compose up --build
-```
+1. The chat as a markdown file with a simple format.
+2. The chat as a place that merges communication between humans, between agents, between humans and agents, and between humans/agents and computers. Also (soon), as a space for receiving/sending email.
+3. A project as an unrestricted docker container.
+4. Autogit + autobackup running in the background.
+5. Permissions expressed as a file inside the project.
+6. Projects exposed in a subdomain of the host, to achieve isolation in the browser.
+7. Engines as servers that have docker installed and get calls through ssh.
+8. The host as a web service that is a sort of hypervisor, in that it handles all the traffic to a project, adding an auth layer.
+9. Auto-login to a project if you have credentials on the host, through redirects.
 
-To run in cloud mode, set this line in `config.4tx`:
+## The feeling of vibey
 
-```
-cloud 1
-```
-
-To run sending emails, set this line in `config.4tx`:
-
-```
-email enable 1
-```
-
-And set these three lines (with proper values) in `secret.4tx`:
-
-
-```
-email ses accessKeyId ...
-          region ...
-          secretAccessKey ...
-```
-
-If you're meddling with the Dockerfiles and you need to bust the cache:
-
-```
-docker compose build --no-cache && docker compose up
-```
+- So that you come alive when you work with computers.
+- So that your digital workspace feels as comfortable as an old shoe.
+- So that your digital memory is portable and reliable, now and in five years.
+- So that you are able to learn and build at the speed of thought.
+- So that you love your digital workspace and can't wait to get back to it when you're away.
+- So that you can finally build, plan or learn what you have been dreaming of for a while now.
+- So that what you do with a computer can make the world a more meaningful place.
 
 ## Dataspace
 
@@ -137,6 +178,14 @@ accessTo:<userId|email|PUBLIC> 1 <verb>:<projectId>
                                ...
 credentials:<userId> data <JSON> // {<anthropic|openai>: {account: {access, expires, refresh, ...}, apiKey: "<key>"}}
 email:<email> <userId>
+engine:<engineId> created <date>
+                  id <id>
+                  ip <ip>
+                  knownHost <known_hosts lines> // from ssh-keyscan when the engine is created
+                  name <name>
+                  owner <userId>
+                  privateKey <OpenSSH private key> // never returned by the API
+                  publicKey <OpenSSH public key>
 lock:commit:<projectId> <1|undefined>
      edit:<projectId>:<path> <1|undefined>
 loginLink:<link> <email>
@@ -144,7 +193,8 @@ loginLinkR:<email> <loginLink> // reverse login link
 owner:<userId> 1 session-h:<sessionId>
                2 session-p:<sessionId>
                3 project:<projectId>
-               4 credentials:<userId>
+               4 engine:<engineId>
+               5 credentials:<userId>
                ...
 pkce:<userId>:<provider> <JSON>
 project:<projectId> created <date>
@@ -152,7 +202,6 @@ project:<projectId> created <date>
                     last <date>
                     name <name>
                     owner <userId>
-                    slot <integer|undefined>
 rateLimit:<identifier> <number>
 session-code:<code> hostSession <sessionId>
                     state <state>
@@ -168,11 +217,11 @@ session-p:<sessionId> csrf <csrfToken> // expires through the key's TTL
                       user <userId>
 user:<id> count <integer>
           created <date>
-          creator <1|undefined>
+          creator <1|undefined> // can create engines
           email <email>
           id <id>
           last <date>
-          settings <JSON> // {vi: true|false|undefined}; absent means {}
+          settings <JSON> // {pinned: [<projectId>, ...]|undefined, vi: true|false|undefined}; absent means {}
           username <username|undefined>
 userCount <integer>
 username:<username> <userId>
@@ -252,8 +301,8 @@ Body lines starting with `əəə head` or `əəə body` are escaped as `> əəə
 
 Except for `GET /auth/user` and `PUT /auth/user`, all other auth routes will return a 404 in local mode.
 
-- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: <boolean>, credentials: <object>, csrf: <token>, email: <email>, id: <user id>, mode: 'cloud', settings: <object>, username: <username|undefined>}` in cloud mode and `{creator: true, credentials: <object>, mode: 'local', settings: <object>, username: <username|undefined>}` in local mode. On a project host, `email` is omitted. `creator` is always `true` for the admin user. `credentials` lists stored providers and credential types as presence flags (for example, `anthropic.account: true`), never credential values or tokens. `settings` defaults to `{}` and can only contain `vi`, a boolean. Without a session on a project host, returns `{anonymous: true, mode: 'cloud'}` if the project has a `PUBLIC` grant and the request carries a `__Host-<cookie name>-project-state` cookie; otherwise, sets that cookie, expiring in 10 minutes, and returns 403 with `{location: <url>}`, the **Project code** URL whose `returnUrl` is the root of the project host, with `optional=1` if the project has a `PUBLIC` grant. Clients navigate to `location` to open a project session. Without a session elsewhere, returns 403.
-- **Update user**: `PUT /auth/user`: accepts `{settings: <object>|undefined, username: <string>|undefined}`, at least one of them. `settings` is `{vi: true|false}` or `{}` and replaces the settings object; omitting `vi` clears the preference (undefined), since JSON cannot represent an explicit `undefined`. `username` is lowercased and NFC-normalized, with a minimum length of 3 UTF-16 units. Allows Unicode letters, combining marks, numbers and single internal dashes; must start with a letter or number, cannot have a combining mark after a dash, and cannot be a UUID. Whitespace and mixing ASCII letters with non-ASCII characters are rejected; ASCII numbers and dashes can accompany non-ASCII names. Setting a new username releases the previous one. Returns `{settings, username}` with whichever was sent, using the normalized username. Rejects missing fields, unknown keys, invalid types and invalid usernames with 400, and a username owned by another user with 409; on any rejection nothing is changed. Available in local mode; cloud mode requires a valid session and CSRF token. This endpoint stores the settings only; it does not change editor bindings.
+- **Get user**: `GET /auth/user`: returns `{admin: true|undefined, count: <integer>, creator: true|undefined, credentials: <object>, csrf: <token>, email: <email>, engines: [<engineId>, ...], id: <user id>, mode: 'cloud', settings: <object>, username: <username|undefined>}` in cloud mode and `{credentials: <object>, engines: ['host'], mode: 'local', settings: <object>, username: <username|undefined>}` in local mode. On a project host, `email` is omitted. `engines` lists the ids of the engines the user owns (the `engine:<id>` keys in `owner:<userId>`), sorted, preceded by `host` for the admin. `credentials` lists stored providers and credential types as presence flags (for example, `anthropic.account: true`), never credential values or tokens. `settings` defaults to `{}` and can only contain `pinned`, an array of project ids, and `vi`, a boolean. Without a session on a project host, returns `{anonymous: true, mode: 'cloud'}` if the project has a `PUBLIC` grant and the request carries a `__Host-<cookie name>-project-state` cookie; otherwise, sets that cookie, expiring in 10 minutes, and returns 403 with `{location: <url>}`, the **Project code** URL whose `returnUrl` is the root of the project host, with `optional=1` if the project has a `PUBLIC` grant. Clients navigate to `location` to open a project session. Without a session elsewhere, returns 403.
+- **Update user**: `PUT /auth/user`: accepts `{settings: <object>|undefined, username: <string>|undefined}`, at least one of them. `settings` is an object with optional `pinned` (an array of strings, the ids of the projects pinned to the top of the projects view) and `vi` (a boolean), and replaces the settings object; omitting a key clears it (undefined), since JSON cannot represent an explicit `undefined`. `username` is lowercased and NFC-normalized, with a minimum length of 3 UTF-16 units. Allows Unicode letters, combining marks, numbers and single internal dashes; must start with a letter or number, cannot have a combining mark after a dash, and cannot be a UUID. Whitespace and mixing ASCII letters with non-ASCII characters are rejected; ASCII numbers and dashes can accompany non-ASCII names. Setting a new username releases the previous one. Returns `{settings, username}` with whichever was sent, using the normalized username. Rejects missing fields, unknown keys, invalid types and invalid usernames with 400, and a username owned by another user with 409; on any rejection nothing is changed. Available in local mode; cloud mode requires a valid session and CSRF token. This endpoint stores the settings only; it does not change editor bindings.
 - **Login**: `POST /auth/login`: expects `{email: <email>}`. Returns 403 if rate limited. Creates a user for that email if it doesn't exist yet, with a username generated from the email: the local part (`hello@example.com` → `hello`), then local part plus domain without its TLD (`hello-example`), then that with `-1`, `-2`… until one is free. Candidates are lowercased, characters other than ASCII letters and digits become single dashes, and leading/trailing dashes are removed. Empty candidates become `user`; short candidates are padded with trailing ones to 3 characters (`a` → `a11`, `ab` → `ab1`). UUID candidates get `-1` appended. Sends a login link by email. With `x-test: 1`, returns `{loginLink}`.
 - **Verify login link**: `GET /auth/verify/<loginLink>`: Returns 403 if link not found. Returns the same than what `GET /auth/user` does, and sets a session cookie.
 - **Get project code**: `GET /auth/project/<subdomain>?returnUrl=<url>&state=<state>[&optional=1]`: `<subdomain>` must be 1–63 lowercase letters, digits or dashes, and the origin of `returnUrl` must be its project host (`<subdomain>.<host>`). Returns 400 for an invalid subdomain or `returnUrl`, or a missing `state`. Without a session, redirects to `returnUrl` if `optional` is set, otherwise to `/#/login/<this path, URI-encoded>`. Otherwise, redirects to `returnUrl` with a single-use `sessionCode` that is bound to the host session, the subdomain and `state`, and expires in 60 seconds. It doesn't check access to the project: the project session only says who the user is, and the project routes decide what they can see.
@@ -263,11 +312,18 @@ Except for `GET /auth/user` and `PUT /auth/user`, all other auth routes will ret
 
 #### Project (host)
 
-- **Request creator access**: `POST /creator/request`: expects `{}`. Returns 409 if the user is already a creator. In local mode, this route returns a 404.
-- **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants, plus every project with a `PUBLIC` grant, most recently active (`last`) first. Projects listed only through `PUBLIC` have `public: true`. Projects have `read: true` when the caller is anonymous or has no write access, including prefix-scoped or `PUBLIC` grants. Each project appears once. `slot` is only returned for projects the caller owns. Each project includes its owner's username as `ownerUsername`. Projects whose `<ownerUsername>--<encoded name>` is a valid subdomain (lowercased, each dash as `--`, each space as `-`) include it as `subdomain`. Without a session, returns only the projects with a `PUBLIC` grant.
-- **Create project**: `POST /project`: expects `{name: <name>, slot: <1–5|undefined>}`. Names must contain 2–500 UTF-16 units, and must stay encodable in readable subdomains: a name can't be a UUID (in any case), contain `/` or `?`, have two spaces in a row, or have a space next to a dash; these return 400. Returns 403 if the user is not a creator, 409 if an owned or shared project already has that name, comparing lowercased names. Stored names retain their case. Assigning an occupied slot removes that slot only from a project owned by the caller. Returns `{id: <projectId>, subdomain: <subdomain>|undefined}`.
-- **Update project**: `PUT /project`: expects `{id: <id>, name: <name>, slot: <1–5|undefined>}`. Names follow the same rules as in **Create project**; breaking them returns 400. Existing projects keep a name that breaks these rules until renamed. Returns 404 if the project is missing or not owned by the caller, 409 if another owned or shared project has the new name, comparing lowercased names. Stored names retain their case; case-only renames are allowed. Assigning an occupied slot removes that slot only from another project owned by the caller.
+- **Request subscription**: `POST /subscription/request`: expects `{type: 'full'|'byoe'}` and emails the admin with the request. Returns 400 for any other body. In local mode, this route returns a 404.
+- **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants, plus every project with a `PUBLIC` grant, most recently active (`last`) first. Projects listed only through `PUBLIC` have `public: true`. Projects have `read: true` when the caller is anonymous or has no write access, including prefix-scoped or `PUBLIC` grants. Each project appears once. Each project includes its owner's username as `ownerUsername`. Projects whose `<ownerUsername>--<encoded name>` is a valid subdomain (lowercased, each dash as `--`, each space as `-`) include it as `subdomain`. Without a session, returns only the projects with a `PUBLIC` grant.
+- **Create project**: `POST /project`: expects `{name: <name>, engine: <engineId|undefined>}`. Names must contain 2–500 UTF-16 units, and must stay encodable in readable subdomains: a name can't be a UUID (in any case), contain `/` or `?`, have two spaces in a row, or have a space next to a dash; these return 400. In cloud mode, returns 403 if `engine` is absent and the user is not the admin: only the admin can create projects on the host. Test requests (`x-test: 1`) skip this check. Returns 404 if `engine` is not owned by the user, 409 if an owned or shared project already has that name, comparing lowercased names. Stored names retain their case. Returns `{id: <projectId>, subdomain: <subdomain>|undefined}`.
+- **Update project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Names follow the same rules as in **Create project**; breaking them returns 400. Existing projects keep a name that breaks these rules until renamed. Returns 404 if the project is missing or not owned by the caller, 409 if another owned or shared project has the new name, comparing lowercased names. Stored names retain their case; case-only renames are allowed.
 - **Delete project**: `DELETE /project/<projectId>`: requires ownership. Returns 404 if the project is missing or inaccessible, 403 if it is shared with the caller but not owned by them.
+
+#### Engine (host)
+
+- **Create engine**: `POST /engine`: expects `{ip: <IPv4|IPv6>, name: <name>}`. Names must contain 1–500 UTF-16 units. Returns 400 for an invalid body or IP. In cloud mode, returns 403 unless the user is the admin or has `creator` set. Generates an ed25519 key pair with `ssh-keygen` and stores both keys in the engine. Trusts the engine's host keys on first use: reads them with `ssh-keyscan` and stores them as `knownHost`, which every later ssh connection to the engine requires (`StrictHostKeyChecking=yes`). Returns 400 if the engine doesn't answer over ssh. Returns `{id: <engineId>, publicKey: <OpenSSH public key>}`; add the public key to the engine's `authorized_keys`.
+- **List engines**: `GET /engines`: returns the engines owned by the user, without `privateKey`.
+- **Update engine**: `PUT /engine`: expects `{id: <id>, name: <name>}`, with the same name rules as **Create engine**. Only the name can change. Returns 404 if the engine is missing or not owned by the caller.
+- **Delete engine**: `DELETE /engine/<engineId>`: returns 404 if the engine is missing or not owned by the caller, 409 if any of the caller's projects run on it.
 
 #### Project (subdomain)
 
@@ -296,7 +352,6 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 
 #### Admin
 
-- **Grant/revoke creator access**: `POST /creator/grant`: expects `{email: <email>, grant: <boolean>}`. Returns 404 if `grant` is `false` and user does not exist. If `grant` is `true` and user does not exist, the endpoint creates the user, with a username generated as in **Login**. In local mode, this route returns a 404.
 - **Run server tests**: `GET /test`. This is a `GET` so that it can be triggered from the browser. Returns the result of running the server test suite.
 - **Get client tests**: `GET /test.js`.
 - **Cleanup after tests**: `POST /test/cleanup`. Used to run after the client tests.
@@ -318,12 +373,11 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `keydown *`: tracks the Command key and handles the global test shortcut:
   - Command+Shift+L: calls `test all` if the logged in user is admin (matches Command plus uppercase `L`).
   - Meta: sets `key.command` to true, showing keyboard shortcut tooltips.
-  - Enter: in the new projects view, calls `create project` when `#create-project` is enabled.
   - Command+1–3: in the files view, opens the recent file in that position of `recent.files`.
   - Command+9: opens settings when logged in; in settings, Command+9 and Command+B call `go back`.
 - `keyup|blur *`: clears `key.command` when Meta is released or the window loses focus. On blur, if `file.full` is set and focus left the page (not just moved into an embedded frame), sets `file.full` to false, which also exits browser full screen.
 - `test *`: sets `test` to `{enabled: true}`. Loads the client side test suite (`test.js`) only if the logged in user is admin.
-- `navigate <targetPath>`: reads and optionally updates the hash. On a project host, `new_projects`, `projects` and `settings` open the main host. Code navigates to projects as `files/<projectId>[/<filename>]`. On the main host, this loads the project's subdomain (from the loaded `projects`, or the project id), at `#/f[/<filename>]`. On a project host, it is turned into `f[/<filename>]` (see `read hash`) before comparing. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
+- `navigate <targetPath>`: reads and optionally updates the hash. On a project host, `projects` and `settings` open the main host. Code navigates to projects as `files/<projectId>[/<filename>]`. On the main host, this loads the project's subdomain (from the loaded `projects`, or the project id), at `#/f[/<filename>]`. On a project host, it is turned into `f[/<filename>]` (see `read hash`) before comparing. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
 - `go back`: calls `history.back ()` if there is a referrer, otherwise navigates to projects.
 - `read hash`: handles `verify/<loginLink>` and checks that the requested view is reachable by the user. On a project host (when the page's host differs from its `base-host` meta tag), the only view is `files`, at `f/<filename>`, and other hashes navigate to `f`; on the main host, `f` hashes navigate to `projects`. `login/<path>`, with a path under `/auth/project/`, opens the path if logged in; otherwise stores it at `returnTo` and navigates to login. Anonymous users navigating to `settings` go to login. In the files view, sets `project.id` to the subdomain and `file.name` to the filename, and calls `read project` if `files` isn't loaded. Defaults to `main.md`, or the first available file; a filename that isn't in the loaded file list navigates to the default.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
@@ -333,7 +387,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 #### Auth
 
 - `report error <error>`: posts an error to the server via `POST /error`.
-- `read user`: if the hash contains a verification link, calls `read hash` directly. Otherwise, fetches user information from `GET /auth/user`. On success, sets `user` to the response body, calls `read projects` on the main host and calls `read hash`. On 403 with a `location`, navigates to it, keeping the hash, to open a project session. On other 403s, sets `user` to `{anonymous: true, mode: 'cloud'}` and calls `read projects`, which shows the projects with a `PUBLIC` grant; other errors show a snackbar.
+- `read user`: if the hash contains a verification link, calls `read hash` directly. Otherwise, fetches user information from `GET /auth/user`. On 403 with a `location`, navigates to it, keeping the hash, to open a project session; other non-403 errors show a snackbar. Otherwise, sets `user` to the response body, or to `{anonymous: true, mode: 'cloud'}` on 403, calls `read projects` on the main host and calls `read hash`.
 - `login <email>`: trims and lowercases the email, then sends a login link via `POST /auth/login`. On success, sets `user.loginLinkRequested` and, when `test` is truthy, stores the returned link at `test.loginLink`.
 - `keydown *`: in the login view, Enter calls `login` when the `#login` button is enabled.
 - `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, opens `returnTo` if set; otherwise stores the user info, loads projects, navigates to projects and shows a welcome snackbar. On error, shows a snackbar and navigates to login.
@@ -350,21 +404,21 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 
 #### Projects
 
-- `request creator`: requests creator access via `POST /creator/request` with an empty body (`{}`). Ignores requests outside cloud mode, from existing creators, or when `user.creatorRequest` is already set. Sets `user.creatorRequest` to `pending` while sending and `sent` on success, showing a snackbar confirming admin review. On error, clears the request state to allow retrying and shows an error snackbar.
+- `request subscription <full|byoe>`: requests a subscription via `POST /subscription/request` with `{type}`. Ignores requests outside cloud mode or when `user.subscriptionRequest` is already set. Sets `user.subscriptionRequest` to `pending` while sending and `sent` on success, showing a snackbar confirming admin review. On error, clears the request state to allow retrying and shows an error snackbar.
 - `keydown *`: handles shortcuts while in the projects view:
-  - Command+1–5: opens the project in that slot; in search mode, the nth matching project, skipping `public` ones.
-  - Command+B: in search mode, returns to the spiral.
+  - Command+1–5: opens the nth project shown (see `views.projectList`).
   - Command+D: in the creation modal, generates a random name.
-  - Command+E: in search mode, opens project creation; in the creation modal, creates the project when the button is enabled.
-  - Enter: creates the project when the creation button is enabled.
-  - Escape: closes the creation modal.
-  - Command+S: opens and focuses search.
-- `change projects`: rereads the hash to validate navigation against the refreshed project list.
+  - Command+E: when logged in, calls `start project`; in the creation modal, creates the project when the button is enabled.
+  - Enter: creates the project when the creation button is enabled, or renames it when `#rename-project` is enabled.
+  - Escape: closes the creation and subscription modals.
+  - Command+S: focuses search.
 - `read clientExtension`: runs only for projects the user owns, so shared and public projects' code never runs in another user's session. Otherwise checks the loaded file list for root-level `extend-client.js`. If present and the files view is still showing, sets `extendClient`, reads the script via `GET /f/extend-client.js`, and evaluates it in global scope with access to `B`, `views`, etc. Skips loading when `extendClient` is already set and ignores responses if the marker is cleared or the view has changed. Loading and evaluation errors show a snackbar. Only use trusted project code: extensions run with full app privileges. Refresh the page to activate extension changes. Logout clears the marker but does not undo already-running extension code.
-- `read projects`: gets all projects via `GET /projects`, sets them in `projects`.
-- `create project`: creates a new project using the trimmed name at `new.project.name` and optional `new.project.slot` via `POST /project`. Shows a snackbar while creating. On success, clears the creation modal and project search, and opens `#/f/main.md` on the project's subdomain.
+- `read projects`: gets all projects via `GET /projects`, sets them in `projects`. If `user.settings.pinned` has ids that are not in the list, removes them through `update user`.
+- `create project`: creates a new project using the trimmed name at `new.project.name` and the engine at `new.project.engine` via `POST /project`. Shows a snackbar while creating. On success, clears the creation modal and project search, and opens `#/f/main.md` on the project's subdomain.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
-- `edit project`: renames and/or changes the slot of a project using the values at `edit.project` via `PUT /project`. The slot selector's “None” option uses the string `null`, which is converted to `undefined` rather than parsed as a number. On success, reloads projects and shows a snackbar.
+- `start project`: opens the creation modal (sets `new.project` to `{engine: <first of user.engines>}`) when `user.engines` is non-empty: in local mode, for the admin and for users who own an engine. The modal shows an engine picker when there is more than one engine; otherwise sets `show.subscribe`, which opens the subscription modal.
+- `pin project <id>`: adds the id to `user.settings.pinned`, or removes it if present, through `update user`.
+- `edit project`: renames a project using the values at `edit.project` via `PUT /project`. On success, reloads projects and shows a snackbar.
 - `remove project <project>`: asks for confirmation, then deletes the project via `DELETE /project/<id>`. On success, reloads projects and shows a snackbar.
 - `download project <project>`: zips `/project` through `POST /project/run` with `read: true` and downloads it as `vibey-backup-<timestamp>-<name>.zip`. Shows a `yellow` snackbar while preparing.
 
@@ -375,8 +429,8 @@ File reads and message reads require read access to their path, which `PUBLIC` g
   - Command+D: when the chat recipient input is present, focuses it and selects its text.
   - In the chat recipient input: Escape blurs it, Enter picks the only or exactly matching option, and ArrowUp/ArrowDown move through the options.
   - Command+Enter: when the chat editor is present, calls `create message` with the current recipient, filename and draft body (the same action as Boom).
-  - Command+E: opens file creation; in the creation modal, creates when enabled. In rename, also attempts submission through `#rename-file`.
-  - Enter: creates a file when the creation button is enabled, saves the project edit when `#rename-file` is enabled, or renames the file when `#edit-file` is enabled.
+  - Command+E: opens file creation; in the creation modal, creates when enabled.
+  - Enter: creates a file when the creation button is enabled, or renames the file when `#edit-file` is enabled.
   - Escape: closes the creation or rename modal; exits full screen when the editor doesn't have focus.
   - Command+F: in creation, selects file type.
   - Command+I: outside creation, scrolls down by chat message when the chat is visible, otherwise toggles edit/view mode; in creation, selects chat type.
@@ -398,7 +452,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `change new.file`: focuses the new file name input when the creation modal opens. Runs at low priority.
 - `change edit.file`: focuses the rename input when the rename modal opens. Runs at low priority.
 - `change show.pane`: on mobile, after rendering, scrolls the window and the shown pane to the top.
-- `read project <noRead>`: sets `files` to `[]` if unset, to avoid concurrent calls. Lists readable project files through `GET /project`, excluding `.git`, and sets `files` with each file's name, size and modification time, plus `apps`, `project.name`, `project.ownerId` and `project.read` (set unless the caller owns the project or has a write grant). After a successful listing, also runs `du -sk /project` through `POST /project/run` with `read: true`, converting KiB to bytes in `project.size.bytes`. This measures disk usage including `.git`; `views.files` displays it as a `size: <size>` pill beside the project title, using the same `size()` formatter as file sizes. The same command then estimates what `clear history` would free: it commits the worktree into a temporary repository (via `GIT_DIR`/`GIT_WORK_TREE`, leaving `/project/.git` untouched), runs `git gc` on it, and prints the difference between both `.git` sizes in bytes, stored (floored at 0) in `project.size.history`. When nonzero, `views.files` shows a `clear history (<size>)` pill after the project size. Failed or denied size requests are silently ignored; command execution requires whole-project write access, and it is skipped when `project.read` is set. Then calls `read clientExtension` and, unless `noRead` is set, reads the selected file.
+- `read project <noRead>`: sets `files` to `[]` if unset, to avoid concurrent calls. Lists readable project files through `GET /project`, excluding `.git`, and sets `files` with each file's name, size and modification time, plus `apps`, `project.name`, `project.ownerId` and `project.read` (set unless the caller owns the project or has a write grant). After a successful listing, also runs `du -sk /project` through `POST /project/run` with `read: true`, converting KiB to bytes in `project.size.bytes`. This measures disk usage including `.git`; `views.inner` displays it as a `size: <size>` pill beside the project title, using the same `size()` formatter as file sizes. The same command then estimates what `clear history` would free: it commits the worktree into a temporary repository (via `GIT_DIR`/`GIT_WORK_TREE`, leaving `/project/.git` untouched), runs `git gc` on it, and prints the difference between both `.git` sizes in bytes, stored (floored at 0) in `project.size.history`. When nonzero, `views.inner` shows a `clear history (<size>)` pill after the project size. Failed or denied size requests are silently ignored; command execution requires whole-project write access, and it is skipped when `project.read` is set. Then calls `read clientExtension` and, unless `noRead` is set, reads the selected file.
 - `read file`: unless the file is an app, stores it in `recent.files` with the current time, keeping at most three files and replacing the one opened longest ago. The three appear as buttons above the file list. Then clears the global `content` and emits `change file`. If `fileEdits` contains pending edits for this file, returns without fetching potentially stale server content; the edit queue resumes the read when that file's edits finish, provided it is still selected and `content` is undefined. For apps, images (`avif`, `bmp`, `gif`, `jpg`, `jpeg`, `png`, `webp`), PDFs and `mp4` videos (case-insensitive), returns without fetching content; the view loads them directly through `GET /f/<path>`. Images show a snackbar on load failure; PDFs provide a download fallback. For other files, fetches through the same GET endpoint with `?raw=1` as bytes, decodes them as text only if they contain no null bytes and are valid UTF-8, otherwise retains a `Uint8Array`, and emits `change file`. For text chats, if the recipient is blank, restores the latest human message's recipient when it is `shell` or an `ai-<model>` the user has credentials for, otherwise uses `all`, and scrolls to the bottom. Ignores responses if the selected filename has changed.
 - `edit file <name> <newContent>`: compares global `content` with the full editor text using an internal chunking function. Splits into lines while preserving line endings, uses `B.diff` to group contiguous additions/deletions, and expands each chunk with unchanged lines above/below until its `oldText` is unique. Each chunk's context accounts for preceding chunks. A shared sentinel works around gotoB dropping leading additions during backtracking; remove it once gotoB uses `x > 0 || D > 0` instead of `x > 0`. A diff timeout shows a snackbar without enqueueing edits. Appends chunks with the captured filename to `fileEdits` and immediately advances `content` to the editor text. An initially empty queue starts a recursive, callback-driven drain, keeping the in-flight entry at the head and sending one request at a time through `POST /project/edit`; no timers or separate saving flag. Empty originals and originals exactly `[EOF]` use unconditional `POST /project/write` entries instead. The queue survives file navigation. On failure, logs the error and removes all queued edits for the failed file, retaining other files' edits. If that document is still selected and loaded in the file editor, a native confirmation offers overwriting with its current editor text or discarding edits and loading the server version. Otherwise, shows an error snackbar and rereads the failed file only if it is still selected. Successful requests remove the head and continue draining; deferred reads resume when their file has no remaining edits.
 - `write file <name> <content> [new]`: saves through `POST /project/write`. On success, updates the file's size and modification time in the list. For a new file, navigates to it and refreshes the list after the write succeeds; otherwise, updates the global `content` if the file is still selected.
@@ -408,7 +462,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `rename file <oldName> <newName>`: validates the new relative path, creates destination folders and moves the file without overwriting an existing destination through `POST /project/run`. Removes the old folder if left empty. On success, closes the rename modal, temporarily adds the new name to `files`, refreshes the list and updates navigation if the renamed file was selected.
 - `download file`: downloads the selected file's server copy through `GET /f/<path>`, with the path URI-encoded. Uses a temporary anchor with the file's basename as its download name; does not require loaded content.
 - `upload file|folder <files> [options]`: uploads a file or folder's files through `POST /project/write`, preserving relative paths and sending file content as multipart without base64 encoding. `options.prefix` writes each file as prefix + file name instead; `options.cb` is called with the written names by index (undefined for failures) instead of refreshing the list and navigating. Tracks successful uploads in `upload.done` out of `upload.total`. When all uploads finish, clears progress and refreshes the list. On full success, closes the creation modal and navigates to the file for a single-file upload; otherwise, shows a failure summary and leaves the modal open.
-- `change projects|project|file|show`: recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view; ignores `project.size` and `show` paths other than `show.settings`. Enables Vim bindings when `user.settings.vi` is true and not on mobile, line wrapping and JavaScript/Python/Markdown modes; file editors show line numbers, restore the cursor and scroll position stored at `editor.position.<project>.<file>` (opening at the top when there is none) and store them silently on every cursor move and scroll; the chat editor places the cursor at the end of the draft. File editors are read-only while `content` is undefined or `project.read` is set, the chat editor disables `Cmd-D`, and loaded file editor changes call `edit file` with the filename and full editor text, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
+- `change project|file`: recreates CodeMirror when an editor container is present. Runs at low priority, only in the files view; ignores `project.size`. Enables Vim bindings when `user.settings.vi` is true and not on mobile, line wrapping and JavaScript/Python/Markdown modes; file editors show line numbers, restore the cursor and scroll position stored at `editor.position.<project>.<file>` (opening at the top when there is none) and store them silently on every cursor move and scroll; the chat editor places the cursor at the end of the draft. File editors are read-only while `content` is undefined or `project.read` is set, the chat editor disables `Cmd-D`, and loaded file editor changes call `edit file` with the filename and full editor text, while chat editor changes update `message.body`. Calls `highlight content` after editor setup and file edits.
 - `change search.content.query`: calls `highlight content`; when search opens in the files view, focuses and selects the input after rendering.
 - `change view`: calls `highlight content` at low priority, after rendering.
 - `change file.full`: enters browser full screen on `document.documentElement` when `file.full` is set, and exits it when unset. Also matches changes to `file` as a whole, so leaving the files view exits full screen. Does nothing if the browser is already in the matching state. Browsers only allow entering full screen from a click or key press; B.call runs synchronously inside those handlers, so the icon and Command+\ qualify. A refused request is ignored and only the in-page layout changes. With `user.settings.vi`, locks Escape through `navigator.keyboard.lock` while in full screen.
@@ -446,7 +500,6 @@ edit file newName "<new name>"
           oldName "<original name>"
      project id <id>
              name "<project name>"
-             slot <integer|numeric string|"null"|undefined> // "null" is the edit selector's None option
 editor position <project name> <filename> ch <integer>
                                           left <integer> // Horizontal scroll in pixels
                                           line <integer>
@@ -465,7 +518,6 @@ files 1 mtime <integer> // Modification time in milliseconds since Unix epoch
         name "<filename>"
         size <integer> // File size in bytes
       ...
-hover project <project>
 key command <true|undefined>
 message atBottom <false|true>
         body <text|undefined>
@@ -473,8 +525,8 @@ message atBottom <false|true>
         to <all|shell|ai|ai-<model>|messageUUID>
 mobile <true|undefined>
 new file "<file name>"
-    project name "<project name>"
-            slot <integer|undefined>
+    project engine "<engineId>" // Defaults to the first of `user.engines`
+            name "<project name>"
     type "chat|file"
 pkce account confirm <provider|undefined>
              loading <provider|undefined>
@@ -496,8 +548,7 @@ projects 1 created <date>
            name "..."
            owner <userId>
            ownerUsername <username|undefined>
-           public <true|undefined> // Listed only because it has a PUBLIC grant; hidden from logged-in users' projects view and slot shortcuts, and never runs its client extension
-           slot <integer|undefined>
+           public <true|undefined> // Listed only because it has a PUBLIC grant; hidden from logged-in users' projects view unless `show.public` is set, and never runs its client extension
            subdomain <subdomain|undefined>
          ...
 recent files <filename> <ISO date> // Up to three recently opened files, excluding apps
@@ -507,12 +558,12 @@ search content count <integer>
                query <text|undefined>
        file <text|undefined>
        project <text|undefined>
-show account <true|undefined>
+show public <true|undefined> // Shows public projects to logged-in users in the projects view; set by the Show public switch, which logged-out users see on and can't change
      files <prefix> <true|false|undefined> // Folder prefix ending in `/`, such as `a/b/`; undefined means expanded only if it contains the current file
      message <filename> <messageId> <true|undefined>
      pane <left|right|undefined>
      projectDetails <true|undefined>
-selected project <projectId> // Highlighted project in the new projects view
+     subscribe <true|undefined> // Subscription modal, opened by `start project` for users who can't create projects
 snackbar message <message>
          timeout "<JS timeout to clear the snackbar>"
          type "<ok|warning|error>"
@@ -524,18 +575,23 @@ upload done <integer>
        total <integer>
 user admin <true|undefined>
      anonymous <true|undefined>
-     creator <false|true>
-     creatorRequest <pending|sent|undefined>
+     subscriptionRequest <pending|sent|undefined>
      credentials anthropic account <true|undefined>
                            apiKey <true|undefined>
                  openai account <true|undefined>
                         apiKey <true|undefined>
      csrf "<CSRF token>"
      email "<email>" // Entered in the login form; set from the server once logged in
+     engines <array of engineIds> // `host` first for the admin and in local mode
      id <userId>
      loginLinkRequested <true|undefined>
      mode <local|cloud>
-     settings vi <boolean|undefined>
+     settings pinned <array of projectIds|undefined>
+              vi <boolean|undefined>
      username "<username>"
-view <login|verify|new_projects|projects|files|settings>
+view <login|verify|projects|files|settings> // `projects` renders `views.outer`, `files` renders `views.inner`
 ```
+
+## License
+
+Vibey is written by [Altocode](https://altocode.nl) and released into the public domain.

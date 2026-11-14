@@ -636,7 +636,7 @@ Path.quote = function (path) {
 }
 
 project.remote = async function (proj) {
-   if (! proj.engine) return {command: ['docker'], cleanup: function () {}};
+   if (! proj.engine || proj.engine === 'host') return {command: ['docker'], cleanup: function () {}};
    var engine = await redis ('hgetall', 'engine:' + proj.engine);
    var keyFile = '/tmp/vibey-engine-' + proj.engine + '-' + process.pid + '-' + Math.random ().toString (36).slice (2);
    await dale.async ({[keyFile]: engine.privateKey, [keyFile + '.known']: engine.knownHost}, function (content, path) {
@@ -684,9 +684,9 @@ project.run = async function (proj, command, options) {
    try {
       var result = await project.agentRun (id, ['sh', '-c', command], {... options, 'catch': true}, docker);
       if (result.error && result.error.error === 'AgentExited' && result.error.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
-         if (proj.engine) await run (... docker, 'network', 'create', '-o', 'com.docker.network.bridge.enable_icc=false', 'vibey-projects', {catch: true});
+         if (proj.engine && proj.engine !== 'host') await run (... docker, 'network', 'create', '-o', 'com.docker.network.bridge.enable_icc=false', 'vibey-projects', {catch: true});
          var recreate = await run (... docker, 'run', '--init', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
-         if (proj.engine && recreate.code && /Unable to find image 'vibey-project:/.test (recreate.stderr)) {
+         if (proj.engine && proj.engine !== 'host' && recreate.code && /Unable to find image 'vibey-project:/.test (recreate.stderr)) {
             var build = await run (... docker, 'build', '-t', 'vibey-project', '-', {input: projectDockerfile, catch: true});
             return build.code ? result : project.run (proj, command, options);
          }
@@ -1123,7 +1123,7 @@ var routes = [
 
       if (! CONFIG.cloud) {
          clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, subdomain: rq.subdomain, projectId: rq.projectId, ip: rs.log.origin});
-         rq.user = {id: 'local', creator: true};
+         rq.user = {id: 'local'};
          return rs.next ();
       }
 
@@ -1452,9 +1452,10 @@ var routes = [
          });
       }
 
-      var [user, credentials] = await redis ([
+      var [user, credentials, owned] = await redis ([
          ['hmget', 'user:' + rq.user.id, 'settings', 'username'],
          ['hget', 'credentials:' + rq.user.id, 'data'],
+         ['smembers', 'owner:' + rq.user.id],
       ]);
       var settings = JSON.parse (user [0] || '{}');
       var username = user [1] || undefined;
@@ -1465,15 +1466,18 @@ var routes = [
          })];
       });
 
-      if (! CONFIG.cloud) return reply (rs, 200, {creator: true, credentials, mode: 'local', settings, username});
+      var engines = dale.fil (owned, undefined, key => /^engine:/.test (key) ? key.replace (/^engine:/, '') : undefined).sort ();
+
+      if (! CONFIG.cloud) return reply (rs, 200, {credentials, engines: ['host'].concat (engines), mode: 'local', settings, username});
 
       reply (rs, 200, {
          admin: rq.user.email === CONFIG.admin ? true : undefined,
          count: parseInt (rq.user.count),
-         creator: rq.user.email === CONFIG.admin || !! rq.user.creator,
+         creator: rq.user.creator ? true : undefined,
          credentials,
          csrf: rq.user.csrf,
          email: rq.subdomain ? undefined : rq.user.email,
+         engines: (rq.user.email === CONFIG.admin ? ['host'] : []).concat (engines),
          id: rq.user.id,
          mode: 'cloud',
          settings,
@@ -1489,8 +1493,13 @@ var routes = [
             ['settings', rq.body.settings, ['object', 'undefined'], 'oneOf'],
             ['username', rq.body.username, ['string', 'undefined'], 'oneOf'],
             function () {return rq.body.settings === undefined ? [] : [
-               ['keys of settings', dale.keys (rq.body.settings), 'vi', 'eachOf', teishi.test.equal],
+               ['keys of settings', dale.keys (rq.body.settings), ['pinned', 'vi'], 'eachOf', teishi.test.equal],
+               ['settings.pinned', rq.body.settings.pinned, ['array', 'undefined'], 'oneOf'],
                ['settings.vi', rq.body.settings.vi, ['boolean', 'undefined'], 'oneOf'],
+               function () {return rq.body.settings.pinned === undefined ? [] : [
+                  ['settings.pinned', rq.body.settings.pinned, 'string', 'each'],
+                  ['length of stringified settings.pinned', JSON.stringify (rq.body.settings.pinned).length, {max: 10000}, teishi.test.range],
+               ]},
             ]}
          ]}
       ])) return;
@@ -1670,7 +1679,6 @@ var routes = [
       reply (rs, 200, {
          admin: user.email === CONFIG.admin ? true : undefined,
          count: parseInt (user.count),
-         creator: user.email === CONFIG.admin || !! user.creator,
          credentials,
          csrf,
          email: user.email,
@@ -1776,18 +1784,19 @@ var routes = [
 
    // *** PROJECT ***
 
-   ['post', '/creator/request', async function (rq, rs) {
+   ['post', '/subscription/request', async function (rq, rs) {
       if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
 
-      if (stop (rs, ['body', rq.body, {}, teishi.test.equal])) return;
-
-      if (rq.user.creator) return reply (rs, 409, {error: 'Already a creator'});
+      if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['type'], 'eachOf', teishi.test.equal],
+         ['type', rq.body.type, ['full', 'byoe'], 'oneOf', teishi.test.equal],
+      ])) return;
 
       await sendmail ({
          to: CONFIG.admin,
-         subject: 'Vibey creator request',
+         subject: 'Vibey subscription request (' + rq.body.type + ')',
          message: ['p', [
-            'New creator request from: ' + rq.user.email,
+            'New ' + rq.body.type + ' subscription request from: ' + rq.user.email,
             ['br'],
             now ()
          ]]
@@ -1796,44 +1805,92 @@ var routes = [
       reply (rs, 200);
    }],
 
-   ['post', '/creator/grant', async function (rq, rs) {
-      if (! CONFIG.cloud) return reply (rs, 404, {error: 'Not in cloud mode'});
+   // *** ENGINES ***
+
+   ['post', '/engine', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['email', 'grant'], 'eachOf', teishi.test.equal],
-         ['email', rq.body.email, 'string'],
+         ['keys of body', dale.keys (rq.body), ['ip', 'name'], 'eachOf', teishi.test.equal],
+         ['ip', rq.body.ip, 'string'],
+         ['name', rq.body.name, 'string'],
          function () {
-            return ['email', rq.body.email, validEmail, teishi.test.match];
+            return ['length of name', rq.body.name.length, {max: 500, min: 1}, teishi.test.range];
          },
-         ['grant', rq.body.grant, 'boolean'],
       ])) return;
 
-      rq.body.email = rq.body.email.toLowerCase ();
+      if (! require ('net').isIP (rq.body.ip)) return reply (rs, 400, {error: 'Invalid IP'});
 
-      if (rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Not admin'});
+      if (CONFIG.cloud && rq.user.email !== CONFIG.admin && ! rq.user.creator) return reply (rs, 403, {error: 'Only the admin or a creator can create engines'});
 
-      var userId = await redis ('get', 'email:' + rq.body.email);
+      var id = crypto.randomUUID ();
+      var keyFile = '/tmp/vibey-engine-key-' + id;
+      var keygen = await run ('ssh-keygen', '-t', 'ed25519', '-N', '', '-C', 'vibey-engine-' + id, '-q', '-f', keyFile, {catch: true});
+      var [privateKey, publicKey] = keygen.code ? [] : await dale.async ([keyFile, keyFile + '.pub'], function (path) {
+         return fs.promises.readFile (path, 'utf8');
+      }, {concurrent: 2});
+      await dale.async ([keyFile, keyFile + '.pub'], function (path) {
+         return fs.promises.rm (path, {force: true});
+      }, {concurrent: 2});
+      if (! privateKey) return reply (rs, 500, {error: 'Failed to generate keys'});
 
-      if (userId) await redis ([rq.body.grant ? ['hset', 'user:' + userId, 'creator', 1] : ['hdel', 'user:' + userId, 'creator']]);
+      var keyscan = await run ('ssh-keyscan', '-T', '10', rq.body.ip, {catch: true});
+      if (keyscan.code || ! (keyscan.stdout || '').trim ()) return reply (rs, 400, {error: 'Could not reach the engine over ssh'});
 
-      else {
-         if (rq.body.grant === false) return reply (rs, 404);
+      await redis ([
+         ['hmset', 'engine:' + id, {
+            created:    now (),
+            id:         id,
+            ip:         rq.body.ip,
+            knownHost:  keyscan.stdout.trim (),
+            name:       rq.body.name,
+            owner:      rq.user.id,
+            privateKey: privateKey,
+            publicKey:  publicKey.trim (),
+         }],
+         ['sadd', 'owner:' + rq.user.id, 'engine:' + id],
+      ]);
 
-         var userId    = crypto.randomUUID ();
-         var userCount = await redis ('incr', 'userCount');
+      reply (rs, 200, {id: id, publicKey: publicKey.trim ()});
+   }],
 
-         await redis ([
-            ['set', 'email:' + rq.body.email, userId],
-            ['hmset', 'user:' + userId, {
-               count: userCount,
-               created: now (),
-               creator: 1,
-               email: rq.body.email,
-               id: userId,
-            }],
-         ]);
-         await setUsername (userId, rq.body.email, true);
-      }
+   ['get', '/engines', async function (rq, rs) {
+      var engines = await getForUser (rq.user.id, 'engine');
+      reply (rs, 200, dale.go (engines, function (engine) {
+         return {... engine, privateKey: undefined};
+      }));
+   }],
+
+   ['put', '/engine', async function (rq, rs) {
+
+      if (stop (rs, [
+         ['keys of body', dale.keys (rq.body), ['id', 'name'], 'eachOf', teishi.test.equal],
+         ['id', rq.body.id, 'string'],
+         ['name', rq.body.name, 'string'],
+         function () {
+            return ['length of name', rq.body.name.length, {max: 500, min: 1}, teishi.test.range];
+         },
+      ])) return;
+
+      if (await redis ('hget', 'engine:' + rq.body.id, 'owner') !== rq.user.id) return reply (rs, 404, {error: 'Engine not found'});
+
+      await redis ('hset', 'engine:' + rq.body.id, 'name', rq.body.name);
+
+      reply (rs, 200);
+   }],
+
+   ['delete', '/engine/:id', async function (rq, rs) {
+
+      if (await redis ('hget', 'engine:' + rq.data.params.id, 'owner') !== rq.user.id) return reply (rs, 404, {error: 'Engine not found'});
+
+      var projects = await getForUser (rq.user.id, 'project');
+      if (dale.stop (projects, true, function (project) {
+         return project.owner === rq.user.id && project.engine === rq.data.params.id;
+      })) return reply (rs, 409, {error: 'Delete the projects on this engine first'});
+
+      await redis ([
+         ['del',  'engine:' + rq.data.params.id],
+         ['srem', 'owner:' + rq.user.id, 'engine:' + rq.data.params.id],
+      ]);
 
       reply (rs, 200);
    }],
@@ -1866,8 +1923,6 @@ var routes = [
          return {
             ...project,
             read: ! rq.user || project.read ? true : undefined,
-            // Slots belong to the owner's wheel.
-            slot: project.slot && project.owner === userId ? parseInt (project.slot) : undefined
          }
       }));
    }],
@@ -1875,10 +1930,9 @@ var routes = [
    ['post', '/project', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['engine', 'name', 'slot'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['engine', 'name'], 'eachOf', teishi.test.equal],
          ['engine', rq.body.engine, ['string', 'undefined'], 'oneOf'],
          ['name', rq.body.name, 'string'],
-         ['slot', rq.body.slot, [1, 2, 3, 4, 5, undefined], 'oneOf', teishi.test.equal],
          function () {
             return ['length of name', rq.body.name.length, {
                max: 500,
@@ -1889,9 +1943,9 @@ var routes = [
 
       if (! validProjectName (rq.body.name)) return reply (rs, 400, {error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'});
 
-      if (! rq.user.creator && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Please request creator access'});
+      if (CONFIG.cloud && (! rq.body.engine || rq.body.engine === 'host') && ! rq.test && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Only the admin can create projects on the host'});
 
-      if (rq.body.engine && await redis ('hget', 'engine:' + rq.body.engine, 'owner') !== rq.user.id) return reply (rs, 404, {error: 'Engine not found'});
+      if (rq.body.engine && rq.body.engine !== 'host' && await redis ('hget', 'engine:' + rq.body.engine, 'owner') !== rq.user.id) return reply (rs, 404, {error: 'Engine not found'});
 
       var projects = await getForUser (rq.user.id, 'project');
       var conflict = dale.stopNot (projects, undefined, function (project) {
@@ -1906,21 +1960,12 @@ var routes = [
          name:    rq.body.name,
          owner:   rq.user.id,
       }
-      if (rq.body.slot) newProject.slot = rq.body.slot;
       if (rq.body.engine) newProject.engine = rq.body.engine;
 
-      var slotConflict = ! rq.body.slot ? undefined : dale.stopNot (projects, undefined, function (project) {
-         if (project.owner !== rq.user.id) return;
-         if (parseInt (project.slot) === rq.body.slot) return project;
-      });
-
-      var ops = [
+      await redis ([
          ['hmset', 'project:' + newProject.id, newProject],
          ['sadd',  'owner:' + rq.user.id, 'project:' + newProject.id]
-      ];
-      if (slotConflict) ops.push (['hdel', 'project:' + slotConflict.id, 'slot']);
-
-      await redis (ops);
+      ]);
 
       await project.run (newProject, 'git config --global init.defaultBranch main && git -C /project init && git -C /project config user.name vibey && git -C /project config user.email vibey@local', {catch: true});
 
@@ -1933,10 +1978,9 @@ var routes = [
    ['put', '/project', async function (rq, rs) {
 
       if (stop (rs, [
-         ['keys of body', dale.keys (rq.body), ['id', 'name', 'slot'], 'eachOf', teishi.test.equal],
+         ['keys of body', dale.keys (rq.body), ['id', 'name'], 'eachOf', teishi.test.equal],
          ['id', rq.body.id, 'string'],
          ['name', rq.body.name, 'string'],
-         ['slot', rq.body.slot, [1, 2, 3, 4, 5, undefined], 'oneOf', teishi.test.equal],
          function () {
             return ['length of name', rq.body.name.length, {
                max: 500,
@@ -1958,22 +2002,10 @@ var routes = [
       });
       if (conflict) return reply (rs, 409, {error: 'There is already a project with that name'});
 
-      var slotConflict = dale.stopNot (projects, undefined, function (project) {
-         if (project.owner !== rq.user.id) return;
-         if (project.id === rq.body.id) return;
-         if (parseInt (project.slot) === rq.body.slot) return project;
-      });
-
-      var ops = [['hmset', 'project:' + match.id, {
+      await redis ('hmset', 'project:' + match.id, {
          last: now (),
          name: rq.body.name
-      }]];
-
-      if (rq.body.slot !== undefined || match.slot !== undefined) ops.push (rq.body.slot === undefined ? ['hdel', 'project:' + match.id, 'slot'] : ['hset', 'project:' + match.id, 'slot', rq.body.slot]);
-
-      if (slotConflict) ops.push (['hdel', 'project:' + slotConflict.id, 'slot']);
-
-      await redis (ops);
+      });
 
       reply (rs, 200);
    }],

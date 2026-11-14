@@ -79,6 +79,14 @@ var filePath = function (name) {
    return name.split ('/').map (encodeURIComponent).join ('/');
 }
 
+var modelCredential = function (model, credentials) {
+   if (! model) return;
+   var creds = (credentials || {}) [model.provider] || {};
+   return model.requireAPIKey
+      ? (creds.apiKey ? 'apiKey' : undefined)
+      : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined;
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -165,7 +173,7 @@ B.mrespond ([
    // *** NAVIGATION ***
 
    ['navigate', '*', function (x) {
-      if (inc (['new_projects', 'projects', 'settings'], x.path [0]) && window.location.host !== baseHost) return window.location.href = window.location.protocol + '//' + baseHost + '/#/' + x.path [0];
+      if (inc (['projects', 'settings'], x.path [0]) && window.location.host !== baseHost) return window.location.href = window.location.protocol + '//' + baseHost + '/#/' + x.path [0];
       var match = x.path [0].match (/^files\/([^/]+)(?:\/(.*))?$/);
       if (match) {
          var path = match [2] ? 'f/' + filePath (decodeURIComponent (match [2])) : 'f';
@@ -191,13 +199,12 @@ B.mrespond ([
       var hash = window.location.hash.slice (2).split ('/');
       var subdomain = window.location.host !== baseHost ? window.location.hostname.split ('.') [0] : undefined;
 
-      var authViews   = ['login', 'verify'];
-      var loggedViews = ['new_projects', 'projects', 'f', 'settings'];
+      var authViews = ['login', 'verify'];
 
       if (subdomain && hash [0] !== 'f') return B.call (x, 'navigate', 'f');
       if (! subdomain && hash [0] === 'f') return B.call (x, 'navigate', 'projects');
 
-      if (! inc (authViews.concat (loggedViews), hash [0])) return B.call (x, 'navigate', 'projects');
+      if (! inc (['f', 'login', 'projects', 'settings', 'verify'], hash [0])) return B.call (x, 'navigate', 'projects');
 
       if (hash [0] === 'verify' && hash [1]) return B.call (x, 'verify', hash [1]);
 
@@ -314,8 +321,6 @@ B.mrespond ([
    ['keydown', '*', function (x, ev) {
       if (ev.key === 'Meta') return B.call ('set', ['key', 'command'], true);
 
-      if (B.get ('view') === 'new_projects' && ev.key === 'Enter' && c ('#create-project') && ! c ('#create-project').disabled) return B.call (x, 'create', 'project');
-
       if (B.get ('view') === 'files') dale.keys (B.get ('recent', 'files') || {}).forEach (function (name, i) {
          shortcut (String (i + 1), ev, x, 'navigate', 'f/' + filePath (name));
       });
@@ -350,13 +355,7 @@ B.mrespond ([
 
          if (error && error.body.location) return window.location.href = error.body.location + window.location.hash;
 
-         if (error && error.status === 403) {
-            B.call (x, 'set', 'user', {anonymous: true, mode: 'cloud'});
-            // Without a session, the projects shared with PUBLIC are shown; loading them reads the hash.
-            return B.call (x, 'read', 'projects');
-         }
-
-         B.call (x, 'set', 'user', rs.body);
+         B.call (x, 'set', 'user', error ? {anonymous: true, mode: 'cloud'} : rs.body);
          if (window.location.host === baseHost) B.call (x, 'read', 'projects');
          B.call (x, 'read', 'hash');
       });
@@ -380,6 +379,7 @@ B.mrespond ([
    ['keydown', '*', function (x, ev) {
       if (B.get ('view') !== 'login') return;
 
+      if (ev.key === 'Escape') return B.call (x, 'navigate', 'projects');
       if (ev.key === 'Enter' && c ('#login') && ! c ('#login').disabled) return B.call (x, 'login', B.get ('user', 'email'));
    }],
 
@@ -406,22 +406,18 @@ B.mrespond ([
 
    // *** PROJECTS ***
 
-   ['request', 'creator', function (x) {
-      if (B.get ('user', 'creator') || B.get ('user', 'creatorRequest') || B.get ('user', 'mode') !== 'cloud') return;
+   ['request', 'subscription', function (x, type) {
+      if (B.get ('user', 'subscriptionRequest') || B.get ('user', 'mode') !== 'cloud') return;
 
-      B.call (x, 'set', ['user', 'creatorRequest'], 'pending');
-      B.call (x, 'post', '/creator/request', {}, function (x, error) {
+      B.call (x, 'set', ['user', 'subscriptionRequest'], 'pending');
+      B.call (x, 'post', '/subscription/request', {type: type}, function (x, error) {
          if (error) {
-            B.call (x, 'rem', 'user', 'creatorRequest');
-            return B.call (x, 'snackbar', 'error', (error.body || {}).error || 'Failed to request creator access');
+            B.call (x, 'rem', 'user', 'subscriptionRequest');
+            return B.call (x, 'snackbar', 'error', (error.body || {}).error || 'Failed to request a subscription');
          }
-         B.call (x, 'set', ['user', 'creatorRequest'], 'sent');
-         B.call (x, 'snackbar', 'ok', 'Creator access requested. An admin will review your request.');
+         B.call (x, 'set', ['user', 'subscriptionRequest'], 'sent');
+         B.call (x, 'snackbar', 'ok', 'YES! Subscription requested. We\'ll get back to you ASAP.');
       });
-   }],
-
-   ['change', 'projects', function (x) {
-      B.call (x, 'read', 'hash');
    }],
 
    ['read', 'clientExtension', function (x) {
@@ -452,6 +448,11 @@ B.mrespond ([
       B.call (x, 'get', '/projects', function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading projects');
          B.call (x, 'set', 'projects', rs.body);
+         var settings = B.get ('user', 'settings') || {};
+         var pinned = dale.fil (settings.pinned, undefined, function (pin) {
+            if (dale.stop (rs.body, true, function (project) {return project.id === pin})) return pin;
+         });
+         if (pinned.length < (settings.pinned || []).length) B.call (x, 'update', 'user', {settings: {... settings, pinned: pinned}});
       });
    }],
 
@@ -461,7 +462,7 @@ B.mrespond ([
 
       B.call (x, 'snackbar', 'ok', 'Creating new project...');
 
-      B.call (x, 'post', '/project', {name: name, slot: B.get ('new', 'project', 'slot')}, function (x, error, rs) {
+      B.call (x, 'post', '/project', {engine: B.get ('new', 'project', 'engine'), name: name}, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to create project');
 
          B.call (x, 'snackbar', 'clear');
@@ -477,12 +478,23 @@ B.mrespond ([
       if (B.get ('new', 'project') !== undefined) c ('#new-project-input').focus ();
    }],
 
+   ['start', 'project', function (x) {
+      if ((B.get ('user', 'engines') || []).length) return B.call (x, 'set', ['new', 'project'], {engine: B.get ('user', 'engines') [0]});
+      B.call (x, 'set', ['show', 'subscribe'], true);
+   }],
+
+   ['pin', 'project', function (x, id) {
+      var settings = B.get ('user', 'settings') || {};
+      var pinned = settings.pinned || [];
+      B.call (x, 'update', 'user', {settings: {... settings, pinned: inc (pinned, id) ? dale.fil (pinned, id, function (v) {return v}) : pinned.concat (id)}});
+   }],
+
    ['edit', 'project', function (x) {
       var edit = B.get ('edit', 'project');
       var name = edit.name.trim ();
       if (! name) return;
 
-      B.call (x, 'put', '/project', {id: edit.id, name: name, slot: (edit.slot && edit.slot !== 'null') ? parseInt (edit.slot) : undefined}, function (x, error) {
+      B.call (x, 'put', '/project', {id: edit.id, name: name}, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'Failed to rename project');
          B.call (x, 'rem', 'edit', 'project');
          B.call (x, 'read', 'projects');
@@ -521,48 +533,34 @@ B.mrespond ([
 
       if (B.get ('view') !== 'projects') return;
 
-      if (inc (['1', '2', '3', '4', '5'], ev.key)) {
-         var projects = B.get ('projects');
-         var project;
-         if (B.get ('search', 'project') === undefined) {
-            project = dale.stopNot (projects, undefined, function (project) {
-               if (project.slot === parseInt (ev.key)) return project;
-            });
-         }
-         if (B.get ('search', 'project') !== undefined && projects) {
-            var filteredProjects = dale.fil (projects, undefined, function (project) {
-               if (! project.public && project.name.match (B.get ('search', 'project'))) return project;
-            });
-            project = filteredProjects [parseInt (ev.key) - 1];
-         }
-         if (project && ev.metaKey) {
+      if (ev.metaKey && inc (['1', '2', '3', '4', '5'], ev.key) && B.get ('projects')) {
+         var project = views.projectList () [parseInt (ev.key) - 1];
+         if (project) {
             ev.preventDefault ();
             B.call (x, 'navigate', 'files/' + project.id);
          }
       }
 
       if (ev.metaKey && ev.key === 's') {
-         shortcut ('s', ev, x, 'set', ['search', 'project'], '');
+         ev.preventDefault ();
          c ('#search-project').focus ();
       }
 
       if (ev.key === 'Enter' && c ('#create-project') && ! c ('#create-project').disabled) return B.call (x, 'create', 'project');
+      if (ev.key === 'Enter' && c ('#rename-project') && ! c ('#rename-project').disabled) return B.call (x, 'edit', 'project');
 
-      if (B.get ('search', 'project') !== undefined && B.get ('new', 'project') === undefined) {
-         if (ev.metaKey && ev.key === 'b') {
-            c ('#search-project').blur ();
-            shortcut ('b', ev, x, 'rem', 'search', 'project');
-         }
-         shortcut ('e', ev, x, 'set', ['new', 'project'], {slot: undefined});
+      if (ev.key === 'Escape') B.call (x, 'rem', 'show', 'subscribe');
+
+      if (B.get ('new', 'project') === undefined) {
+         if (! B.get ('user', 'anonymous')) shortcut ('e', ev, x, 'start', 'project');
+         return;
       }
 
-      if (B.get ('new', 'project') !== undefined) {
-         if (ev.key === 'Escape') return B.call (x, 'rem', 'new', 'project');
-         if (! c ('#create-project').disabled) shortcut ('e', ev, x, 'create', 'project');
-         if (ev.metaKey && ev.key === 'd') {
-            ev.preventDefault ();
-            c ('#dice-project').click ();
-         }
+      if (ev.key === 'Escape') return B.call (x, 'rem', 'new', 'project');
+      if (! c ('#create-project').disabled) shortcut ('e', ev, x, 'create', 'project');
+      if (ev.metaKey && ev.key === 'd') {
+         ev.preventDefault ();
+         c ('#dice-project').click ();
       }
 
    }],
@@ -645,7 +643,6 @@ B.mrespond ([
       }
 
       if (ev.key === 'Enter' && c ('#create-file') && ! c ('#create-file').disabled) return B.call (x, 'create', 'file');
-      if (ev.key === 'Enter' && c ('#rename-file') && ! c ('#rename-file').disabled) return B.call (x, 'edit', 'project');
       if (ev.key === 'Enter' && c ('#edit-file') && ! c ('#edit-file').disabled) return B.call (x, 'rename', 'file', B.get ('edit', 'file', 'oldName'), B.get ('edit', 'file', 'newName').trim ());
 
       if (B.get ('mobile') && B.get ('show', 'pane') === 'right') shortcut ('b', ev, x, 'rem', 'show', 'pane');
@@ -684,12 +681,11 @@ B.mrespond ([
             ev.preventDefault ();
 
             var search = B.get ('search', 'file');
-            var pattern = search && new RegExp (search, search === search.toLowerCase () ? 'i' : '');
             var expand = B.get ('show', 'files') || {};
             files = dale.fil (files, undefined, function (file) {
-               if (pattern && ! file.name.match (pattern)) return;
+               if (search && (search !== search.toLowerCase () ? file.name : file.name.toLowerCase ()).indexOf (search) === -1) return;
                var parts = file.name.split ('/');
-               if (! pattern && dale.stop (parts.slice (0, -1), true, function (part, depth) {
+               if (! search && dale.stop (parts.slice (0, -1), true, function (part, depth) {
                   var prefix = parts.slice (0, depth + 1).join ('/') + '/';
                   return ! (expand [prefix] !== undefined ? expand [prefix] : (current || '').indexOf (prefix) === 0);
                })) return;
@@ -725,7 +721,6 @@ B.mrespond ([
 
       if (B.get ('edit', 'file') !== undefined) {
          if (ev.key === 'Escape') return B.call (x, 'rem', 'edit', 'file');
-         if (c ('#rename-file') && ! c ('#rename-file').disabled) shortcut ('e', ev, x, 'rename', 'file');
       }
    }],
 
@@ -1106,10 +1101,9 @@ B.mrespond ([
       if (editor) editor.setOption ('keyMap', B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default');
    }],
 
-   ['change', [/^(projects|project|file|show)$/], {match: B.changeResponder, priority: -1000}, function (x) {
+   ['change', [/^(project|file)$/], {match: B.changeResponder, priority: -1000}, function (x) {
       if (B.get ('view') !== 'files') return;
       if (x.path [0] === 'project' && x.path [1] === 'size') return;
-      if (x.path [0] === 'show' && x.path [1] !== 'settings') return;
 
       var name = B.get ('file', 'name') || '';
 
@@ -1681,6 +1675,7 @@ css.style = [
    }),
 
    ['.vborderblue-border', {'border-color': css.colors.vborderblue}],
+   ['.vgreen-border', {'border-color': css.colors.vgreen}],
    ['.outline-0:focus', {outline: 'none'}],
    ['.placeholder-vgray::placeholder', {color: css.colors.vgray, opacity: '1'}],
 
@@ -1700,6 +1695,17 @@ css.style = [
       color: css.colors.vlightblue,
    }],
 
+   // *** PROJECTS ***
+
+   ['LITERAL', '@keyframes project-tile {from {opacity: 0; transform: translateY(0.5rem);} to {opacity: 1; transform: none;}}'],
+   ['.project-input-icon', {
+      top: '50%',
+      transform: 'translateY(-50%)',
+   }],
+   ['.project-tile', {
+      animation: 'project-tile 0.5s ease-out both',
+   }],
+
    // *** SPINNY ***
 
    ['LITERAL', '@keyframes spinny {0%, 24.99% { content: "|"; } 25%, 49.99% { content: "/"; } 50%, 74.99% { content: "-"; } 75%, 100% { content: "\\\\"; }}'],
@@ -1709,7 +1715,7 @@ css.style = [
    }],
 ]
 
-// *** UTILITY VIEWS ***
+// *** HELPER VIEWS ***
 
 var views = {};
 
@@ -1821,141 +1827,6 @@ views.media = function (name, base64) {
    return ['div', {class: /^audio\//.test (type) ? 'flex flex-auto items-center justify-center' : 'flex-auto relative'}, [element]];
 }
 
-// *** MAIN ***
-
-views.main = function () {
-   return B.view ([['view'], ['snackbar']], function (view, snackbar) {
-      return ['div', {class: 'min-vh-100 relative'}, [
-         ['style', css.style],
-
-         // Header
-         (function () {
-            if (view === 'login' || view === 'files') return;
-            return B.view ('mobile', function (mobile) {return ['div', {
-               class: 'absolute flex right-0 top-0',
-               style: style ({
-                  gap: '1.5rem',
-                  margin: 'calc(1.5rem - 2vh) 1.5rem 0 0',
-               })
-            }, [
-
-               // Account and logout
-               B.view ([['user', 'mode'], ['user', 'email'], ['user', 'anonymous'], ['search', 'project']], function (mode, email, anonymous, search) {
-                  if (view === 'projects' && search !== undefined) return ['span'];
-                  var logout = ['button', {
-                     // Without a session, the projects list covers the header; this keeps Login clickable.
-                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple f5 pa2 ph3' + (anonymous ? ' relative z-1' : ''),
-                     onclick: anonymous ? B.ev ('navigate', 'login') : B.ev ('logout', []),
-                     title: email || '',
-                  }, [
-                     ['i', {class: 'bi bi-person-walking mr1'}],
-                     anonymous ? 'Login' : 'Logout'
-                  ]];
-                  if (view !== 'projects' || anonymous) return logout;
-                  if (mobile) return mode === 'local' ? ['span'] : ['button', {
-                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple',
-                     onclick: B.ev ('logout', []),
-                     style: style ({
-                        'font-size': '1.75rem',
-                        height: '4rem',
-                        'margin-top': '1rem',
-                        padding: '1rem 1.25rem',
-                        width: '4.25rem',
-                     }),
-                     title: email || '',
-                  }, ['i', {class: 'bi bi-person-walking'}]];
-                  return ['div', {
-                     class: 'bg-vmidnight border-box flex flex-column vnearwhite',
-                     style: style ({
-                        'border-radius': '1.125rem',
-                        gap: '1rem',
-                        'max-width': '18rem',
-                        padding: '1.125rem',
-                        width: '18vw',
-                     }),
-                  }, [
-                     ['div', {class: 'f6 lh-copy'}, [
-                        'Logged in as ',
-                        ['span', {
-                           class: 'fw6',
-                           style: style ({'overflow-wrap': 'anywhere'}),
-                        }, email || 'local user'],
-                     ]],
-                     mode !== 'local' ? logout : '',
-                  ]];
-               })
-            ]]});
-
-         }) (),
-
-         // Dynamic view
-         (function () {
-            if (! views [view]) return ['div'];
-            return ['div', {class: 'vh-100'}, views [view] ()];
-         }) (),
-
-         // Snackbar
-         (function () {
-            if (! snackbar) return;
-
-            var snackbarClass = {
-               error: 'bg-vred white',
-               ok: 'bg-vgreen black',
-               warning: 'bg-yellow black',
-            } [snackbar.type] || 'bg-dark-gray white';
-
-            var spinnies = snackbar.type !== 'yellow' ? '' : ['span', {
-               class: 'dib nowrap',
-               style: style ({transform: 'scale(0.75)'}),
-            }, dale.go (dale.times (3), function () {return views.spinny ('white')})];
-
-            if (snackbar) return ['div', {
-               class: 'bottom-0 fixed left-0 pa3 pa4-ns right-0 z-999',
-               onclick: B.ev ('snackbar', 'clear'),
-            }, ['div', {
-               class: 'br3 center flex fw5 items-center justify-center lh-copy mw7 pa3 ph4-ns shadow-4 tc ' + snackbarClass,
-               style: style ({gap: '1rem'}),
-            }, [spinnies, snackbar.message || '', spinnies]]];
-         }) (),
-      ]];
-   });
-}
-
-// *** AUTH ***
-
-views.login = function () {
-   return B.view ('user', function (user) {
-      user = user || {};
-
-      var emailValid = user.email && user.email.match (/^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i);
-
-      return ['div', {class: 'bg-vmidnight flex items-center justify-center min-vh-100 pa4'}, [
-         ['div', {class: 'ba bg-vdeepnavy br3 mw6 pa4 pa5-ns shadow-3 vborderblue-border vnearwhite w-100'}, [
-            ['h1', {class: 'f3 fw6 ma0 mb2 vnearwhite'}, 'Enter vibey'],
-            ['div', {class: 'f4 fw5 light-blue mb2'}],
-            ['div', {class: 'lh-copy mb4 vgray'}, user.loginLinkRequested ? 'Check your inbox for a login link.' : ''],
-            ['div', [
-               ['input', {
-                  class: css.input,
-                  oninput: B.ev ('set', ['user', 'email']),
-                  placeholder: 'your email',
-                  type: 'email',
-                  value: user.email
-               }],
-               ['button', {
-                  class: css.join (emailValid ? 'bg-vgreen' : 'bg-mid-gray', emailValid ? css.button.replace ('white', 'vdeepnavy') : css.button, 'db w-100').replace ('bg-vblue', ''),
-                  disabled: ! emailValid,
-                  id: 'login',
-                  onclick: B.ev ('login', user.email),
-               }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Let me in') : 'Enter your email'],
-            ]]
-         ]]
-      ]];
-   });
-}
-
-// *** PROJECTS ***
-
 views.modal = function (attributes, contents) {
    return ['div', {
       ... (attributes || {}),
@@ -2000,389 +1871,549 @@ views.projectColor = function (text, textOnly) {
    return textOnly ? colors.bg.replace (/^bg-/, '') : colors.bg + ' ' + colors.fg;
 }
 
-views.projects = function () {
-   var phi = (1 + Math.sqrt (5)) / 2;
-   var scale = 140 / 1400;
-   // On mobile, the spiral scales to 85vw, leaving 5vw on each side within the 95vw column.
-   var vw = function (n) {
-      return n * (B.get ('mobile') ? 85 / containerWidth : scale) + 'vw'
-   };
-   var baseRadius = 24, slotWidth = 80, slotHeight = 48, slotBorderRadius = 12;
-   var angleToRadius = function (t) {return baseRadius * Math.pow (phi, t / (Math.PI / 2))};
+// *** MAIN ***
 
-   var slotAngles = [Math.PI, Math.PI * 1.6, Math.PI * 2, Math.PI * 2.25];
-   var slotPositions = dale.go (slotAngles, function (t) {
-      var radius = angleToRadius (t);
-      return {x: radius * Math.cos (t), y: radius * Math.sin (t)};
-   });
+views.main = function () {
+   return B.view ([['view'], ['snackbar']], function (view, snackbar) {
+      return ['div', {class: 'min-vh-100 relative'}, [
+         ['style', css.style],
 
-   // Slot 5: find angle past slot 4 where x matches slot 2
-   var alignTargetX = slotPositions [1].x;
-   for (var candidateAngle = Math.PI * 2.26; candidateAngle < Math.PI * 3; candidateAngle += 0.001) {
-      var radius = angleToRadius (candidateAngle);
-      if (Math.abs (radius * Math.cos (candidateAngle) - alignTargetX) < 2) {
-         slotPositions.push ({x: radius * Math.cos (candidateAngle), y: radius * Math.sin (candidateAngle)});
-         slotAngles.push (candidateAngle);
-         break;
-      }
-   }
+         // Header
+         (function () {
+            if (inc (['files', 'login', 'projects'], view)) return;
+            return ['div', {
+               class: 'absolute flex right-0 top-0',
+               style: style ({
+                  gap: '1.5rem',
+                  margin: 'calc(1.5rem - 2vh) 1.5rem 0 0',
+               })
+            }, [
 
-   var slotXs = dale.go (slotPositions, function (s) { return s.x });
-   var slotYs = dale.go (slotPositions, function (s) { return s.y });
-   var offsetX = -Math.min.apply (null, slotXs) + slotWidth / 2 + 20;
-   var offsetY = -Math.min.apply (null, slotYs) + slotHeight / 2 + 20;
-   var containerWidth  = Math.max.apply (null, slotXs) - Math.min.apply (null, slotXs) + slotWidth + 40;
-   var containerHeight = Math.max.apply (null, slotYs) - Math.min.apply (null, slotYs) + slotHeight + 40;
-
-   // Spiral line from slot 1 to slot 5
-   var spiralStart = slotAngles [0], spiralEnd = slotAngles [slotAngles.length - 1], steps = 300, spiralPath = '';
-   dale.go (dale.times (steps, 0), function (i) {
-      var angle = spiralStart + (spiralEnd - spiralStart) * i / steps;
-      var radius = angleToRadius (angle);
-      spiralPath += (i === 0 ? 'M' : 'L') + (radius * Math.cos (angle) + offsetX).toFixed (1) + ',' + (radius * Math.sin (angle) + offsetY).toFixed (1);
-   });
-
-   // Status bar: left = left of slot 1, same aspect ratio as slots, bottom = bottom of slot 4
-   var barBottom = slotPositions [3].y + offsetY + slotHeight / 2;
-   var barHeight = slotHeight * 2;
-   var barWidth  = barHeight * slotWidth / slotHeight;
-   var barLeft   = slotPositions [0].x + offsetX - slotWidth / 2;
-
-   return B.view ([['mobile'], ['projects'], ['user', 'email'], ['search', 'project'], ['user', 'creator'], ['user', 'anonymous']], function (mobile, projects, email, search, creator, anonymous) {
-      var columnWidth = mobile ? '95vw' : search !== undefined || ! creator ? '74vw' : 'calc(' + vw (containerWidth) + ' + 10vw)';
-      var emailHue = dale.go ((email || '').split (''), function (c) { return c.charCodeAt (0); }).reduce (function (a, b) { return a + b; }, 0) % 360;
-
-      if (! projects) return ['div', {
-         class: 'bg-vdeepnavy flex flex-wrap items-center justify-center min-vh-100 vnearwhite',
-         style: style ({gap: '2rem'}),
-      }, dale.go (dale.times (80), () => views.spinny ())];
-
-
-      return ['div', {
-         class: 'bg-vdeepnavy flex items-center justify-center min-vh-100 vnearwhite',
-      }, [
-         ['div', {
-            class: 'fixed',
-            style: style ({
-               'background-color': 'hsla(' + emailHue + ', 70%, 50%, 0.2)',
-               'border-radius': '1.125rem',
-               bottom: 'calc(1.5rem - 2vh)',
-               left: '50%',
-               'pointer-events': 'none',
-               top: 'calc(1.5rem - 2vh)',
-               transform: 'translateX(-50%)',
-               width: columnWidth,
-            }),
-         }],
-
-         // Logo; on mobile, the size of the logout button and level with it.
-         mobile && (search !== undefined || ! creator) ? '' : ['div', {style: style ({
-            left: '1.5rem',
-            position: 'fixed',
-            top: mobile ? 'calc(2.5rem - 2vh)' : 'calc(1.5rem - 2vh)',
-         })}, ['img', {
-            alt: 'vibey',
-            class: mobile ? 'border-box db' + (anonymous ? '' : ' pointer') : 'db',
-            onclick: mobile && ! anonymous ? B.ev ('set', ['show', 'account'], true) : undefined,
-            src: '/favicon.svg',
-            style: style ({
-               'background-color': css.colors.vmidnight,
-               'border-radius': mobile ? '0.25rem' : '1.125rem',
-               height: mobile ? '4rem' : '6.75rem',
-               padding: mobile ? '0.75rem' : '1.125rem',
-               width: mobile ? '4.25rem' : '7.59375rem',
-            }),
-         }]],
-
-         // Spiral slots or project list
-         B.view (['search', 'project'], function (search) {
-            // Without creator access there's no spiral, only the list of projects (the public ones, without a session).
-            if (search === undefined && ! creator) search = '';
-            return ['div', {class: 'relative' + (search !== undefined ? ' self-start' : ''), style: style ({
-               height: search === undefined ? vw (containerHeight + 48 + (mobile ? 72 : 48)) : 'auto',
-               width: search === undefined ? vw (containerWidth) : '100vw',
-            })}, [
-
-               (function () {
-
-                  // Spiral
-                  if (search === undefined) return ['div', [
-
-                     // Spiral drawing
-                     ['div', {opaque: true}, ['LITERAL', '<svg width="' + vw (containerWidth) + '" height="' + vw (containerHeight) + '" viewBox="0 0 ' + containerWidth + ' ' + containerHeight + '" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg"><path d="' + spiralPath + '" fill="none" stroke="' + css.rgba (css.colors.vlightblue, 0.35) + '" stroke-width="2" stroke-linecap="round"/></svg>']],
-
-                     // Spiral slots
-                     dale.go (slotPositions, function (slot, index) {
-
-                        var matchingProject = dale.stopNot (projects, undefined, function (project) {
-                           if (project.slot === index + 1) return project;
-                        });
-
-                        return ['div', {
-                           class: 'absolute flex items-center justify-center pointer' + (matchingProject ? ' ' + views.projectColor (matchingProject.name) : ''),
-                           onclick: matchingProject ? B.ev ('navigate', 'files/' + matchingProject.id) : undefined,
-                           onmouseenter: B.ev ('set', ['hover', 'project'], matchingProject || {name: '(slot ' + (index + 1) + ')'}),
-                           onmouseleave: B.ev ('rem', [], 'hover'),
-                           style: style ({
-                              border: vw (1.5) + ' solid ' + css.colors.vborderblue,
-                              'border-radius': vw (slotBorderRadius),
-                              height: vw (slotHeight),
-                              left: vw (slot.x + offsetX - slotWidth / 2),
-                              top: vw (slot.y + offsetY - slotHeight / 2),
-                              width: vw (slotWidth),
-                           }),
-                        }, (function () {
-                           if (matchingProject) return [['span', {class: 'f3 fw7'}, dale.go (matchingProject.name.split (' '), function (word) {
-                              return word [0];
-                           }).slice (0, 3).join (' ')], views.tooltip (index + 1)];
-
-                           if (! matchingProject) return [
-                              ['div', {
-                                 class: views.projectColor ('slot ' + (index + 1)) + ' absolute absolute--fill br-inherit',
-                                 style: style ({
-                                    opacity: 0.15,
-                                    'pointer-events': 'none',
-                                 }),
-                              }],
-                              ['span', {
-                                 class: 'flex green h-100 items-center justify-center relative w-100',
-                                 onclick: B.ev ('set', ['new', 'project'], {slot: index + 1}),
-                                 opaque: true,
-                              }, ['LITERAL', '<svg viewBox="0 0 40 40" width="36%" height="36%" xmlns="http://www.w3.org/2000/svg"><path d="M20 8 L20 32 M8 20 L32 20" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M20 8 L20 32 M8 20 L32 20" stroke="' + css.colors.vwhite + '" stroke-width="0.75" stroke-linecap="round"/></svg>']],
-                           ];
-                        }) ()];
-                     }),
-
-                     // Status bar
-                     B.view (['hover', 'project'], function (project) {
-                        var pinned = dale.stop (projects, true, function (project) {
-                           return !! project.slot;
-                        });
-                        if (! project && pinned) return ['div'];
-                        return ['div', {
-                           class: ('absolute ba border-box flex flex-column items-center justify-center vborderblue-border ' + (project ? views.projectColor (project.name) : 'bg-vmidnight vlightblue')).split (' ').sort ().join (' '),
-                           style: style ({
-                              'border-width': '0.09375rem',
-                              'border-radius': vw (slotBorderRadius),
-                              'font-size': vw (13),
-                              height: vw (barHeight),
-                              left: vw (barLeft),
-                              top: vw (barBottom - barHeight),
-                              width: vw (barWidth),
-                           }),
-                        }, ! project ? ['p', {class: 'lh-copy ma0 pa2 tc'}, 'Click on a slot to create a project.'] : [
-                           ['span', {
-                              class: 'fw6',
-                              style: style ({'font-size': '120%'}),
-                           }, project.name],
-                           ['br'],
-                           ['span', {
-                              style: style ({
-                                 'font-size': '70%',
-                                 opacity: '0.7',
-                              }),
-                           }, project.last ? ago (project.last) : ''],
-                        ]];
-                     }),
-                  ]];
-
-                  // List of projects
-                  if (search !== undefined) return ['div', {
-                     class: 'flex flex-column relative w-100',
-                     style: style ({
-                        'padding-bottom': 'calc(4vh + ' + vw (mobile ? 72 : 48) + ')',
-                        'padding-top': '16vh',
-                     }),
+               // Account and logout
+               B.view ([['user', 'email'], ['user', 'anonymous']], function (email, anonymous) {
+                  return ['button', {
+                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple f5 pa2 ph3',
+                     onclick: anonymous ? B.ev ('navigate', 'login') : B.ev ('logout', []),
+                     title: email || '',
                   }, [
-                     anonymous ? '' : ['div', {
-                        class: 'border-box center fixed flex left-0 right-0 w-100',
-                        style: style ({
-                           gap: '0.75rem',
-                           height: '14vh',
-                           'min-height': '3rem',
-                           padding: mobile ? '2vh 5vw' : '2vh 15vw',
-                           top: '2vh',
-                           'z-index': '1',
-                        }),
-                     }, ! creator ? B.view ([['user', 'creatorRequest'], ['user', 'mode']], function (request, mode) {
-                        return ['div', {
-                           class: 'bg-vmidnight flex items-center justify-center ph3 tc vlightblue',
-                           style: style ({
-                              border: '0.09375rem solid ' + css.colors.vborderblue,
-                              'border-radius': '0.75rem',
-                              flex: 1,
-                              gap: '0.75rem',
-                           }),
-                        }, [
-                           mode === 'cloud' ? ['button', {
-                              class: (css.button + ' f7' + (request ? ' o-60' : '')).split (' ').sort ().join (' '),
-                              disabled: !! request,
-                              onclick: B.ev ('request', 'creator'),
-                              type: 'button',
-                           }, request === 'pending' ? 'Requesting...' : request === 'sent' ? 'Request sent' : 'Request creator access'] : '',
-                           ['span', {class: 'lh-copy'}, 'Or ask a creator to share a project with you.'],
-                        ]];
-                     }) : [
-                        ['div', {
-                           class: 'bg-vmidnight flex items-center justify-center pointer relative vlightblue',
-                           onclick: B.ev ('rem', 'search', 'project'),
-                           style: style ({
-                              border: '0.09375rem solid ' + css.colors.vborderblue,
-                              'border-radius': '0.75rem',
-                              flex: 1,
-                           }),
-                        }, [views.tooltip ('B'), ['span', {class: 'fw6 f4'}, mobile ? '‹ Back' : '‹ Back to shell']]],
-                        ['div', {
-                           class: 'bg-vmidnight flex items-center justify-center pointer relative vgreen',
-                           onclick: B.ev ('set', ['new', 'project'], {slot: undefined}),
-                           style: style ({
-                              border: '0.09375rem solid ' + css.colors.vborderblue,
-                              'border-radius': '0.75rem',
-                              flex: 1,
-                           }),
-                        }, [views.tooltip ('E'), ['span', {class: 'fw6 f4'}, mobile ? '+ New' : '+ New project']]],
-                     ]],
-                     (function () {
-                        var span = mobile ? 90 : 70, start = mobile ? 5 : 15;
-                        var cardWidth = span / phi * (mobile ? 1.15 : 1);
-                        var cycle = 8;
-                        var pattern = new RegExp (search, search === search.toLowerCase () ? 'i' : '');
-                        var filteredProjects = dale.fil (projects, undefined, function (project) {
-                           if ((anonymous || ! project.public) && project.name.match (pattern)) return project;
-                        });
-                        return dale.go (filteredProjects, function (project, index) {
-                           var offset = start + (Math.sin (index * 2 * Math.PI / cycle - Math.PI / 2) + 1) / 2 * (span - cardWidth);
-                           return ['div', {
-                              class: 'border-box flex items-center justify-between pointer relative ' + views.projectColor (project.name),
-                              onclick: B.ev ('navigate', 'files/' + project.id),
-                              style: style ({
-                                 'border-radius': '0.75rem',
-                                 height: '10vh',
-                                 'margin-bottom': '4vh',
-                                 'margin-left': offset + 'vw',
-                                 'min-height': '3rem',
-                                 padding: '0 1.5rem',
-                                 width: cardWidth + 'vw',
-                              }),
-                           }, [
-                              index < 5 ? views.tooltip (index + 1) : '',
-                              ['span', {class: 'flex flex-column justify-center'}, [
-                                 // Projects owned by someone else show as username/name.
-                                 ['span', {class: 'f4 fw6'}, (project.ownerUsername && project.owner !== (B.get ('user', 'id') || 'local') ? project.ownerUsername + '/' : '') + project.name],
-                                 ['span', {
-                                    style: style ({
-                                       'font-size': '70%',
-                                       opacity: '0.7',
-                                    }),
-                                 }, project.last ? ago (project.last) : ''],
-                              ]],
-                              // An empty span keeps the card's layout when there are no actions.
-                              anonymous ? ['span'] : ['div', {
-                                 class: 'flex items-center',
-                                 onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
-                                 style: style ({
-                                    gap: '0.5rem',
-                                 }),
-                              }, [
-                                 project.owner !== B.get ('user', 'id') ? '' : ['span', {
-                                    class: 'flex items-center justify-center pointer',
-                                    onclick: B.ev ('set', ['edit', 'project'], {
-                                       id: project.id,
-                                       name: project.name,
-                                       slot: project.slot,
-                                    }),
-                                    style: style ({
-                                       'border-radius': '0.5rem',
-                                       'font-size': '1.25rem',
-                                       height: '2.5rem',
-                                       width: '2.5rem',
-                                    }),
-                                    title: 'Rename',
-                                 }, ['i', {class: 'bi bi-pencil'}]],
-                                 project.owner !== B.get ('user', 'id') ? '' : ['span', {
-                                    class: 'flex items-center justify-center pointer',
-                                    onclick: B.ev ('remove', 'project', project),
-                                    style: style ({
-                                       'border-radius': '0.5rem',
-                                       'font-size': '1.25rem',
-                                       height: '2.5rem',
-                                       width: '2.5rem',
-                                    }),
-                                    title: 'Delete',
-                                 }, ['i', {class: 'bi bi-trash'}]],
-                              ]],
-                           ]];
-                        });
-                     }) ()
+                     ['i', {class: 'bi bi-person-walking mr1'}],
+                     anonymous ? 'Login' : 'Logout'
                   ]];
-               }) (),
+               })
+            ]];
 
-               // Search bar
+         }) (),
+
+         // Dynamic view
+         (function () {
+            var render = views [{files: 'inner', login: 'outer', projects: 'outer'} [view] || view];
+            if (! render) return ['div'];
+            return ['div', {class: 'vh-100'}, [render (), view === 'login' ? views.login () : '']];
+         }) (),
+
+         // Snackbar
+         (function () {
+            if (! snackbar) return;
+
+            var snackbarClass = {
+               error: 'bg-vred white',
+               ok: 'bg-vgreen black',
+               warning: 'bg-yellow black',
+            } [snackbar.type] || 'bg-dark-gray white';
+
+            var spinnies = snackbar.type !== 'yellow' ? '' : ['span', {
+               class: 'dib nowrap',
+               style: style ({transform: 'scale(0.75)'}),
+            }, dale.go (dale.times (3), function () {return views.spinny ('white')})];
+
+            if (snackbar) return ['div', {
+               class: 'bottom-0 fixed left-0 pa3 pa4-ns right-0 z-999',
+               onclick: B.ev ('snackbar', 'clear'),
+            }, ['div', {
+               class: 'br3 center flex fw5 items-center justify-center lh-copy mw7 pa3 ph4-ns shadow-4 tc ' + snackbarClass,
+               style: style ({gap: '1rem'}),
+            }, [spinnies, snackbar.message || '', spinnies]]];
+         }) (),
+      ]];
+   });
+}
+
+// *** AUTH ***
+
+views.login = function () {
+   return B.view ('user', function (user) {
+      user = user || {};
+
+      var emailValid = user.email && user.email.match (/^(?=[A-Z0-9][A-Z0-9@._%+-]{5,253}$)[A-Z0-9._%+-]{1,64}@(?:(?=[A-Z0-9-]{1,63}\.)[A-Z0-9]+(?:-[A-Z0-9]+)*\.){1,8}[A-Z]{2,63}$/i);
+
+      return views.modal ({'aria-modal': 'true', onclick: B.ev ('navigate', 'projects'), role: 'dialog'}, [
+         ['h1', {class: 'f3 fw6 ma0 mb2 vnearwhite'}, 'Enter vibey'],
+         ['div', {class: 'f4 fw5 light-blue mb2'}],
+         ['div', {class: 'lh-copy mb4 vgray'}, user.loginLinkRequested ? 'Check your inbox for a login link.' : ''],
+         ['div', [
+            ['input', {
+               class: css.input,
+               oninput: B.ev ('set', ['user', 'email']),
+               placeholder: 'your email',
+               type: 'email',
+               value: user.email
+            }],
+            ['button', {
+               class: css.join (emailValid ? 'bg-vgreen' : 'bg-mid-gray', emailValid ? css.button.replace ('white', 'vdeepnavy') : css.button, 'db w-100').replace ('bg-vblue', ''),
+               disabled: ! emailValid,
+               id: 'login',
+               onclick: B.ev ('login', user.email),
+            }, emailValid ? (user.loginLinkRequested ? 'Send another link' : 'Let me in') : 'Enter your email'],
+         ]]
+      ]);
+   });
+}
+
+// *** SETTINGS ***
+
+views.settings = function () {
+   return ['div', {class: 'bg-vmidnight border-box min-vh-100 pa3 pa4-ns'}, [
+      ['div', {class: 'bg-vdeepnavy br3 center mw7 pa4'}, [
+         ['div', {class: 'flex items-center mb3'}, [
+            ['span', {
+               class: 'f2 fw7 lh-solid mr3 pointer relative vnearwhite',
+               onclick: B.ev ('go', 'back'),
+            }, ['‹', views.tooltip ('B', 'below')]],
+            ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
+         ]],
+         B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
+            pkce = pkce || {};
+            var account = pkce.account || {};
+            if (pkce.apiKey) return views.modal ({
+               'aria-label': 'Add API key',
+               'aria-modal': 'true',
+               role: 'dialog',
+            }, [
+               ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, (pkce.apiKey === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' API key'],
+               ['input', {
+                  class: css.input + ' f6 mb3 w-100',
+                  oninput: B.ev ('set', ['pkce', 'code']),
+                  placeholder: pkce.apiKey === 'anthropic' ? 'sk-ant-...' : 'sk-...',
+                  type: 'password',
+                  value: pkce.code || '',
+               }],
+               ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
+                  ['button', {
+                     class: css.button + ' f6 flex-auto',
+                     disabled: ! (pkce.code || '').trim (),
+                     onclick: B.ev ('save', 'apiKey', pkce.apiKey, pkce.code || ''),
+                  }, 'Save'],
+                  ['button', {
+                     class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
+                     onclick: B.ev ('rem', [], 'pkce'),
+                     type: 'button',
+                  }, 'Cancel'],
+               ]],
+            ]);
+            if (account.confirm && ! account.provider) return views.modal ({
+               'aria-label': 'Connect account',
+               'aria-modal': 'true',
+               role: 'dialog',
+            }, [
+               ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, 'Connect ' + (account.confirm === 'anthropic' ? 'Anthropic' : 'OpenAI')],
+               ['p', {class: 'lh-copy mb3 mt0 vnearwhite'}, 'Here’s what will happen:'],
+               ['ol', {class: 'lh-copy mb4 mt0 pl3 vlightblue'}, account.confirm === 'anthropic' ? [
+                  ['li', 'Click the button below to be taken to Claude\'s login page.'],
+                  ['li', 'Come back and paste the code you got.'],
+               ] : [
+                  ['li', 'Click the button below to be taken to OpenAI\'s login page.'],
+                  ['li', 'You’ll be taken to a broken page with a URL that starts with "localhost:1455...". This is expected.'],
+                  ['li', 'Copy that entire URL, come back and paste it here.'],
+               ]],
+               ((credentials || {}) [account.confirm] || {}).account
+                  ? ['p', {class: 'lh-copy mb4 mt0 vpurple'}, 'Completing this login will replace your currently connected account for this provider.']
+                  : '',
                ['div', {
-                  class: search === undefined ? 'absolute' : 'fixed',
-                  onclick: B.ev ('set', ['search', 'project'], ''),
-                  style: style ({
-                     bottom: search === undefined ? undefined : '2vh',
-                     height: vw (mobile ? 72 : 48),
-                     left: search === undefined ? 0 : '50%',
-                     top: search === undefined ? vw (containerHeight + 32) : undefined,
-                     transform: search === undefined ? undefined : 'translateX(-50%)',
-                     width: vw (containerWidth),
-                  }),
+                  class: 'flex flex-wrap',
+                  style: style ({gap: '0.75rem'}),
                }, [
-                  views.tooltip ('S'),
-                  ['i', {
-                     class: 'absolute bi bi-search',
-                     style: style ({
-                        color: css.colors.vmidblue,
-                        'font-size': vw (16),
-                        left: vw (14),
-                        'pointer-events': 'none',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                     }),
-                  }],
-                  ['input', {
-                     class: 'bg-vnavy border-box outline-0 w-100',
-                     id: 'search-project',
-                     onfocus: B.ev ('set', ['search', 'project'], ''),
-                     oninput: B.ev ('set', ['search', 'project']),
-                     placeholder: 'Search projects',
-                     style: style ({
-                        border: vw (1.5) + ' solid ' + css.colors.vborderblue,
-                        'border-radius': vw (slotBorderRadius),
-                        color: css.colors.vlightblue,
-                        'font-size': vw (16),
-                        height: '100%',
-                        'padding-left': vw (40),
-                        'padding-right': vw (16),
-                     }),
-                     type: 'text',
-                     value: search,
-                  }],
+                  ['button', {
+                     class: (css.button.replace ('bg-vblue', account.confirm === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
+                     disabled: !! account.loading,
+                     onclick: B.ev ('start', 'pkce', account.confirm),
+                     type: 'button',
+                  }, account.loading ? 'Opening browser...' : 'Start login'],
+                  ['button', {
+                     class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
+                     disabled: !! account.loading,
+                     onclick: B.ev ('rem', [], 'pkce'),
+                     type: 'button',
+                  }, 'Cancel'],
+               ]],
+            ]);
+            if (account.provider) return ['div', [
+               ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (account.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
+               ['input', {
+                  class: css.input + ' f6 mb2 w-100',
+                  oninput: B.ev ('set', ['pkce', 'code']),
+                  placeholder: 'Paste code here...',
+                  type: 'text',
+                  value: pkce.code || '',
+               }],
+               ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
+                  ['button', {
+                     class: css.button + ' f6 flex-auto',
+                     disabled: ! (pkce.code || '').trim (),
+                     onclick: B.ev ('complete', 'pkce', account.provider, pkce.code || ''),
+                  }, 'Submit'],
+                  ['button', {
+                     class: css.button + ' f6',
+                     style: style ({'background-color': css.colors.vborderblue}),
+                     onclick: B.ev ('rem', [], 'pkce'),
+                  }, 'Cancel'],
                ]],
             ]];
-         }),
-
-         B.view (['show', 'account'], function (showAccount) {
-            if (! showAccount || ! mobile || anonymous) return ['div'];
-            return views.modal ({onclick: B.ev ('rem', 'show', 'account')}, [
-               ['div', {
-                  class: 'flex flex-column justify-between',
-                  style: style ({'min-height': 'calc(25vh - 3rem)'}),
+            return ['div', [dale.go (['anthropic', 'openai'], function (provider) {
+               var configured = dale.fil ((credentials || {}) [provider] || {}, undefined, function (present, name) {
+                  if (present) return name;
+               }).sort ();
+               return ['section', {class: 'mb4'}, [
+                  ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, provider === 'anthropic' ? 'Anthropic' : 'OpenAI'],
+                  configured.length ? ['div', {class: 'mb3'}, dale.go (configured, function (name) {
+                     return ['div', {class: 'flex items-center mb2', style: style ({gap: '0.75rem'})}, [
+                        ['span', {class: 'f6 vlightblue'}, [
+                           ['i', {class: 'bi bi-check-circle mr2 vgreen'}],
+                           (name === 'account' ? 'Account' : name === 'apiKey' ? 'API key' : name) + ' added',
+                        ]],
+                        ['button', {
+                           class: 'bg-vred bn br2 f6 fw6 ml3 pointer vnearwhite',
+                           onclick: B.ev ('remove', 'credential', provider, name),
+                           style: style ({padding: '0.5rem 0.75rem'}),
+                           type: 'button',
+                        }, 'Remove'],
+                     ]];
+                  })] : ['p', {class: 'f6 mb3 mt0 vgray'}, 'No credentials added'],
+                  ['div', {
+                     class: 'flex flex-wrap',
+                     style: style ({gap: '0.75rem'}),
+                  }, [
+                     ['button', {
+                        class: (css.button.replace ('bg-vblue', provider === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
+                        disabled: !! account.loading,
+                        onclick: B.ev ('set', 'pkce', {account: {confirm: provider}}),
+                        type: 'button',
+                     }, account.loading === provider ? 'Opening browser...' : inc (configured, 'account') ? 'Add new account' : 'Add account'],
+                     ['button', {
+                        class: 'bg-transparent br2 f6 flex-auto fw6 pa3 pointer',
+                        onclick: B.ev ('set', 'pkce', {apiKey: provider}),
+                        style: style ({
+                           border: '0.125rem solid ' + (provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen),
+                           color: provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen,
+                        }),
+                        type: 'button',
+                     }, inc (configured, 'apiKey') ? 'Add new API key' : 'Add API key'],
+                  ]],
+               ]];
+            }),
+            B.view (['user', 'username'], function (username) {
+               return ['form', {
+                  class: 'mb4',
+                  onsubmit: B.ev ('update', 'user', {raw: '(event.preventDefault (), {username: this.elements.username.value})'}),
                }, [
-                  ['div', {class: 'f5 lh-copy'}, [
-                     'Logged in as ',
-                     ['span', {
-                        class: 'fw6',
-                        style: style ({'overflow-wrap': 'anywhere'}),
-                     }, email || 'local user'],
+                  ['label', {class: 'db f6 mb2 vgray', for: 'username-input'}, 'Username'],
+                  ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
+                     ['input', {
+                        autocapitalize: 'none',
+                        autocomplete: 'username',
+                        class: css.input + ' f6 flex-auto',
+                        id: 'username-input',
+                        name: 'username',
+                        required: true,
+                        spellcheck: false,
+                        style: style ({'min-width': 0}),
+                        type: 'text',
+                        value: username || '',
+                     }],
+                     ['button', {
+                        class: css.button + ' f6',
+                        type: 'submit',
+                     }, 'Save'],
+                  ]],
+               ]];
+            }),
+            B.view (['user', 'settings'], function (settings) {
+               settings = settings || {};
+               return ['label', {class: 'f6 flex items-center vgray'}, [
+                  ['input', {
+                     checked: !! settings.vi,
+                     class: 'mr2',
+                     onchange: B.ev ('update', 'user', {settings: {... settings, vi: ! settings.vi}}),
+                     type: 'checkbox',
+                  }],
+                  'vi mode',
+               ]];
+            })]];
+         }),
+      ]],
+   ]];
+}
+
+// *** PROJECTS ***
+
+// Visible projects in display order: pinned first, then the rest, each most recently active first. Public projects show only to anonymous users or when `show.public` is set.
+views.projectList = function () {
+   var pinned = B.get ('user', 'settings', 'pinned') || [];
+   var search = B.get ('search', 'project') || '';
+   var visible = dale.fil (B.get ('projects'), undefined, function (project) {
+      if ((B.get ('user', 'anonymous') || B.get ('show', 'public') || ! project.public) && (search !== search.toLowerCase () ? project.name : project.name.toLowerCase ()).indexOf (search) !== -1) return project;
+   });
+   return dale.fil (visible, undefined, function (project) {
+      if (inc (pinned, project.id)) return project;
+   }).concat (dale.fil (visible, undefined, function (project) {
+      if (! inc (pinned, project.id)) return project;
+   }));
+}
+
+views.outer = function () {
+   return B.view ([['mobile'], ['projects'], ['search', 'project'], ['show', 'public'], ['user']], function (mobile, projects, search, showPublic, user) {
+      user = user || {};
+      var pinned = (user.settings || {}).pinned || [];
+
+      var iconButton = function (icon, title, ev) {
+         return ['span', {
+            class: 'br2 f5 flex h2 items-center justify-center pointer w2',
+            onclick: ev,
+            title: title,
+         }, ['i', {class: 'bi bi-' + icon}]];
+      }
+
+      var account = ['div', {
+         class: 'flex items-center',
+         style: style ({gap: '0.75rem'}),
+      }, [
+         user.anonymous ? '' : ['button', {
+            class: 'bg-vblue bn br2 f5 pa2 ph3 pointer relative white',
+            onclick: B.ev ('navigate', 'settings'),
+            title: 'Settings',
+         }, [['i', {class: 'bi bi-wrench-adjustable'}], views.tooltip ('9', 'below')]],
+         user.mode === 'local' ? '' : ['button', {
+            class: css.button.replace ('white', 'vdeepnavy') + ' bg-vpurple f5 pa2 ph3',
+            onclick: user.anonymous ? B.ev ('navigate', 'login') : B.ev ('logout', []),
+            title: user.email || '',
+         }, [
+            ['i', {class: 'bi bi-person-walking mr1'}],
+            user.anonymous ? 'Login' : 'Logout'
+         ]],
+      ]];
+
+      var logo = ['a', {
+         class: 'db',
+         href: 'https://hivibey.com',
+      }, ['img', {
+         alt: 'vibey',
+         class: 'bg-vmidnight db',
+         src: '/favicon.svg',
+         style: style ({
+            'border-radius': mobile ? '0.75rem' : '1.125rem',
+            height: mobile ? '3rem' : '5rem',
+            padding: mobile ? '0.5rem' : '0.875rem',
+            width: mobile ? '3.375rem' : '5.625rem',
+         }),
+      }]];
+
+      var columns = mobile ? 'minmax(0, 1fr)' : 'repeat(4, minmax(0, 1fr))';
+      var userColor = 'hsla(' + dale.acc ((user.email || '').split (''), 0, function (a, b) {return a + b.charCodeAt (0)}) % 360 + ', 70%, 50%, 0.2)';
+      var publicOn = user.anonymous || showPublic;
+
+      return ['div', {
+         class: 'bg-vdeepnavy border-box min-vh-100 vnearwhite',
+         style: style ({
+            display: 'grid',
+            gap: mobile ? '1rem' : '1.5rem',
+            'grid-template-columns': mobile ? 'minmax(0, 1fr)' : '8rem minmax(0, 1fr) 14rem',
+            'grid-template-rows': mobile ? 'auto 1fr' : '1fr',
+            padding: mobile ? '1rem' : '1.5rem',
+         }),
+      }, [
+         mobile ? ['div', {class: 'flex items-center justify-between'}, [logo, account]] : ['div', [logo]],
+
+         // Projects column
+         ['div', {
+            class: 'ba border-box br3 bw2 flex flex-column ' + (mobile ? 'pa3' : 'pa4') + ' vgreen-border',
+            style: style ({'background-color': userColor}),
+         }, [
+            ['div', {
+               class: 'flex-auto',
+               style: style ({
+                  'align-content': 'start',
+                  display: 'grid',
+                  gap: '1.5rem',
+                  'grid-template-columns': columns,
+               }),
+            }, projects === undefined ? [] : dale.go (views.projectList (), function (project, index) {
+               var isPinned = inc (pinned, project.id);
+               var owned = project.owner === user.id;
+               return ['div', {
+                  class: 'border-box br3 flex flex-column justify-between pa3 pointer project-tile relative ' + views.projectColor (project.name),
+                  onclick: B.ev ('navigate', 'files/' + project.id),
+                  style: style ({
+                     'animation-delay': Math.min (index, 24) * 0.08 + 's',
+                     'min-height': '7rem',
+                  }),
+               }, [
+                  index < 5 ? views.tooltip (index + 1) : '',
+                  // Projects owned by someone else show as username/name.
+                  ['span', {
+                     class: 'f4 fw6',
+                     style: style ({'overflow-wrap': 'anywhere'}),
+                  }, (project.ownerUsername && project.owner !== (user.id || 'local') ? project.ownerUsername + '/' : '') + project.name],
+                  ['div', {class: 'flex items-center justify-between mt3'}, [
+                     ['span', {class: 'f6 o-70'}, project.last ? ago (project.last) : ''],
+                     user.anonymous ? '' : ['div', {
+                        class: 'flex items-center',
+                        onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
+                        style: style ({gap: '0.25rem'}),
+                     }, [
+                        owned ? iconButton ('pencil', 'Rename', B.ev ('set', ['edit', 'project'], {id: project.id, name: project.name})) : '',
+                        owned ? iconButton ('trash', 'Delete', B.ev ('remove', 'project', project)) : '',
+                        iconButton (isPinned ? 'pin-angle-fill' : 'pin-angle', isPinned ? 'Unpin' : 'Pin', B.ev ('pin', 'project', project.id)),
+                     ]],
+                  ]],
+               ]];
+            })],
+
+            // Creation tile and search
+            ['div', {
+               class: 'bottom-0 flex flex-column pv3 sticky',
+               style: style ({
+                  background: 'linear-gradient(' + userColor + ', ' + userColor + '), ' + css.colors.vdeepnavy,
+                  gap: '1rem',
+               }),
+            }, [
+               user.anonymous ? '' : ['div', {
+                  style: style ({
+                     display: 'grid',
+                     gap: '1.5rem',
+                     'grid-template-columns': columns,
+                  }),
+               }, ['div', {
+                  class: 'bg-vgreen border-box br3 f4 flex fw6 items-center justify-center pa3 pointer relative vdeepnavy',
+                  onclick: B.ev ('start', 'project'),
+                  style: style ({
+                     gap: '0.5rem',
+                     'grid-column': mobile ? '1' : '4',
+                  }),
+               }, [views.tooltip ('E'), ['i', {class: 'bi bi-plus-lg'}], 'Create project']]],
+               ['div', {
+                  class: 'flex items-center',
+                  style: style ({gap: '1rem'}),
+               }, [
+                  ['div', {class: 'flex-auto relative'}, [
+                     views.tooltip ('S'),
+                     ['i', {class: 'absolute bi bi-search left-1 project-input-icon vmidblue'}],
+                     ['input', {
+                        class: 'ba bg-vnavy border-box br3 f5 outline-0 pv3 vborderblue-border vlightblue w-100',
+                        id: 'search-project',
+                        oninput: B.ev ('set', ['search', 'project']),
+                        placeholder: 'Search projects',
+                        style: style ({
+                           'padding-left': '2.75rem',
+                           'padding-right': '1rem',
+                        }),
+                        type: 'text',
+                        value: search || '',
+                     }],
                   ]],
                   ['button', {
-                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vgreen f4 mt3 self-end',
-                     onclick: B.ev ('rem', 'show', 'account'),
+                     'aria-checked': publicOn ? 'true' : 'false',
+                     class: 'ba bg-vnavy border-box br3 f5 flex fw6 items-center nowrap ' + (user.anonymous ? 'o-60' : 'pointer') + ' ph3 self-stretch ' + (publicOn ? 'vgreen vgreen-border' : 'vborderblue-border vlightblue'),
+                     disabled: !! user.anonymous,
+                     onclick: B.ev ('set', ['show', 'public'], ! showPublic),
+                     role: 'switch',
+                     style: style ({transition: 'border-color 0.2s, color 0.2s'}),
                      type: 'button',
-                  }, 'Sure'],
+                  }, [
+                     ['span', {
+                        class: 'border-box relative',
+                        style: style ({
+                           border: '0.125rem solid currentColor',
+                           'border-radius': '1rem',
+                           height: '1.5rem',
+                           'margin-right': '0.625rem',
+                           width: '2.5rem',
+                        }),
+                     }, ['span', {
+                        class: 'absolute',
+                        style: style ({
+                           background: 'currentColor',
+                           'border-radius': '50%',
+                           height: '0.875rem',
+                           left: '0.1875rem',
+                           top: '0.1875rem',
+                           transform: publicOn ? 'translateX(1rem)' : 'none',
+                           transition: 'transform 0.2s',
+                           width: '0.875rem',
+                        }),
+                     }]],
+                     'Show public',
+                  ]],
+               ]],
+            ]],
+         ]],
+
+         mobile ? '' : ['div', {class: 'flex items-start justify-end'}, [account]],
+
+         // Subscription modal
+         B.view ([['show', 'subscribe'], ['user', 'subscriptionRequest']], function (subscribe, subscriptionRequest) {
+            if (! subscribe) return ['div'];
+
+            if (subscribe !== true) return views.modal ({onclick: B.ev ('rem', 'show', 'subscribe')}, [
+               ['p', {class: 'f4 lh-copy ma0 mb4 vnearwhite'}, 'Are you sure that you want to give me money and start a vibey subscription? Don\'t play with my feelings'],
+               ['div', {
+                  class: 'flex flex-column flex-row-ns',
+                  style: style ({gap: '1rem'}),
+               }, [
+                  ['button', {
+                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vgreen f5',
+                     onclick: B.ev (['request', 'subscription', subscribe], ['set', ['show', 'subscribe'], true]),
+                     type: 'button',
+                  }, 'Of course, confirm'],
+                  ['button', {
+                     class: css.button + ' f5',
+                     onclick: B.ev ('set', ['show', 'subscribe'], true),
+                     type: 'button',
+                  }, 'Maybe not'],
+               ]],
+            ]);
+
+            var plan = function (type, title, description, price, icons) {
+               return ['div', {class: 'ba br3 flex flex-column flex-auto justify-between pa4 vborderblue-border w-100 w-50-ns'}, [
+                  ['div', [
+                     ['h3', {class: 'f4 fw6 ma0 mb2 vnearwhite'}, title],
+                     ['p', {class: 'lh-copy ma0 mb3 vlightblue'}, description],
+                     ['div', {class: 'f3 fw6 mb4 vnearwhite'}, [price, ['span', {class: 'f6 fw4 vgray'}, ' EUR/mo + VAT']]],
+                  ]],
+                  ['button', {
+                     class: css.button.replace ('white', 'vdeepnavy') + ' bg-vgreen f5 w-100',
+                     disabled: !! subscriptionRequest,
+                     onclick: B.ev ('set', ['show', 'subscribe'], type),
+                     type: 'button',
+                  }, [['span', {class: 'mr2'}, icons], subscriptionRequest === 'sent' ? 'Requested' : 'Request']],
+               ]];
+            }
+
+            return views.modal ({onclick: B.ev ('rem', 'show', 'subscribe')}, [
+               ['h2', {class: 'f3 fw6 ma0 mb3 vnearwhite'}, 'Subscribe to create projects'],
+               ['div', {
+                  class: 'flex flex-column flex-row-ns',
+                  style: style ({gap: '1.5rem'}),
+               }, [
+                  plan ('full', 'Subscription + Small server', 'We host your projects on a small server.', '25', '💸💸'),
+                  plan ('byoe', 'Subscription + Bring my own server', 'Run your projects on a server you provide.', '10', '💸🤖'),
+               ]],
+               ['p', {class: 'lh-copy ma0 mt4 vgray'}, [
+                  'Remember that vibey is ',
+                  ['a', {
+                     class: 'underline vlightblue',
+                     href: 'https://github.com/altocodenl/vibey',
+                     target: '_blank',
+                  }, 'open source'],
+                  ' and you can run it for free, both locally and in your own server.',
                ]],
             ]);
          }),
@@ -2412,69 +2443,45 @@ views.projects = function () {
 
             return views.modal ({onclick: B.ev ('rem', 'new', 'project')}, [
                ['div', {
-                  class: 'relative w-100',
-                  style: style ({height: vw (48)}),
+                  class: 'h3 relative w-100',
                }, [
-                  ['i', {
-                     class: 'absolute bi bi-pencil',
-                     style: style ({
-                        color: css.colors.vmidblue,
-                        'font-size': vw (16),
-                        left: vw (14),
-                        'pointer-events': 'none',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                     })
-                  }],
+                  ['i', {class: 'absolute bi bi-pencil left-1 project-input-icon vmidblue'}],
                   ['span', {
-                     class: 'absolute pointer',
+                     class: 'absolute pointer project-input-icon right-1',
                      id: 'dice-project',
                      onclick: B.ev ('set', ['new', 'project', 'name'], randomName ()),
-                     style: style ({
-                        right: vw (14),
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                     })
                   }, [
-                     ['i', {
-                        class: 'bi bi-dice-' + Math.ceil (Math.random () * 5),
-                        style: style ({
-                           color: css.colors.vmidblue,
-                           'font-size': vw (16),
-                        })
-                     }],
+                     ['i', {class: 'bi bi-dice-' + Math.ceil (Math.random () * 5) + ' vmidblue'}],
                      views.tooltip ('D'),
                   ]],
                   ['input', {
-                     class: 'bg-vnavy border-box h-100 outline-0 w-100',
+                     class: 'ba bg-vnavy border-box br3 f5 h-100 outline-0 vborderblue-border vlightblue w-100',
                      id: 'new-project-input',
                      oninput: B.ev ('set', ['new', 'project', 'name']),
                      placeholder: 'Name your project',
                      style: style ({
-                        border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
-                        'border-radius': slotBorderRadius,
-                        color: css.rgba (css.colors.vlightblue, 0.8),
-                        'font-size': vw (16),
-                        'padding-left': vw (40),
-                        'padding-right': vw (40),
+                        'padding-left': '2.75rem',
+                        'padding-right': '2.75rem',
                      }),
                      type: 'text',
                      value: newProject.name,
                   }],
                ]],
+               (user.engines || []).length < 2 ? '' : ['div', {class: 'flex items-center mt3'}, [
+                  ['label', {class: 'f5 mr3 vgray', for: 'new-project-engine'}, 'Engine'],
+                  ['select', {
+                     class: 'ba bg-vnavy border-box br3 f5 outline-0 pa3 pointer vborderblue-border vlightblue w-50',
+                     id: 'new-project-engine',
+                     onchange: B.ev ('set', ['new', 'project', 'engine']),
+                  }, dale.go (user.engines, function (engine) {
+                     return ['option', {selected: engine === newProject.engine, value: engine}, engine];
+                  })],
+               ]],
                ['button', {
-                  class: 'bn fw7 pointer relative w-100',
+                  class: 'bn br3 f5 fw7 mt3 pointer pv3 relative vblack w-100 ' + (allowCreation === true ? 'bg-vgreen' : 'bg-mid-gray'),
                   disabled: allowCreation !== true,
                   id: 'create-project',
                   onclick: B.ev ('create', 'project'),
-                  style: style ({
-                     'background-color': allowCreation === true ? css.colors.vgreen : '#555',
-                     'border-radius': slotBorderRadius,
-                     color: '#000',
-                     'font-size': vw (16),
-                     'margin-top': '1rem',
-                     padding: '1rem 0',
-                  })
                }, [allowCreation === true ? views.tooltip ('E') : '', {
                   conflict: 'That name\'s taken',
                   empty: 'Enter a name',
@@ -2497,77 +2504,23 @@ views.projects = function () {
             }) ();
 
             return views.modal ({onclick: B.ev ('rem', 'edit', 'project')}, [
-               ['div', {
-                  class: 'flex w-100',
-                  style: style ({
-                     gap: '0.5rem',
-                     height: vw (48),
-                  }),
-               }, [
-                  ['div', {
-                     class: 'relative',
-                     style: style ({flex: '1'}),
-                  }, [
-                     ['i', {
-                        class: 'absolute bi bi-pencil',
-                        style: style ({
-                           color: css.colors.vmidblue,
-                           'font-size': vw (16),
-                           left: vw (14),
-                           'pointer-events': 'none',
-                           top: '50%',
-                           transform: 'translateY(-50%)',
-                        })
-                     }],
-                     ['input', {
-                        class: 'bg-vnavy border-box h-100 outline-0 w-100',
-                        id: 'edit-project-input',
-                        oninput: B.ev ('set', ['edit', 'project', 'name']),
-                        placeholder: 'Rename your project',
-                        style: style ({
-                           border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
-                           'border-radius': slotBorderRadius,
-                           color: css.rgba (css.colors.vlightblue, 0.8),
-                           'font-size': vw (16),
-                           'padding-left': vw (40),
-                        }),
-                        type: 'text',
-                        value: editProject.name,
-                     }],
-                  ]],
-                  ['select', {
-                     class: 'bg-vnavy pointer',
-                     onchange: B.ev ('set', ['edit', 'project', 'slot']),
-                     style: style ({
-                        border: '0.09375rem solid ' + css.rgba (css.colors.vlightblue, 0.15),
-                        'border-radius': slotBorderRadius,
-                        color: css.rgba (css.colors.vlightblue, 0.8),
-                        'font-size': vw (12),
-                        padding: '0 0.5rem',
-                     }),
-                  }, [
-                     ['option', {
-                        selected: ! editProject.slot,
-                        value: 'null',
-                     }, 'None'],
-                     dale.go (dale.times (5, 1), function (n) {
-                        return ['option', {value: n, selected: editProject.slot === n}, 'Slot ' + n];
-                     }),
-                  ]],
+               ['div', {class: 'h3 relative w-100'}, [
+                  ['i', {class: 'absolute bi bi-pencil left-1 project-input-icon vmidblue'}],
+                  ['input', {
+                     class: 'ba bg-vnavy border-box br3 f5 h-100 outline-0 vborderblue-border vlightblue w-100',
+                     id: 'edit-project-input',
+                     oninput: B.ev ('set', ['edit', 'project', 'name']),
+                     placeholder: 'Rename your project',
+                     style: style ({'padding-left': '2.75rem'}),
+                     type: 'text',
+                     value: editProject.name,
+                  }],
                ]],
                ['button', {
-                  class: 'bn fw7 pointer w-100',
+                  class: 'bn br3 f5 fw7 mt3 pointer pv3 vblack w-100 ' + (allowEdit === true ? 'bg-vgreen' : 'bg-mid-gray'),
                   disabled: allowEdit !== true,
-                  id: 'rename-file',
+                  id: 'rename-project',
                   onclick: B.ev ('edit', 'project'),
-                  style: style ({
-                     'background-color': allowEdit === true ? css.colors.vgreen : '#555',
-                     'border-radius': slotBorderRadius,
-                     color: '#000',
-                     'font-size': vw (16),
-                     'margin-top': '1rem',
-                     padding: '1rem 0',
-                  })
                }, {
                   conflict: 'That name\'s taken',
                   empty: 'Enter a name',
@@ -2620,106 +2573,7 @@ views.pane = function (paneClass, contents) {
    });
 }
 
-views.new_projects = function () {
-   return B.view ([['mobile'], ['projects'], ['selected', 'project'], ['new', 'project'], ['user', 'id']], function (mobile, projects, selected, newProject, userId) {
-      if (! projects) return ['div', {
-         class: 'bg-vmidnight flex flex-wrap items-center justify-center overflow-hidden vh-100',
-         style: style ({gap: '2rem'}),
-      }, dale.go (dale.times (80), () => views.spinny ())];
-
-      var current = dale.stopNot (projects, undefined, function (project) {
-         if (project.id === selected) return project;
-      });
-      var canDelete = current && current.owner === userId;
-      var newName = ((newProject || {}).name || '').trim ();
-      var allowCreation = newName && ! dale.stop (projects, true, function (project) {
-         return project.name === newName;
-      });
-
-      return ['div', {
-         class: 'bg-vmidnight border-box flex flex-column overflow-hidden vh-100',
-         style: style ({
-            padding: mobile ? '0' : '0.75rem 1.5rem 0 1.5rem',
-         }),
-      }, [
-         ['div', {
-            style: style ({
-               'align-self': 'center',
-               display: 'grid',
-               flex: 1,
-               gap: '1.5rem',
-               'grid-template-columns': mobile ? 'minmax(0, 1fr)' : 'minmax(0, 23.6fr) minmax(0, 76.4fr)',
-               'grid-template-rows': 'minmax(0, 1fr)',
-               'min-height': 0,
-               width: mobile ? '100%' : '70%',
-            }),
-         }, [
-            // Left pane
-            views.pane ('overflow-hidden', function () {return [
-               ['div', {class: 'flex flex-shrink-0 items-center mb3'}, [
-                  ['span', {class: 'f4 fw7 vnearwhite'}, 'Projects'],
-               ]],
-               ['div', {class: 'flex flex-shrink-0 mb3'}, [
-                  ['button', {
-                     class: 'bg-vgreen bn br2 flex-auto fw6 mr2 pointer vdeepnavy',
-                     onclick: B.ev ('set', ['new', 'project'], {slot: undefined}),
-                     style: style ({padding: '0.75rem'}),
-                  }, '+ New'],
-                  ['button', {
-                     'aria-label': 'Delete selected project',
-                     class: 'bg-vred bn br2 fw6 ph3 vnearwhite' + (canDelete ? ' pointer' : ' o-50'),
-                     disabled: ! canDelete,
-                     onclick: canDelete ? B.ev ('remove', 'project', current) : undefined,
-                     style: style ({
-                        'padding-bottom': '0.75rem',
-                        'padding-top': '0.75rem',
-                     }),
-                     title: 'Delete selected project',
-                  }, '×'],
-               ]],
-               newProject === undefined ? '' : ['div', {class: 'flex flex-shrink-0 mb3'}, [
-                  ['input', {
-                     class: 'ba bg-vnavy border-box bw1 f5 flex-auto fw6 mr2 outline-0 ph3 vlightblue vmidblue-border',
-                     id: 'new-project-input',
-                     oninput: B.ev ('set', ['new', 'project', 'name']),
-                     placeholder: 'Name your project',
-                     style: style ({
-                        'border-radius': '0.75rem',
-                        height: '3rem',
-                     }),
-                     type: 'text',
-                     value: newProject.name,
-                  }],
-                  ['button', {
-                     class: 'black bn br2 fw7 ph3 ' + (allowCreation ? 'bg-vgreen pointer' : 'bg-vgray'),
-                     disabled: ! allowCreation,
-                     id: 'create-project',
-                     onclick: B.ev ('create', 'project'),
-                  }, 'Boom'],
-               ]],
-               ['div', {class: 'flex-auto overflow-y-auto'}, dale.go (projects, function (project) {
-                  var active = project.id === selected;
-                  return ['div', {
-                     class: css.join ('br1 fw5 lh-copy pointer', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
-                     onclick: B.ev ('set', ['selected', 'project'], project.id),
-                     style: style ({
-                        'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
-                        padding: '0.5rem 0.625rem',
-                     }),
-                  }, [
-                     ['span', {class: views.projectColor (project.name, true)}, (project.ownerUsername && project.owner !== (userId || 'local') ? project.ownerUsername + '/' : '') + project.name],
-                     ['div', {class: 'f7 mt1 tr vgray'}, project.last ? ago (project.last) : ''],
-                  ]];
-               })],
-            ]}),
-            // Right pane
-            views.pane ('overflow-auto', function () {return []}),
-         ]],
-      ]];
-   });
-}
-
-views.files = function () {
+views.inner = function () {
 
    var iconAndName = function (name) {
       if (name.match (/^APP:\d+$/)) return [['i', {class: 'bi bi-window mr1 vlightblue'}], 'Port ' + name.slice (4)];
@@ -2978,7 +2832,6 @@ views.files = function () {
                         ['i', {class: 'bi bi-chevron-' + (open ? 'up' : 'down') + ' ml-auto'}],
                      ]];
                   };
-                  var pattern = search && new RegExp (search, search === search.toLowerCase () ? 'i' : '');
                   var currentIndex = dale.stopNot (files, undefined, function (f, k) {
                      if (f.name === current) return k;
                   });
@@ -2996,7 +2849,7 @@ views.files = function () {
                         }),
                      }, iconAndName ('APP:' + port)];
                   }), dale.fil (files, undefined, function (file, index) {
-                     if (pattern && ! file.name.match (pattern)) return;
+                     if (search && (search !== search.toLowerCase () ? file.name : file.name.toLowerCase ()).indexOf (search) === -1) return;
                      var parts = file.name.split ('/');
                      var rows = [];
                      var folders = dale.go (parts.slice (0, -1), function (part, depth) {
@@ -3008,14 +2861,14 @@ views.files = function () {
                         });
                      };
                      var finish = function (rows) {
-                        if (! pattern) dale.go (folders.slice ().reverse (), function (prefix) {
+                        if (! search) dale.go (folders.slice ().reverse (), function (prefix) {
                            var next = files [index + 1];
                            if (next && next.name.indexOf (prefix) === 0) return;
                            if (visible [prefix] > 5) rows.push (folderRow (prefix, true));
                         });
                         return rows;
                      };
-                     var hidden = ! pattern && dale.stop (parts.slice (0, -1), true, function (part, depth) {
+                     var hidden = ! search && dale.stop (parts.slice (0, -1), true, function (part, depth) {
                         var prefix = parts.slice (0, depth + 1).join ('/') + '/';
                         var open = expand [prefix] !== undefined ? expand [prefix] : (current || '').indexOf (prefix) === 0;
                         if (! shown [prefix]) {
@@ -3026,7 +2879,7 @@ views.files = function () {
                         return ! open;
                      });
                      if (hidden) return finish (rows);
-                     if (! pattern) count (folders);
+                     if (! search) count (folders);
                      var active = file.name === current;
                      var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
                      return finish (rows.concat ([['div', {
@@ -3036,12 +2889,12 @@ views.files = function () {
                         style: style ({
                            'border-left': '0.1875rem solid ' + (active ? css.colors.vblue : 'transparent'),
                            padding: '0.5rem 0.625rem',
-                           'padding-left': (0.625 + (pattern ? 0 : parts.length - 1)) + 'rem',
+                           'padding-left': (0.625 + (search ? 0 : parts.length - 1)) + 'rem',
                         }),
                      }, [
                         tooltip ? views.tooltip (tooltip, 'right') : '',
                         ['div', {class: 'flex items-center', style: style ({gap: '0.5rem'})}, [
-                           ['span', {class: views.projectColor (file.name, true)}, iconAndName (pattern ? file.name : parts [parts.length - 1])],
+                           ['span', {class: views.projectColor (file.name, true)}, iconAndName (search ? file.name : parts [parts.length - 1])],
                            (pending || []).some (function (k) {return k.indexOf (file.name) !== -1;}) ? ['span', {style: style ({transform: 'scale(0.75)'})}, views.spinny (active ? 'vnearwhite' : 'vlightblue')] : '',
                         ]],
                         ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
@@ -3490,196 +3343,6 @@ views.files = function () {
 }
 
 // *** CHAT ***
-
-var modelCredential = function (model, credentials) {
-   if (! model) return;
-   var creds = (credentials || {}) [model.provider] || {};
-   return model.requireAPIKey
-      ? (creds.apiKey ? 'apiKey' : undefined)
-      : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined;
-}
-
-views.settings = function () {
-   return ['div', {class: 'bg-vmidnight border-box min-vh-100 pa3 pa4-ns'}, [
-      ['div', {class: 'bg-vdeepnavy br3 center mw7 pa4'}, [
-         ['div', {class: 'flex items-center mb3'}, [
-            ['span', {
-               class: 'f2 fw7 lh-solid mr3 pointer relative vnearwhite',
-               onclick: B.ev ('go', 'back'),
-            }, ['‹', views.tooltip ('B', 'below')]],
-            ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
-         ]],
-         B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
-            pkce = pkce || {};
-            var account = pkce.account || {};
-            if (pkce.apiKey) return views.modal ({
-               'aria-label': 'Add API key',
-               'aria-modal': 'true',
-               role: 'dialog',
-            }, [
-               ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, (pkce.apiKey === 'anthropic' ? 'Anthropic' : 'OpenAI') + ' API key'],
-               ['input', {
-                  class: css.input + ' f6 mb3 w-100',
-                  oninput: B.ev ('set', ['pkce', 'code']),
-                  placeholder: pkce.apiKey === 'anthropic' ? 'sk-ant-...' : 'sk-...',
-                  type: 'password',
-                  value: pkce.code || '',
-               }],
-               ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
-                  ['button', {
-                     class: css.button + ' f6 flex-auto',
-                     disabled: ! (pkce.code || '').trim (),
-                     onclick: B.ev ('save', 'apiKey', pkce.apiKey, pkce.code || ''),
-                  }, 'Save'],
-                  ['button', {
-                     class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
-                     onclick: B.ev ('rem', [], 'pkce'),
-                     type: 'button',
-                  }, 'Cancel'],
-               ]],
-            ]);
-            if (account.confirm && ! account.provider) return views.modal ({
-               'aria-label': 'Connect account',
-               'aria-modal': 'true',
-               role: 'dialog',
-            }, [
-               ['h3', {class: 'f4 fw6 mb3 mt0 vlightblue'}, 'Connect ' + (account.confirm === 'anthropic' ? 'Anthropic' : 'OpenAI')],
-               ['p', {class: 'lh-copy mb3 mt0 vnearwhite'}, 'Here’s what will happen:'],
-               ['ol', {class: 'lh-copy mb4 mt0 pl3 vlightblue'}, account.confirm === 'anthropic' ? [
-                  ['li', 'Click the button below to be taken to Claude\'s login page.'],
-                  ['li', 'Come back and paste the code you got.'],
-               ] : [
-                  ['li', 'Click the button below to be taken to OpenAI\'s login page.'],
-                  ['li', 'You’ll be taken to a broken page with a URL that starts with "localhost:1455...". This is expected.'],
-                  ['li', 'Copy that entire URL, come back and paste it here.'],
-               ]],
-               ((credentials || {}) [account.confirm] || {}).account
-                  ? ['p', {class: 'lh-copy mb4 mt0 vpurple'}, 'Completing this login will replace your currently connected account for this provider.']
-                  : '',
-               ['div', {
-                  class: 'flex flex-wrap',
-                  style: style ({gap: '0.75rem'}),
-               }, [
-                  ['button', {
-                     class: (css.button.replace ('bg-vblue', account.confirm === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
-                     disabled: !! account.loading,
-                     onclick: B.ev ('start', 'pkce', account.confirm),
-                     type: 'button',
-                  }, account.loading ? 'Opening browser...' : 'Start login'],
-                  ['button', {
-                     class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
-                     disabled: !! account.loading,
-                     onclick: B.ev ('rem', [], 'pkce'),
-                     type: 'button',
-                  }, 'Cancel'],
-               ]],
-            ]);
-            if (account.provider) return ['div', [
-               ['div', {class: 'f6 lh-copy mb2 gold'}, 'A browser tab opened for ' + (account.provider === 'anthropic' ? 'Anthropic' : 'OpenAI') + '. Paste the code or URL you received below.'],
-               ['input', {
-                  class: css.input + ' f6 mb2 w-100',
-                  oninput: B.ev ('set', ['pkce', 'code']),
-                  placeholder: 'Paste code here...',
-                  type: 'text',
-                  value: pkce.code || '',
-               }],
-               ['div', {class: 'flex', style: style ({gap: '0.5rem'})}, [
-                  ['button', {
-                     class: css.button + ' f6 flex-auto',
-                     disabled: ! (pkce.code || '').trim (),
-                     onclick: B.ev ('complete', 'pkce', account.provider, pkce.code || ''),
-                  }, 'Submit'],
-                  ['button', {
-                     class: css.button + ' f6',
-                     style: style ({'background-color': css.colors.vborderblue}),
-                     onclick: B.ev ('rem', [], 'pkce'),
-                  }, 'Cancel'],
-               ]],
-            ]];
-            return ['div', [dale.go (['anthropic', 'openai'], function (provider) {
-               var configured = dale.fil ((credentials || {}) [provider] || {}, undefined, function (present, name) {
-                  if (present) return name;
-               }).sort ();
-               return ['section', {class: 'mb4'}, [
-                  ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, provider === 'anthropic' ? 'Anthropic' : 'OpenAI'],
-                  configured.length ? ['div', {class: 'mb3'}, dale.go (configured, function (name) {
-                     return ['div', {class: 'flex items-center mb2', style: style ({gap: '0.75rem'})}, [
-                        ['span', {class: 'f6 vlightblue'}, [
-                           ['i', {class: 'bi bi-check-circle mr2 vgreen'}],
-                           (name === 'account' ? 'Account' : name === 'apiKey' ? 'API key' : name) + ' added',
-                        ]],
-                        ['button', {
-                           class: 'bg-vred bn br2 f6 fw6 ml3 pointer vnearwhite',
-                           onclick: B.ev ('remove', 'credential', provider, name),
-                           style: style ({padding: '0.5rem 0.75rem'}),
-                           type: 'button',
-                        }, 'Remove'],
-                     ]];
-                  })] : ['p', {class: 'f6 mb3 mt0 vgray'}, 'No credentials added'],
-                  ['div', {
-                     class: 'flex flex-wrap',
-                     style: style ({gap: '0.75rem'}),
-                  }, [
-                     ['button', {
-                        class: (css.button.replace ('bg-vblue', provider === 'anthropic' ? 'bg-vpurple' : 'bg-vgreen').replace ('white', 'vdeepnavy') + ' f6 flex-auto').split (' ').sort ().join (' '),
-                        disabled: !! account.loading,
-                        onclick: B.ev ('set', 'pkce', {account: {confirm: provider}}),
-                        type: 'button',
-                     }, account.loading === provider ? 'Opening browser...' : inc (configured, 'account') ? 'Add new account' : 'Add account'],
-                     ['button', {
-                        class: 'bg-transparent br2 f6 flex-auto fw6 pa3 pointer',
-                        onclick: B.ev ('set', 'pkce', {apiKey: provider}),
-                        style: style ({
-                           border: '0.125rem solid ' + (provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen),
-                           color: provider === 'anthropic' ? css.colors.vpurple : css.colors.vgreen,
-                        }),
-                        type: 'button',
-                     }, inc (configured, 'apiKey') ? 'Add new API key' : 'Add API key'],
-                  ]],
-               ]];
-            }),
-            B.view (['user', 'username'], function (username) {
-               return ['form', {
-                  class: 'mb4',
-                  onsubmit: B.ev ('update', 'user', {raw: '(event.preventDefault (), {username: this.elements.username.value})'}),
-               }, [
-                  ['label', {class: 'db f6 mb2 vgray', for: 'username-input'}, 'Username'],
-                  ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
-                     ['input', {
-                        autocapitalize: 'none',
-                        autocomplete: 'username',
-                        class: css.input + ' f6 flex-auto',
-                        id: 'username-input',
-                        name: 'username',
-                        required: true,
-                        spellcheck: false,
-                        style: style ({'min-width': 0}),
-                        type: 'text',
-                        value: username || '',
-                     }],
-                     ['button', {
-                        class: css.button + ' f6',
-                        type: 'submit',
-                     }, 'Save'],
-                  ]],
-               ]];
-            }),
-            B.view (['user', 'settings'], function (settings) {
-               settings = settings || {};
-               return ['label', {class: 'f6 flex items-center vgray'}, [
-                  ['input', {
-                     checked: !! settings.vi,
-                     class: 'mr2',
-                     onchange: B.ev ('update', 'user', {settings: {... settings, vi: ! settings.vi}}),
-                     type: 'checkbox',
-                  }],
-                  'vi mode',
-               ]];
-            })]];
-         }),
-      ]],
-   ]];
-}
 
 views.chat = function (read, name, getContent) {
    var matchesQuery = function (message, query, userId) {

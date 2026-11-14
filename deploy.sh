@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+HOST="acprod"
+BASE_URL="https://app.buildwithvibey.com"
+
 if [[ "${1:-}" != "prod" ]]; then
    echo "Must specify environment (prod)"
    exit 1
@@ -11,7 +14,6 @@ if [[ "${2:-}" != "confirm" && "${3:-}" != "confirm" && "${4:-}" != "confirm" ]]
    exit 1
 fi
 
-HOST="acprod"
 TARGET_FOLDER="/root/vibey"
 REBUILD=0
 CLIENT=0
@@ -28,12 +30,12 @@ if [[ "$CLIENT" == "1" ]]; then
 fi
 rsync -av --exclude node_modules --exclude .git ./ "$HOST:$TARGET_FOLDER/"
 
-ssh "$HOST" "bash -s -- '$TARGET_FOLDER' '$REBUILD'" <<'REMOTE'
+ssh "$HOST" "bash -s -- '$TARGET_FOLDER' '$REBUILD' '$BASE_URL'" <<'REMOTE'
 set -euo pipefail
 cd "$1"
 
 # Only change the remote configuration; keep local development settings intact.
-node <<'NODE'
+BASE_URL="$3" node <<'NODE'
 var fs = require ('fs');
 var config = fs.readFileSync ('config.4tx', 'utf8');
 if (! /^email enable [01][ \t]*$/m.test (config) || ! /^baseURL .+$/m.test (config)) {
@@ -41,7 +43,7 @@ if (! /^email enable [01][ \t]*$/m.test (config) || ! /^baseURL .+$/m.test (conf
 }
 config = config.replace (/^email enable [01][ \t]*$/m, 'email enable 1');
 config = config.replace (/^cloud 0$/m, 'cloud 1');
-config = config.replace (/^baseURL .+$/m, 'baseURL https://app.buildwithvibey.com');
+config = config.replace (/^baseURL .+$/m, 'baseURL ' + process.env.BASE_URL);
 fs.writeFileSync ('config.4tx', config);
 NODE
 

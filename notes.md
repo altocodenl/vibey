@@ -1,5 +1,92 @@
 # Vibey development notes
 
+## 2026-11-14
+
+Engine endpoints:
+- create: takes a name and an ip only (later we can add a user); creates a pair of public/private keys through a command, to populate them in the db. only the admin or someone marked as creator (in the user) can do this.
+- list: show your engines.
+- update: only allow to change the name.
+- delete: only allow to delete it.
+
+access rules for engine:
+- who can create projects
+- if ports are directly open
+- redirects
+
+Should we put them all in the same file? It would be a "file", because it would be in redis. I'm feeling squeamish about keeping that in the actual engine, in a random folder.
+
+I like the idea of making the demos a bit more abstract, in that each would cover one of the main use cases of the app. They still have a concrete nature, but the important thing is workflow, not X workflow. X is just enough of a concrete placeholder to let you appreciate what your workflow could be.
+
+For now, users can have a creator flag, I set by hand, if they're paying users. When it happens more often, I'll add an endpoint.
+```
+redis-cli hset user:<id> creator 1
+```
+
+DONE:
+- BYOE (!)
+
+- TODO
+   - migration
+      - personal blog
+      - altocode home
+      - user #2
+      - user #3
+   - new domain: hivibey.com (!)
+   - demos
+      - workflow
+      - communication
+      - website
+      - app
+   - notifications
+   - devops
+      - destek to list logs and have alerts
+      - renew wildcard subdomain automatically
+   - engine
+      - support engines without provisioning
+      - grant others the right to create projects
+      - open ports
+      - redirect traffic from domain: certbot, redirect single path, redirect to folder (forbid going up past the original target)
+      - provision engines
+   - access
+      - email to project
+      - api tokens
+   - file
+      - open sqlite files
+   - project
+      - cron
+      - New project view
+      - Fix autogit
+         - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
+         - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.
+         - Run cleanup with a 1/10 probability, in a blocking way
+      - autobackup
+      - CSRF tokens to prevent CSRF attacks between projects (outside from Vibey is already covered by headers): support GET /auth/user, change prompt
+   - tests: local mode, client tests
+
+## 2026-11-13
+
+OK, saw the new outer view:
+- Wide central column, with only space on the left and the right for the vibey icon and the login/logout button + settings button respectively.
+   - Mobile: the buttons go at the top, the central column takes almost the full width.
+   - Note: clicking on the vibey icon should take you to the vibey homepage. There should be a settings button next to the logout (only when you're logged in) which opens the settings view.
+- The central column is about *projects*. It has rounded rectangular tiles, for each project. On a desktop screen, allow for four projects per line.
+   - Mobile: one per line.
+- There should be a loading animation that shows the projects appear gradually and fade in, quickly but still perceptible. A bit like the flux challenge.
+- At the bottom of the project grid there should be a search bar with which you can filter, and a toggle (by default off) for showing public projects. The toggle is absent when you're logged out, and you see public projects only.
+- For those logged in, at the top of the search bar, always visible, there's a new project tile, on its own line, on the right, with a +, green and the text "Create project".
+   - For those that are not admin or have no engine of their own, it takes them to the page to create a subscription. This can be a placeholder modal for now.
+- Each project tile shows the name, modified ago. For those logged in, they can pin them with a pin/unpin icon as we have now in the DNA list.
+   - Note: store the pinned projects in the settings. Remove the slots from the projects.
+
+(I love how the mobile part feels like a responsory).
+
+An interesting consequence of BYOE: you can set up, in your local vibey, remote engines. So you can control remote projects from your laptop. Perhaps handier than ssh for certain things.
+
+DONE:
+- BYOE engines wip
+- Add license
+- New outer view, with subscription modal
+
 ## 2026-11-12
 
 Readme ideas:
