@@ -29,6 +29,7 @@ if [[ "$CLIENT" == "1" ]]; then
    exit 0
 fi
 rsync -av --exclude node_modules --exclude .git ./ "$HOST:$TARGET_FOLDER/"
+rsync -av --delete-after .git/ "$HOST:$TARGET_FOLDER/.git/"
 
 ssh "$HOST" "bash -s -- '$TARGET_FOLDER' '$REBUILD' '$BASE_URL'" <<'REMOTE'
 set -euo pipefail
