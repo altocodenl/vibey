@@ -2108,6 +2108,23 @@ if (mode === 'server') {
             ];
          }
 
+         // Grants the shared project `grant` on the target, then reads the target's .git/HEAD through a cross-project tool call.
+         var targetGitRead = function (grant, expected) {
+            var file = 'chat/git-' + grant.replace (/\W+/g, '-') + '.md';
+            return [
+               targetAccess (grant),
+               ['Cross-project .git read with ' + grant + ' grant', 'post', '/project/message', function (s) {
+                  return {file: file, to: 'ai-opus-5.5', body: 'fake-output:\ntool-call: read ' + s.accessTargetId + '\nRead git head\npath: .git/HEAD'};
+               }, 200],
+               waitFor ('Cross-project .git read with ' + grant + ' grant finishes', agentsDone (file, function (text) {
+                  return /\nResult:\n/.test (text);
+               })),
+               ['Cross-project .git read with ' + grant + ' grant matches ' + expected, 'get', accessFile (file) + '?raw=1', 200, function (s, rq, rs) {
+                  return assert (['result', expected.test (rs.body), true, teishi.test.equal]);
+               }],
+            ];
+         }
+
          suites.access = CONFIG.cloud ? [
             accessLogin ('a'),
             accessLogin ('b'),
@@ -2338,6 +2355,10 @@ if (mode === 'server') {
             ['Sync with PUBLIC write fails', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
                return assert (['sync error', rs.body.error, 'PUBLIC can only be granted read at line: PUBLIC write', teishi.test.equal]);
             }],
+            accessWrite ('vibey/access.md', 'access-c@example.com write chat/\nPUBLIC list\n', 200),
+            ['Sync with PUBLIC list without PUBLIC read fails', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
+               return assert (['sync error', rs.body.error, 'PUBLIC list requires a PUBLIC read grant', teishi.test.equal]);
+            }],
             useSession ('B on shared project'),
             ['B keeps scoped read after failed syncs', 'get', accessFile ('chat/inside.txt'), 200, assertBody ('scoped edit')],
 
@@ -2394,7 +2415,9 @@ if (mode === 'server') {
             accessShell ('with read grant', 'target', 'printf denied > cross.txt', 404),
             targetAccess ('write chat/'),
             accessShell ('with prefixed write grant', 'target', 'printf denied > cross.txt', 404),
-            targetAccess ('write'),
+            targetGitRead ('read', /\nAccess denied\nExit code: 1/),
+            targetGitRead ('write .git/', /\nAccess denied\nExit code: 1/),
+            targetGitRead ('write', /\nResult:\nref: refs\/heads\/main\n/),
             accessShell ('syncs target access', 'target', 'vibey access', 200),
             accessWait,
             accessShell ('runs command in target', 'target', 'printf cross > cross.txt', 200),
@@ -2446,7 +2469,7 @@ if (mode === 'server') {
                ['publicFull', [
                   ['notes.md', 'Notes'],
                   ['src/app.js', 'console.log ("app");'],
-                  ['vibey/access.md', 'PUBLIC read\n'],
+                  ['vibey/access.md', 'PUBLIC read\nPUBLIC list\n'],
                ]],
                ['publicPartial', [
                   ['chat/one.txt', 'one'],
@@ -2479,13 +2502,13 @@ if (mode === 'server') {
                delete s.projectCsrf;
                return true;
             }],
-            ['Anonymous lists public projects', 'get', '/projects', 200, function (s, rq, rs) {
+            ['Anonymous lists only listed public projects', 'get', '/projects', 200, function (s, rq, rs) {
                var listed = dale.fil (rs.body, undefined, function (p) {
                   if (p.id === s.publicFullId || p.id === s.publicPartialId) return p;
                });
                return assert ([
-                  ['both listed', listed.length, 2, teishi.test.equal],
-                  ['public', dale.go (listed, function (p) {return p.public}), [true, true], teishi.test.equal],
+                  ['only full listed', dale.go (listed, function (p) {return p.id}), [s.publicFullId], teishi.test.equal],
+                  ['public', listed [0].public, true, teishi.test.equal],
                ]);
             }],
             useProject ('publicFull'),
@@ -2581,13 +2604,13 @@ if (mode === 'server') {
                   ['sessionCode', location.searchParams.get ('sessionCode'), /^[a-f0-9]{64}$/, teishi.test.match],
                ]);
             }],
-            ['B sees public projects', 'get', '/projects', 200, function (s, rq, rs) {
+            ['B sees only listed public projects', 'get', '/projects', 200, function (s, rq, rs) {
                var listed = dale.fil (rs.body, undefined, function (p) {
                   if (p.id === s.publicFullId || p.id === s.publicPartialId) return p;
                });
                return assert ([
-                  ['both listed', listed.length, 2, teishi.test.equal],
-                  ['public', dale.go (listed, function (p) {return p.public}), [true, true], teishi.test.equal],
+                  ['only full listed', dale.go (listed, function (p) {return p.id}), [s.publicFullId], teishi.test.equal],
+                  ['public', listed [0].public, true, teishi.test.equal],
                ]);
             }],
             projectLogin ('B on publicFull', 'publicFull'),

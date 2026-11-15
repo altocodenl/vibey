@@ -88,3 +88,5 @@ After saving the file successfully, invoke this exact standalone Vibey tool call
 `vibey access` is not a program in the container: it only works as this Vibey tool call. Running it through any other shell fails with `vibey: not found`, and changing the file without syncing leaves the previous grants in place.
 
 There's no need to call `vibey access` if you just granted access to a project; just do it when granting access to users or to `PUBLIC`.
+
+If a user is setting parts of the project as public, it's possible to list the project in the list of public vibey projects. To do this, a line of the form `PUBLIC list` must be added in `vibey/access.md`. You can suggest this to the user, but **always** ask the user if they want this; by default, most people do not want their projects to be listed publicly.

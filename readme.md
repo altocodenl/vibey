@@ -76,7 +76,7 @@ You'll need:
 1. A command line with rsync in your computer.
 2. A Linux server that you can access through SSH, with Docker, Node and rsync installed.
 3. A static IP for the server, with DNS A records for both your domain and its subdomains (`example.com` and `*.example.com`) pointing to it.
-4. A reverse proxy (like Caddy or nginx) with a wildcard HTTPS certificate, forwarding to `127.0.0.1:5353` and keeping the `Host` header. (Please don't run vibey through http, it's a bad idea, especially if you set up AI credentials).
+4. A reverse proxy (like Caddy or nginx) with a wildcard HTTPS certificate, forwarding to `127.0.0.1:5353` and keeping the `Host` header. (Please don't run vibey through http, it's a bad idea, especially if you set up AI credentials). This can be done for free with certbot and Let's Encrypt.
 5. AWS SES credentials.
 
 #1: in `config.4tx`, change `admin` to your email and `email from address` to an address verified in SES.
@@ -122,7 +122,7 @@ email ses accessKeyId ...
 4. Autogit + autobackup running in the background.
 5. Permissions expressed as a file inside the project.
 6. Projects exposed in a subdomain of the host, to achieve isolation in the browser.
-7. Engines as servers that have docker installed and get calls through ssh.
+7. Engines as servers that have docker installed and get calls through ssh. Project containers run with `--restart unless-stopped`, so they come back up when an engine restarts.
 8. The host as a web service that is a sort of hypervisor, in that it handles all the traffic to a project, adding an auth layer.
 9. Auto-login to a project if you have credentials on the host, through redirects.
 
@@ -172,9 +172,11 @@ redis db <number>
 ```
 accessBy:<projectId> 1 <read|write>:<userId|email|PUBLIC>
                      2 <read|write>:<userId|email|PUBLIC>:<prefix>
+                     3 list:PUBLIC
                      ...
 accessTo:<userId|email|PUBLIC> 1 <verb>:<projectId>
                                2 <verb>:<projectId>:<prefix>
+                               3 list:<projectId> // Only in accessTo:PUBLIC
                                ...
 credentials:<userId> data <JSON> // {<anthropic|openai>: {account: {access, expires, refresh, ...}, apiKey: "<key>"}}
 email:<email> <userId>
@@ -227,21 +229,52 @@ userCount <integer>
 username:<username> <userId>
 ```
 
-### Access
+### vibey/access.md
 
-Set grants in `/project/vibey/access.md`, then run `vibey access` to sync them. The **Update access** button, at the top right of `vibey/access.md`, sends `vibey access` to the shell in `vibey/access.chat.md` and opens that chat:
+This file determines who can access a project, and for what purposes.
+
+Each line has the shape `<email|PUBLIC> <read|write|list> [prefix]`, with `prefix` being optional. In the example below, Alice can read the entire project, Bob can read and write files and run commands in the `chat` folder, Eve can read and write the entire project (including `vibey/access.md`, so she can change everyone's access), and everyone (even anonymous users) can read the files in `docs`:
 
 ```
 alice@example.com read
 bob@example.com write chat/
+eve@example.com write
 PUBLIC read docs/
 ```
 
-Each line is `<email|PUBLIC> <read|write> [prefix]`. Blank lines, lines starting with `#` and project grants (lines starting with `project:`, see below) are ignored by the sync. Emails are lowercased. Omitting the prefix grants whole-project access, apps included; otherwise, paths are matched by literal prefix, so `docs` also matches `docs.md` and `docs-private/`; end a folder prefix with `/` to scope it to that folder. A prefix of `APP:<port>` grants access to the app on that port only, matched exactly; file prefixes never match apps. `write` includes `read`. Paths with a `.git` segment require whole-project `write`, even to read. Owners retain full access.
+All prefixes are relative to the working directory of each project (`/project`).
 
-`PUBLIC` grants read access to everyone, including requests without a session, and only supports `read`. Projects with a `PUBLIC` grant, whatever its prefix, are listed for everyone. Only the owner and users whose own grant covers `vibey/access.md` can list or read it; `PUBLIC` grants don't.
+Writing also enables reading. If a user can write anywhere in the project (no prefix, like Eve above), they can also run commands and calls to AI in the project.
 
-Prefixes and requested paths must be relative, without backslashes, control characters, doubled slashes or `.`/`..` segments. Symlinks are followed, not confined to the grant's prefix.
+Apps on a certain port can also be opened. Below, Alice can send GET and HEAD methods to an app at port 8000, and Bob can do the same.
+
+```
+alice@example.com read APP:8000
+bob@example.com write APP:8000
+```
+
+A line without a prefix covers the whole project, apps included. A line with a file prefix never covers apps, and `APP:8000` covers only port 8000. Prefixes match literally, so `docs` also matches `docs.md` and `docs-private/`. To cover only a folder, end the prefix with `/`, as in `docs/`. Prefixes must be relative paths, without backslashes, control characters, doubled slashes or `.`/`..` segments.
+
+`PUBLIC` lines only support `read`. By default, a public project can be read by anyone with its URL, but it doesn't show up in anyone's project list. To list it for everyone, add:
+
+```
+PUBLIC list
+```
+
+Lines starting with `project:` give other projects access to this one; see [Apps](#apps).
+
+```
+project:<projectId1> read scripts/
+project:<projectId2> write
+```
+
+A few things always hold, whatever the file says:
+
+- The owner has full access.
+- Anything inside `.git` requires `write` on the whole project, even to read it.
+- `vibey/access.md` itself can only be read by the owner and by users whose own line covers it; `PUBLIC` lines don't.
+
+Once the file is updated, to put the changes in effect, run this shell command in any chat of the project: `vibey access`.
 
 ### Apps
 
@@ -313,7 +346,7 @@ Except for `GET /auth/user` and `PUT /auth/user`, all other auth routes will ret
 #### Project (host)
 
 - **Request subscription**: `POST /subscription/request`: expects `{type: 'full'|'byoe'}` and emails the admin with the request. Returns 400 for any other body. In local mode, this route returns a 404.
-- **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants, plus every project with a `PUBLIC` grant, most recently active (`last`) first. Projects listed only through `PUBLIC` have `public: true`. Projects have `read: true` when the caller is anonymous or has no write access, including prefix-scoped or `PUBLIC` grants. Each project appears once. Each project includes its owner's username as `ownerUsername`. Projects whose `<ownerUsername>--<encoded name>` is a valid subdomain (lowercased, each dash as `--`, each space as `-`) include it as `subdomain`. Without a session, returns only the projects with a `PUBLIC` grant.
+- **Get projects**: `GET /projects`: returns owned projects and projects shared with the user, including prefix-scoped grants, plus every project with a `PUBLIC read` grant and a `PUBLIC list` line, most recently active (`last`) first. Projects listed only through `PUBLIC` have `public: true`. Projects have `read: true` when the caller is anonymous or has no write access, including prefix-scoped or `PUBLIC` grants. Each project appears once. Each project includes its owner's username as `ownerUsername`. Projects whose `<ownerUsername>--<encoded name>` is a valid subdomain (lowercased, each dash as `--`, each space as `-`) include it as `subdomain`. Without a session, returns only those listed projects.
 - **Create project**: `POST /project`: expects `{name: <name>, engine: <engineId|undefined>}`. Names must contain 2–500 UTF-16 units, and must stay encodable in readable subdomains: a name can't be a UUID (in any case), contain `/` or `?`, have two spaces in a row, or have a space next to a dash; these return 400. In cloud mode, returns 403 if `engine` is absent and the user is not the admin: only the admin can create projects on the host. Test requests (`x-test: 1`) skip this check. Returns 404 if `engine` is not owned by the user, 409 if an owned or shared project already has that name, comparing lowercased names. Stored names retain their case. Returns `{id: <projectId>, subdomain: <subdomain>|undefined}`.
 - **Update project**: `PUT /project`: expects `{id: <id>, name: <name>}`. Names follow the same rules as in **Create project**; breaking them returns 400. Existing projects keep a name that breaks these rules until renamed. Returns 404 if the project is missing or not owned by the caller, 409 if another owned or shared project has the new name, comparing lowercased names. Stored names retain their case; case-only renames are allowed.
 - **Delete project**: `DELETE /project/<projectId>`: requires ownership. Returns 404 if the project is missing or inaccessible, 403 if it is shared with the caller but not owned by them.
@@ -379,7 +412,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `test *`: sets `test` to `{enabled: true}`. Loads the client side test suite (`test.js`) only if the logged in user is admin.
 - `navigate <targetPath>`: reads and optionally updates the hash. On a project host, `projects` and `settings` open the main host. Code navigates to projects as `files/<projectId>[/<filename>]`. On the main host, this loads the project's subdomain (from the loaded `projects`, or the project id), at `#/f[/<filename>]`. On a project host, it is turned into `f[/<filename>]` (see `read hash`) before comparing. If the current hash doesn't match the target path, it sets the hash. If the existing hash matches the target, it calls `read hash`.
 - `go back`: calls `history.back ()` if there is a referrer, otherwise navigates to projects.
-- `read hash`: handles `verify/<loginLink>` and checks that the requested view is reachable by the user. On a project host (when the page's host differs from its `base-host` meta tag), the only view is `files`, at `f/<filename>`, and other hashes navigate to `f`; on the main host, `f` hashes navigate to `projects`. `login/<path>`, with a path under `/auth/project/`, opens the path if logged in; otherwise stores it at `returnTo` and navigates to login. Anonymous users navigating to `settings` go to login. In the files view, sets `project.id` to the subdomain and `file.name` to the filename, and calls `read project` if `files` isn't loaded. Defaults to `main.md`, or the first available file; a filename that isn't in the loaded file list navigates to the default.
+- `read hash`: handles `verify/<loginLink>` and checks that the requested view is reachable by the user. On a project host (when the page's host differs from its `base-host` meta tag), the only view is `files`, at `f/<filename>`, and other hashes navigate to `f`; on the main host, `f` hashes navigate to `projects`. `login/<path>`, with a path under `/auth/project/`, opens the path if logged in; otherwise stores it at `returnTo` and navigates to login. Anonymous users navigating to `settings` go to login. In the files view, sets `project.id` to the subdomain and `file.name` to the filename, and calls `read project` if `files` isn't loaded. Defaults to `main.md`, or the first available file; a filename that isn't in the loaded file list navigates to the default. In the settings view, calls `read engines`.
 - `stop propagation`: a helper to stop the bubbling up of an event (like a click).
 - `snackbar <type> [message] [keep]`: shows a notification with type (`ok`, `warning`, `error`, or `yellow`, which shows spinnies). Auto-clears after 4 seconds unless `keep` is set. `snackbar clear` dismisses it immediately.
 - `get|post|put|delete <path> [body] [callback]`: makes an AJAX request. Puts the CSRF header in `post`, `put` and `delete` requests if the CSRF token is available. Adds `x-test: 1` when `test` is truthy. On 403 from a non-auth path, resets user state and redirects to login. Reports errors to the server.
@@ -392,7 +425,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `keydown *`: in the login view, Enter calls `login` when the `#login` button is enabled.
 - `verify <loginLink>`: verifies the login link via `GET /auth/verify/<loginLink>`. On success, opens `returnTo` if set; otherwise stores the user info, loads projects, navigates to projects and shows a welcome snackbar. On error, shows a snackbar and navigates to login.
 - `logout`: logs out via `POST /auth/logout`. Resets user state to anonymous and navigates to login.
-- `update user <body>`: sends `body` (`{settings: <object>}` and/or `{username: <string>}`) through `PUT /auth/user`. On success, sets each key of the response under `user` (e.g. `user.settings`, `user.username`), showing an `ok` snackbar (`Username changed to <username>`) when the username differs from the current one; on failure, keeps the current values and shows the server's error (such as an invalid or taken username) in a snackbar, or `Could not update user`. In the right settings pane, the Username form calls it with `{username}` on submit, and the `vi mode` checkbox below the AI providers with the complete settings object as `{settings}`.
+- `update user <body>`: sends `body` (`{settings: <object>}` and/or `{username: <string>}`) through `PUT /auth/user`. On success, sets each key of the response under `user` (e.g. `user.settings`, `user.username`), showing an `ok` snackbar (`Username changed to <username>`) when the username differs from the current one; on failure, keeps the current values and shows the server's error (such as an invalid or taken username) in a snackbar, or `Could not update user`. When `body` includes `username`, clears `edit.username` on success. At the top of the settings view, the pencil button next to the username opens an inline form that calls it with `{username}` on submit; the `vi mode` checkbox below the engines calls it with the complete settings object as `{settings}`.
 - `change user.settings`: updates the current editor's key map without recreating it. Uses Vim bindings when `user.settings.vi` is true and not on mobile, otherwise default bindings.
 
 #### Credentials
@@ -401,6 +434,13 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `complete pkce <provider> <code>`: exchanges the authorization code for tokens via `POST /credentials/:provider/complete`. On success, clears `pkce` and reloads user.
 - `save apiKey <provider> <key>`: saves the API key via `POST /credentials/:provider/apiKey`. On success, clears `pkce` and reloads user.
 - `remove credential <provider> <name>`: asks for confirmation, then removes the credential via `DELETE /credentials/:provider/:name`. On success, reloads user.
+
+#### Engines
+
+- `read engines`: gets the user's engines via `GET /engines`, sorted by name, and sets them in `engines`.
+- `create engine`: creates an engine using the trimmed values at `new.engine.name` and `new.engine.ip` via `POST /engine`. Shows a snackbar while the server reaches the engine. On success, clears `new.engine`, reloads engines and reloads user, so that `user.engines` includes the new engine; on failure, shows the server's error (such as an unreachable engine) in a snackbar.
+- `edit engine <id> <name>`: ignores blank names, otherwise renames the engine via `PUT /engine`. On success, shows a snackbar and reloads engines.
+- `delete engine <id> <name>`: asks for confirmation, then deletes the engine via `DELETE /engine/<id>`. On success, reloads engines and user; on failure, shows the server's error (such as projects still running on the engine) in a snackbar.
 
 #### Projects
 
@@ -416,7 +456,7 @@ File reads and message reads require read access to their path, which `PUBLIC` g
 - `read projects`: gets all projects via `GET /projects`, sets them in `projects`. If `user.settings.pinned` has ids that are not in the list, removes them through `update user`.
 - `create project`: creates a new project using the trimmed name at `new.project.name` and the engine at `new.project.engine` via `POST /project`. Shows a snackbar while creating. On success, clears the creation modal and project search, and opens `#/f/main.md` on the project's subdomain.
 - `change new.project`: when `new.project` is set, focuses the new project name input field. Runs at low priority so the DOM is ready.
-- `start project`: opens the creation modal (sets `new.project` to `{engine: <first of user.engines>}`) when `user.engines` is non-empty: in local mode, for the admin and for users who own an engine. The modal shows an engine picker when there is more than one engine; otherwise sets `show.subscribe`, which opens the subscription modal.
+- `start project`: opens the creation modal (sets `new.project` to `{engine: <first of user.engines>}`) when `user.engines` is non-empty: in local mode, for the admin and for users who own an engine. The modal shows an engine picker when there is more than one engine, labeled with engine names from `engines` (`host` and engines not yet loaded show their id), and calls `read engines` to load them; otherwise sets `show.subscribe`, which opens the subscription modal.
 - `pin project <id>`: adds the id to `user.settings.pinned`, or removes it if present, through `update user`.
 - `edit project`: renames a project using the values at `edit.project` via `PUT /project`. On success, reloads projects and shows a snackbar.
 - `remove project <project>`: asks for confirmation, then deletes the project via `DELETE /project/<id>`. On success, reloads projects and shows a snackbar.
@@ -496,14 +536,24 @@ editor <CodeMirror instance>
 
 ```
 apps <array of ports> // Listening ports the caller can access, shown as `APP:<port>` entries above the files
-edit file newName "<new name>"
+edit engine <engineId>
+     file newName "<new name>"
           oldName "<original name>"
      project id <id>
              name "<project name>"
+     username <true|undefined>
 editor position <project name> <filename> ch <integer>
                                           left <integer> // Horizontal scroll in pixels
                                           line <integer>
                                           top <integer> // Vertical scroll in pixels
+engines 1 created <date>
+          id <engineId>
+          ip <IP>
+          knownHost <known_hosts lines>
+          name "<engine name>"
+          owner <userId>
+          publicKey <OpenSSH public key>
+        ...
 extendClient <true|undefined>
 file actions <false|true>
      full <false|true>
@@ -524,7 +574,9 @@ message atBottom <false|true>
         cancelling <messageId> <true|undefined>
         to <all|shell|ai|ai-<model>|messageUUID>
 mobile <true|undefined>
-new file "<file name>"
+new engine ip "<IP>"
+           name "<engine name>"
+    file "<file name>"
     project engine "<engineId>" // Defaults to the first of `user.engines`
             name "<project name>"
     type "chat|file"
@@ -548,7 +600,7 @@ projects 1 created <date>
            name "..."
            owner <userId>
            ownerUsername <username|undefined>
-           public <true|undefined> // Listed only because it has a PUBLIC grant; hidden from logged-in users' projects view unless `show.public` is set, and never runs its client extension
+           public <true|undefined> // Listed only because it has `PUBLIC read` and `PUBLIC list` grants; hidden from logged-in users' projects view unless `show.public` is set, and never runs its client extension
            subdomain <subdomain|undefined>
          ...
 recent files <filename> <ISO date> // Up to three recently opened files, excluding apps

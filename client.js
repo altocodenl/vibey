@@ -252,6 +252,8 @@ B.mrespond ([
          if (! B.get ('files')) B.call (x, 'read', 'project');
       }
 
+      if (hash [0] === 'settings') B.call (x, 'read', 'engines');
+
       B.call (x, 'set', 'view', hash [0] === 'f' ? 'files' : hash [0]);
 
    }],
@@ -479,6 +481,7 @@ B.mrespond ([
    }],
 
    ['start', 'project', function (x) {
+      if ((B.get ('user', 'engines') || []).length > 1) B.call (x, 'read', 'engines');
       if ((B.get ('user', 'engines') || []).length) return B.call (x, 'set', ['new', 'project'], {engine: B.get ('user', 'engines') [0]});
       B.call (x, 'set', ['show', 'subscribe'], true);
    }],
@@ -1091,6 +1094,7 @@ B.mrespond ([
       B.call (x, 'put', '/auth/user', body, function (x, error, rs) {
          if (error) return B.call (x, 'snackbar', 'error', (error.body || {}).error || 'Could not update user');
          if (rs.body.username !== undefined && rs.body.username !== B.get ('user', 'username')) B.call (x, 'snackbar', 'ok', 'Username changed to ' + rs.body.username);
+         if (body.username !== undefined) B.call (x, 'rem', 'edit', 'username');
          dale.go (rs.body, function (value, key) {
             B.call (x, 'set', ['user', key], value);
          });
@@ -1582,6 +1586,48 @@ B.mrespond ([
       });
    }],
 
+   // *** ENGINES ***
+
+   ['read', 'engines', function (x) {
+      B.call (x, 'get', '/engines', function (x, error, rs) {
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem loading engines');
+         B.call (x, 'set', 'engines', rs.body.sort (function (a, b) {
+            return a.name.localeCompare (b.name);
+         }));
+      });
+   }],
+
+   ['create', 'engine', function (x) {
+      var engine = B.get ('new', 'engine') || {};
+      B.call (x, 'snackbar', 'ok', 'Reaching engine...');
+      B.call (x, 'post', '/engine', {ip: (engine.ip || '').trim (), name: (engine.name || '').trim ()}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', (error.body || {}).error || 'Failed to create engine');
+         B.call (x, 'snackbar', 'clear');
+         B.call (x, 'rem', 'new', 'engine');
+         B.call (x, 'read', 'engines');
+         B.call (x, 'read', 'user');
+      });
+   }],
+
+   ['edit', 'engine', function (x, id, name) {
+      if (! name.trim ()) return;
+      B.call (x, 'put', '/engine', {id: id, name: name.trim ()}, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', 'Failed to rename engine');
+         B.call (x, 'snackbar', 'ok', 'Engine renamed');
+         B.call (x, 'rem', 'edit', 'engine');
+         B.call (x, 'read', 'engines');
+      });
+   }],
+
+   ['delete', 'engine', function (x, id, name) {
+      if (! confirm ('Delete engine ' + name + '?')) return;
+      B.call (x, 'delete', '/engine/' + id, function (x, error) {
+         if (error) return B.call (x, 'snackbar', 'error', (error.body || {}).error || 'Failed to delete engine');
+         B.call (x, 'read', 'engines');
+         B.call (x, 'read', 'user');
+      });
+   }],
+
 
 ]);
 
@@ -1981,6 +2027,53 @@ views.settings = function () {
             }, ['‹', views.tooltip ('B', 'below')]],
             ['span', {class: 'f4 fw6 vnearwhite'}, 'Settings'],
          ]],
+         B.view ([['edit', 'username'], ['user', 'username']], function (editUsername, username) {
+            return ['section', {class: 'ba bg-vnavy br3 mb4 pa3 vborderblue-border'}, [
+               ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, 'Username'],
+               ['div', {class: 'flex items-center', style: style ({gap: '0.75rem'})}, [
+                  ['i', {class: 'bi bi-person-circle f4 vlightblue'}],
+                  editUsername ? ['form', {
+                     class: 'flex flex-auto items-center',
+                     onsubmit: B.ev ('update', 'user', {raw: '(event.preventDefault (), {username: this.elements.username.value})'}),
+                     style: style ({
+                        gap: '0.5rem',
+                        'min-width': 0,
+                     }),
+                  }, [
+                     ['input', {
+                        'aria-label': 'Username',
+                        autocapitalize: 'none',
+                        autocomplete: 'username',
+                        autofocus: true,
+                        class: css.input.replace (' mb3', '').replace ('pa3', 'pa2') + ' f6 flex-auto',
+                        name: 'username',
+                        required: true,
+                        spellcheck: false,
+                        style: style ({'min-width': 0}),
+                        type: 'text',
+                        value: username || '',
+                     }],
+                     ['button', {
+                        'aria-label': 'Save username',
+                        class: 'bg-transparent bn f5 pointer vgreen',
+                        type: 'submit',
+                     }, ['i', {class: 'bi bi-check-lg'}]],
+                     ['button', {
+                        'aria-label': 'Cancel rename',
+                        class: 'bg-transparent bn f5 pointer vgray',
+                        onclick: B.ev ('rem', 'edit', 'username'),
+                        type: 'button',
+                     }, ['i', {class: 'bi bi-x-lg'}]],
+                  ]] : ['span', {class: 'f5 fw6 truncate vnearwhite'}, username],
+                  editUsername ? '' : ['button', {
+                     'aria-label': 'Edit username',
+                     class: 'bg-transparent bn f5 pointer vlightblue',
+                     onclick: B.ev ('set', ['edit', 'username'], {raw: '(event.preventDefault (), true)'}),
+                     type: 'button',
+                  }, ['i', {class: 'bi bi-pencil'}]],
+               ]],
+            ]];
+         }),
          B.view ([['pkce'], ['user', 'credentials']], function (pkce, credentials) {
             pkce = pkce || {};
             var account = pkce.account || {};
@@ -2068,12 +2161,14 @@ views.settings = function () {
                   }, 'Cancel'],
                ]],
             ]];
-            return ['div', [dale.go (['anthropic', 'openai'], function (provider) {
+            return ['div', [['section', {class: 'ba bg-vnavy br3 mb4 pa3 vborderblue-border'}, [
+               ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, 'AI credentials'],
+               dale.go (['anthropic', 'openai'], function (provider) {
                var configured = dale.fil ((credentials || {}) [provider] || {}, undefined, function (present, name) {
                   if (present) return name;
                }).sort ();
-               return ['section', {class: 'mb4'}, [
-                  ['h3', {class: 'f5 fw6 mb3 mt0 vlightblue'}, provider === 'anthropic' ? 'Anthropic' : 'OpenAI'],
+               return ['div', {class: provider === 'anthropic' ? 'mb4' : ''}, [
+                  ['h4', {class: 'f6 fw6 mb3 mt0 vnearwhite'}, provider === 'anthropic' ? 'Anthropic' : 'OpenAI'],
                   configured.length ? ['div', {class: 'mb3'}, dale.go (configured, function (name) {
                      return ['div', {class: 'flex items-center mb2', style: style ({gap: '0.75rem'})}, [
                         ['span', {class: 'f6 vlightblue'}, [
@@ -2109,31 +2204,124 @@ views.settings = function () {
                      }, inc (configured, 'apiKey') ? 'Add new API key' : 'Add API key'],
                   ]],
                ]];
-            }),
-            B.view (['user', 'username'], function (username) {
-               return ['form', {
-                  class: 'mb4',
-                  onsubmit: B.ev ('update', 'user', {raw: '(event.preventDefault (), {username: this.elements.username.value})'}),
-               }, [
-                  ['label', {class: 'db f6 mb2 vgray', for: 'username-input'}, 'Username'],
-                  ['div', {class: 'flex', style: style ({gap: '0.75rem'})}, [
-                     ['input', {
-                        autocapitalize: 'none',
-                        autocomplete: 'username',
-                        class: css.input + ' f6 flex-auto',
-                        id: 'username-input',
-                        name: 'username',
-                        required: true,
-                        spellcheck: false,
-                        style: style ({'min-width': 0}),
-                        type: 'text',
-                        value: username || '',
-                     }],
-                     ['button', {
-                        class: css.button + ' f6',
-                        type: 'submit',
-                     }, 'Save'],
+            })]],
+            B.view ([['edit', 'engine'], ['engines'], ['new', 'engine'], ['projects'], ['user']], function (editEngine, engines, newEngine, projects, user) {
+               return ['section', {class: 'mb4'}, [
+                  ['div', {class: 'flex items-center justify-between mb3'}, [
+                     ['h3', {class: 'f5 fw6 ma0 vlightblue'}, 'Engines'],
+                     user.mode === 'local' || user.admin || user.creator ? ['button', {
+                        class: 'bg-transparent ba br2 f6 fw6 ph3 pointer pv2 vborderblue-border vlightblue',
+                        onclick: B.ev ('set', ['new', 'engine'], {}),
+                        type: 'button',
+                     }, [['i', {class: 'bi bi-plus-lg mr2'}], 'Add engine']] : '',
                   ]],
+                  (engines || []).length ? dale.go (engines, function (engine) {
+                     var bound = dale.fil (projects, undefined, function (project) {
+                        if (project.engine === engine.id && project.owner === user.id) return project;
+                     });
+                     return ['div', {class: 'ba bg-vnavy br3 mb3 overflow-hidden vborderblue-border'}, [
+                        ['div', {class: 'flex items-center pa3', style: style ({gap: '0.75rem'})}, [
+                           ['i', {class: 'bi bi-hdd-rack f4 vgreen'}],
+                           editEngine === engine.id ? ['form', {
+                              class: 'flex flex-auto items-center',
+                              onsubmit: B.ev ('edit', 'engine', engine.id, {raw: '(event.preventDefault (), this.elements.name.value)'}),
+                              style: style ({
+                                 gap: '0.5rem',
+                                 'min-width': 0,
+                              }),
+                           }, [
+                              ['input', {
+                                 'aria-label': 'Engine name',
+                                 autofocus: true,
+                                 class: css.input.replace (' mb3', '').replace ('pa3', 'pa2') + ' f6 flex-auto',
+                                 name: 'name',
+                                 required: true,
+                                 style: style ({'min-width': 0}),
+                                 type: 'text',
+                                 value: engine.name,
+                              }],
+                              ['button', {
+                                 'aria-label': 'Save name',
+                                 class: 'bg-transparent bn f5 pointer vgreen',
+                                 type: 'submit',
+                              }, ['i', {class: 'bi bi-check-lg'}]],
+                              ['button', {
+                                 'aria-label': 'Cancel rename',
+                                 class: 'bg-transparent bn f5 pointer vgray',
+                                 onclick: B.ev ('rem', 'edit', 'engine'),
+                                 type: 'button',
+                              }, ['i', {class: 'bi bi-x-lg'}]],
+                           ]] : ['div', {class: 'flex-auto', style: style ({'min-width': 0})}, [
+                              ['div', {class: 'f5 fw6 truncate vnearwhite'}, engine.name],
+                              ['div', {class: 'code f7 vgray'}, engine.ip],
+                           ]],
+                           editEngine === engine.id ? '' : ['button', {
+                              'aria-label': 'Rename engine ' + engine.name,
+                              class: 'bg-transparent bn f5 pointer vlightblue',
+                              onclick: B.ev ('set', ['edit', 'engine'], {raw: '(event.preventDefault (), ' + JSON.stringify (engine.id) + ')'}),
+                              type: 'button',
+                           }, ['i', {class: 'bi bi-pencil'}]],
+                           ['button', {
+                              'aria-label': 'Delete engine ' + engine.name,
+                              class: 'bg-transparent bn f5 pointer vred',
+                              onclick: B.ev ('delete', 'engine', engine.id, engine.name),
+                              type: 'button',
+                           }, ['i', {class: 'bi bi-trash'}]],
+                        ]],
+                        ['div', {class: 'bt f6 pa3 vborderblue-border'}, [
+                           bound.length ? ['div', {class: 'mb2 vgray'}, 'Projects'] : '',
+                           bound.length ? ['div', {class: 'flex flex-wrap mb3', style: style ({gap: '0.5rem'})}, dale.go (bound, function (project) {
+                              return ['span', {
+                                 class: 'br2 f6 fw6 ph2 pointer pv1 ' + views.projectColor (project.name),
+                                 onclick: B.ev ('navigate', 'files/' + project.id),
+                              }, project.name];
+                           })] : '',
+                           ['div', {class: 'mb2 vgray'}, 'Public key'],
+                           ['div', {class: 'bg-vdeepnavy br2 code f7 pa2 vgray word-wrap'}, engine.publicKey],
+                        ]],
+                     ]];
+                  }) : ['p', {class: 'f6 mb3 mt0 vgray'}, 'No engines added'],
+                  ! newEngine ? '' : views.modal ({
+                     'aria-label': 'Add engine',
+                     'aria-modal': 'true',
+                     onclick: B.ev ('rem', 'new', 'engine'),
+                     role: 'dialog',
+                  }, [
+                     ['form', {onsubmit: B.ev ('create', 'engine', {raw: 'event.preventDefault ()'})}, [
+                        ['h3', {class: 'f4 fw6 mb2 mt0 vlightblue'}, 'Add engine'],
+                        ['p', {class: 'f6 mb4 mt0 vgray'}, 'Connect a machine that runs your projects.'],
+                        ['label', {class: 'db f6 mb2 vgray', for: 'new-engine-name'}, 'Name'],
+                        ['input', {
+                           class: css.input + ' f6',
+                           id: 'new-engine-name',
+                           oninput: B.ev ('set', ['new', 'engine', 'name']),
+                           placeholder: 'My server',
+                           type: 'text',
+                           value: newEngine.name || '',
+                        }],
+                        ['label', {class: 'db f6 mb2 vgray', for: 'new-engine-ip'}, 'IP address'],
+                        ['input', {
+                           class: css.input + ' code f6',
+                           id: 'new-engine-ip',
+                           oninput: B.ev ('set', ['new', 'engine', 'ip']),
+                           placeholder: '203.0.113.10',
+                           type: 'text',
+                           value: newEngine.ip || '',
+                        }],
+                        ['div', {class: 'flex mt2', style: style ({gap: '0.75rem'})}, [
+                           ['button', {
+                              class: css.button + ' f6 flex-auto',
+                              disabled: ! (newEngine.name || '').trim () || ! (newEngine.ip || '').trim (),
+                              type: 'submit',
+                           }, 'Add engine'],
+                           ['button', {
+                              class: 'bg-vhighlightblue bn br2 f6 fw6 pa3 pointer vlightblue',
+                              onclick: B.ev ('rem', 'new', 'engine'),
+                              type: 'button',
+                           }, 'Cancel'],
+                        ]],
+                     ]],
+                  ]),
                ]];
             }),
             B.view (['user', 'settings'], function (settings) {
@@ -2419,7 +2607,7 @@ views.outer = function () {
          }),
 
          // Project creation modal
-         B.view (['new', 'project'], function (newProject) {
+         B.view ([['engines'], ['new', 'project']], function (engines, newProject) {
             if (newProject === undefined) return ['div'];
 
             var randomName = function () {
@@ -2474,7 +2662,9 @@ views.outer = function () {
                      id: 'new-project-engine',
                      onchange: B.ev ('set', ['new', 'project', 'engine']),
                   }, dale.go (user.engines, function (engine) {
-                     return ['option', {selected: engine === newProject.engine, value: engine}, engine];
+                     return ['option', {selected: engine === newProject.engine, value: engine}, dale.fil (engines, undefined, function (e) {
+                        if (e.id === engine) return e.name;
+                     }) [0] || engine];
                   })],
                ]],
                ['button', {

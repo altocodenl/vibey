@@ -1,5 +1,40 @@
 # Vibey development notes
 
+## 2026-11-15
+
+https://www.crissyfield.de/research/lovable-en/
+"Using datasets from the open web archive Common Crawl, we identified and analyzed 159,041 Lovable projects from December 2025 to September 2026. Of these, 34,545 used Supabase.
+
+24,664 websites sent database records from Supabase as soon as they loaded, without requiring a login or any other interaction. That alone is not a security issue: the data may be intended for public display. But by making additional read-only requests, we were able to retrieve more database content. We found records containing email addresses in 10,560 tables across 7,403 of the 24,664 websites (30%)."
+It is crucial to have good security by default.
+
+DONE:
+- auto-bring back up docker projects if engines restart.
+- We need the ui for engines, I had forgotten. Engines go below ai credentials: list (with each project bounded plus name), rename, create, delete.
+- Do idempotent manual provision script for new engines: install nginx; remove non-ssh authentication altogether, to reduce noise in the logs; autorefresh on Sunday 8am UTC (force users to write their apps in a way that restart and can take restarts). Engines must stay fresh. Also projects: refresh must reach them! how does alpine manage them?
+- special directive for vibey access: who listed. make it opt-in to show public projects, by default delisted. Listing in the vibey front page should be opt in.
+
+On domain redirects:
+- how to update the nginx config? Taking control of it is not acceptable; we need to do targeted edits to the redirects, letting certbot do its magic on the block below.
+- When doing redirects from a domain, do redirects without distinguishing single file vs path. do it all prefix based! prefix to prefix. prefixes are matched in the order they appear. as for the target, it can be either id or subdomain, you choose. in the end, it all maps to nginx config rules, because it's the nginx in the engine that does the proxy.
+- Do we put engine redirects (and general config) in a file, or in redis? we can still show the whole thing as a file, and store it in redis. the important thing is one format, like we have for vibey/access.md
+
+the road ahead:
+- now: core vibey
+- very soon: email (also outgoing) & domain
+- after: cell
+- later: bank (transactions, checking)
+
+At some point, we should consider using openbsd as the default for engines, instead of ubuntu.
+
+I used to complain that cloudflare is MITM as a service, but vibey is essentially the same. Hopefully it's more useful.
+
+How to use the backup credits? The moment that, extrapolated to the end of the month, with what you have in files you have just enough to keep it, we stop accepting new files. If you delete, you can of course add more. So, for your budget, whatever was backed up already stays, but new backups are frozen. We need good, up to date calculation of usage in s3/backblaze.
+
+Do all billing prorated to the calendar month, and bill on the first. Then you don't have to remember which day you started.
+
+When Altocode grows and we have to check for platform abuse, as well as take requests from law enforcement, how do you maintain a high standard without having to do everything yourself? A possibility is to open partial access to select government, civil, media and ngos to some (not all) open cases, so there can be monitoring of Altocode's own monitoring, as well as that of law enforcement agencies. By giving partial access which is different to different organizations depending on the case, you also reduce the number of parties that can create a leak on a case X, and also that helps you detect leaky partners over time.
+
 ## 2026-11-14
 
 Engine endpoints:
@@ -29,6 +64,7 @@ DONE:
    - migration
       - personal blog
       - altocode home
+      - github repos
       - user #2
       - user #3
    - new domain: hivibey.com (!)
@@ -42,9 +78,7 @@ DONE:
       - destek to list logs and have alerts
       - renew wildcard subdomain automatically
    - engine
-      - support engines without provisioning
       - grant others the right to create projects
-      - open ports
       - redirect traffic from domain: certbot, redirect single path, redirect to folder (forbid going up past the original target)
       - provision engines
    - access
@@ -53,8 +87,8 @@ DONE:
    - file
       - open sqlite files
    - project
+      - open ports
       - cron
-      - New project view
       - Fix autogit
          - Run one git operation at a time. Use a single queue or lock per repo so two commits never run together.
          - Turn off automatic cleanup in the commit path: git -c gc.auto=0 -c maintenance.auto=false commit ..., or set both options in each repo's config.

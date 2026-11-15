@@ -312,7 +312,7 @@ var getForUser = async function (userId, entity) {
       var grants = await redis ('smembers', 'accessTo:' + userId);
       keys = [... new Set (keys.concat (dale.fil (grants, undefined, function (grant) {
          var [verb, id] = grant.split (':');
-         if (verb === 'read' || verb === 'write') return 'project:' + id;
+         if ((verb === 'read' || verb === 'write') && (userId !== 'PUBLIC' || inc (grants, 'list:' + id))) return 'project:' + id;
       })))];
    }
    var items = dale.fil (keys, undefined, function (key) {
@@ -582,6 +582,7 @@ project.access = async function (proj) {
       line = line.trim ();
       // Project grants (`project:<originId> ...`) are read on every cross-project call, not synced.
       if (! line || line.startsWith ('#') || line.startsWith ('project:')) return;
+      if (/^PUBLIC\s+list$/.test (line)) return {email: 'PUBLIC', verb: 'list', prefix: ''};
       var match = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line);
       if (! match || (match [1] !== 'PUBLIC' && ! validEmail.test (match [1]))) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
       if (match [1] === 'PUBLIC' && match [2] !== 'read') return invalidEntry = {error: 'PUBLIC can only be granted read at line: ' + line};
@@ -593,6 +594,7 @@ project.access = async function (proj) {
    });
 
    if (invalidEntry) return {code: 1, error: invalidEntry.error};
+   if (dale.stop (entries, true, entry => entry.email === 'PUBLIC' && entry.verb === 'list') && ! dale.stop (entries, true, entry => entry.email === 'PUBLIC' && entry.verb === 'read')) return {code: 1, error: 'PUBLIC list requires a PUBLIC read grant'};
 
    var emails = dale.keys (dale.obj (entries, function (entry) {
       return [entry.email, true];
@@ -685,7 +687,7 @@ project.run = async function (proj, command, options) {
       var result = await project.agentRun (id, ['sh', '-c', command], {... options, 'catch': true}, docker);
       if (result.error && result.error.error === 'AgentExited' && result.error.stderr.match (/^Error response from daemon: (?:container .+ is not running|No such container)/)) {
          if (proj.engine && proj.engine !== 'host') await run (... docker, 'network', 'create', '-o', 'com.docker.network.bridge.enable_icc=false', 'vibey-projects', {catch: true});
-         var recreate = await run (... docker, 'run', '--init', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
+         var recreate = await run (... docker, 'run', '--init', '--restart', 'unless-stopped', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
          if (proj.engine && proj.engine !== 'host' && recreate.code && /Unable to find image 'vibey-project:/.test (recreate.stderr)) {
             var build = await run (... docker, 'build', '-t', 'vibey-project', '-', {input: projectDockerfile, catch: true});
             return build.code ? result : project.run (proj, command, options);
@@ -864,7 +866,7 @@ project.wake = async function () {
    await dale.async (volumes.stdout.trim ().split ('\n'), async function (id) {
       var start = await run ('docker', 'start', id, {catch: true});
       if (! start.code) return;
-      var recreate = await run ('docker', 'run', '--init', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
+      var recreate = await run ('docker', 'run', '--init', '--restart', 'unless-stopped', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
       if (recreate.code) clog ({priority: 'important', type: 'Project wake error', id, error: recreate.stderr});
    }, {concurrent: 10});
 }
@@ -3140,6 +3142,7 @@ var routes = [
                         if (grant [2] !== 'write' && call.op !== 'read') return;
                         var prefix = grant [3] || '';
                         if (! validProjectPath (prefix)) return;
+                        if (call.op !== 'run' && inc (call.path.split ('/'), '.git')) return grant [2] === 'write' && ! prefix;
                         return ! prefix || (call.op !== 'run' && call.path.startsWith (prefix));
                      }
                   );
