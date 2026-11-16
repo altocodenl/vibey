@@ -2,7 +2,7 @@
 set -euo pipefail
 
 HOST="acprod"
-BASE_URL="https://app.buildwithvibey.com"
+BASE_URL="https://app.hivibey.com"
 
 if [[ "${1:-}" != "prod" ]]; then
    echo "Must specify environment (prod)"
