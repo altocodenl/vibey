@@ -10,7 +10,7 @@ var Redis = require (process.cwd () + '/node_modules/redis').createClient ({db: 
 
 var redis = function (command, ... args) {
    return util.promisify (Redis [command].bind (Redis)).apply (null, args);
-}
+};
 
 (async function () {
    var keys = await redis ('keys', 'project:*');
