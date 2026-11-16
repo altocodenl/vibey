@@ -90,6 +90,12 @@ var clog = function () {
    console.log (ansi (color, cell.JSToText (log)) + '\n\n');
 }
 
+// Token users carry their secret in their id, so logs show 'token' instead.
+var logUser = function (user, fallback) {
+   if (! user) return fallback;
+   return user.token ? 'token' : user.id;
+}
+
 var reply = function () {
    var args = arguments;
    var [rs, code, body, headers, contentType] = dale.go (dale.times (5, arguments [0].writable === undefined ? 1 : 0), function (k) {
@@ -97,7 +103,7 @@ var reply = function () {
    });
 
    if (rs.headersSent || rs.writableEnded || rs.destroyed || (rs.connection && rs.connection.writable === false)) {
-      return clog ({priority: 'important', type: 'Interrupted response', rqId: rs.log.id, method: rs.request.method, path: rs.request.url, ip: rs.log.origin, userId: rs.request.user ? rs.request.user.id : 'anonymous'});
+      return clog ({priority: 'important', type: 'Interrupted response', rqId: rs.log.id, method: rs.request.method, path: rs.request.url, ip: rs.log.origin, userId: logUser (rs.request.user, 'anonymous')});
    }
 
    return cicek.reply (rs, code, body, headers, contentType);
@@ -539,7 +545,7 @@ var validProjectName = function (name) {
 var allowOp = async function (userId, projectId, op, prefix) {
    if (op !== 'read' && op !== 'write') return false;
    if (prefix !== undefined && ! validProjectPath (prefix)) return false;
-   // access.md names who the project is shared with; requests without a session can't read it.
+   // access.md names who the project is shared with and holds token secrets: only the owner and whole-project writers can read or change it.
    if (userId === 'PUBLIC' && prefix === 'vibey/access.md') return false;
 
    var [owner, grants] = await redis ([
@@ -555,6 +561,7 @@ var allowOp = async function (userId, projectId, op, prefix) {
       if (verb !== 'write' && verb !== op) return;
 
       var scope = parts.join (':');
+      if (prefix === 'vibey/access.md') return verb === 'write' && ! scope;
       if (type (prefix) === 'string' && inc (prefix.split ('/'), '.git')) return verb === 'write' && ! scope;
       return ! scope || (type (prefix) === 'string' && (scope.startsWith ('APP:') ? prefix === scope : ! /^APP:\d+$/.test (prefix) && prefix.startsWith (scope)));
    });
@@ -565,6 +572,7 @@ var projectAccessCleanup = async function (id) {
    return [
       ... dale.go (members, function (member) {
          var [verb, who, ... prefix] = member.split (':');
+         if (who === 'token') who += ':' + prefix.shift ();
          var suffix = prefix.length ? ':' + prefix.join (':') : '';
          return ['srem', 'accessTo:' + who, verb + ':' + id + suffix];
       }),
@@ -584,13 +592,13 @@ project.access = async function (proj) {
       if (! line || line.startsWith ('#') || line.startsWith ('project:')) return;
       if (/^PUBLIC\s+list$/.test (line)) return {email: 'PUBLIC', verb: 'list', prefix: ''};
       var match = /^(\S+)\s+(read|write)(?:\s+(.+))?$/.exec (line);
-      if (! match || (match [1] !== 'PUBLIC' && ! validEmail.test (match [1]))) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
+      if (! match || (match [1] !== 'PUBLIC' && ! /^token:[A-Za-z0-9_-]{32,256}$/.test (match [1]) && ! validEmail.test (match [1]))) return invalidEntry = {error: 'Invalid vibey/access.md line: ' + line};
       if (match [1] === 'PUBLIC' && match [2] !== 'read') return invalidEntry = {error: 'PUBLIC can only be granted read at line: ' + line};
 
       var prefix = match [3] || '';
       if (! validProjectPath (prefix)) return invalidEntry = {error: 'Invalid vibey/access.md prefix at line: ' + line};
 
-      return {email: match [1] === 'PUBLIC' ? 'PUBLIC' : match [1].toLowerCase (), verb: match [2], prefix};
+      return {email: match [1] === 'PUBLIC' || match [1].startsWith ('token:') ? match [1] : match [1].toLowerCase (), verb: match [2], prefix};
    });
 
    if (invalidEntry) return {code: 1, error: invalidEntry.error};
@@ -601,6 +609,7 @@ project.access = async function (proj) {
    }));
 
    var users = await dale.async (emails, async function (email) {
+      if (email.startsWith ('token:')) return email;
       var userId = await redis ('get', 'email:' + email);
       // Keep invitations keyed by email until the account is verified.
       if (userId && await redis ('ttl', 'user:' + userId) === -1) return userId;
@@ -618,6 +627,7 @@ project.access = async function (proj) {
    await redis ([
       ... dale.go (previous, function (member) {
          var [verb, who, ... prefix] = member.split (':');
+         if (who === 'token') who += ':' + prefix.shift ();
          var suffix = prefix.length ? ':' + prefix.join (':') : '';
          return inc (members, member) ? [] : ['srem', 'accessTo:' + who, verb + ':' + id + suffix];
       }),
@@ -625,12 +635,13 @@ project.access = async function (proj) {
       members.length ? ['sadd', 'accessBy:' + id, ... members] : [],
       ... dale.go (members, function (member) {
          var [verb, who, ... prefix] = member.split (':');
+         if (who === 'token') who += ':' + prefix.shift ();
          var suffix = prefix.length ? ':' + prefix.join (':') : '';
          return ['sadd', 'accessTo:' + who, verb + ':' + id + suffix];
       })
    ]);
 
-   return {code: 0, stdout: 'Access synced for: ' + (emails.join (', ') || '(none)') + '\n'};
+   return {code: 0, stdout: 'Access synced for: ' + (dale.go (emails, email => email.startsWith ('token:') ? 'token' : email).join (', ') || '(none)') + '\n'};
 }
 
 Path.quote = function (path) {
@@ -1162,7 +1173,9 @@ var routes = [
          if (rq.user && rq.projectId && session.project !== rq.projectId) delete rq.user;
       }
 
-      clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, subdomain: rq.subdomain, projectId: rq.projectId, ip: rs.log.origin, userId: rq.user ? rq.user.id : 'anonymous'});
+      if (! rq.user && rq.projectId && /^[A-Za-z0-9_-]{32,256}$/.test (rq.headers ['x-token'] || '')) rq.user = {id: 'token:' + rq.headers ['x-token'], token: true};
+
+      clog ({type: 'Request', rqId: rs.log.id, method: rq.method, url: rq.url, subdomain: rq.subdomain, projectId: rq.projectId, ip: rs.log.origin, userId: logUser (rq.user, 'anonymous')});
 
       // Create project cookie from session cookie
       if (rq.subdomain && rq.data.query && rq.data.query.sessionCode) {
@@ -1281,7 +1294,7 @@ var routes = [
          else           return reply (rs, 403, {error: 'No session'});
       }
 
-      if (rq.user && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== session.csrf) return reply (rs, 403, {error: 'Invalid csrf token'});
+      if (rq.user && ! rq.user.token && ! publicPath && inc (['post', 'put', 'delete'], rq.method) && rq.headers ['x-csrf'] !== session.csrf) return reply (rs, 403, {error: 'Invalid csrf token'});
 
       if (rq.subdomain && matchRoute ([['get', '/'], ['get', /^\/f\/.+/]])) {
          if (rq.url !== '/' && ! validProjectPath (rq.url.replace (/^\/f\//, ''))) return reply (rs, 400, {error: 'Invalid path'});
@@ -1317,7 +1330,7 @@ var routes = [
 
       rs.next ();
 
-      if (rq.user && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
+      if (rq.user && ! rq.user.token && ! (rq.method === 'post' && rq.url === '/auth/logout')) await redis ([
          ['hmset', 'session-h:' + (hostSession ? session.hostSession : sessionId), {
             expires: new Date (Date.now () + CONFIG.cookie.expires * 1000).toISOString (),
             last: JSON.stringify ({
@@ -1333,7 +1346,7 @@ var routes = [
 
    ['post', '/error', function (rq, rs) {
       var error = type (rq.body.error) === 'object' ? rq.body : {error: rq.body};
-      clog ({priority: 'important', type: 'client error', ... error, user: rq.user ? rq.user.id : 'public'});
+      clog ({priority: 'important', type: 'client error', ... error, user: logUser (rq.user, 'public')});
       reply (rs, 200);
    }],
 
@@ -2238,7 +2251,7 @@ var routes = [
          if (pair && name !== cookie ('project') && name !== cookie ('project-state')) return pair;
       });
       var headers = dale.fil (rq.headers, undefined, function (v, k) {
-         if (! inc (['connection', 'content-length', 'cookie', 'expect', 'host', 'x-csrf'], k)) return '-H ' + Path.quote (k + ': ' + v);
+         if (! inc (['connection', 'content-length', 'cookie', 'expect', 'host', 'x-csrf', 'x-token'], k)) return '-H ' + Path.quote (k + ': ' + v);
       });
 
       var result = await project.run (rq.project, [

@@ -521,6 +521,10 @@ B.mrespond ([
    ['start', 'project', function (x) {
       if ((B.get ('user', 'engines') || []).length > 1) B.call (x, 'read', 'engines');
       if ((B.get ('user', 'engines') || []).length) return B.call (x, 'set', ['new', 'project'], {engine: B.get ('user', 'engines') [0]});
+      if (B.get ('user', 'creator')) {
+         B.call (x, 'snackbar', 'error', 'Create an engine first');
+         return B.call (x, 'navigate', 'settings');
+      }
       B.call (x, 'set', ['show', 'subscribe'], true);
    }],
 
@@ -826,6 +830,7 @@ B.mrespond ([
       }
 
       content = undefined;
+      B.call (x, 'rem', [], 'sqlite');
       B.call (x, 'change', 'file');
 
       // Wait for this file's previous edits to finish before loading potentially stale server content.
@@ -850,6 +855,10 @@ B.mrespond ([
          }
          if (B.get ('file', 'name') !== name) return;
          content = newContent;
+         if (content instanceof Uint8Array && new TextDecoder ().decode (content.subarray (0, 16)) === 'SQLite format 3\u0000') {
+            B.call (x, 'set', 'sqlite', {name: name, page: 0});
+            B.call (x, 'query', 'sqlite');
+         }
          if (type (content) === 'string' && /\.chat\.md$/.test (name) && ! (B.get ('message', 'to') || '').trim ()) {
             var entries = content.split (/^əəə head [0-9a-f-]{36}\n/im).slice (1).reverse ();
             var recipient = dale.stopNot (entries, undefined, function (entry) {
@@ -878,6 +887,54 @@ B.mrespond ([
          if (B.get ('file', 'name') !== name) return;
          B.call (x, 'snackbar', 'error', 'There was a problem loading the file');
       }
+   }],
+
+   ['query', 'sqlite', async function (x) {
+      var name = B.get ('sqlite', 'name');
+      try {
+         if (! window.initSqlJs) await new Promise (function (resolve, reject) {
+            var script = document.createElement ('script');
+            script.src = 'assets/sql.js/dist/sql-wasm.js';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.body.appendChild (script);
+         });
+         var SQL = await initSqlJs ({locateFile: function (file) {return 'assets/sql.js/dist/' + file}});
+      }
+      catch (error) {
+         return B.call (x, 'set', ['sqlite', 'error'], 'There was a problem loading the SQLite viewer');
+      }
+      if (B.get ('sqlite', 'name') !== name) return;
+
+      var state = B.get ('sqlite'), db, page, result = {name: name, page: state.page, query: state.query};
+      try {
+         db = new SQL.Database (content);
+         result.tables = dale.go ((db.exec ("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name") [0] || {values: []}).values, function (row) {return row [0]});
+         result.table = inc (result.tables, state.table) ? state.table : result.tables [0];
+         if (state.query) {
+            page = db.exec (state.query).pop ();
+            result.columns = page ? page.columns : [];
+            result.count = page ? page.values.length : 0;
+            result.pages = 1;
+         }
+         else if (result.table !== undefined) {
+            var table = '"' + result.table.replace (/"/g, '""') + '"';
+            result.count = db.exec ('SELECT COUNT(*) FROM ' + table) [0].values [0] [0];
+            result.pages = Math.max (1, Math.ceil (result.count / 100));
+            page = db.exec ('SELECT * FROM ' + table + ' LIMIT 100 OFFSET ?', [state.page * 100]) [0];
+            result.columns = page ? page.columns : dale.go ((db.exec ('PRAGMA table_info(' + table + ')') [0] || {values: []}).values, function (row) {return row [1]});
+         }
+         result.rows = dale.go (page ? page.values : [], function (row) {
+            return dale.go (row, function (cell) {
+               return cell instanceof Uint8Array ? '[BLOB ' + cell.length + ' bytes]' : cell;
+            });
+         });
+      }
+      catch (error) {
+         result.error = error.message;
+      }
+      if (db) db.close ();
+      B.call (x, 'set', 'sqlite', result);
    }],
 
    ['download', 'file', function (x) {
@@ -3298,6 +3355,53 @@ views.inner = function () {
                      }],
                   ]] :
                   content === undefined ? ['div', {class: 'flex flex-auto items-center justify-center'}, views.spinny ()] :
+                  B.get ('sqlite', 'name') === file.name ? B.view ('sqlite', function (sqlite) {
+                     if (! sqlite) return ['div'];
+                     var center = function (contents) {return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, contents]};
+                     if (sqlite.error && ! sqlite.tables) return center (sqlite.error);
+                     if (! sqlite.tables) return center (views.spinny ());
+                     if (! sqlite.tables.length) return center ('This database has no tables.');
+                     var button = 'bg-transparent bn br2 f6 fw6 pointer vgray';
+                     var field = 'ba bg-vdeepnavy border-box br2 f6 outline-0 vborderblue-border vnearwhite';
+                     return ['div', {class: 'flex flex-auto flex-column', style: style ({'min-height': 0})}, [
+                        ['div', {class: 'flex flex-wrap items-center mb2', style: style ({gap: '0.5rem'})}, [
+                           ['select', {
+                              class: field + ' pointer',
+                              onchange: B.ev (['set', ['sqlite', 'table'], {raw: 'this.value'}], ['set', ['sqlite', 'page'], 0], ['rem', 'sqlite', 'query'], ['query', 'sqlite']),
+                              style: style ({padding: '0.375rem 0.5rem'}),
+                           }, dale.go (sqlite.tables, function (table) {
+                              return ['option', {selected: table === sqlite.table, value: table}, table];
+                           })],
+                           ['input', {
+                              class: field + ' flex-auto placeholder-vgray',
+                              onchange: B.ev (['set', ['sqlite', 'query'], {raw: 'this.value.trim ()'}], ['query', 'sqlite']),
+                              placeholder: 'SQL query',
+                              style: style ({'font-family': 'monospace', 'min-width': '12rem', padding: '0.375rem 0.5rem'}),
+                              type: 'text',
+                              value: sqlite.query || '',
+                           }],
+                           ['span', {class: 'f6 vgray'}, sqlite.count + ' row' + (sqlite.count === 1 ? '' : 's')],
+                           sqlite.query ? '' : ['button', {class: button, disabled: sqlite.page === 0, onclick: B.ev (['set', ['sqlite', 'page'], sqlite.page - 1], ['query', 'sqlite']), type: 'button'}, '‹'],
+                           sqlite.query ? '' : ['span', {class: 'f6 vgray'}, (sqlite.page + 1) + ' / ' + sqlite.pages],
+                           sqlite.query ? '' : ['button', {class: button, disabled: sqlite.page >= sqlite.pages - 1, onclick: B.ev (['set', ['sqlite', 'page'], sqlite.page + 1], ['query', 'sqlite']), type: 'button'}, '›'],
+                        ]],
+                        sqlite.error ? ['div', {class: 'f6 mb2 vred'}, sqlite.error] : '',
+                        ['div', {class: 'flex-auto overflow-auto'}, ['table', {class: 'f6 vgray', style: style ({'border-collapse': 'collapse'})}, [
+                           ['thead', ['tr', dale.go (sqlite.columns, function (column) {
+                              return ['th', {class: 'bb bg-vdeepnavy fw6 pa2 tl', style: style ({position: 'sticky', top: 0})}, column];
+                           })]],
+                           ['tbody', dale.go (sqlite.rows, function (row) {
+                              return ['tr', dale.go (row, function (cell) {
+                                 return ['td', {
+                                    class: 'bb pa2',
+                                    style: style ({'max-width': '24rem', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap'}),
+                                    title: cell === null ? 'NULL' : String (cell),
+                                 }, cell === null ? ['span', {class: 'i o-50'}, 'NULL'] : String (cell)];
+                              })];
+                           })],
+                        ]]],
+                     ]];
+                  }) :
                   isBinary ? (function () {
                      return ['div', {class: 'flex flex-auto items-center justify-center vgray'}, [
                         ['div', {class: 'tc'}, [

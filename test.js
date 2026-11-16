@@ -71,7 +71,7 @@ if (mode === 'server') {
       });
       // Grants to invited emails that never signed up are keyed by email rather than user ID.
       var invites = dale.fil (keys, undefined, function (key) {
-         if (key.match (/^accessTo:.+example\.com$/)) return key;
+         if (key.match (/^accessTo:.+example\.com$/) || key.match (/^accessTo:token:vibeytest-/)) return key;
       });
 
       if (invites.length) await redis ('del', ... invites);
@@ -2052,6 +2052,22 @@ if (mode === 'server') {
             }];
          }
 
+         var tokenRead  = 'vibeytest-read-00000000000000000000000000000000';
+         var tokenWrite = 'vibeytest-write-00000000000000000000000000000000';
+         var tokenWhole  = 'vibeytest-whole-00000000000000000000000000000000';
+         var tokenScoped = 'vibeytest-scoped-00000000000000000000000000000000';
+
+         var useToken = function (token) {
+            return ['Switch to ' + (token ? 'token ' + token.split ('-') [0] + '-' + token.split ('-') [1] : 'no token'), 'get', '/', 200, function (s) {
+               delete s.headers.cookie;
+               delete s.headers ['x-csrf'];
+               delete s.projectCsrf;
+               if (token) s.headers ['x-token'] = token;
+               else delete s.headers ['x-token'];
+               return true;
+            }];
+         }
+
          var accessFile = function (path) {
             return '/f/' + encodeURIComponent (path);
          }
@@ -2199,12 +2215,10 @@ if (mode === 'server') {
                return assert (['outside file visible', inc (dale.go (rs.body.files, function (f) {return f.name}), 'outside.txt'), true, teishi.test.equal]);
             }],
             ['B reads file', 'get', accessFile ('outside.txt'), 200, assertBody ('original')],
-            ['B lists access.md with own whole-project grant', 'get', '/project', 200, function (s, rq, rs) {
-               return assert (['access.md visible', inc (dale.go (rs.body.files, function (f) {return f.name}), 'vibey/access.md'), true, teishi.test.equal]);
+            ['B does not list access.md with whole-project read', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['access.md hidden', inc (dale.go (rs.body.files, function (f) {return f.name}), 'vibey/access.md'), false, teishi.test.equal]);
             }],
-            ['B reads access.md with own whole-project grant', 'get', accessFile ('vibey/access.md') + '?raw=1', 200, function (s, rq, rs) {
-               return assert (['access.md', rs.body, /^access-b@example\.com read\n/, teishi.test.match]);
-            }],
+            ['B cannot read access.md with whole-project read', 'get', accessFile ('vibey/access.md') + '?raw=1', 404],
             ['B cannot read .git as reader', 'get', accessFile ('.git/HEAD'), 404],
             {
                tag: 'Project name under a user who does not own it',
@@ -2624,6 +2638,130 @@ if (mode === 'server') {
             accessAs ('a'),
             ['A deletes full public project', 'delete', function (s) {return '/project/' + s.publicFullId}, 200],
             ['A deletes partial public project', 'delete', function (s) {return '/project/' + s.publicPartialId}, 200],
+
+            ['Logs never use raw user ids', 'get', '/', 200, function (s, rq, rs) {
+               // Token user ids contain the secret, so every log line mentioning a user must go through logUser.
+               var leaks = dale.fil (fs.readFileSync ('server.js', 'utf8').split ('\n'), undefined, function (line, k) {
+                  if (/\bclog\s*\(/.test (line) && /\buser\b.*\.id\b|\.user\.id\b/.test (line) && ! /logUser \(/.test (line)) return (k + 1) + ': ' + line.trim ();
+               });
+               return assert (['clog lines with raw user ids', leaks, [], teishi.test.equal]);
+            }],
+            ['A creates token project', 'post', '/project', {name: 'token project'}, 200, function (s, rq, rs) {
+               s.tokenProjectId = rs.body.id;
+               s.tokenProject = 'access-a--token-project';
+               return true;
+            }],
+            projectLogin ('A on tokenProject', 'tokenProject'),
+            dale.go ([
+               ['notes.md', 'Notes'],
+               ['chat/one.txt', 'one'],
+               ['app.js', 'require ("http").createServer (function (rq, rs) {rs.writeHead (200, {"content-type": "application/json"}); rs.end (JSON.stringify ({token: rq.headers ["x-token"] || null}));}).listen (3000);'],
+               ['vibey/access.md', 'token:' + tokenRead + ' read chat/\ntoken:' + tokenWrite + ' write\ntoken:' + tokenWhole + ' read\ntoken:' + tokenScoped + ' write vibey/\n'],
+            ], function (file) {
+               return accessWrite (file [0], file [1], 200);
+            }),
+            accessWrite ('vibey/access.md', 'token:short read\n', 200),
+            ['Sync with malformed token fails', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
+               return assert (['sync error', rs.body.error, 'Invalid vibey/access.md line: token:short read', teishi.test.equal]);
+            }],
+            accessWrite ('vibey/access.md', 'token:' + tokenRead + ' read chat/\ntoken:' + tokenWrite + ' write\ntoken:' + tokenWhole + ' read\ntoken:' + tokenScoped + ' write vibey/\n', 200),
+            ['Sync token access', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs) {
+               return assert ([
+                  ['sync error', rs.body.error, undefined, teishi.test.equal],
+                  ['sync output hides secrets', rs.body.stdout, 'Access synced for: token, token, token, token\n', teishi.test.equal],
+               ]);
+            }],
+            ['Token grants are stored like user grants', 'get', '/', 200, function (s, rq, rs, next) {
+               redis ([
+                  ['smembers', 'accessTo:token:' + tokenRead],
+                  ['smembers', 'accessTo:token:' + tokenWrite],
+                  ['smembers', 'accessBy:' + s.tokenProjectId],
+               ]).then (function ([readGrants, writeGrants, members]) {
+                  if (! assert ([
+                     ['read token grants', readGrants, ['read:' + s.tokenProjectId + ':chat/'], teishi.test.equal],
+                     ['write token grants', writeGrants, ['write:' + s.tokenProjectId], teishi.test.equal],
+                     ['members', members.sort (), ['read:token:' + tokenRead + ':chat/', 'write:token:' + tokenWrite, 'read:token:' + tokenWhole, 'write:token:' + tokenScoped + ':vibey/'].sort (), teishi.test.equal],
+                  ])) return next (new Error (validationError));
+                  next (null, rs);
+               }, next);
+            }],
+            useToken (tokenRead),
+            ['Read token lists only its prefix', 'get', '/project', 200, function (s, rq, rs) {
+               return assert ([
+                  ['file names', dale.go (rs.body.files, function (f) {return f.name}), ['chat/one.txt'], teishi.test.equal],
+                  ['access', rs.body.project.access, ['read:chat/'], teishi.test.equal],
+               ]);
+            }],
+            ['Read token reads inside prefix', 'get', '/f/chat/one.txt', 200, assertBody ('one')],
+            ['Read token cannot read outside prefix', 'get', '/f/notes.md', 404],
+            ['Read token cannot read access.md', 'get', '/f/vibey/access.md', 404],
+            ['Read token cannot write', 'post', '/project/write', {path: 'chat/two.txt', content: 'two'}, 404],
+            {
+               tag: 'Read token cannot reach app',
+               method: 'get',
+               host: function (s) {return '3000--' + s.tokenProject + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/',
+               headers: {'x-token': tokenRead},
+               code: 404,
+            },
+            // access.md holds the other tokens' secrets: whole-project read or prefix write must not reveal them.
+            useToken (tokenWhole),
+            ['Whole-project read token reads other files', 'get', '/f/notes.md?raw=1', 200, assertBody ('Notes')],
+            ['Whole-project read token does not list access.md', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['access.md hidden', inc (dale.go (rs.body.files, function (f) {return f.name}), 'vibey/access.md'), false, teishi.test.equal]);
+            }],
+            ['Whole-project read token cannot read access.md', 'get', '/f/vibey/access.md?raw=1', 404],
+            useToken (tokenScoped),
+            ['vibey/ write token cannot read access.md', 'get', '/f/vibey/access.md?raw=1', 404],
+            ['vibey/ write token cannot overwrite access.md', 'post', '/project/write', {path: 'vibey/access.md', content: 'token:' + tokenScoped + ' write\n'}, 404],
+            useToken (tokenWrite),
+            ['Write token reads access.md', 'get', '/f/vibey/access.md?raw=1', 200, function (s, rq, rs) {
+               return assert (['access.md', rs.body, /^token:/, teishi.test.match]);
+            }],
+            ['Write token writes without csrf', 'post', '/project/write', {path: 'notes.md', content: 'Token notes'}, 200],
+            ['Write token starts app', 'post', '/project/run', {command: 'nohup node app.js < /dev/null > /dev/null 2>&1 & for i in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:3000/ && exit 0; sleep 0.1; done; exit 1', read: true}, 200, function (s, rq, rs) {
+               return assert (['code', rs.body.code, undefined, teishi.test.equal]);
+            }],
+            {
+               tag: 'Write token reaches app without forwarding x-token',
+               method: 'get',
+               host: function (s) {return '3000--' + s.tokenProject + '.' + new URL (CONFIG.baseURL).hostname},
+               path: '/',
+               headers: {'x-token': tokenWrite},
+               code: 200,
+               apres: function (s, rq, rs) {
+                  var body = type (rs.body) === 'string' ? JSON.parse (rs.body) : rs.body;
+                  return assert (['token', body.token, null, teishi.test.equal]);
+               },
+            },
+            ['Write token cannot create projects on the host', 'post', '/project', {name: 'token made'}, 403, assertBody ({error: 'No session'})],
+            useToken ('vibeytest-unknown-00000000000000000000000000000000'),
+            ['Unknown token cannot list project', 'get', '/project', 404],
+            ['Unknown token cannot write', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 404],
+            useToken ('short'),
+            ['Malformed token is ignored', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 403, assertBody ({error: 'No session'})],
+            useToken (),
+            useSession ('A on tokenProject'),
+            ['A sees write token edit', 'get', '/f/notes.md?raw=1', 200, assertBody ('Token notes')],
+            accessWrite ('vibey/access.md', 'token:' + tokenWrite + ' write\n', 200),
+            ['Sync after removing read token', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs, next) {
+               if (! assert (['sync output', rs.body.stdout, 'Access synced for: token\n', teishi.test.equal])) return false;
+               redis ('exists', 'accessTo:token:' + tokenRead).then (function (exists) {
+                  if (! assert (['read token grants removed', exists, 0, teishi.test.equal])) return next (new Error (validationError));
+                  next (null, rs);
+               }, next);
+            }],
+            useToken (tokenRead),
+            ['Removed read token cannot list project', 'get', '/project', 404],
+            ['Removed read token cannot read', 'get', '/f/chat/one.txt', 404],
+            useToken (),
+            accessAs ('a'),
+            ['A deletes token project', 'delete', function (s) {return '/project/' + s.tokenProjectId}, 200, function (s, rq, rs, next) {
+               redis ('exists', 'accessTo:token:' + tokenWrite).then (function (exists) {
+                  if (! assert (['write token grants removed', exists, 0, teishi.test.equal])) return next (new Error (validationError));
+                  next (null, rs);
+               }, next);
+            }],
 
             // Removing a user's line entirely revokes their access on the next sync.
             useSession ('A on shared project'),

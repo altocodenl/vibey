@@ -63,15 +63,18 @@ Every single successful tool call that modifies the files creates a commit autom
 
 ## Project access
 
-When the project owner asks you to grant access to an email address, or to make the project (or part of it) public, read `vibey/access.md` first, using Vibey tool calls for every step. If it does not exist, create it. Otherwise preserve existing entries and add the requested line only if absent.
+When the project owner asks you to grant access to an email address or a token, or to make the project (or part of it) public, read `vibey/access.md` first, using Vibey tool calls for every step. If it does not exist, create it. Otherwise preserve existing entries and add the requested line only if absent.
 
 ```
 alice@example.com read
 bob@example.com write chat/
 PUBLIC read docs/
+token:3f9c2a7e5b1d4c8f9a0e6b2d7c4f1a8e read scripts/
 ```
 
-Each line is `<email|PUBLIC> <read|write> [prefix]`. `PUBLIC` gives everyone, including people who aren't logged in, read access, and lists the project for everyone; it only supports `read`. Blank lines, lines starting with `#` and project grants (`project:<originId> <read|write> [prefix]`) are ignored by `vibey access`; project grants take effect without syncing. Emails are lowercased. Omitting the prefix grants whole-project access; otherwise, paths are matched by literal prefix, so `docs` also matches `docs.md` and `docs-private/`; end a folder prefix with `/` to scope it to that folder. `write` includes `read`. Owners retain full access.
+Each line is `<email|PUBLIC|token:<secret>> <read|write> [prefix]`. `PUBLIC` gives everyone, including people who aren't logged in, read access, and lists the project for everyone; it only supports `read`. Blank lines, lines starting with `#` and project grants (`project:<originId> <read|write> [prefix]`) are ignored by `vibey access`; project grants take effect without syncing. Emails are lowercased. Omitting the prefix grants whole-project access; otherwise, paths are matched by literal prefix, so `docs` also matches `docs.md` and `docs-private/`; end a folder prefix with `/` to scope it to that folder. `write` includes `read`. Owners retain full access.
+
+A `token:` line gives access to requests that send the secret in the `x-token` header to the project host, for scripts and services without an account. The secret must be 32 to 256 characters from `A-Z`, `a-z`, `0-9`, `_` and `-`; generate one with `openssl rand -hex 32` instead of inventing it, and tell the owner the secret, because anyone who has it gets the line's access. Secrets are case-sensitive.
 
 Prefixes and requested paths must be relative, without backslashes, control characters, doubled slashes or `.`/`..` segments. Symlinks are followed, not confined to the grant's prefix.
 
@@ -87,6 +90,6 @@ After saving the file successfully, invoke this exact standalone Vibey tool call
 
 `vibey access` is not a program in the container: it only works as this Vibey tool call. Running it through any other shell fails with `vibey: not found`, and changing the file without syncing leaves the previous grants in place.
 
-There's no need to call `vibey access` if you just granted access to a project; just do it when granting access to users or to `PUBLIC`.
+There's no need to call `vibey access` if you just granted access to a project; just do it when granting access to users, tokens or `PUBLIC`.
 
 If a user is setting parts of the project as public, it's possible to list the project in the list of public vibey projects. To do this, a line of the form `PUBLIC list` must be added in `vibey/access.md`. You can suggest this to the user, but **always** ask the user if they want this; by default, most people do not want their projects to be listed publicly.

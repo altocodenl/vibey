@@ -1,5 +1,77 @@
 # Vibey development notes
 
+## 2026-11-16
+
+What can not be there with the demos yet, and still launch? Notifications, destek, provision engines, autobackup, csrf
+this is the moment to run fast!
+
+cron, email and api token are "cold calls", therefore, for ai they need to use the credentials of the owner.
+
+Only non-trivial piece of design is email. How do we map?
+- Use the `to` of the email, this is the key to whom to address! What's the root of the `to`? It could be `<ai|ai model|nothing>.<projectId/name>@app.hivibey.com` Can email be easily spoofed, or can we validate that the sender is actually the sender?
+- It all lands in inbox/<chain name>.md
+
+new code & domain, UTC times:
+11:41 deployed new code, all working fine
+11:45 ran the two migrations (host projects, no slot)
+11:53 ran certbot for app.hivibey.com, got an error when installing certificate
+16:44 about to do the switch to hivibey.com
+16:46 switch works fine
+
+```
+certbot --nginx -d app.hivibey.com
+certbot certonly --manual --preferred-challenges dns --cert-name wildcard.app.hivibey.com -d '*.app.hivibey.com'
+```
+
+For notifications: if destek does pings, as in go hit this HTTP endpoint, or this server through ssh, it can also hit an endpoint in case something happens, and that can trigger an email or a notification. There's something there, I need to follow the thread.
+
+It's remarkable how little code it took to add api tokens, simply because how the access system is structured.
+
+DONE:
+- Deploy new code and check it all works
+- Run data migrations (host projects, delete slots)
+- Migrate app & main page to hivibey.com
+- Fix autogit (finally!)
+- Cross to close login and all other modals
+- Don't show subscription modal to creators
+- Add second stop button at the bottom of a long shell or AI message
+- Copy/paste in vi mode.
+- sqlite viewer (!)
+- Access with tokens (!)
+
+- TODO
+   - migration
+      - personal blog
+      - altocode home
+      - github repos
+      - user #2
+      - user #3
+   - demos
+      - workflow
+      - communication
+      - website
+      - app
+   - devops
+      - destek
+         - logs
+         - stats
+         - pings
+      - renew wildcard subdomain automatically
+   - engine
+      - show better "in progress" state for projects in a new engine
+      - grant others the right to create projects
+      - redirect traffic from domain: certbot, redirect single path, redirect to folder (forbid going up past the original target)
+      - provision engines
+   - access
+      - ask for consent before running AI on a project you don't own
+      - email to project
+      - open ports on containers
+   - project
+      - cron
+      - autobackup
+      - CSRF tokens to prevent CSRF attacks between projects (CSRF from outside Vibey is already mostly covered by headers): support GET /auth/user, change prompt
+   - tests: local mode, client tests
+
 ## 2026-11-15
 
 https://www.crissyfield.de/research/lovable-en/
