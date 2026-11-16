@@ -710,9 +710,14 @@ project.run = async function (proj, command, options) {
       var lockKey = 'lock:commit:' + proj.id;
       await lock (lockKey, 60);
       try {
-         var committed = await project.run (proj, 'git add -A && (git diff --cached --quiet || (git commit -q -m ' + Path.quote (commit) + ' && git rev-parse HEAD))', {catch: true});
+         // Auto gc is off because commit would start it detached, so it would keep running after the lock is released. We hold the lock, so the crashed git is the only thing that could have left the file, and it's safe to remove.
+         var committed = await project.run (proj, 'git add -A && (git diff --cached --quiet || (git -c gc.auto=0 -c maintenance.auto=false commit -q -m ' + Path.quote (commit) + ' && git rev-parse HEAD)); code=$?; if [ $code -gt 128 ]; then rm -f .git/index.lock; fi; exit $code', {catch: true});
          if (committed.code) return clog ({type: 'Commit error', id: proj.id, message: commit, error: committed.stderr});
          if (committed.stdout) await project.backup (proj);
+         if (committed.stdout && Math.random () < 0.05) {
+            var gc = await project.run (proj, 'git -c gc.autoDetach=false gc --auto --quiet', {catch: true});
+            if (gc.code) clog ({type: 'Git gc error', id: proj.id, error: gc.stderr});
+         }
       }
       finally {
          await redis ('del', lockKey);
