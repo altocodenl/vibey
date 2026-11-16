@@ -87,6 +87,44 @@ var modelCredential = function (model, credentials) {
       : creds.account ? 'account' : creds.apiKey ? 'apiKey' : undefined;
 }
 
+// Syncs vim's unnamed register with the system clipboard. Runs once; later calls do nothing.
+var vimClipboard = function () {
+   if (vimClipboard.done) return;
+   vimClipboard.done = true;
+
+   var unnamed = CodeMirror.Vim.getRegisterController ().unnamedRegister;
+   var setText = unnamed.setText;
+   var lastSynced = null;
+
+   // Load text into the unnamed register without writing it back to the clipboard. vim.js stores linewise yanks with a trailing newline.
+   var load = function (text) {
+      if (typeof text !== 'string' || text === '' || text === lastSynced) return;
+      lastSynced = text;
+      setText.call (unnamed, text, /\n$/.test (text));
+   }
+
+   // Yank/delete/change -> system clipboard.
+   unnamed.setText = function (text) {
+      setText.apply (this, arguments);
+      if (! text || ! navigator.clipboard) return;
+      lastSynced = text;
+      navigator.clipboard.writeText (text).catch (function () {});
+   }
+
+   // System clipboard -> register, whenever a vim editor gets focus.
+   document.addEventListener ('focusin', function (ev) {
+      var wrapper = ev.target.closest && ev.target.closest ('.CodeMirror');
+      if (! wrapper || ! wrapper.CodeMirror || wrapper.CodeMirror.getOption ('keyMap') !== 'vim') return;
+      if (! navigator.clipboard || ! navigator.clipboard.readText) return;
+      navigator.clipboard.readText ().then (load).catch (function () {});
+   });
+
+   // Cmd-C / Ctrl-C in the page -> register.
+   document.addEventListener ('copy', function () {
+      setTimeout (function () {load (String (window.getSelection ()))});
+   });
+}
+
 // *** NATIVE RESPONDERS ***
 
 window.addEventListener ('hashchange', function () {
@@ -1102,6 +1140,7 @@ B.mrespond ([
    }],
 
    ['change', ['user', 'settings'], {match: B.changeResponder}, function (x) {
+      if (B.get ('user', 'settings', 'vi') && ! B.get ('mobile')) vimClipboard ();
       if (editor) editor.setOption ('keyMap', B.get ('user', 'settings', 'vi') && ! B.get ('mobile') ? 'vim' : 'default');
    }],
 
@@ -1486,8 +1525,13 @@ B.mrespond ([
          to: 'shell',
       }, function (x, error) {
          if (error) return B.call (x, 'snackbar', 'error', 'There was a problem updating access');
+         var chat = 'vibey/access.chat.md';
+         var files = B.get ('files') || [];
+         if (! dale.stop (files, true, function (f) {
+            return f.name === chat;
+         })) B.call (x, 'set', 'files', files.concat ([{name: chat, size: 0, mtime: teishi.time ()}]));
+         B.call (x, 'navigate', 'f/' + filePath (chat));
          B.call (x, 'read', 'project');
-         B.call (x, 'navigate', 'f/' + filePath ('vibey/access.chat.md'));
       });
    }],
 
@@ -1883,7 +1927,7 @@ views.modal = function (attributes, contents) {
    }, [
       B.view (['mobile'], function (mobile) {
          return ['div', {
-            class: 'bg-vdeepnavy border-box',
+            class: 'bg-vdeepnavy border-box relative',
             onclick: B.ev ('stop', 'propagation', {raw: 'event'}),
             style: style ({
                border: '0.0625rem solid ' + css.colors.vborderblue,
@@ -1893,7 +1937,19 @@ views.modal = function (attributes, contents) {
                padding: mobile ? '1.5rem 1rem' : '3rem 2.25rem',
                width: mobile ? '100%' : '50vw',
             }),
-         }, contents];
+         }, [
+            attributes && attributes.onclick ? ['button', {
+               'aria-label': 'Close',
+               class: 'absolute bg-transparent bn f3 lh-solid pointer vgray',
+               onclick: attributes.onclick,
+               style: style ({
+                  right: '1rem',
+                  top: '1rem',
+               }),
+               title: 'Close',
+            }, '×'] : '',
+            contents
+         ]];
       }),
    ]];
 }
@@ -3911,6 +3967,17 @@ views.chat = function (read, name, getContent) {
                   return ['LITERAL', localPaths (marked.parse (b), '')];
                };
                var isToolResult = shell && parseToolResult (truncatedBody || body);
+               var stopButton = function () {
+                  return B.view (['message', 'cancelling', messageId], function (cancelling) {
+                     return ['button', {
+                        'aria-label': 'Stop message ' + messageIndexes [messageId.toLowerCase ()],
+                        class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
+                        disabled: !! cancelling,
+                        onclick: B.ev ('cancel', 'message', messageId),
+                        type: 'button',
+                     }, cancelling ? 'Stopping...' : '■ Stop'];
+                  });
+               };
                // Replies indent the whole row, which also narrows the bubble.
                var indent = (messageLevels [messageId.toLowerCase ()] || 0) * (mobile ? 0.5 : 2);
                return ['div', {
@@ -3957,24 +4024,21 @@ views.chat = function (read, name, getContent) {
                      }, costLabel] : '',
                   ]],
                   ['pre', {
-                     class: 'code f6 fw7 lh-solid ma0 pl3',
-                     style: mobile ? undefined : style ({'grid-column': '1', 'grid-row': '2'}),
+                     class: 'code f6 flex flex-column fw7 justify-between lh-solid ma0 pl3',
+                     style: style ({
+                        'align-self': 'stretch',
+                        'grid-column': mobile ? undefined : '1',
+                        'grid-row': mobile ? undefined : '2',
+                     }),
                   }, [
-                     /^pending 1$/m.test (head) ? B.view (['message', 'cancelling', messageId], function (cancelling) {
-                        return ['button', {
-                           'aria-label': 'Stop message ' + messageIndexes [messageId.toLowerCase ()],
-                           class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
-                           disabled: !! cancelling,
-                           onclick: B.ev ('cancel', 'message', messageId),
-                           type: 'button',
-                        }, cancelling ? 'Stopping...' : '■ Stop'];
-                     }) : media ? ['button', {
+                     /^pending 1$/m.test (head) ? stopButton () : media ? ['button', {
                         'aria-label': 'Download ' + mediaName,
                         class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
                         onclick: B.ev ('download', 'message', messageId),
                         title: 'Download ' + mediaName,
                         type: 'button',
                      }, [['i', {class: 'bi bi-download mr1'}], 'Save']] : ['span'],
+                     /^pending 1$/m.test (head) && body.split ('\n').length > 20 ? stopButton () : '',
                   ]],
                   ['div', {
                      class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' border-box chat-message lh-copy mw-100' + (isToolResult ? '' : ' pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
