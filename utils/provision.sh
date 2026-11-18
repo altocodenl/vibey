@@ -36,7 +36,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "Refresh started at $(date -u)"
 apt-get update
-apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
+apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold --with-new-pkgs upgrade
 apt-get -y autoremove
 apt-get clean
 echo "Refresh done at $(date -u), rebooting"
@@ -48,7 +48,8 @@ timedatectl set-timezone Etc/UTC
 printf '0 8 * * 0 root /usr/local/sbin/refresh.sh\n' > /etc/cron.d/refresh
 chmod 644 /etc/cron.d/refresh
 
-# Runs outside of the ssh session, which ends when the engine reboots.
-systemd-run --collect --unit=refresh /usr/local/sbin/refresh.sh
-echo "Refresh running; the engine reboots when it finishes. Log at /var/log/refresh.log"
+apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold --with-new-pkgs upgrade
+apt-get -y autoremove
+apt-get clean
+shutdown -r now
 REMOTE

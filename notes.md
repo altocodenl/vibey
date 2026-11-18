@@ -1,5 +1,101 @@
 # Vibey development notes
 
+## 2026-11-18
+
+I think this mapping is the key to email:
+chain -> chat
+inbox -> project
+
+we can already send emails to the owners of projects. If you created a project, you'll surely won't mind the project sending you an email. It can be done through `vibey email owner "<subject>" "<body>"`.
+
+Cron calls need to go in a chat! vibey/cron.chat.md . But perhaps even better to do it by day, so cron-YYYYMMDD.chat.md. Also include stderr. Later, add a "raw" mode where cron actually runs without going through the host.
+
+Now for an interesting problem: we need cron calls to not be straight system calls, but actually go through the host. We need to send them through a node script that sends an https call, using the credentials in the crontab. It should take the project id from the crontab too. It should specify the chat as cron-YYYYMMDD.chat.md, but using the timezone of the crontab, if any, to not confuse those who are far from UTC. We won't cover the case for changing timezones, we'll live in the present, in regard to the chat messages (we append anyway, right)?
+
+This node script should then send whatever was going to be sent by the actual commands, so they go through the host. They're not raw commands, we can add that later.
+
+cron maps to a normal token, this is great. Simple access control.
+
+Cold AI calls turned out to be trivial. If there's a token, use the AI credentials of the owner of the project.
+
+DONE:
+- Migrate user #2
+- Cron (!)
+- Cold AI calls (from token or cron)
+
+TODO
+   - migration
+      - personal blog
+      - altocode home
+      - github repos
+      - user #3
+   - demos
+      - the trip
+      - the quote
+      - the checklist
+      - the website
+   - devops
+      - destek
+         - logs
+         - stats
+         - pings
+      - renew wildcard subdomain automatically
+   - engine
+      - show better "in progress" state for projects in a new engine
+      - grant others the right to create projects
+      - redirect traffic from domain: certbot, redirect single path, redirect to folder (forbid going up past the original target)
+      - provision engines
+   - access
+      - ask for consent before running AI on a project you don't own
+      - email to project
+      - open ports on containers
+   - project
+      - autobackup
+      - CSRF tokens to prevent CSRF attacks between projects (CSRF from outside Vibey is already mostly covered by headers): support GET /auth/user, change prompt
+   - tests: local mode, client tests
+
+## 2026-11-17
+
+The "website" demo is really about "hosting".
+
+cron design:
+- the file: vibey/cron.md.
+   - optional timezone setter: `timezone <integer offset off UTC>`
+   - other lines are of the form: `"<time selector>" <command>`. Double quotes are only used if the time selector contains spaces.
+   - Time selector shapes:
+      - Day of the week: `Monday` (defaults to midnight plus 30-90 minutes)
+      - Day of the month: `1st`, `2nd`, `18th`
+      - Time: `6:00`, `18:00`
+      - Time interval that's less than a day: `5m`, `1h`, `3h`, `6h30m` . If not modulo day, resets at midnight.
+      - Day of the week + time: `"Monday 6:00", "Friday 18:00"
+      - Day of the week + time interval: "Tuesday 5m"
+      - Day of the month + time or time interval: `3rd 18:00`, "18th 5m"
+      - "start" (on server start)
+- When running `vibey cron`, the actual cronfile in the project gets (re)created.
+- The tests simply edit vibey/cron.md, run `vibey cron` and then assert the contents of the actual cronfile.
+
+Interesting consequence: "No output or commits from cron jobs. Jobs run straight in the container, so they aren't logged to a chat and don't trigger autogit commits."
+
+Demos:
+- the trip:
+   - Jake, denda and I (three friends), in thirties, no kids, decently athletic, three weeks in vietnam.
+   - Goal: figure out flights, itinerary.
+   - Sequence
+      - Two ais researching.
+      - Share with Denda, write. With Jake, just read (he's a bit of a klutz)
+- The quote: area with sample pdf, instructions. forward an email, hits ai, new proposal gets written. you then download it and attach it.
+- The checklist:
+   - Two customers with checklists
+   - Mini app where they can upload
+   - AI reviews that the docs are correct
+- The website: ??? also blog
+
+Demo I won't consider for now: the brief: review messages from the last twelve hours, and any new X public resource (competitors page, reviews?).
+
+Notes on the demos:
+- The human element is key on each. All of them involve multiple humans and collaboration.
+- Use AI music, but prompted by me. Better than silence, or narration (text on screen is enough).
+
 ## 2026-11-16
 
 What can not be there with the demos yet, and still launch? Notifications, destek, provision engines, autobackup, csrf
@@ -39,17 +135,16 @@ DONE:
 - sqlite viewer (!)
 - Access with tokens (!)
 
-- TODO
+TODO
    - migration
       - personal blog
       - altocode home
       - github repos
-      - user #2
       - user #3
    - demos
       - workflow
       - communication
-      - website
+      - hosting
       - app
    - devops
       - destek
@@ -558,7 +653,7 @@ I'm amazed at how elegant it is to use http calls to make an agent call agents, 
 - Cron design:
    - "<time selector>" <command>
    - timezone <integer offset off UTC>
-   - Readable time selectors:
+   - Time selector shapes:
       - Day of the week: `Monday` (defaults to midnight plus 30-90 minutes)
       - Day of the month: `1st`, `2nd`, `18th`
       - Time: `6:00`, `18:00`

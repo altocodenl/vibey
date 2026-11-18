@@ -50,12 +50,5 @@ NODE
 
 # Build the project image explicitly, even though its service has zero replicas.
 docker compose build vibey-host vibey-project
-if [[ "$2" == "1" ]]; then
-   mapfile -t projects < <(docker ps -aq --filter 'name=^/vibey-project-')
-   if (( ${#projects[@]} )); then
-      docker stop "${projects[@]}"
-      docker rm "${projects[@]}"
-   fi
-fi
-docker compose up -d
+rebuild="$2" docker compose up -d
 REMOTE

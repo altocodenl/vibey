@@ -846,6 +846,61 @@ if (mode === 'server') {
             ];
          }
 
+         var cronCurl = function (command, offset = -10800) {
+            return "d=$(date -d @$(($(date +%s) + " + offset + ")) +%Y%m%d) && { e=$(curl -sSf -o /dev/null -H 'content-type: application/json' -H 'x-token: TOKEN' --data-binary '{\"body\":" + JSON.stringify (command) + ",\"file\":\"vibey/cron-'$d'.chat.md\",\"to\":\"shell\"}' " + new URL (CONFIG.baseURL).protocol + '//PROJECT.' + new URL (CONFIG.baseURL).host + "/project/message 2>&1) || { i=$(cat /proc/sys/kernel/random/uuid); printf '\\nəəə head %s\\nfrom cron\\nid %s\\nt %s\\nto all\\nəəə body %s\\nCould not send %s to the host: %s' \"$i\" \"$i\" \"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\" \"$i\" '" + command + "' \"$e\" >> \"/project/vibey/cron-$d.chat.md\"; }; }";
+         }
+         var fives = dale.times (12, 0, 5).join (',');
+         var cronRules = {
+            'timezone -3': [],
+            'Monday echo weekly': '31 3 * * 1 ' + cronCurl ('echo weekly'),
+            '"Friday 18:00" echo friday': '0 21 * * 5 ' + cronCurl ('echo friday'),
+            '3rd echo monthly': '25 4 3 * * ' + cronCurl ('echo monthly'),
+            '6:00 echo morning': '0 9 * * * ' + cronCurl ('echo morning'),
+            '5m echo often': fives + ' * * * * ' + cronCurl ('echo often'),
+            '"Tuesday 6h30m" echo tuesday': [
+               '0 3,16 * * 2 ' + cronCurl ('echo tuesday'),
+               '30 9,22 * * 2 ' + cronCurl ('echo tuesday'),
+            ],
+            '"18th 5m" echo eighteenth': [
+               fives + ' ' + dale.times (21, 3).join (',') + ' 18 * * ' + cronCurl ('echo eighteenth'),
+               fives + ' 0,1,2 19 * * ' + cronCurl ('echo eighteenth'),
+            ],
+            '"31st 22:00" echo last': '0 1 * * * [ $(date -d @$(($(date +%s) + -10800)) +%d) = 31 ] && ' + cronCurl ('echo last'),
+            'start echo boot': '@reboot ' + cronCurl ('echo boot'),
+         };
+         var cronRulesWithSunday = {
+            ... cronRules,
+            '"Sunday 23:00" echo sunday': '0 2 * * 1 ' + cronCurl ('echo sunday'),
+         };
+         var cronRulesFractional = {
+            'timezone +5:45': [],
+            '6:00 echo morning': '15 0 * * * ' + cronCurl ('echo morning', 20700),
+            '"Monday 2:00" echo monday': '15 20 * * 0 ' + cronCurl ('echo monday', 20700),
+            '"1st 3:00" echo first': '15 21 * * * [ $(date -d @$(($(date +%s) + 20700)) +%d) = 01 ] && ' + cronCurl ('echo first', 20700),
+         };
+
+         var cronSync = function (tag, rules) {
+            return [
+               ['Sync cron ' + tag, 'post', '/project/run', {command: 'vibey cron'}, 200, assertBody ({stdout: 'Cron synced\n'})],
+               cronRead (tag, rules),
+            ];
+         }
+
+         var cronRead = function (tag, rules) {
+            var lines = [].concat (... dale.go (rules, function (lines) {return lines}));
+            return ['Read cronfile ' + tag, 'post', '/project/run', {command: 'sudo cat /etc/crontabs/vibey && pgrep -x crond > /dev/null'}, 200, function (s, rq, rs) {
+               var header = /^# vibey-project (\S+)\n# vibey-token ([0-9a-f]{64})\n/.exec (rs.body.stdout);
+               if (! assert ([
+                  ['header', header, 'array'],
+                  ['project id', header && header [1], s.projectId, teishi.test.equal],
+                  ['new token', header && header [2] !== s.cronToken, true, teishi.test.equal],
+                  ['cron lines', rs.body.stdout.slice (header ? header [0].length : 0).replaceAll (header && header [2], 'TOKEN').replaceAll (s.projectId, 'PROJECT'), lines.join ('\n') + '\n', teishi.test.equal],
+               ])) return false;
+               s.cronToken = header [2];
+               return true;
+            }];
+         }
+
          suites.project = [
 
             // *** PROJECT (HOST) ***
@@ -1951,6 +2006,41 @@ if (mode === 'server') {
                }) ();
             }],
             ['Read file after container has been removed', 'get', '/f/' + encodeURIComponent ('main.md') + '?raw=1', 200, assertBody ('# el norte\n\n')],
+            ['Sync cron without cron.md', 'post', '/project/run', {command: 'vibey cron'}, 200, assertBody ({stdout: 'Cron synced\n'})],
+            ['Write invalid cron.md', 'post', '/project/write', {path: 'vibey/cron.md', content: 'Someday echo never\n'}, 200],
+            ['Sync invalid cron', 'post', '/project/run', {command: 'vibey cron'}, 200, assertBody ({code: 1, error: 'Invalid vibey/cron.md line: Someday echo never'})],
+            ['Write cron.md', 'post', '/project/write', {path: 'vibey/cron.md', content: dale.keys (cronRules).join ('\n')}, 200],
+            cronSync ('after write', cronRules),
+            ['Add cron line', 'post', '/project/edit', {path: 'vibey/cron.md', oldText: 'start echo boot', newText: 'start echo boot\n"Sunday 23:00" echo sunday'}, 200],
+            cronSync ('after adding a line', cronRulesWithSunday),
+            ['Remove cron lines', 'post', '/project/edit', {path: 'vibey/cron.md', oldText: '5m echo often\n"Tuesday 6h30m" echo tuesday\n', newText: ''}, 200],
+            cronSync ('after removing lines', dale.obj (cronRulesWithSunday, function (lines, rule) {
+               if (rule !== '5m echo often' && rule !== '"Tuesday 6h30m" echo tuesday') return [rule, lines];
+            })),
+            ['Write cron.md with a fractional timezone', 'post', '/project/write', {path: 'vibey/cron.md', content: dale.keys (cronRulesFractional).join ('\n')}, 200],
+            cronSync ('with a fractional timezone', cronRulesFractional),
+            ['Remove container with cron', 'post', '/project/run', {command: 'true'}, 200, function (s, rq, rs, next) {
+               (async function () {
+                  await run ('docker', 'rm', '-f', 'vibey-project-' + s.projectId);
+                  next (null, rs);
+               }) ();
+            }],
+            cronRead ('after recreating the container', cronRulesFractional),
+            ['Remove cron.md', 'post', '/project/run', {command: 'rm vibey/cron.md'}, 200],
+            ['Sync cron after removing cron.md', 'post', '/project/run', {command: 'vibey cron'}, 200, assertBody ({stdout: 'Cron synced\n'})],
+            ['Cronfile is emptied and token revoked', 'post', '/project/run', {command: 'sudo cat /etc/crontabs/vibey'}, 200, function (s, rq, rs, next) {
+               if (! assert (['cronfile', rs.body.stdout || '', '', teishi.test.equal])) return false;
+               redis ([
+                  ['exists', 'accessTo:token:' + s.cronToken],
+                  ['sismember', 'accessBy:' + s.projectId, 'write:token:' + s.cronToken],
+               ]).then (function ([exists, member]) {
+                  if (! assert ([
+                     ['token grants removed', exists, 0, teishi.test.equal],
+                     ['token member removed', member, 0, teishi.test.equal],
+                  ])) return next (new Error (validationError));
+                  next (null, rs);
+               }, next);
+            }],
             ['Create a third project', 'post', '/project', {name: 'third'}, 200, function (s, rq, rs, next) {
                s.thirdProjectId = rs.body.id;
                (async function () {
@@ -2743,6 +2833,80 @@ if (mode === 'server') {
             useToken (),
             useSession ('A on tokenProject'),
             ['A sees write token edit', 'get', '/f/notes.md?raw=1', 200, assertBody ('Token notes')],
+            accessWrite ('vibey/cron.md', '5m echo often\n', 200),
+            ['Sync cron on token project', 'post', '/project/run', {command: 'vibey cron'}, 200, assertBody ({stdout: 'Cron synced\n'})],
+            ['Cron token is granted write', 'post', '/project/run', {command: 'sudo cat /etc/crontabs/vibey', read: true}, 200, function (s, rq, rs, next) {
+               var token = /^# vibey-token (\S+)$/m.exec (rs.body.stdout);
+               if (! assert (['cron token', token, 'array'])) return false;
+               s.tokenCronToken = token [1];
+               redis ([
+                  ['smembers', 'accessTo:token:' + s.tokenCronToken],
+                  ['sismember', 'accessBy:' + s.tokenProjectId, 'write:token:' + s.tokenCronToken],
+               ]).then (function ([grants, member]) {
+                  if (! assert ([
+                     ['cron token grants', grants, ['write:' + s.tokenProjectId], teishi.test.equal],
+                     ['cron token member', member, 1, teishi.test.equal],
+                  ])) return next (new Error (validationError));
+                  next (null, rs);
+               }, next);
+            }],
+            ['Switch to cron token', 'get', '/', 200, function (s) {
+               delete s.headers.cookie;
+               delete s.headers ['x-csrf'];
+               delete s.projectCsrf;
+               s.headers ['x-token'] = s.tokenCronToken;
+               return true;
+            }],
+            ['Cron token posts a message', 'post', '/project/message', {body: 'tick', file: 'chat/cron.chat.md', to: 'all'}, 200],
+            useToken (tokenWrite),
+            ['Write token posts a message', 'post', '/project/message', {body: 'tock', file: 'chat/cron.chat.md', to: 'all'}, 200],
+            ['Messages show cron and token without secrets', 'get', '/f/chat/cron.chat.md?raw=1', 200, function (s, rq, rs) {
+               return assert ([
+                  ['from lines', rs.body.match (/^from .+$/gm), ['from cron', 'from token'], teishi.test.equal],
+                  ['no cron secret', rs.body.includes (s.tokenCronToken), false, teishi.test.equal],
+                  ['no write secret', rs.body.includes (tokenWrite), false, teishi.test.equal],
+               ]);
+            }],
+            useToken (),
+            useSession ('A on tokenProject'),
+            ['Sync access keeps cron token', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs, next) {
+               if (! assert (['sync output', rs.body.stdout, 'Access synced for: token, token, token, token\n', teishi.test.equal])) return false;
+               redis ('smembers', 'accessTo:token:' + s.tokenCronToken).then (function (grants) {
+                  if (! assert (['cron token grants', grants, ['write:' + s.tokenProjectId], teishi.test.equal])) return next (new Error (validationError));
+                  next (null, rs);
+               }, next);
+            }],
+            ['Resync cron replaces cron token', 'post', '/project/run', {command: 'vibey cron'}, 200, function (s, rq, rs) {
+               s.tokenOldCronToken = s.tokenCronToken;
+               return assert (['stdout', rs.body.stdout, 'Cron synced\n', teishi.test.equal]);
+            }],
+            ['Old cron token grant is removed', 'post', '/project/run', {command: 'sudo cat /etc/crontabs/vibey', read: true}, 200, function (s, rq, rs, next) {
+               s.tokenCronToken = /^# vibey-token (\S+)$/m.exec (rs.body.stdout) [1];
+               redis ([
+                  ['exists', 'accessTo:token:' + s.tokenOldCronToken],
+                  ['sismember', 'accessBy:' + s.tokenProjectId, 'write:token:' + s.tokenOldCronToken],
+                  ['smembers', 'accessTo:token:' + s.tokenCronToken],
+               ]).then (function ([exists, member, grants]) {
+                  if (! assert ([
+                     ['new token', s.tokenCronToken !== s.tokenOldCronToken, true, teishi.test.equal],
+                     ['old grants removed', exists, 0, teishi.test.equal],
+                     ['old member removed', member, 0, teishi.test.equal],
+                     ['new token grants', grants, ['write:' + s.tokenProjectId], teishi.test.equal],
+                  ])) return next (new Error (validationError));
+                  next (null, rs);
+               }, next);
+            }],
+            ['Switch to old cron token', 'get', '/', 200, function (s) {
+               delete s.headers.cookie;
+               delete s.headers ['x-csrf'];
+               delete s.projectCsrf;
+               s.headers ['x-token'] = s.tokenOldCronToken;
+               return true;
+            }],
+            ['Old cron token cannot list project', 'get', '/project', 404],
+            ['Old cron token cannot write', 'post', '/project/write', {path: 'notes.md', content: 'forbidden'}, 404],
+            useToken (),
+            useSession ('A on tokenProject'),
             accessWrite ('vibey/access.md', 'token:' + tokenWrite + ' write\n', 200),
             ['Sync after removing read token', 'post', '/project/run', {command: 'vibey access'}, 200, function (s, rq, rs, next) {
                if (! assert (['sync output', rs.body.stdout, 'Access synced for: token\n', teishi.test.equal])) return false;
@@ -2757,8 +2921,14 @@ if (mode === 'server') {
             useToken (),
             accessAs ('a'),
             ['A deletes token project', 'delete', function (s) {return '/project/' + s.tokenProjectId}, 200, function (s, rq, rs, next) {
-               redis ('exists', 'accessTo:token:' + tokenWrite).then (function (exists) {
-                  if (! assert (['write token grants removed', exists, 0, teishi.test.equal])) return next (new Error (validationError));
+               redis ([
+                  ['exists', 'accessTo:token:' + tokenWrite],
+                  ['exists', 'accessTo:token:' + s.tokenCronToken],
+               ]).then (function ([writeExists, cronExists]) {
+                  if (! assert ([
+                     ['write token grants removed', writeExists, 0, teishi.test.equal],
+                     ['cron token grants removed', cronExists, 0, teishi.test.equal],
+                  ])) return next (new Error (validationError));
                   next (null, rs);
                }, next);
             }],

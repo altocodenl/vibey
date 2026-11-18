@@ -622,6 +622,9 @@ project.access = async function (proj) {
    var members = dale.go (entries, function (entry) {
       return entry.verb + ':' + recipients [entry.email] + (entry.prefix ? ':' + entry.prefix : '');
    });
+   var crontab = await project.read (proj, '/etc/crontabs/vibey');
+   var cronToken = ! crontab.code && /^# vibey-token (\S+)$/m.exec (crontab.stdout);
+   if (cronToken) members.push ('write:token:' + cronToken [1]);
 
    var previous = await redis ('smembers', 'accessBy:' + id);
    await redis ([
@@ -688,6 +691,72 @@ project.remove = async function (proj) {
    }
 }
 
+project.cron = async function (proj, boot) {
+   var file = await project.read (proj, '/project/vibey/cron.md');
+   if (file.code && ! /No such file/.test (file.error)) return file;
+   if (file.code) file = {stdout: ''};
+
+   var tz = /^\s*timezone\s+([+-]?)(1[0-4]|\d)(?::([0-5]\d))?\s*$/m.exec (file.stdout), timezone = tz ? (tz [1] === '-' ? -1 : 1) * (tz [2] * 60 + Number (tz [3] || 0)) : 0;
+   var token = crypto.randomBytes (32).toString ('hex'), base = new URL (CONFIG.baseURL), localDate = '$(date -d @$(($(date +%s) + ' + timezone * 60 + ')) +%';
+   var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+   var invalidLine;
+   var lines = dale.fil (file.stdout.split (/\r?\n/), undefined, function (line) {
+      line = line.trim ();
+      if (! line || line.startsWith ('#') || (tz && line === tz [0].trim ())) return;
+
+      var match = /^(?:"([^"]+)"|(\S+))\s+(.+)$/.exec (line);
+      if (! match) return invalidLine = line;
+      var command = 'd=' + localDate + 'Y%m%d) && { e=$(' + [
+         'curl -sSf -o /dev/null',
+         '-H ' + Path.quote ('content-type: application/json'),
+         '-H ' + Path.quote ('x-token: ' + token),
+         '--data-binary ' + Path.quote ('{"body":' + JSON.stringify (match [3]) + ',"file":"vibey/cron-') + '$d' + Path.quote ('.chat.md","to":"shell"}'),
+         base.protocol + '//' + proj.id + '.' + base.host + '/project/message',
+      ].join (' ') + ' 2>&1) || { i=$(cat /proc/sys/kernel/random/uuid); printf ' + Path.quote ('\\nəəə head %s\\nfrom cron\\nid %s\\nt %s\\nto all\\nəəə body %s\\nCould not send %s to the host: %s') + ' "$i" "$i" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$i" ' + Path.quote (match [3]) + ' "$e" >> "/project/vibey/cron-$d.chat.md"; }; }', parts = (match [1] || match [2]).split (/\s+/), dow, dom, times;
+      if (parts.join (' ') === 'start') return '@reboot ' + command;
+      if (days.includes (parts [0])) dow = days.indexOf (parts.shift ());
+      else if (/^([1-9]|[12]\d|3[01])(st|nd|rd|th)$/.test (parts [0])) dom = parseInt (parts.shift ());
+
+      var selector = parts [0] || '', time = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec (selector), interval = /^(?:(\d+)h)?(?:(\d+)m)?$/.exec (selector);
+      var every = interval && Number (interval [1] || 0) * 60 + Number (interval [2] || 0);
+      if (parts.length > 1 || (! selector && dow === undefined && dom === undefined)) return invalidLine = line;
+      if (! selector) times = [30 + parseInt (crypto.createHash ('md5').update (line).digest ('hex').slice (0, 8), 16) % 60];
+      else if (time) times = [time [1] * 60 + Number (time [2])];
+      else if (every && every < 1440) times = dale.times (Math.ceil (1440 / every), 0, every);
+      else return invalidLine = line;
+
+      var hours = {}, groups = {};
+      dale.go (times, function (t) {
+         var utc = t - timezone, key = (dow === undefined && dom === undefined ? 0 : Math.floor (utc / 1440)) + ' ' + (utc + 1440) % 60;
+         (hours [key] = hours [key] || []).push (Math.floor ((utc + 1440) % 1440 / 60));
+      });
+      dale.go (hours, function (h, key) {
+         var [shift, minute] = key.split (' ');
+         key = shift + ' ' + (h.length === 24 ? '*' : h.join (','));
+         (groups [key] = groups [key] || []).push (minute);
+      });
+      return dale.go (groups, function (minutes, key) {
+         var [shift, h] = key.split (' '), day = dom + Number (shift), guard = '';
+         if (dom !== undefined && shift !== '0' && (day < 1 || day > 28 || dom > 28)) day = '*', guard = '[ ' + localDate + 'd) = ' + String (dom).padStart (2, '0') + ' ] && ';
+         return [minutes.join (','), h, dom === undefined ? '*' : day, '*', dow === undefined ? '*' : (dow + Number (shift) + 7) % 7, guard + command].join (' ');
+      }).join ('\n');
+   });
+
+   if (invalidLine) return {code: 1, error: 'Invalid vibey/cron.md line: ' + invalidLine};
+   var previous = await project.read (proj, '/etc/crontabs/vibey');
+   var oldToken = ! previous.code && /^# vibey-token (\S+)$/m.exec (previous.stdout);
+   var header = ['# vibey-project ' + proj.id, '# vibey-token ' + token];
+   var result = await project.run (proj, (boot ? 'sudo rm -f /run/crond.reboot; ' : '') + 'sudo tee /etc/crontabs/vibey > /dev/null || exit 1; sudo pkill -x crond; sudo crond', {input: lines.length ? header.concat (lines).join ('\n') + '\n' : '', catch: true});
+   if (result.code) return {code: result.code, error: result.stderr};
+   await redis ([
+      oldToken ? ['srem', 'accessBy:' + proj.id, 'write:token:' + oldToken [1]] : [],
+      oldToken ? ['srem', 'accessTo:token:' + oldToken [1], 'write:' + proj.id] : [],
+      lines.length ? ['sadd', 'accessBy:' + proj.id, 'write:token:' + token] : [],
+      lines.length ? ['sadd', 'accessTo:token:' + token, 'write:' + proj.id] : [],
+   ]);
+   return {stdout: 'Cron synced\n'};
+}
+
 project.run = async function (proj, command, options) {
    var id = 'vibey-project-' + proj.id;
    if (type (command) === 'array') command = command.join (' ');
@@ -707,6 +776,7 @@ project.run = async function (proj, command, options) {
             var restart = await run (... docker, 'start', id, {catch: true});
             if (restart.code) return result;
          }
+         else await project.cron (proj, true);
          return project.run (proj, command, options);
       }
    }
@@ -877,14 +947,39 @@ project.cleanup = async function () {
 }
 
 project.wake = async function () {
-   var volumes = await run ('docker', 'volume', 'ls', '-q', '-f', 'name=vibey-project-', {catch: true});
-   if (volumes.code || ! volumes.stdout.trim ()) return;
-   await dale.async (volumes.stdout.trim ().split ('\n'), async function (id) {
-      var start = await run ('docker', 'start', id, {catch: true});
-      if (! start.code) return;
-      var recreate = await run ('docker', 'run', '--init', '--restart', 'unless-stopped', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
-      if (recreate.code) clog ({priority: 'important', type: 'Project wake error', id, error: recreate.stderr});
-   }, {concurrent: 10});
+   var engines = ['host'].concat (dale.go (await redis ('keys', 'engine:*'), function (key) {return key.slice ('engine:'.length)}));
+   await dale.async (engines, async function (engine) {
+      var remote = await project.remote ({engine});
+      var docker = remote.command;
+      try {
+         if (process.env.rebuild === '1') {
+            if (engine !== 'host') {
+               var build = await run (... docker, 'build', '-t', 'vibey-project', '-', {input: projectDockerfile, catch: true});
+               if (build.code) return clog ({priority: 'important', type: 'Project rebuild error', engine, error: build.stderr});
+            }
+            var containers = await run (... docker, 'ps', '-a', '--filter', 'name=^/vibey-project-', '--format', '{{.Names}} {{.Image}}', {catch: true});
+            var stale = dale.fil ((containers.stdout || '').trim ().split ('\n'), undefined, function (line) {
+               var [name, image] = line.split (' ');
+               if (name && image !== 'vibey-project') return name;
+            });
+            if (stale.length) await run (... docker, 'rm', '-f', ... stale, {catch: true});
+         }
+         if (engine !== 'host') await run (... docker, 'network', 'create', '-o', 'com.docker.network.bridge.enable_icc=false', 'vibey-projects', {catch: true});
+         var volumes = await run (... docker, 'volume', 'ls', '-q', '-f', 'name=vibey-project-', {catch: true});
+         if (volumes.code || ! volumes.stdout.trim ()) return;
+         await dale.async (volumes.stdout.trim ().split ('\n'), async function (id) {
+            var start = await run (... docker, 'start', id, {catch: true});
+            if (! start.code) return;
+            var recreate = await run (... docker, 'run', '--init', '--restart', 'unless-stopped', '--network', 'vibey-projects', '-v', id + ':/project', '--name', id, '-d', 'vibey-project', {catch: true});
+            if (recreate.code) return clog ({priority: 'important', type: 'Project wake error', engine, id, error: recreate.stderr});
+            var proj = await redis ('hgetall', 'project:' + id.slice ('vibey-project-'.length));
+            if (proj) await project.cron (proj, true);
+         }, {concurrent: 10});
+      }
+      finally {
+         remote.cleanup ();
+      }
+   }, {concurrent: 5});
 }
 
 // *** BACKUP ***
@@ -2351,6 +2446,7 @@ var routes = [
 
       var result = rq.body.command.trim () === 'vibey access'
          ? await project.access (rq.project)
+         : rq.body.command.trim () === 'vibey cron' ? await project.cron (rq.project)
          : await project.run (rq.project, rq.body.command, {catch: true, commit: rq.body.read ? false : 'Run ' + Path.quote (rq.body.command)});
       if (result.code === 0) delete result.code;
 
@@ -2438,8 +2534,10 @@ var routes = [
          if (rq.body.to === 'ai-' + m.model) return m;
       });
       var aiFlavor = aiModel ? aiModel.provider : undefined;
+      var crontab = rq.user.token && await project.read (rq.project, '/etc/crontabs/vibey');
+      var cron = crontab && ! crontab.code && new RegExp ('^# vibey-token ' + rq.user.id.slice ('token:'.length) + '$', 'm').test (crontab.stdout);
       var credentials = aiModel
-         ? JSON.parse (await redis ('hget', 'credentials:' + rq.user.id, 'data') || '{}')
+         ? JSON.parse (await redis ('hget', 'credentials:' + (rq.user.token ? rq.project.owner : rq.user.id), 'data') || '{}')
          : {};
       var creds = credentials [aiFlavor] || {};
       var auth = aiModel && (rq.test ? 'test' : aiModel.requireAPIKey
@@ -2477,7 +2575,7 @@ var routes = [
             creds.account.expires = Date.now () + tokenData.expires_in * 1000 - 5 * 60 * 1000;
             if (tokenData.refresh_token) creds.account.refresh = tokenData.refresh_token;
             if (tokenData.id_token) creds.account.idToken = tokenData.id_token;
-            await redis ('hset', 'credentials:' + rq.user.id, 'data', JSON.stringify (credentials));
+            await redis ('hset', 'credentials:' + (rq.user.token ? rq.project.owner : rq.user.id), 'data', JSON.stringify (credentials));
          }
       }
 
@@ -2490,7 +2588,7 @@ var routes = [
       var message = dale.fil ([
          'əəə head ' + id,
          rq.body.base64 ? 'base64 1' : undefined,
-         'from ' + (rq.body.from || rq.user.id),
+         'from ' + (rq.body.from || (cron ? 'cron' : rq.user.token ? 'token' : rq.user.id)),
          'id ' + id,
          rq.body.name !== undefined ? 'name ' + rq.body.name : undefined,
          rq.body.reply !== undefined ? 'reply ' + rq.body.reply : undefined,
@@ -2650,7 +2748,7 @@ var routes = [
                port:    CONFIG.port,
                method:  'post',
                path:    '/project/message',
-               headers: dale.obj ({cookie: rq.headers.cookie, host: rq.headers.host, 'x-csrf': rq.headers ['x-csrf'], 'x-test': rq.headers ['x-test']}, function (v, k) {if (v !== undefined) return [k, v]}),
+               headers: dale.obj ({cookie: rq.headers.cookie, host: rq.headers.host, 'x-csrf': rq.headers ['x-csrf'], 'x-test': rq.headers ['x-test'], 'x-token': rq.headers ['x-token']}, function (v, k) {if (v !== undefined) return [k, v]}),
                body:    body,
                code:    200,
             }, function (error, rdata) {
@@ -2687,9 +2785,9 @@ var routes = [
          if (result.code) return reply (rs, 400, result);
          reply (rs, 200, {id: id, responseId: responseId});
 
-         if (shellCommand.trim () === 'vibey access') {
-            var accessResult = await project.access (shellProject);
-            output += accessResult.stdout || accessResult.error || 'Could not sync access\n';
+         if (shellCommand.trim () === 'vibey access' || shellCommand.trim () === 'vibey cron') {
+            var accessResult = await (shellCommand.trim () === 'vibey access' ? project.access : project.cron) (shellProject);
+            output += accessResult.stdout || accessResult.error || 'Could not sync\n';
             streamEdit ();
          }
          else await project.run (shellProject, groupedCommand (shellCommand), {catch: true, onSpawn: function (proc) {
@@ -3181,8 +3279,8 @@ var routes = [
                      stdout: dale.go (results, function (result) {return result.stdout || result.error}).join ('\n'),
                   };
                }
-               if (call.op === 'run' && call.command.trim () === 'vibey access') {
-                  var result = await project.access (target);
+               if (call.op === 'run' && (call.command.trim () === 'vibey access' || call.command.trim () === 'vibey cron')) {
+                  var result = await (call.command.trim () === 'vibey access' ? project.access : project.cron) (target);
                   if (onOutput) onOutput (result.stdout || result.error || '');
                   return result;
                }

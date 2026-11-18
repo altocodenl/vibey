@@ -1575,14 +1575,16 @@ B.mrespond ([
       });
    }],
 
-   ['update', 'access', function (x) {
+   ['update', 'vibey', function (x, what) {
+      var tz = /^\s*timezone\s+([+-]?)(1[0-4]|\d)(?::([0-5]\d))?\s*$/m.exec (type (content) === 'string' ? content : '');
+      var offset = tz ? (tz [1] === '-' ? -1 : 1) * (tz [2] * 60 + Number (tz [3] || 0)) : 0;
+      var chat = what === 'access' ? 'vibey/access.chat.md' : 'vibey/cron-' + new Date (Date.now () + offset * 60000).toISOString ().slice (0, 10).replace (/-/g, '') + '.chat.md';
       B.call (x, 'post', '/project/message', {
-         body: 'vibey access',
-         file: 'vibey/access.chat.md',
+         body: 'vibey ' + what,
+         file: chat,
          to: 'shell',
       }, function (x, error) {
-         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem updating access');
-         var chat = 'vibey/access.chat.md';
+         if (error) return B.call (x, 'snackbar', 'error', 'There was a problem updating ' + what);
          var files = B.get ('files') || [];
          if (! dale.stop (files, true, function (f) {
             return f.name === chat;
@@ -3329,13 +3331,13 @@ views.inner = function () {
                            title: file.full ? 'Exit full screen' : 'Full screen',
                            type: 'button',
                         }, [views.tooltip ('\\', 'below'), ['i', {class: 'bi bi-' + (file.full ? 'fullscreen-exit' : 'fullscreen') + ' mr1'}], 'Full']],
-                        file.name === 'vibey/access.md' && ! project.read ? ['button', {
+                        (file.name === 'vibey/access.md' || file.name === 'vibey/cron.md') && ! project.read ? ['button', {
                            class: 'bg-vgreen bn br2 f6 fw6 ml2 pointer vdeepnavy',
-                           onclick: B.ev ('update', 'access'),
+                           onclick: B.ev ('update', 'vibey', file.name.slice (6, -3)),
                            style: style ({padding: '0.25rem 0.75rem'}),
-                           title: 'Sync access from vibey/access.md',
+                           title: 'Sync ' + file.name.slice (6, -3) + ' from ' + file.name,
                            type: 'button',
-                        }, [['i', {class: 'bi bi-arrow-repeat mr1'}], 'Update access']] : '',
+                        }, [['i', {class: 'bi bi-arrow-repeat mr1'}], 'Update ' + file.name.slice (6, -3)]] : '',
                      ]],
                   ]];
 

@@ -14,4 +14,4 @@ WORKDIR /project
 
 USER vibey
 
-CMD ["sleep", "infinity"]
+CMD ["sh", "-c", "sudo rm -f /run/crond.reboot; sudo crond; exec sleep infinity"]

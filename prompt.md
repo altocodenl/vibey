@@ -93,3 +93,7 @@ After saving the file successfully, invoke this exact standalone Vibey tool call
 There's no need to call `vibey access` if you just granted access to a project; just do it when granting access to users, tokens or `PUBLIC`.
 
 If a user is setting parts of the project as public, it's possible to list the project in the list of public vibey projects. To do this, a line of the form `PUBLIC list` must be added in `vibey/access.md`. You can suggest this to the user, but **always** ask the user if they want this; by default, most people do not want their projects to be listed publicly.
+
+## Cron
+
+To schedule commands, edit `vibey/cron.md`: an optional `timezone <offset>` line (`-3`, `+5:30`), then one `<selector> <command>` per line, quoting selectors with spaces: `Monday`, `3rd`, `18:00`, `5m`, `"Friday 18:00"`, `"18th 5m"`, `start`. Only these shapes: no cron syntax, abbreviations, am/pm, ranges or lists (use one line per day); intervals are under a day and restart at midnight. Output goes to `vibey/cron-YYYYMMDD.chat.md`. Then sync with the tool call `run` / `command: vibey cron`, which, like `vibey access`, only works as a Vibey tool call.
