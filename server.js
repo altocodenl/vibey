@@ -957,9 +957,9 @@ project.wake = async function () {
                var build = await run (... docker, 'build', '-t', 'vibey-project', '-', {input: projectDockerfile, catch: true});
                if (build.code) return clog ({priority: 'important', type: 'Project rebuild error', engine, error: build.stderr});
             }
-            var containers = await run (... docker, 'ps', '-a', '--filter', 'name=^/vibey-project-', '--format', '{{.Names}} {{.Image}}', {catch: true});
+            var containers = await run (... docker, 'ps', '-a', '--filter', 'name=^/vibey-project-', '--format', '{{.Names}}@{{.Image}}', {catch: true});
             var stale = dale.fil ((containers.stdout || '').trim ().split ('\n'), undefined, function (line) {
-               var [name, image] = line.split (' ');
+               var [name, image] = line.split ('@');
                if (name && image !== 'vibey-project') return name;
             });
             if (stale.length) await run (... docker, 'rm', '-f', ... stale, {catch: true});
