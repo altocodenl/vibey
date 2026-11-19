@@ -259,7 +259,7 @@ if (mode === 'server') {
             }},
             {tag: 'Host outside base domain', method: 'get', host: new URL (CONFIG.baseURL).hostname, headers: {host: 'example.org:' + CONFIG.port}, path: '/', code: 404},
             {tag: 'Nested subdomain', method: 'get', host: 'a.b.' + new URL (CONFIG.baseURL).hostname, path: '/', code: 404},
-            dale.go ([['get', '/f/main.md'], ['get', '/project'], ['post', '/project/run']], function (route) {
+            dale.go ([['get', '/f/main.md'], ['get', '/project'], ['get', '/project/recent'], ['post', '/project/run']], function (route) {
                return {tag: 'Project route on host: ' + route.join (' '), method: route [0], host: new URL (CONFIG.baseURL).hostname, path: route [1], body: route [0] === 'post' ? {command: 'true'} : '', code: 404};
             }),
             dale.go ([['get', '/projects'], ['get', '/auth/list'], ['post', '/auth/login']], function (route) {
@@ -1258,6 +1258,8 @@ if (mode === 'server') {
                ['List files on readable subdomain', 'get', '/project', 200, function (s, rq, rs) {
                   return assert (['file names', dale.go (rs.body.files, function (f) {return f.name}), ['main.md'], teishi.test.equal]);
                }],
+               ['Recent projects exclude the current project', 'get', '/project/recent', 200, assertBody ([])],
+               ['Anonymous cannot get recent projects', 'get', '/project/recent', 403, assertBody ({error: 'No session'}), {cookie: ''}],
                {
                   tag: 'Get project session csrf',
                   method: 'get',
@@ -3168,6 +3170,7 @@ if (mode === 'server') {
 
                if (matchRoute ([
                   ['get', '/project'],
+                  ['get', '/project/recent'],
                   ['get', /^\/f\/.+/],
                   ['get', /^\/project\/message\/.+/],
                   ['post', '/project/write'],

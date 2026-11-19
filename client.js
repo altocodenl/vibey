@@ -215,13 +215,10 @@ B.mrespond ([
       var match = x.path [0].match (/^files\/([^/]+)(?:\/(.*))?$/);
       if (match) {
          var path = match [2] ? 'f/' + filePath (decodeURIComponent (match [2])) : 'f';
-         if (window.location.host === baseHost) {
-            var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
-               if (project.id === match [1]) return project;
-            }) || {id: match [1]};
-            return window.location.href = window.location.protocol + '//' + (project.subdomain || project.id) + '.' + window.location.host + '/#/' + path;
-         }
-         x.path = [path];
+         var project = dale.stopNot (B.get ('projects'), undefined, function (project) {
+            if (project.id === match [1]) return project;
+         }) || {id: match [1]};
+         return window.location.href = window.location.protocol + '//' + (project.subdomain || project.id) + '.' + baseHost + '/#/' + path;
       }
       var hash = '#/' + x.path;
       if (window.location.hash === hash) return B.call (x, 'read', 'hash');
@@ -805,7 +802,14 @@ B.mrespond ([
          });
 
          B.call (x, 'read', 'clientExtension');
+         B.call (x, 'read', 'recentProjects');
          if (! noRead) B.call (x, 'read', 'file');
+      });
+   }],
+
+   ['read', 'recentProjects', function (x) {
+      B.call (x, 'get', '/project/recent', function (x, error, rs) {
+         if (! error) B.call (x, 'set', ['recent', 'projects'], rs.body);
       });
    }],
 
@@ -1799,6 +1803,7 @@ css.colors = {
    vborderblue:    css.rgba (css.colors.vlightblue, 0.22),
    vhighlightblue: css.rgba (css.colors.vblue, 0.25),
    vmidblue:       css.rgba (css.colors.vlightblue, 0.4),
+   vstripeblue:    css.rgba (css.colors.vlightblue, 0.05),
 };
 
 css.style = [
@@ -1823,6 +1828,7 @@ css.style = [
       ];
    }),
 
+   ['.icon-inherit i', {color: 'inherit'}],
    ['.vborderblue-border', {'border-color': css.colors.vborderblue}],
    ['.vgreen-border', {'border-color': css.colors.vgreen}],
    ['.outline-0:focus', {outline: 'none'}],
@@ -2880,9 +2886,9 @@ views.pane = function (paneClass, contents) {
 
 views.inner = function () {
 
-   var iconAndName = function (name) {
+   var iconAndName = function (name, label) {
       if (name.match (/^APP:\d+$/)) return [['i', {class: 'bi bi-window mr1 vlightblue'}], 'Port ' + name.slice (4)];
-      var parts = name.split ('/');
+      var parts = (label || name).split ('/');
       var styled = [];
       dale.go (parts, function (part, index) {
          if (index > 0) styled.push (['span', {class: 'vgray'}, ' / ']);
@@ -2890,6 +2896,9 @@ views.inner = function () {
       });
       if (name.match (/\.chat\.md$/)) return [['i', {class: 'bi bi-chat-left-dots mr1 vpurple'}], styled];
       if (name.match (/\.md$/)) return [['i', {class: 'bi bi-file-text mr1 vlightblue'}], styled];
+      if (name.match (/\.pdf$/i)) return [['i', {class: 'bi bi-file-earmark-pdf mr1 vbrick'}], styled];
+      if (name.match (/\.(avif|bmp|gif|heic|ico|jpe?g|png|svg|webp)$/i)) return [['i', {class: 'bi bi-image mr1 vgreen'}], styled];
+      if (name.match (/\.(avi|m4v|mkv|mov|mp4|ogv|webm)$/i)) return [['i', {class: 'bi bi-film mr1 vorange'}], styled];
       return styled;
    }
 
@@ -3013,6 +3022,27 @@ views.inner = function () {
          }, [
             // Left pane
             pane ('overflow-hidden', function () {return [
+               B.view (['recent', 'projects'], function (projects) {
+                  return ['div', {
+                     class: 'flex flex-shrink-0 mb3',
+                     style: style ({
+                        gap: '0.5rem',
+                     }),
+                  }, dale.go ([0, 1, 2], function (i) {
+                     var other = (projects || []) [i];
+                     return ['div', {
+                        class: css.join ('br3 f5 flex fw7 items-center justify-center', other ? views.projectColor (other.name) + ' pointer' : 'b--dashed ba bw1 vborderblue-border'),
+                        onclick: other ? B.ev ('navigate', 'files/' + other.id) : undefined,
+                        style: style ({
+                           flex: '1',
+                           height: '3rem',
+                        }),
+                        title: other ? other.name : '',
+                     }, other ? dale.go (other.name.split (/[^a-zA-Z0-9]+/).slice (0, 3), function (word) {
+                        return word.charAt (0).toUpperCase ();
+                     }).join ('') : ''];
+                  })];
+               }),
                B.view ([['project', 'size'], ['show', 'projectDetails']], function (projectSize, details) {
                   projectSize = projectSize || {};
                   return ['div', {class: views.projectColor (project.name) + ' br3 flex-shrink-0 mb3 ph3 pv2 relative'}, [
@@ -3091,35 +3121,60 @@ views.inner = function () {
                         title: 'Delete current file',
                      }, [views.tooltip ('U', 'below'), '×']];
                   }),
+                  B.view (['show', 'chats'], function (chats) {
+                     return ['button', {
+                        'aria-pressed': chats ? 'true' : 'false',
+                        class: 'bn br2 ml2 ph2 pointer ' + (chats ? 'bg-vpurple vdeepnavy' : 'bg-vhighlightblue vpurple'),
+                        onclick: B.ev ('set', ['show', 'chats'], ! chats),
+                        title: chats ? 'Show all files' : 'Show only chats',
+                        type: 'button',
+                     }, ['i', {class: 'bi bi-chat-left-dots'}]];
+                  }),
                ]],
                B.view ([['recent', 'files'], ['file', 'name']], function (recent, current) {
                   var names = dale.keys (recent || {});
-                  return ['div', {class: 'flex flex-shrink-0 mb2'}, [0, 1, 2].map (function (i) {
+                  return ['div', {
+                     class: 'flex flex-shrink-0 mb2',
+                     style: style ({
+                        gap: '0.5rem',
+                     }),
+                  }, [0, 1, 2].map (function (i) {
                      var name = names [i];
+                     var base = (name || '').split ('/').pop ();
+                     var ext = (base.match (/[^.](\.[^.]+){1,2}$/) || [''])[0].slice (1);
+                     var stem = base.slice (0, base.length - ext.length);
                      return ['button', {
                         type: 'button',
-                        class: 'bn br2 relative ' + (name === current
-                           ? 'bg-vhighlightblue vnearwhite'
-                           : 'bg-transparent vlightblue') + (name ? ' pointer' : ''),
+                        class: css.join ('bn br3 fw7 icon-inherit relative', name ? views.projectColor (name) + ' pointer' : 'b--dashed ba bg-transparent bw1 vborderblue-border vlightblue', name && name !== current ? 'o-70' : ''),
                         disabled: ! name,
                         title: name || '',
                         onclick: name ? B.ev (['navigate', 'f/' + filePath (name)], ['set', ['show', 'pane'], 'right']) : undefined,
                         style: style ({
-                           width: '33.333%',
+                           flex: '1',
+                           'min-height': '3rem',
                            'min-width': 0,
                            padding: '0.5rem',
                         }),
                      }, [
-                        ['span', {class: 'db truncate'}, name ? name.split ('/').pop () : '—'],
+                        ['span', {
+                           class: 'overflow-hidden',
+                           style: style ({
+                              '-webkit-box-orient': 'vertical',
+                              '-webkit-line-clamp': '2',
+                              display: '-webkit-box',
+                              'overflow-wrap': 'anywhere',
+                           }),
+                        }, name ? iconAndName (base, stem.length > 24 ? stem.slice (0, 12) + '…' + stem.slice (-11) : stem) : ''],
                         name ? views.tooltip (String (i + 1), 'below') : '',
                      ]];
                   })];
                }),
-               B.view ([['apps'], ['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file'], ['show', 'files']], function (apps, files, current, pending, search, expand) {
+               B.view ([['apps'], ['files'], ['file', 'name'], ['pending', 'messages'], ['search', 'file'], ['show', 'chats'], ['show', 'files']], function (apps, files, current, pending, search, chats, expand) {
                   if (! files) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, dale.go (dale.times (50), () => views.spinny ())];
                   if (! files.length && ! (apps || []).length) return ['div', {class: 'flex-auto overflow-y-auto pa3 tc vgray'}, 'No files yet.'];
                   expand = expand || {};
                   var shown = {};
+                  var stripe = 0;
                   var visible = {};
                   var folderRow = function (prefix, open) {
                      var parts = prefix.slice (0, -1).split ('/');
@@ -3142,10 +3197,10 @@ views.inner = function () {
                   });
                   var prevIndex = currentIndex !== undefined ? (currentIndex === 0 ? files.length - 1 : currentIndex - 1) : undefined;
                   var nextIndex = currentIndex !== undefined ? (currentIndex >= files.length - 1 ? 0 : currentIndex + 1) : undefined;
-                  return ['div', {class: 'flex-auto overflow-y-auto'}, [dale.go (apps || [], function (port) {
+                  return ['div', {class: 'flex-auto overflow-y-auto'}, [dale.go (chats ? [] : apps || [], function (port) {
                      var active = current === 'APP:' + port;
                      return ['div', {
-                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
+                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue', stripe++ % 2 && ! active ? 'bg-vstripeblue' : ''),
                         id: active ? 'selected-file' : undefined,
                         onclick: B.ev (['navigate', 'f/APP:' + port], ['set', ['show', 'pane'], 'right']),
                         style: style ({
@@ -3155,6 +3210,7 @@ views.inner = function () {
                      }, iconAndName ('APP:' + port)];
                   }), dale.fil (files, undefined, function (file, index) {
                      if (search && (search !== search.toLowerCase () ? file.name : file.name.toLowerCase ()).indexOf (search) === -1) return;
+                     if (chats && ! /\.chat\.md$/.test (file.name)) return;
                      var parts = file.name.split ('/');
                      var rows = [];
                      var folders = dale.go (parts.slice (0, -1), function (part, depth) {
@@ -3188,7 +3244,7 @@ views.inner = function () {
                      var active = file.name === current;
                      var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
                      return finish (rows.concat ([['div', {
-                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue'),
+                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue', stripe++ % 2 && ! active ? 'bg-vstripeblue' : ''),
                         id: active ? 'selected-file' : undefined,
                         onclick: B.ev (['navigate', 'f/' + filePath (file.name)], ['set', ['show', 'pane'], 'right']),
                         style: style ({

@@ -1351,6 +1351,7 @@ var routes = [
 
       var projectRoutes = [
          ['get', '/project'],
+         ['get', '/project/recent'],
          ['get', /^\/f\/.+/],
          ['get', /^\/project\/message\/.+/],
          ['post', '/project/write'],
@@ -2231,6 +2232,18 @@ var routes = [
             subdomain: rq.subdomain !== rq.projectId ? rq.subdomain : undefined,
          }
       });
+   }],
+
+   ['get', '/project/recent', async function (rq, rs) {
+      if (! rq.user) return reply (rs, 403, {error: 'No session'});
+      var projects = await getForUser (rq.user.id, 'project');
+      reply (rs, 200, dale.go (dale.fil (projects, undefined, function (project) {
+         if (project.id !== rq.projectId) return project;
+      }).sort (function (a, b) {
+         return new Date (b.last) - new Date (a.last);
+      }).slice (0, 3), function (project) {
+         return {id: project.id, name: project.name};
+      }));
    }],
 
    ['get', /^\/f\/(.+)$/, async function (rq, rs) {
