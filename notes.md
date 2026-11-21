@@ -1,5 +1,35 @@
 # Vibey development notes
 
+## 2026-11-20
+
+For destek, I think I got it. The fourth element is not ping. It is *event*. When something happens, do something else: send an HTTP request, or an email, or run a script. The important thing is to have the event. *That* is the fourth leg of the table that is destek. Events can be triggered by four things: a log, a stat (metric), a queue, or a *cron*. The trigger is registered in the event, and the action taken as well. Practical examples:
+- Every N seconds, you hit a health check. If it fails, that's an event that triggers another event.
+- If a metric goes below a value, that sends a notification.
+- If a log reports an important error, that sends a notification and perhaps an agent that reviews logs to diagnose the problem.
+- The things I can do with as outputs are HTTP calls and email. That's all that's needed, for now and perhaps later too, because behind an HTTP call there can be a workflow with custom code, why bake that in? As long as you can have n calls, you should be fine. Perhaps an earlier call could bring data used in a later call. A DSL should do.
+
+Two changes for the email server version I had before:
+- Make workers, not the master, listen to smtp requests.
+- Make the smtp server simply convert the incoming email into an http request that actually hits PUT /project/message. What's not clear yet is on which chat to put it. But the gatekeeper can resolve the auth.
+   - Then let's do this: the smtp block simply receives, but doesn't authenticate the message. It just posts to POST /project/email. The gatekeeper validates that the recipient is legitimate (in the DKIM sense), then the general logic for finding project kicks in.
+   - When the request makes it to POST /project/email, the proper chat is determined and there's a self call to PUT /project/message
+
+- no bounce
+- just two calls
+
+## 2026-11-19
+
+Idea: inbox project, where you forward all your mail, and a cheap llm sorts it.
+
+claude, on email threads:
+```
+Recommended: combine them (close to what Gmail does)
+Link emails by their headers first.
+Then merge an email into a thread with the same normalized subject only if it has no header links and shares a participant with that thread.
+Gmail also starts a new thread when the subject changes, even if the headers link the emails.
+If you want the established algorithm, look up JWZ threading (Jamie Zawinski's algorithm, also described in RFC 5256 as REFERENCES). Python's imapclient and some mail libraries implement it. Many IMAP servers can also thread for you with the THREAD REFERENCES or THREAD ORDEREDSUBJECT command.
+```
+
 ## 2026-11-18
 
 I think this mapping is the key to email:
@@ -22,6 +52,7 @@ DONE:
 - Migrate user #2
 - Cron (!)
 - Cold AI calls (from token or cron)
+- Switch projects from the inner view, improve readability of left pane
 
 TODO
    - migration
