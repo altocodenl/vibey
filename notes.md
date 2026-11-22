@@ -1,5 +1,15 @@
 # Vibey development notes
 
+## 2026-11-21
+
+Email in the chat:
+- from already exists, same with to. To can now have multiple email addresses, separated by spaces, on the same line.
+- subject is, by convention, the first line of the body
+- the contents of the email are the rest of the body, as they come
+- attachments are best referred to by the message, but placed as files next to the chat/email
+
+destek will be my first internal app. It essentially solves the remaining part of the infrastructure: logs, stats, events (when I need them, also queues). a service backed by sqlite.
+
 ## 2026-11-20
 
 For destek, I think I got it. The fourth element is not ping. It is *event*. When something happens, do something else: send an HTTP request, or an email, or run a script. The important thing is to have the event. *That* is the fourth leg of the table that is destek. Events can be triggered by four things: a log, a stat (metric), a queue, or a *cron*. The trigger is registered in the event, and the action taken as well. Practical examples:

@@ -802,7 +802,7 @@ B.mrespond ([
          });
 
          B.call (x, 'read', 'clientExtension');
-         B.call (x, 'read', 'recentProjects');
+         if (! B.get ('user', 'anonymous')) B.call (x, 'read', 'recentProjects');
          if (! noRead) B.call (x, 'read', 'file');
       });
    }],
