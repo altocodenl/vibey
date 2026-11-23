@@ -1,5 +1,88 @@
 # Vibey development notes
 
+## 2026-11-23
+
+The TODO list has the remaining things that are necessary:
+- email
+- make domains work all the way
+- autobackup
+- destek
+- migrations
+
+
+TODO: fix cache, skip sending pending calls
+
+```
+⏺ Prompt cache test summary (vibey + claude -p)
+
+  1. CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1 works: the system prompt stays stable when the repo changes, so identical prompts get full cache hits.
+  2. Today vibey caches only Claude Code's system prompt (~12k tokens). Every turn rewrites the whole transcript to cache (~20k in the test).
+  3. Cause: the API never reuses part of the final user message. Adding blocks to that same message misses, even with an explicit cache_control breakpoint (tested on Haiku and Sonnet).
+  4. Adding content as a new turn (user -> assistant -> user) does hit: 24.8k read, 88 written.
+  5. Claude Code also appends an "# Environment" message after the user content and puts its breakpoint there, so each request caches transcript +
+  Environment, which the next turn never matches.
+  6. claude -p does not accept injected history through stdin: it reorders assistant turns and runs each user line as a separate prompt.
+  7. Calling the Messages API directly would fix it, but it costs far more than the subscription.
+  8. Fix: keep one Claude Code session per (project, agent, chat file) and pass only the new part with --resume <id>.
+  9. Tested: turn 0 writes 32k; turn 1 reads 25k / writes 7k; turns 2 and 3 read 32k / write 75.
+  10. Vibey stores the session id plus the length and hash of the sent prompt in redis. If the new prompt extends the old one, only the suffix is sent;
+  otherwise a fresh session starts.
+  11. The "Current chat file" line moves to the front of the prompt so it doesn't break the prefix.
+  12. Credentials still get deleted after each call: only CLAUDE_CONFIG_DIR/projects is symlinked to a persistent /home/vibey/.vibey-sessions dir.
+  13. Pending messages: show only their head (from/id/to/pending), not the growing body. When one finishes, the next call starts one fresh session.
+  14. Caveats: the AI's last reply goes in twice (small), nothing cleans up old session dirs, and Claude Code's own tool output grows the session (it may
+  compact).
+  15. Status: --resume pattern verified with plain claude -p in a scratchpad; the vibey diff is not applied and is untested end-to-end.
+```
+
+Backups:
+- backup once an hour, to avoid aggressive uploading
+- decided against own solution
+- basic queue logic can solve the ongoing backups!
+   - add queue entries from the master
+
+   - children pick them up, update them
+   - if child fails, error is reported, entry is cleared so it can be picked up again
+   - report error from the master if there's already an old entry for the project, don't re-queue
+- backblaze is 3x cheaper than s3, and it doesn't charge for LIST, PUT and DELETE requests. Also ingress is free.
+- cost tracking can be done by ourselves: just measure total size after the backup, and that is valid to the previous time.
+
+Engine:
+- mark engine in progress and build the image there, until it is built
+- engine/access.md
+   <email> create
+   <domain> map
+   <from prefix, with domain> redirect <projectId/url> [<APP:PORT>] <to prefix>
+- auto open ports of a project if they are mentioned in a redirect!
+- redirects are across all methods, like they're done in nginx
+   client_max_body_size: increase from 1mb to 100mb
+   proxy_set_header Host $host;
+   proxy_set_header X-Forwarded-For $remote_addr;
+   proxy_set_header X-Forwarded-Proto $scheme;
+   On the Node side, trust exactly one proxy hop (in Express, app.set('trust proxy', 1)). Otherwise anything that relies on the client IP, like rate limiting or logs, reads either nginx's address or a spoofed one.
+   Proxy headers. Host, X-Forwarded-For and X-Forwarded-Proto
+      Set proxy_read_timeout 5m; and proxy_send_timeout 5m;. Leave client_body_timeout and client_header_timeout at their 60s defaults. Raising those lets slow clients tie up connections, which is the slowloris attack.
+   Timeouts: 5m
+- for now: full nginx rewrite. don't use certbot's 301, instead put 302s in place.
+
+email:
+- email with to with number below: reuse the box below, but reply to a certain numbered message
+- what about outgoing? Just send to owner, for now.
+- email receiving: simple threading done in the endpoint; use extra fields for cc and bcc.
+
+destek
+- destek should be importable as a library too, so you can use it within the code. however, for vibey-host, I cannot include itas a library because it is shared state.
+- If vibey were to use destek internally, it'd have to have a host project for it, and it couldn't really log itself without going into an infinite recurse. But still doable.
+- The case for keeping destek in the projects is that then the data is owned by the projects, and therefore it's backed up there and uses those limits. ownership and also quotas are kept within the project.
+- Actions on event can merely be HTTP calls: email can simply be emailing the owner through the vibey mechanism of reply.
+
+## 2026-11-22
+
+I think that humans can create beautiful proofs partly because they need to fit it in small brains. We cannot work with things that are so big. Alexander, though, would disagree, and say that beauty comes from deep feeling. Is deep feeling something that AI could also experience, and therefore use to create beautiful wholes, including proofs?
+
+https://arxiv.org/pdf/2510.08338
+"Consumer research costs companies billions annually yet suffers from panel biases and limited scale. Large language models (LLMs) offer an alternative by simulating synthetic consumers, but produce unrealistic response distributions when asked directly for numerical ratings. We present semantic similarity rating (SSR), a method that elicits textual responses from LLMs and maps these to Likert distributions using embedding similarity to reference statements. Testing on an extensive dataset comprising 57 personal care product surveys conducted by a leading corporation in that market (9,300 human responses), SSR achieves 90% of human test–retest reliability while maintaining realistic response distributions (KS similarity > 0.85). Additionally, these synthetic respondents provide rich qualitative feedback explaining their ratings. This framework enables scalable consumer research simulations while preserving traditional survey metrics and interpretability."
+
 ## 2026-11-21
 
 Email in the chat:
