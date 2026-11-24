@@ -1,5 +1,23 @@
 # Vibey development notes
 
+## 2026-11-24
+
+docker logs -f --tail 100 vibey-host
+
+how to avoid busting cache:
+- Filter out all pending messages when sending the chat to ai
+- Use the id of the chat message as a claude session id, keep the session in disk.
+- Move the "Current chat file" line to the front of the prompt.
+- disable git instructions.
+
+agent.js is merely a long-lived docker exec!
+
+Idea: email between projects of the same owner!
+
+DONE:
+- Avoid busting cache for claude & gpt
+- Sort alphabetically but ignoring case
+
 ## 2026-11-23
 
 The TODO list has the remaining things that are necessary:
@@ -8,7 +26,6 @@ The TODO list has the remaining things that are necessary:
 - autobackup
 - destek
 - migrations
-
 
 TODO: fix cache, skip sending pending calls
 

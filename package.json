@@ -12,6 +12,7 @@
       "aws4":                     "1.13.2",
       "bootstrap-icons":          "1.11.3",
       "codemirror":               "5.65.21",
+      "mailauth":                 "8.1.0",
       "marked":                   "18.0.5",
       "nodemailer":               "6.9.16",
       "nodemailer-ses-transport": "1.5.1",

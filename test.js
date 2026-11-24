@@ -494,7 +494,34 @@ if (mode === 'server') {
                ['Request subscription without type', 'post', '/subscription/request', {}, 400],
                ['Request subscription with invalid type', 'post', '/subscription/request', {type: 'pro'}, 400],
                ['Request subscription with extra key', 'post', '/subscription/request', {type: 'full', extra: true}, 400],
-               ['Non-admin cannot create a host project', 'post', '/project', {name: 'not allowed'}, 403, assertBody ({error: 'Only the admin can create projects on the host'}), {'x-test': '0'}],
+               ['Non-admin cannot create a host project', 'post', '/project', {name: 'not allowed'}, 403, assertBody ({error: 'Only the admin or a host user can create projects on the host'}), {'x-test': '0'}],
+               ['Add host email', 'get', '/', 200, function (s, rq, rs, next) {
+                  redis ([
+                     ['sadd', 'hostEmails', 'hello@example.com'],
+                     ['del', 'rateLimit:login:hello@example.com'],
+                  ]).then (function () {next (null, rs)}, next);
+               }],
+               ['Logout before host login', 'post', '/auth/logout', {}, 200],
+               ['Login as host user', 'post', '/auth/login', {email: 'hello@example.com'}, 200, function (s, rq, rs) {
+                  s.loginLink = rs.body.loginLink;
+                  return true;
+               }],
+               ['Verify login as host user', 'get', function (s) {return '/auth/verify/' + s.loginLink}, 200, function (s, rq, rs) {
+                  if (! assert ([
+                     ['body.engines', rs.body.engines, ['host'], teishi.test.equal],
+                  ])) return false;
+                  s.headers.cookie = getCookie (rs.headers);
+                  s.headers ['x-csrf'] = rs.body.csrf;
+                  return true;
+               }],
+               ['Get host user', 'get', '/auth/user', 200, function (s, rq, rs) {
+                  return assert ([
+                     ['body.engines', rs.body.engines, ['host'], teishi.test.equal],
+                  ]);
+               }],
+               ['Remove host email', 'get', '/', 200, function (s, rq, rs, next) {
+                  redis ('srem', 'hostEmails', 'hello@example.com').then (function () {next (null, rs)}, next);
+               }],
                // Login allocates usernames; collisions use the first available suffix.
                usernameAccount ('hello@example.net', 'hello-example'),
                usernameAccount ('hello@example.org', 'hello-example-1'),
@@ -1486,6 +1513,14 @@ if (mode === 'server') {
             ['Read file after append to empty file', 'get', '/f/' + encodeURIComponent ('doc/empty.md') + '?raw=1', 200, assertBody ('first message\n')],
             ['Append at EOF preserving existing content', 'post', '/project/edit', function (s) {return {path: 'doc/empty.md', oldText: '[EOF]', newText: 'second message\n'}}, 200, assertBody ({})],
             waitForCommits ('List commits after appends', 13, "Edit 'doc/empty.md'"),
+            ['Write uppercase file', 'post', '/project/write', {path: 'sort/Zeta.md', content: 'z'}, 200, assertBody ({})],
+            ['Write lowercase file', 'post', '/project/write', {path: 'sort/alpha.md', content: 'a'}, 200, assertBody ({})],
+            ['List files sorted case-insensitively', 'get', '/project', 200, function (s, rq, rs) {
+               return assert (['file names', dale.fil (rs.body.files, undefined, function (f) {
+                  if (f.name.indexOf ('sort/') === 0) return f.name;
+               }), ['sort/alpha.md', 'sort/Zeta.md'], teishi.test.equal]);
+            }],
+            ['Remove sort files', 'post', '/project/run', {command: 'rm -r sort'}, 200],
             ['Read file after second append', 'get', '/f/' + encodeURIComponent ('doc/empty.md') + '?raw=1', 200, function (s, rq, rs, next) {
                if (! assertBody ('first message\nsecond message\n') (s, rq, rs)) return false;
                (async function () {
@@ -2071,7 +2106,7 @@ if (mode === 'server') {
                   s.headers ['x-csrf'] = rs.body.csrf;
                   return true;
                }],
-               ['Create project as non-admin', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Only the admin can create projects on the host'}), {'x-test': '0'}],
+               ['Create project as non-admin', 'post', '/project', {name: 'should fail'}, 403, assertBody ({error: 'Only the admin or a host user can create projects on the host'}), {'x-test': '0'}],
                ['Update another user\'s project', 'put', '/project', function (s) {return {id: s.projectId, name: 'hacked'}}, 404],
                projectLogin ('another user\'s project', 'projectId'),
                ['Read file from another user\'s project', 'get', '/f/' + encodeURIComponent ('main.md'), 404],
@@ -3071,7 +3106,7 @@ if (mode === 'server') {
             ['Create project on nonexistent engine', 'post', '/project', {name: 'on engine', engine: 'nonexistent'}, 404, assertBody ({error: 'Engine not found'})],
             CONFIG.cloud ? [
                ['Create project on another user\'s engine', 'post', '/project', {name: 'on engine', engine: 'test-engine-b'}, 404, assertBody ({error: 'Engine not found'})],
-               ['Non-admin cannot create a project on explicit host', 'post', '/project', {name: 'on host', engine: 'host'}, 403, assertBody ({error: 'Only the admin can create projects on the host'}), {'x-test': '0'}],
+               ['Non-admin cannot create a project on explicit host', 'post', '/project', {name: 'on host', engine: 'host'}, 403, assertBody ({error: 'Only the admin or a host user can create projects on the host'}), {'x-test': '0'}],
             ] : [],
             ['Create project on explicit host', 'post', '/project', {name: 'on host', engine: 'host'}, 200, function (s, rq, rs) {
                s.hostEngineProjectId = rs.body.id;

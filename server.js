@@ -1593,7 +1593,7 @@ var routes = [
          credentials,
          csrf: rq.user.csrf,
          email: rq.subdomain ? undefined : rq.user.email,
-         engines: (rq.user.email === CONFIG.admin ? ['host'] : []).concat (engines),
+         engines: (rq.user.email === CONFIG.admin || await redis ('sismember', 'hostEmails', rq.user.email) ? ['host'] : []).concat (engines),
          id: rq.user.id,
          mode: 'cloud',
          settings,
@@ -1747,9 +1747,10 @@ var routes = [
       var userId = await redis ('get', 'email:' + email);
       if (! userId) return reply (rs, 403, {error: 'No user bound to the email'});
 
-      var [user, credentials] = await redis ([
+      var [user, credentials, owned] = await redis ([
          ['hgetall', 'user:' + userId],
          ['hget', 'credentials:' + userId, 'data'],
+         ['smembers', 'owner:' + userId],
       ]);
 
       var csrf      = crypto.randomBytes (32).toString ('hex');
@@ -1795,9 +1796,11 @@ var routes = [
       reply (rs, 200, {
          admin: user.email === CONFIG.admin ? true : undefined,
          count: parseInt (user.count),
+         creator: user.creator ? true : undefined,
          credentials,
          csrf,
          email: user.email,
+         engines: (user.email === CONFIG.admin || await redis ('sismember', 'hostEmails', user.email) ? ['host'] : []).concat (dale.fil (owned, undefined, key => /^engine:/.test (key) ? key.replace (/^engine:/, '') : undefined).sort ()),
          id: userId,
          mode: 'cloud',
          settings: JSON.parse (user.settings || '{}'),
@@ -2059,7 +2062,7 @@ var routes = [
 
       if (! validProjectName (rq.body.name)) return reply (rs, 400, {error: 'Project names cannot be a UUID, contain / or ?, have two spaces in a row, or have a space next to a dash'});
 
-      if (CONFIG.cloud && (! rq.body.engine || rq.body.engine === 'host') && ! rq.test && rq.user.email !== CONFIG.admin) return reply (rs, 403, {error: 'Only the admin can create projects on the host'});
+      if (CONFIG.cloud && (! rq.body.engine || rq.body.engine === 'host') && ! rq.test && rq.user.email !== CONFIG.admin && ! await redis ('sismember', 'hostEmails', rq.user.email)) return reply (rs, 403, {error: 'Only the admin or a host user can create projects on the host'});
 
       if (rq.body.engine && rq.body.engine !== 'host' && await redis ('hget', 'engine:' + rq.body.engine, 'owner') !== rq.user.id) return reply (rs, 404, {error: 'Engine not found'});
 
@@ -2219,7 +2222,8 @@ var routes = [
          };
       });
       files.sort (function (a, b) {
-         return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+         var A = a.name.toLowerCase (), B = b.name.toLowerCase ();
+         return A < B ? -1 : A > B ? 1 : a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
       });
       return reply (rs, 200, {
          apps,
@@ -2906,7 +2910,7 @@ var routes = [
 
          var buffer = '', aiStderr = '';
          var lastFullText = '', messageBreak = false;
-         var codexProc, codexError, codexItem, codexDone = false;
+         var codexProc, codexError, codexItem, codexThreadId, codexBase = undefined, codexStarted = false, codexDone = false;
          var codexSend = function (message) {
             codexProc.stdin.write (JSON.stringify (message) + '\n');
          };
@@ -2974,23 +2978,51 @@ var routes = [
                });
                if (event.id === 1) {
                   codexSend ({method: 'initialized'});
-                  return codexSend ({
+                  return codexSend (resume ? {
+                     id: 2, method: 'thread/resume',
+                     params: {
+                        threadId: previous, excludeTurns: true, model: aiModel.canonical, cwd: '/project',
+                        approvalPolicy: 'never', sandbox: 'danger-full-access',
+                     },
+                  } : {
                      id: 2, method: 'thread/start',
                      params: {
                         model: aiModel.canonical, cwd: '/project',
-                        approvalPolicy: 'never', sandbox: 'danger-full-access', ephemeral: true,
+                        approvalPolicy: 'never', sandbox: 'danger-full-access', ephemeral: false,
                      },
                   });
                }
-               if (event.id === 2) return codexSend ({
-                  id: 3, method: 'turn/start',
-                  params: {
-                     threadId: event.result.thread.id,
-                     input: [{type: 'text', text: prompt, text_elements: []}],
-                  },
-               });
+               if (event.id === 2) {
+                  codexThreadId = event.result.thread.id;
+                  return codexSend ({
+                     id: 3, method: 'turn/start',
+                     params: {
+                        threadId: codexThreadId,
+                        input: [{type: 'text', text: prompt.slice (resume ? sent.length : 0), text_elements: []}],
+                     },
+                  });
+               }
+               if (event.id === 3) codexStarted = true;
                if (event.method === 'thread/tokenUsage/updated') {
-                  var tokens = params.tokenUsage.total;
+                  var total = params.tokenUsage.total, last = params.tokenUsage.last;
+                  if (! codexStarted) {
+                     codexBase = {
+                        cachedInputTokens: total.cachedInputTokens || 0,
+                        inputTokens: total.inputTokens,
+                        outputTokens: total.outputTokens,
+                     };
+                     return;
+                  }
+                  codexBase = codexBase || {
+                     cachedInputTokens: (total.cachedInputTokens || 0) - (last.cachedInputTokens || 0),
+                     inputTokens: total.inputTokens - last.inputTokens,
+                     outputTokens: total.outputTokens - last.outputTokens,
+                  };
+                  var tokens = {
+                     cachedInputTokens: (total.cachedInputTokens || 0) - codexBase.cachedInputTokens,
+                     inputTokens: total.inputTokens - codexBase.inputTokens,
+                     outputTokens: total.outputTokens - codexBase.outputTokens,
+                  };
                   usage = {
                      cache: tokens.cachedInputTokens || 0,
                      fresh: tokens.inputTokens - (tokens.cachedInputTokens || 0),
@@ -3023,9 +3055,11 @@ var routes = [
          }
 
          var prompt = (transcript + '\n').replace (
+            /^əəə head ([0-9a-f-]{36})\n(?:(?!əəə body )[^\n]*\n)*?pending 1\n[\s\S]*?(?=^əəə head [0-9a-f-]{36}\n|(?![\s\S]))/gim, ''
+         ).replace (
             /^əəə head ([0-9a-f-]{36})\n[\s\S]*?^əəə body \1\n/gim,
             function (head) {
-               return head.replace (/^(pending|t|t-start|t-end|tokens-in|tokens-cache|tokens-out|credential) .*\n/gm, '');
+               return head.replace (/^(pending|session|t|t-start|t-end|tokens-in|tokens-cache|tokens-out|credential) .*\n/gm, '');
             }
          );
 
@@ -3043,7 +3077,7 @@ var routes = [
             }
          );
 
-         prompt += '\nCurrent chat file: ' + JSON.stringify (rq.body.file) + '\n';
+         prompt = 'Current chat file: ' + JSON.stringify (rq.body.file) + '\n\n' + prompt;
 
          if (rq.test) var aiResult = await new Promise (function (resolve) {
             var proc = new (require ('events')) (), words = 0;
@@ -3070,6 +3104,21 @@ var routes = [
             try {
                var command;
 
+               var previousHead = dale.stopNot (transcript.split (/^əəə head /m).reverse (), undefined, function (entry) {
+                  var head = entry.slice (0, entry.search (/^əəə body /m));
+                  if ((head.match (/^from (.+)$/m) || []) [1] === rq.body.to && ! /^pending 1$/m.test (head)) return head;
+               });
+               var previous = previousHead && (previousHead.match (aiFlavor === 'openai' ? /^session (.+)$/m : /^id ([0-9a-f-]{36})$/m) || []) [1];
+               var session = previous ? await project.run (rq.project, 'cat ' + (aiFlavor === 'openai' ? '/home/vibey/.vibey-codex-sessions/*/*/*/rollout-*-' : '/home/vibey/.vibey-sessions/*/') + Path.quote (previous + '.jsonl'), {catch: true}) : {code: 1};
+               var sent = session.code ? '' : dale.fil (session.stdout.trim ().split ('\n'), undefined, function (line) {
+                  var entry = JSON.parse (line);
+                  if (aiFlavor === 'anthropic' && entry.type === 'user' && ! entry.isMeta && typeof entry.message.content === 'string') return entry.message.content;
+                  if (aiFlavor === 'openai' && entry.type === 'response_item' && entry.payload.type === 'message' && entry.payload.role === 'user') return dale.fil (entry.payload.content, undefined, function (content) {
+                     if (content.type === 'input_text' && ! /^<environment_context>/.test (content.text)) return content.text;
+                  }).join ('');
+               }).join ('');
+               var resume = sent && prompt.startsWith (sent);
+
                if (aiFlavor === 'openai') {
                   var codexAuth = JSON.stringify (auth === 'apiKey'
                      ? {auth_mode: 'apikey', OPENAI_API_KEY: creds.apiKey}
@@ -3087,6 +3136,7 @@ var routes = [
                   if (result.code) throw result;
 
                   command = 'export CODEX_HOME=' + Path.quote (configDir) + ';'
+                     + ' mkdir -p /home/vibey/.vibey-codex-sessions && ln -s /home/vibey/.vibey-codex-sessions ' + Path.quote (configDir + '/sessions') + ' || exit 1;'
                      + ' exec codex app-server --stdio -c ' + Path.quote ('sandbox_mode="danger-full-access"');
                }
 
@@ -3111,17 +3161,20 @@ var routes = [
                   if (result.code) throw result;
 
                   command = 'export CLAUDE_CONFIG_DIR=' + Path.quote (configDir) + ';'
+                     + ' mkdir -p /home/vibey/.vibey-sessions && ln -s /home/vibey/.vibey-sessions ' + Path.quote (configDir + '/projects') + ' || exit 1;'
+                     + ' export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1;'
                      + ' unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN;'
                      + ' credential=$(cat ' + Path.quote (credentialPath) + ') || exit 1;'
                      + ' export ' + (auth === 'apiKey' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN') + '="$credential";'
                      + ' unset credential;'
                      + ' exec claude -p --model ' + Path.quote (aiModel.canonical)
+                     + (resume ? ' --resume ' + Path.quote (previous) + ' --fork-session' : '') + ' --session-id ' + Path.quote (responseId)
                      + ' --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions';
                }
 
                var aiResult = await project.run (rq.project, groupedCommand (command), {
                   catch: true,
-                  input: aiFlavor === 'openai' ? undefined : prompt,
+                  input: aiFlavor === 'openai' ? undefined : prompt.slice (resume ? sent.length : 0),
                   onSpawn: function (proc) {
                      watchCancellation (proc);
                      if (aiFlavor !== 'openai') return;
@@ -3147,6 +3200,9 @@ var routes = [
                      processLines (lines);
                   },
                });
+
+               if (aiFlavor === 'openai' && ! aiResult.code && ! aiResult.signal) await project.run (rq.project, 'find /home/vibey/.vibey-codex-sessions -name ' + Path.quote ('*.jsonl') + ' -mmin +1440 -delete', {catch: true});
+               if (aiFlavor === 'anthropic' && ! aiResult.code && ! aiResult.signal) await project.run (rq.project, (previous ? 'rm -f /home/vibey/.vibey-sessions/*/' + Path.quote (previous + '.jsonl') + '; ' : '') + 'find /home/vibey/.vibey-sessions -name ' + Path.quote ('*.jsonl') + ' -mmin +1440 -delete', {catch: true});
             }
             finally {
                try {
@@ -3195,6 +3251,7 @@ var routes = [
             'əəə head ' + responseId,
             'from ' + rq.body.to,
             'id ' + responseId,
+            ...(codexThreadId ? ['session ' + codexThreadId] : []),
             't-end ' + now (),
             't-start ' + tStart,
          ].concat (tokenLines (usage)).join ('\n');
