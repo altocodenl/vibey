@@ -1,5 +1,12 @@
 # Vibey development notes
 
+## 2026-11-25
+
+- Do not validate DKIM, simply parse the data and send it to a new endpoint, POST /project/email, as JSON. Attachments go as base64, in an attachments object.
+- Let the gatekeeper do the conversion of project id to project name, if necessary, this is like a normal project endpoint.
+- Let the /project/email endpoint do DKIM validation. If it's invalid, mark the from as `(unverified)`, but still let it through.
+- Let that endpoint verify access.
+
 ## 2026-11-24
 
 docker logs -f --tail 100 vibey-host

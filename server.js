@@ -3740,3 +3740,40 @@ var server = cicek.listen ({port: CONFIG.port}, dale.go (routes, function (route
    }
    return route;
 }));
+
+// *** INBOUND EMAIL ***
+
+if (! cicek.isMaster && CONFIG.email?.enable) new (require ('smtp-server').SMTPServer) ({
+   authOptional: true,
+   disabledCommands: ['STARTTLS'],
+   size: 10 * 1024 * 1024,
+   onRcptTo: async function (address, session, cb) {
+      var match = address.address.toLowerCase ().match (/^([a-z0-9]+)--(.+)@(.+)$/);
+      if (! match || match [3] !== new URL (CONFIG.baseURL).hostname) return cb (new Error ('Unknown recipient'));
+      var ownerId = await redis ('get', 'username:' + match [1]);
+      session.project = dale.stopNot (ownerId ? await getForUser (ownerId, 'project') : undefined, undefined, function (project) {
+         if (project.owner === ownerId && slug (project.name) === match [2]) return project;
+      });
+      cb (session.project ? undefined : new Error ('Unknown recipient'));
+   },
+   onData: async function (stream, session, cb) {
+      try {
+         var chunks = [];
+         for await (var chunk of stream) if (! stream.sizeExceeded) chunks.push (chunk);
+         if (stream.sizeExceeded) return cb (new Error ('Message too big'));
+         var message = Buffer.concat (chunks);
+         var [auth, parsed] = await Promise.all ([
+            require ('mailauth').authenticate (message, {ip: session.remoteAddress, helo: session.hostNameAppearsAs, sender: session.envelope.mailFrom?.address, mta: new URL (CONFIG.baseURL).hostname}),
+            require ('mailparser').simpleParser (message)
+         ]);
+         var date = new Date ().toISOString (), path = 'inbox-' + date.slice (0, 10).replace (/-/g, '') + '.md';
+         var senderId = await redis ('get', 'email:' + (parsed.from?.value [0]?.address || '').toLowerCase ());
+         if (auth.dmarc?.status?.result !== 'pass' || ! senderId || ! await allowOp (senderId, session.project.id, 'write', path)) return cb (new Error ('Sender not allowed'));
+         var result = await project.edit (session.project, path, '[EOF]', '## ' + (parsed.subject || '(no subject)') + '\n> From: ' + (parsed.from?.text || '') + '\n> Time: ' + date + '\n\n' + (parsed.text || '').trim () + '\n\n');
+         cb (result.code ? new Error ('Could not save email') : undefined);
+      }
+      catch (error) {
+         cb (error);
+      }
+   }
+}).listen (25);
