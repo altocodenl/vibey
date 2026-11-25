@@ -1,0 +1,18 @@
+{
+   "name": "destek",
+   "version": "0.0.0",
+   "dependencies": {
+      "cicek":    "3.4.5",
+      "dale":     "6.0.2",
+      "gotob":    "2.3.2",
+      "lith":     "6.0.7",
+      "tachyons": "4.12.0",
+      "teishi":   "5.1.2"
+   },
+   "main": "server.js",
+   "author": "Altocode <info@altocode.nl>",
+   "license": [{
+      "type": "Public Domain",
+      "url": "http://github.com/altocodenl/vibey#license"
+   }]
+}

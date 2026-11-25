@@ -2,10 +2,147 @@
 
 ## 2026-11-25
 
+email:
 - Do not validate DKIM, simply parse the data and send it to a new endpoint, POST /project/email, as JSON. Attachments go as base64, in an attachments object.
 - Let the gatekeeper do the conversion of project id to project name, if necessary, this is like a normal project endpoint.
 - Let the /project/email endpoint do DKIM validation. If it's invalid, mark the from as `(unverified)`, but still let it through.
 - Let that endpoint verify access.
+
+Email is a personal URL with a free-form yet well structured protocol for anybody to send you a message or get a message from you, that's why it is ineradicable.
+
+destek references (and earlier equivalents):
+- 2026-11-23: destek as library vs per-project app; data ownership & quotas
+- 2026-11-21: destek as first internal app (logs, stats, events, queues; sqlite)
+- 2026-11-20: events as the fourth leg (triggered by log, stat, queue or cron)
+- 2026-11-16: destek not needed for launch; pings hitting endpoints for notifications
+- 2026-11-09 to 2026-11-17: TODO "destek to list logs and have alerts"; "vibey inside has an app, destek"; side chat for destek
+- 2026-10-29: destek as the second half of ac;tools
+- 2026-10-28: destek named; revisits fourlite; POST /log/<tags>, autoparsing, timey, ping
+- 2026-10-27: logging app (sqlite per day, t/priority/tags; push system logs via curl cron)
+- 2026-10-10: outbound email notifications; project page as inbox
+- 2026-10-04: notification project (???)
+- 2026-10-01: a project for metrics that the host sends to; bootstrapping problem
+- 2026-09-30: timey (time series service); ac;tools revisited (timey, logs as files, kuey, inbox notifications)
+- 2026-09-29: notifications project for alerts, monitoring inside with fallback to local files
+- 2026-09-28 to 2026-10-30: TODO "devops: notification project to see alerts"
+- 2026-09-03: auto-keepalive on apps & uptime notifications in-built
+- 2026-07-15: managed layer (keepalive, log rotation & backup, cpu/mem/slow request monitoring, uptime checks); uptime monitoring with warnings by email or API
+- 2026-05-09: uptime among the things in the back
+
+destek's logs have only three columns: time, tags and fields. That's it.
+destek's stats have also only three columns: time, tags and value. That's it!
+queue: time, status (pending, working, done, error), lastActivity, and `fields` (has everything else)
+event: trigger: cron, log, stat or queue
+
+idea for event: when sending a notification, you can log, to rate limit re-sending. rather than building emails going out of destek, integrate it with a vibey call to a chat, which could send an email out. just let it be http calls.
+
+destek's log query: <field>:<value>, with value being just case-smart match; if you need to add spaces, add quotes: `<field>:"foo bar"`.
+Either simple query mode, or full on sql, with perhaps a simple switch for sql to do read only vs write, so you have a pokayoke to prevent writes if you're copypasting sql statements willy-nilly.
+
+destek uses:
+- on every http request on the host, send an (abridged) log and a stat.
+- on every docker call, send a log and a stat.
+- on every llm call, send a log and a stat.
+- more detailed auth logs, if they're not covered by regular logging of http requests.
+- on every client error, send a log.
+- lift ubuntu system logs (security, performance, upgrades, certbot)
+- every minute, check cpu/mem/disk.
+- every minute, check uptime.
+- backup queues
+- measure backup spend per user.
+
+another idea: just make stats be a kind of log. just use numeric fields. In that way, you could use (for example), the ms of an http response to count as a stat directly (then measure its average or its sum across time). Events cannot be expressed as logs, though the firing of events can indeed create logs so we see what's going on. Logs (and cron) call events, and events leave logs in turn.
+if we fold stat onto log, then a log can have time, tags (unordered values) and fields (keyvalues).
+
+As for queues, they could be folded into logs, but I wonder if that's going too far. Let's explore it.
+
+If a queue was to be expressed as a log, it'd be all the logs with a certain set of properties and a status pending, to pick up the next one. You'd need an endpoint to pick the next entry transactionally, so there's no conflict. The picking would be the writing of a new log. Same would go for heartbeats on long processes. Same for errors. Even if we expose endpoints for a queue, the underlying logic could still be stored as logs, so you can have a full history right there. It makes sense.
+
+Logs are the actual calls. Events are really responders, in the recalc sense. The one addition to the model is cron, the way it's already done inside vibey.
+
+Back to the original "folding": stock and flow variables can be simplified into one type. By making stats into logs, we go one step further.
+
+Good ideas from before I had forgotten:
+- `raw` field with the original line.
+- Autoparsing of lines.
+
+destek in a nutshell:
+- a node web service with perhaps 10 endpoints.
+- backed by one sqlite db per day, plus one for storing responders.
+- auth tokens for append (lowest level access, just push data), read and write.
+- read and write give access to a web UI for making queries.
+- queries have a simple mode and then full SQL.
+- responders are sequences of http calls that can use queries and previous results as inputs
+- responders are triggered by logs or cron.
+
+Claude:
+```
+  What seems specific to destek:
+  - Stats folded into logs, and queues expressed as logs.
+  - One tiny Node service with one sqlite file per day.
+  - Responders that are just HTTP calls.
+```
+
+claude even suggested rolling old stat logs with a cron based responder. the design is really folding onto itself.
+
+more clauding:
+
+```
+And it goes one step further: the responders database in your nutshell could fold in as well.
+
+  - Definitions: creating or editing a responder writes a log, such as responder:uptime, action:set, .... The current definition is the latest log for that name, which is the same "latest log per id" pattern as the queue state table.
+  - Runs: each time a responder runs, it leaves a log, so a failing responder is visible by querying destek itself.
+  - Monitoring destek: a cron responder can track destek's own write rate and file sizes, since those are just stats.
+
+  That leaves one primitive (the log) and one active element (the responder), with cron as the clock. Everything else is either a query or a table derived from the logs: rollups, queue state, current responder definitions. It's the same simplification as 2026-09-30's "a stock is just a sum over a flow", taken all the way.
+```
+
+This is too much, but I can indeed store responders as a JSON file, so the whole setup is really portable. The other thing that should be portable are the queries, although I wonder if I can just simply encode them into urls.
+
+But logging the responder steps is definitely a win.
+
+Destek is indeed folding into calls and responders, call and response. Interesting to realize that cron is a way to make time a caller.
+
+destek is a better stdout/stderr for processes, mostly.
+
+destek: portable logs, stats and events.
+
+POST /log
+- As every endpoint, validates strictly, and puts everything in fourdata (number, text, array, object).
+- Takes a single JSON log entry, parsed as a bunch of fields. If `t` or `tags` is present and of the right form (date or array of unique texts/numbers), they are used.
+- Takes an array of JSON entries, be them objects or strings. If objects, same treatment as above. If string, parsed as text lines.
+- Takes a single string. It is automatically split into newlines and parsed as text lines.
+- Parsing of text lines: induce ways to 1) find date; 2) convert the rest to fields. For converting to fields, try a few formats: nginx, systemlog.
+
+Log table:
+- id
+- t: time, always UTC, ISO string.
+- tags: a list of unique tags
+- fields: a list of key values.
+- raw: the original log (if a JSON object, stringified).
+- One table per UTC day, the server joins in memory.
+
+GET /log?query=...
+- Queries the logs.
+- A good practical limit is 8k. Enough to make a sql query.
+- Simple queries are simply translated to SQL in the client, the server expects a SQL query against the logs table.
+- We need a paginated search, where the server searches backward if it cannot find data, or rather, if it doesn't fill the limit, until it runs out.
+
+PUT /log
+- Takes raw SQL for an update or delete, whether for one
+
+Query view:
+- A big search bar that takes a "simple query", or SQL.
+- Re-queries on every keystroke.
+- Simple query:
+   - space is a delimiter. If you enter `x y`, you're searching free-text in raw for both `x` and `y`, with smart case.
+   - Use double quotes to search with space: `"hello there"` as a simple term.
+   - To qualify the term to a field: `priority:important`. If you want to search for a literal colon, use double quotes.
+   - Same with tags, just use the pseudo field `tag`: `tag:nginx`
+
+GRH, here we go:
+> Please read today's entry of notes.md, then suggest a server diff to implement POST and GET in destek/server.js, without any auth
+> Using gotoB in the way it's used in vibey/client.js, do a simple interface for querying
 
 ## 2026-11-24
 
