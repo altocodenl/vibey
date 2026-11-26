@@ -1,5 +1,20 @@
 # Vibey development notes
 
+## 2026-11-26
+
+I have a feeling that leaving things in vibey makes them a bit messy. Haven't found a way to see files more clearly. The left pane leaves me wanting something else.
+
+The colored text is also throwing me off, colors are OK, but in text they are too much.
+
+TODO:
+- Fix relative links from chat.
+- Fix 500 when chat is going and loading
+- Refresh docs too
+- rg prompt
+
+DONE:
+- black and white text
+
 ## 2026-11-25
 
 email:

@@ -3179,7 +3179,7 @@ views.inner = function () {
                   var folderRow = function (prefix, open) {
                      var parts = prefix.slice (0, -1).split ('/');
                      return ['div', {
-                        class: 'br1 flex fw5 items-center lh-copy pointer vlightblue',
+                        class: 'br1 flex fw5 items-center lh-copy pointer vnearwhite',
                         onclick: B.ev ('set', ['show', 'files', prefix], ! open),
                         style: style ({
                            'border-left': '0.1875rem solid transparent',
@@ -3200,7 +3200,7 @@ views.inner = function () {
                   return ['div', {class: 'flex-auto overflow-y-auto'}, [dale.go (chats ? [] : apps || [], function (port) {
                      var active = current === 'APP:' + port;
                      return ['div', {
-                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue', stripe++ % 2 && ! active ? 'bg-vstripeblue' : ''),
+                        class: css.join ('br1 fw5 lh-copy pointer relative vnearwhite', active ? 'bg-vhighlightblue' : '', stripe++ % 2 && ! active ? 'bg-vstripeblue' : ''),
                         id: active ? 'selected-file' : undefined,
                         onclick: B.ev (['navigate', 'f/APP:' + port], ['set', ['show', 'pane'], 'right']),
                         style: style ({
@@ -3244,7 +3244,7 @@ views.inner = function () {
                      var active = file.name === current;
                      var tooltip = index === prevIndex ? 'K' : index === nextIndex ? 'J' : '';
                      return finish (rows.concat ([['div', {
-                        class: css.join ('br1 fw5 lh-copy pointer relative', active ? 'bg-vhighlightblue vnearwhite' : 'vlightblue', stripe++ % 2 && ! active ? 'bg-vstripeblue' : ''),
+                        class: css.join ('br1 fw5 lh-copy pointer relative vnearwhite', active ? 'bg-vhighlightblue' : '', stripe++ % 2 && ! active ? 'bg-vstripeblue' : ''),
                         id: active ? 'selected-file' : undefined,
                         onclick: B.ev (['navigate', 'f/' + filePath (file.name)], ['set', ['show', 'pane'], 'right']),
                         style: style ({
@@ -3256,7 +3256,7 @@ views.inner = function () {
                         tooltip ? views.tooltip (tooltip, 'right') : '',
                         ['div', {class: 'flex items-center', style: style ({gap: '0.5rem'})}, [
                            ['span', {class: views.projectColor (file.name, true)}, iconAndName (search ? file.name : parts [parts.length - 1])],
-                           (pending || []).some (function (k) {return k.indexOf (file.name) !== -1;}) ? ['span', {style: style ({transform: 'scale(0.75)'})}, views.spinny (active ? 'vnearwhite' : 'vlightblue')] : '',
+                           (pending || []).some (function (k) {return k.indexOf (file.name) !== -1;}) ? ['span', {style: style ({transform: 'scale(0.75)'})}, views.spinny ('vnearwhite')] : '',
                         ]],
                         ['div', {class: 'f7 mt1 tr vgray'}, size (file.size) + ' · ' + ago (file.mtime)],
                      ]]]));
@@ -4133,7 +4133,7 @@ views.chat = function (read, name, getContent) {
                   return B.view (['message', 'cancelling', messageId], function (cancelling) {
                      return ['button', {
                         'aria-label': 'Stop message ' + messageIndexes [messageId.toLowerCase ()],
-                        class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
+                        class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative vnearwhite',
                         disabled: !! cancelling,
                         onclick: B.ev ('cancel', 'message', messageId),
                         type: 'button',
@@ -4172,7 +4172,7 @@ views.chat = function (read, name, getContent) {
                      }),
                   }, [
                      ['span', {class: 'br2 dib ph2 pv1 ' + views.projectColor (messageIndexes [messageId.toLowerCase ()])}, messageIndexes [messageId.toLowerCase ()]],
-                     ['span', {class: 'br2 dib pv1 ' + views.projectColor (fromLabel, true)}, parentFrom ? [senderLabel (from) + ' -> ', ['button', {
+                     ['span', {class: 'br2 dib pv1 vnearwhite'}, parentFrom ? [senderLabel (from) + ' -> ', ['button', {
                         class: 'bn br2 code f6 fw7 lh-solid ph2 pointer pv1 ' + views.projectColor (messageIndexes [replyTo [1].toLowerCase ()]),
                         onclick: B.ev ('scroll', 'message', replyTo [1].toLowerCase ()),
                         title: 'Go to message ' + messageIndexes [replyTo [1].toLowerCase ()],
@@ -4195,7 +4195,7 @@ views.chat = function (read, name, getContent) {
                   }, [
                      /^pending 1$/m.test (head) ? stopButton () : media ? ['button', {
                         'aria-label': 'Download ' + mediaName,
-                        class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
+                        class: 'bn br2 db f7 fw7 mt2 ph2 pointer pv1 relative vnearwhite',
                         onclick: B.ev ('download', 'message', messageId),
                         title: 'Download ' + mediaName,
                         type: 'button',
@@ -4203,7 +4203,7 @@ views.chat = function (read, name, getContent) {
                      /^pending 1$/m.test (head) && body.split ('\n').length > 20 ? stopButton () : '',
                   ]],
                   ['div', {
-                     class: views.projectColor (messageIndexes [messageId.toLowerCase ()], true) + ' border-box chat-message lh-copy mw-100' + (isToolResult ? '' : ' pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
+                     class: 'border-box chat-message lh-copy mw-100 vnearwhite' + (isToolResult ? '' : ' pv1') + (shell || /^ai-/.test (from) ? ' code' : ''),
                      opaque: true,
                      style: style ({
                         'font-size': from === userId ? '1.125rem' : undefined,
@@ -4235,7 +4235,7 @@ views.chat = function (read, name, getContent) {
                      }, '(cancelled ' + ago (cancelled [1]) + ')'] : ['span'],
                   ]],
                   messageReplies [messageId.toLowerCase ()] ? ['div', {
-                     class: 'code f6 flex flex-wrap fw7 items-center lh-solid ' + views.projectColor (messageIndexes [messageId.toLowerCase ()], true),
+                     class: 'code f6 flex flex-wrap fw7 items-center lh-solid vnearwhite',
                      style: style ({
                         gap: '0.5rem',
                         'grid-column': '2',
@@ -4254,7 +4254,7 @@ views.chat = function (read, name, getContent) {
                      }),
                   ]] : '',
                   ['div', {
-                     class: 'br2 code dib f6 fw7 lh-solid ph2 pv1 ' + views.projectColor (timeLabel, true),
+                     class: 'br2 code dib f6 fw7 lh-solid ph2 pv1 vnearwhite',
                      style: style ({
                         'grid-column': mobile ? '3' : '2',
                         'grid-row': '3',
