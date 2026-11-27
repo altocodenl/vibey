@@ -11,6 +11,7 @@ TODO:
 - Fix 500 when chat is going and loading
 - Refresh docs too
 - rg prompt
+- Simple secret vault
 
 DONE:
 - black and white text

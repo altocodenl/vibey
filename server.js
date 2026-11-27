@@ -3704,7 +3704,7 @@ cicek.log = function (log) {
 
 cicek.apres = function (rs) {
    clog ({
-      priority: rs.log.code >= 500 ? 'critical' : (rs.log >= 400 ? 'important' : undefined),
+      priority: rs.log.code >= 500 ? 'critical' : (rs.log.code >= 400 ? 'important' : undefined),
       type: 'Response',
       rqId: rs.log.id,
       method: rs.log.method,
