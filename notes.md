@@ -1,5 +1,14 @@
 # Vibey development notes
 
+## 2026-11-27
+
+Using destek in vibey:
+- Run it as an app inside a container
+- Make it call an external service, in the host, going out through the network, that gives info about the host; the external service posts to localhost.
+- make vibey host post every log to it, through an internal channel.
+- exposure is through the vibey app, for querying.
+- agent integration: I need to crack this. The idea I had (general for vibey apps), is to let the agent in through js somehow, like a websocket where the agent can send js commands to control the page.
+
 ## 2026-11-26
 
 I have a feeling that leaving things in vibey makes them a bit messy. Haven't found a way to see files more clearly. The left pane leaves me wanting something else.
